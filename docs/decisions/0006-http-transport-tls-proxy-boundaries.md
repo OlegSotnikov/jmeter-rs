@@ -1,6 +1,6 @@
 # Decision 0006: HTTP transport, TLS, proxy, recorder, and mirror boundaries
 
-Status: accepted architecture, revision 5; implementation and external evidence pending  
+Status: accepted architecture, revision 9; implementation and external evidence pending
 Date: 2026-08-13  
 Compatibility features: `ELEM-001`, `ELEM-005`, `PROXY-001`, `PROXY-002`,
 `PROXY-003`, `TLS-001`, `TLS-002`, `TEST-002`, `TEST-004`  
@@ -26,17 +26,21 @@ exact JMeter HttpClient4 implementation would be a false compatibility claim.
 
 ## Decision
 
-HTTP execution has three explicit, wire-stable capability paths:
+HTTP execution has four explicit, wire-stable capability paths:
 
 1. `NativeV1` / `http.native/1`: an independently named native Rust transport
-   for plans and deployments that select it explicitly;
-2. `JmeterHttpClient4V563` / `http.jmeter-httpclient4/5.6.3` and
+   for direct, numeric-address, plain HTTP/1.1 plans that select it explicitly;
+2. `NativeV2` / `http.native/2`: a separately selected native increment for
+   direct HTTP/1.1 with explicit hostname resolution and explicit-root rustls
+   HTTPS; its resolver and trust-policy identities are part of the effective
+   provider identity;
+3. `JmeterHttpClient4V563` / `http.jmeter-httpclient4/5.6.3` and
    `JmeterJavaV563` / `http.jmeter-java/5.6.3`: pinned JVM worker paths for
    exact implementation-specific compatibility;
-3. typed unavailable/unsupported results when the requested path is absent.
+4. typed unavailable/unsupported results when the requested path is absent.
 
 There is no fallback between these paths. A JMX sampler selecting HttpClient4
-or Java is not silently executed by Hyper. A native transport result can earn
+or Java is not silently executed by a Rust transport. A native transport result can earn
 native-capability evidence, but it cannot by itself verify the profile's
 HttpClient4 fixture. The compatibility profile and every evidence artifact
 record the selected capability.
@@ -69,6 +73,84 @@ It is not inferred from which adapter happens to be registered. The application
 binds exactly one requested identifier to exactly one implementation after
 validating its complete identity. Aliases, case folding, and a missing
 selection are accepted only when pinned JMeter evidence defines them.
+
+### Explicit standalone provider substitution
+
+The standalone application exposes one application-owned, plan-wide selector:
+exactly one direct command-line JMeter property operation whose value is
+`http.native/1` or `http.native/2`, for example
+`-Jjmeter-rs.http.capability=http.native/1`. This explicitly requests that
+every otherwise-supported `HTTPSamplerProxy` node execute through the selected
+native provider,
+including a node whose preserved JMX source names `HttpClient4` or `Java`.
+It is an operator-selected provider substitution, not a fallback and not
+evidence for either JMeter provider. The source implementation spelling stays
+lossless, and both the source-selected provider and executed native capability
+identity are recorded in the compiled manifest and result evidence.
+
+The selector is honored only from direct command-line `-J`. It is not
+inherited from default, user, system, additional-property, environment, or
+JMeter-home configuration. An empty, removed, repeated, unknown, or
+non-command-line value rejects admission. Without the selector, a sampler
+follows its JMeter wire/default provider and therefore requires the matching
+optional compatibility-pack capability. Other native selectors require new,
+versioned capability identities.
+
+The complete selector and every affected node are resolved before DNS, socket,
+logger, output, report, or runtime setup. Admission rejects the plan atomically
+if any enabled HTTP feature cannot be represented by `NativeV1`; it never runs
+a supported prefix or silently drops a manager, body, assertion, extractor,
+proxy, TLS, redirect, or embedded-resource setting. Native diagnostics and JTL
+metadata identify the exact selected native capability and its subordinate
+resolver/TLS policy identities, preventing downstream confusion with
+`HttpClient4` or `Java` evidence.
+
+### Explicit NativeV2 configuration
+
+`NativeV2` preserves every `NativeV1` invariant and adds only direct hostname
+resolution and rustls HTTPS. It is selected exactly by
+`-Jjmeter-rs.http.capability=http.native/2`; `/1` is never upgraded because a
+resolver or TLS adapter is registered. A plan may mix direct HTTP and HTTPS,
+but proxy, redirect, embedded-resource, HTTP/2, decompression, pooling,
+transparent-retry, manager, JSSE/JKS/PKCS12/PKCS11, trust-all, and client-key
+behavior remains unsupported until a separately accepted increment represents
+it.
+
+When an admitted `/2` plan contains a hostname, it requires exactly one direct
+command-line property
+`-Jjmeter-rs.http.dns.nameservers=<bounded-comma-list>`. Entries are numeric
+socket addresses, or numeric IP addresses using port 53; bracketed IPv6 is
+required when a port is present. The effective resolver is
+`http.dns.explicit/1`: it reads no system resolver configuration, hosts file,
+search domain, proxy setting, or ambient cache. The application parses the
+complete bounded list and constructs one run-owned resolver before output,
+logging, or engine setup. The resolver implementation may be shared, but
+semantic DNS/cache state remains per virtual user and every returned address
+list is bounded without truncation. The transport selects the first address in
+that deterministic returned order and makes exactly one connection attempt;
+it does not retry or fall through to later addresses under the same sampler
+attempt.
+
+When an admitted `/2` plan contains HTTPS, it requires exactly one direct
+command-line property
+`-Jjmeter-rs.http.tls.ca-file=<root-contained-path>`. The CA file is public
+trust material, not a secret, but it is still read once through the bounded
+application filesystem capability before any output or network side effect.
+It contains one or more bounded PEM certificates and defines
+`http.tls.explicit-rustls-ring/1`. Platform roots, embedded web PKI roots, and
+insecure verification are different future policy identities and are never
+fallbacks. TLS configuration is immutable and run-owned; client private keys
+are not accepted by this increment.
+
+The effective `/2` execution identity records `http.native/2`,
+`http.dns.explicit/1` when used, `http.tls.explicit-rustls-ring/1` when used,
+the exact dependency/provider versions, HTTP/1.1 ALPN policy, and non-secret
+configuration digests. Raw paths, hostnames, DNS answers, certificates, and
+request data do not enter identity preimages. Hostname resolution never
+rewrites the URL authority: the original URL host supplies the HTTP `Host`
+value and TLS server name, while the selected numeric answer supplies only the
+socket address. DNS names use DNS SAN verification and SNI; IP literals use IP
+SAN verification and no SNI. Only `http/1.1` is offered and accepted.
 
 ## Executor-neutral streaming contract
 
@@ -365,7 +447,36 @@ preimages.
 
 ## Native HTTP behavior
 
-The first native implementation is low-level Hyper plus an explicit connector;
+`NativeV1` starts with bounded synchronous HTTP/1.1 I/O and the
+repository-owned request/response framing code. Post-connect reads and writes
+use `std::net`. The connect edge uses exact-pinned Mio solely to create one
+nonblocking socket attempt and wait for its readiness or cancellation; this is
+not an async transport provider and does not introduce Tokio into the
+application executor. The adapter calls `mio::net::TcpStream::connect` exactly
+once for an admitted address, registers that still-owned stream with one
+`Poll`, and shares one `Arc<Waker>` with the cancellation callback. Writable
+readiness is confirmed with `take_error` before the stream is converted safely
+to `std::net::TcpStream`. Cancellation or deadline expiry drops that exact
+in-progress stream. A cancellation implementation must never emulate polling
+by starting repeated short `connect_timeout` attempts.
+
+The complete operation performs exactly one direct attempt and is invoked only
+through an application-owned bounded blocking worker pool. A runtime component
+future submits one admitted operation, yields while it is pending, propagates
+cancellation to that exact operation, and observes completion through a bounded
+channel. Socket, DNS, TLS, and response parsing work must never run in the
+runtime executor's poll call. Poll event capacity, spurious readiness/wake
+handling, retained callback state, pool size, queue depth, retained job/result
+bytes, admission wait, operation deadline, shutdown, and join behavior are
+finite and tested. A full or stopped pool returns a typed sampler error; it
+never executes inline and never creates one OS thread per virtual user.
+
+The bootstrap adapter may close its exact owned connection after one response;
+it may not rewrite a source keep-alive policy or require EOF when HTTP framing
+already identifies the message boundary. Connection pooling and async I/O are
+separate, versioned provider increments. An eventual async HTTP/1.1 or HTTP/2
+provider may use low-level Hyper plus an explicit connector, but it does not
+silently replace the bootstrap provider merely because it is registered.
 Reqwest is not used because its convenient redirects, proxies, retries,
 decompression, TLS, and environment defaults obscure the required contract.
 Exact dependency versions and features are selected only after the current
@@ -756,13 +867,17 @@ transport heuristics.
 
 ## Dependency decision
 
-The new edge crate may use exact-pinned Hyper, Hyper-util, Tokio,
-http-body-util, rustls, Tokio-rustls, and narrowly enabled async compression.
-Optional platform-root or custom DNS crates require separate features. Default
-features are disabled and only required HTTP/client/runtime/TLS/codec features
-are enabled. Rustls's cryptographic provider is selected exactly; OpenSSL,
-native-tls, AWS-LC, ambient system proxy, and resolver-system-config features
-are not pulled in accidentally.
+The bootstrap HTTP/1.1 framing and post-connect socket I/O use the standard
+library. Its single-attempt connect/cancellation edge may use exact-pinned Mio
+with only `net` and `os-poll`; Mio is not used as a general async executor or
+HTTP provider. The native TLS increment may use exact-pinned rustls with one
+exact cryptographic provider. A separately identified async/pooling/HTTP2
+increment may use exact-pinned Hyper, Hyper-util, Tokio, Tokio-rustls,
+http-body-util, and narrowly enabled async compression. Optional platform-root
+or custom DNS crates require separate capabilities. Default features are
+disabled and only required socket/HTTP/client/runtime/TLS/codec features are
+enabled. OpenSSL, native-tls, AWS-LC, ambient system proxy, and
+resolver-system-config features are not pulled in accidentally.
 
 Before adding these packages, `docs/third-party-provenance.md` records purpose,
 exact current stable version, features, license, MSRV, build scripts, native C
@@ -795,7 +910,7 @@ tree, response data, success/error, redirect behavior, state, timeStamp,
 elapsed/latency/connect/idle, sent/received/body/header bytes, and connection
 reuse. Only profile-declared fields may be normalized.
 
-An executable `xtask http-acceptance --check` owns the static matrix and refuses
+The executable `xtask http-acceptance --check` owns the static matrix and refuses
 to pass unless every required capability, case, exact dependency/provider
 identity, raw diagnostic location, and expected artifact is declared. It does
 not execute public network services and it does not convert planned descriptors
@@ -806,7 +921,10 @@ The checker requires the `http.attempt/1`, `http.state-delta/1`,
 `http.error-context/1`, `http.parser-limits/1`, body-state/replay, and budget-
 handoff schema identities; all finite parser categories; retry ownership and
 exact HttpClient4 values; redaction and known/unavailable counter rules; and
-redirect/authentication/embedded transaction-boundary declarations.
+redirect/authentication/embedded transaction-boundary declarations. Static
+acceptance remains planning evidence: the currently materialized direct
+HTTP/1.1 subset cannot promote `ELEM-001` until its application worker-pool
+integration and pinned differential fixtures pass.
 
 Recorder evidence covers filters, header stripping, grouping, pauses, binary
 files, generated JMX, replay, CONNECT interception, dynamic/static

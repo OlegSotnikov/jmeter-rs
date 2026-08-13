@@ -362,6 +362,11 @@ impl Supervisor {
         }
         self.service_stop.store(false, Ordering::Release);
         self.service_ack.store(false, Ordering::Release);
+        // Publish the lifecycle state before starting the thread.  A very
+        // short-lived service can otherwise set STOPPED/FAILED and race with
+        // this function's post-spawn RUNNING store, leaving the root claiming
+        // a live service after its join handle has already terminated.
+        self.service_state.store(SERVICE_RUNNING, Ordering::Release);
         let join = thread::Builder::new()
             .name("jmeter-process-supervision".to_owned())
             .spawn(move || self.service_main())
@@ -375,7 +380,6 @@ impl Supervisor {
                 )
             })?;
         service.join = Some(join);
-        self.service_state.store(SERVICE_RUNNING, Ordering::Release);
         Ok(())
     }
 
@@ -629,10 +633,15 @@ impl Supervisor {
         if request.cancellation.is_cancelled()
             || self.abandoned_generation[index].load(Ordering::Acquire) == generation
         {
-            slot.state = SlotState::Complete;
             slot.terminal_error = Some(SupervisionError::cancelled(
                 "launch was cancelled before useful work began",
             ));
+            // Keep the normative lifecycle edge even though no OS resource
+            // was created: Reserved -> CleanupRequested -> HandlesClosing ->
+            // Complete.  Directly publishing Complete would bypass the same
+            // ownership proof used for a setup failure with a returned root.
+            slot.state = SlotState::CleanupRequested;
+            let _ = self.cleanup_slot(&mut slot, Instant::now());
             let terminal = slot.terminal_error.clone();
             drop(slot);
             self.release_slot(index, generation, terminal);
@@ -714,7 +723,8 @@ impl Supervisor {
                     slot.state = SlotState::CleanupRequested;
                     self.record_error(error);
                 } else {
-                    slot.state = SlotState::Complete;
+                    slot.state = SlotState::CleanupRequested;
+                    let _ = self.cleanup_slot(&mut slot, Instant::now());
                     drop(slot);
                     self.record_error(error);
                     self.release_slot(index, generation, None);
@@ -1204,8 +1214,13 @@ impl Supervisor {
                 return Ok(self.shutdown_report(true));
             }
             if control.admission == Admission::Open {
-                control.admission = Admission::Closing;
+                // The atomic gate is the activation linearization point.  Set
+                // it while root control is held, before publishing Closing,
+                // so an activation that observes `false` is ordered before
+                // shutdown and an activation that observes `true` cannot
+                // return useful work after admission closes.
                 self.admission_closed.store(true, Ordering::Release);
+                control.admission = Admission::Closing;
                 control.shutdown_epoch = control.shutdown_epoch.saturating_add(1);
             }
         }
@@ -1369,7 +1384,8 @@ impl Supervisor {
             return;
         }
         slot.terminal_error = Some(error.clone());
-        slot.state = SlotState::Complete;
+        slot.state = SlotState::CleanupRequested;
+        let _ = self.cleanup_slot(&mut slot, Instant::now());
         drop(slot);
         self.record_error(error.clone());
         self.release_slot(index, generation, Some(error));

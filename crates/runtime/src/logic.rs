@@ -123,17 +123,15 @@ fn throughput_decide(
     mode: ThroughputMode,
     limit: u64,
     percent: f64,
-    global: bool,
 ) -> bool {
     match mode {
         ThroughputMode::Total => counters.executions < limit,
         ThroughputMode::Percentage => {
-            // Per-thread JMeter controllers increment their iteration field
-            // before the first decision (1, 2, ...), while the shared global
-            // iteration starts at -1 and is incremented to zero first.
-            let iteration = counters
-                .iterations
-                .saturating_add(if global { 1 } else { 2 });
+            // JMeter's per-thread field starts at -1 and is incremented to
+            // zero before the first decision. The shared global field follows
+            // the same observable sequence, so our zero-based visit counter
+            // maps directly to the denominator (iterations + 1).
+            let iteration = counters.iterations.saturating_add(1);
             let percent = f64::from(percent as f32);
             let estimate = (100.0 * counters.executions as f64 + 50.0) / iteration as f64;
             estimate < percent
@@ -179,19 +177,23 @@ pub enum SwitchSelection {
 
 /// Applies JMeter's numeric Switch Controller selection rules.
 ///
-/// Empty input is the zero index. A signed numeric value outside the
-/// non-negative child range, including a negative value, falls back to the
-/// first child. Parsing as `i128` keeps the distinction between an oversized
-/// numeric value and a non-numeric child name without panicking or relying on
-/// the host pointer width.
+/// Empty input is the zero index. A decimal numeric value outside the
+/// non-negative child range falls back to the first child. JMeter's
+/// `StringUtils.isNumeric` accepts only digit-only input, so a sign (`-1`,
+/// `+1`) is a name lookup rather than a numeric selection. Parsing as `i32`
+/// matches JMeter's integer parser and keeps oversized numeric values on the
+/// name-resolution path without panicking or relying on host pointer width.
 fn switch_numeric_index(value: &str, child_count: usize) -> Option<usize> {
     if value.is_empty() {
         return Some(0);
     }
-    let value = value.parse::<i128>().ok()?;
-    if value < 0 {
-        return Some(0);
+    if !value.chars().all(|character| character.is_ascii_digit()) {
+        return None;
     }
+    // JMeter parses numeric selections with Integer.parseInt. Values outside
+    // the signed 32-bit range are therefore treated as names (and may select
+    // a `default` child), rather than being silently clamped to child zero.
+    let value = value.parse::<i32>().ok()?;
     let index = usize::try_from(value).unwrap_or(usize::MAX);
     Some(if index < child_count { index } else { 0 })
 }
@@ -727,6 +729,11 @@ pub struct LogicSelection {
     /// these as lease requirements; an application edge must acquire/release
     /// them through its explicit coordinator before running the sampler.
     pub critical_sections: Vec<String>,
+    /// Critical-section controller identities parallel to
+    /// [`Self::critical_sections`]. Names are not identities: adjacent
+    /// controllers may use the same lock name while still representing
+    /// distinct scope boundaries.
+    pub critical_section_ids: Vec<u64>,
 }
 
 /// Transaction metadata active for one selected sampler.
@@ -781,7 +788,7 @@ pub struct LogicRunner {
     once_done: BTreeSet<u64>,
     interleave_next: BTreeMap<u64, usize>,
     throughput: BTreeMap<u64, ThroughputState>,
-    run_start: Option<Duration>,
+    runtime_starts: BTreeMap<u64, Duration>,
     transition_count: usize,
     shared_state: Option<Arc<LogicSharedState>>,
     transaction_metadata: BTreeMap<u64, (bool, bool)>,
@@ -804,7 +811,7 @@ impl LogicRunner {
             once_done: BTreeSet::new(),
             interleave_next: BTreeMap::new(),
             throughput: BTreeMap::new(),
-            run_start: None,
+            runtime_starts: BTreeMap::new(),
             transition_count: 0,
             shared_state: None,
             transaction_metadata: BTreeMap::new(),
@@ -858,7 +865,7 @@ impl LogicRunner {
         self.once_done.clear();
         self.interleave_next.clear();
         self.throughput.clear();
-        self.run_start = None;
+        self.runtime_starts.clear();
         self.transition_count = 0;
         self.transaction_metadata.clear();
         self.pending_random_order = None;
@@ -893,6 +900,7 @@ impl LogicRunner {
         self.finished = false;
         self.terminal = None;
         self.loop_iterations.clear();
+        self.runtime_starts.clear();
         self.pending_random_order = None;
         self.active_ifs.clear();
         self.if_check_pending = false;
@@ -900,7 +908,7 @@ impl LogicRunner {
     }
 
     /// Advances one controller transition.
-    pub fn step(&mut self, input: LogicInput) -> Result<LogicStep, LogicControllerError> {
+    pub fn step(&mut self, mut input: LogicInput) -> Result<LogicStep, LogicControllerError> {
         if let Some(existing) = self.terminal {
             if input.signal.is_stop() {
                 let signal = existing.combine(input.signal);
@@ -917,7 +925,7 @@ impl LogicRunner {
         }
         if input.signal == ControlSignal::NextLoop {
             self.pending_random_order = None;
-            self.next_loop(&input)?;
+            self.next_loop(&mut input)?;
             if self.finished {
                 return Ok(LogicStep::Complete);
             }
@@ -925,9 +933,6 @@ impl LogicRunner {
         if self.if_check_pending {
             self.if_check_pending = false;
             self.recheck_active_ifs(&input)?;
-        }
-        if self.run_start.is_none() {
-            self.run_start = Some(input.elapsed);
         }
         let mut used = 0usize;
         loop {
@@ -955,7 +960,7 @@ impl LogicRunner {
                 return Ok(LogicStep::Complete);
             };
             let retry = item.clone();
-            match self.process_item(item, &input)? {
+            match self.process_item(item, &mut input)? {
                 Some(LogicStep::NeedsRandom) => {
                     self.work.push(retry);
                     return Ok(LogicStep::NeedsRandom);
@@ -973,7 +978,7 @@ impl LogicRunner {
     fn process_item(
         &mut self,
         item: WorkItem,
-        input: &LogicInput,
+        input: &mut LogicInput,
     ) -> Result<Option<LogicStep>, LogicControllerError> {
         match item {
             WorkItem::Node {
@@ -989,7 +994,7 @@ impl LogicRunner {
                 id,
                 count,
                 children,
-                path,
+                mut path,
                 iteration,
             } => {
                 let next =
@@ -1002,6 +1007,7 @@ impl LogicRunner {
                 if count.finite_count().is_some_and(|total| next >= total) {
                     return Ok(None);
                 }
+                update_cursor_iteration(&mut path, id, "LoopController", next)?;
                 self.schedule_children(
                     children.clone(),
                     path.clone(),
@@ -1021,15 +1027,22 @@ impl LogicRunner {
                 condition,
                 max_iterations,
                 children,
-                path,
+                mut path,
                 iteration,
             } => {
-                let next = iteration.saturating_add(1);
+                let next =
+                    iteration
+                        .checked_add(1)
+                        .ok_or(LogicControllerError::TransitionLimit {
+                            used: self.transition_count,
+                            limit: self.program.limits.max_transitions,
+                        })?;
                 if max_iterations.is_some_and(|maximum| next >= maximum)
                     || !condition.evaluate(&self.variables, input.last_sample_success)?
                 {
                     return Ok(None);
                 }
+                update_cursor_iteration(&mut path, id, "WhileController", next)?;
                 self.schedule_children(
                     children.clone(),
                     path.clone(),
@@ -1051,7 +1064,7 @@ impl LogicRunner {
                 output_variable,
                 count,
                 children,
-                path,
+                mut path,
                 index,
             } => {
                 if index >= count {
@@ -1063,6 +1076,7 @@ impl LogicRunner {
                 self.variables.insert(output_variable.clone(), value);
                 self.loop_iterations
                     .insert(id, index.saturating_add(1) as u64);
+                update_cursor_iteration(&mut path, id, "ForeachController", index as u64)?;
                 self.schedule_children(
                     children.clone(),
                     path.clone(),
@@ -1083,23 +1097,32 @@ impl LogicRunner {
                 id,
                 duration,
                 children,
-                path,
+                mut path,
                 iteration,
                 deadline,
             } => {
                 if input.elapsed >= deadline {
+                    self.runtime_starts.remove(&id);
                     return Ok(None);
                 }
+                let next =
+                    iteration
+                        .checked_add(1)
+                        .ok_or(LogicControllerError::TransitionLimit {
+                            used: self.transition_count,
+                            limit: self.program.limits.max_transitions,
+                        })?;
+                update_cursor_iteration(&mut path, id, "RunTime", next)?;
                 self.schedule_children(
                     children.clone(),
                     path.clone(),
-                    iteration,
+                    next,
                     Some(WorkItem::RuntimeAgain {
                         id,
                         duration,
                         children,
                         path,
-                        iteration,
+                        iteration: next,
                         deadline,
                     }),
                 );
@@ -1113,7 +1136,7 @@ impl LogicRunner {
         node: LogicNode,
         path: Vec<LogicCursor>,
         iteration: u64,
-        input: &LogicInput,
+        input: &mut LogicInput,
     ) -> Result<Option<LogicStep>, LogicControllerError> {
         match node {
             LogicNode::Sample { id } => {
@@ -1134,10 +1157,18 @@ impl LogicRunner {
                             })
                     })
                     .collect();
-                let critical_sections = path
+                let critical_section_cursors = path
+                    .iter()
+                    .filter(|cursor| cursor.kind.starts_with("CriticalSection:"))
+                    .collect::<Vec<_>>();
+                let critical_sections = critical_section_cursors
                     .iter()
                     .filter_map(|cursor| cursor.kind.strip_prefix("CriticalSection:"))
                     .map(str::to_owned)
+                    .collect();
+                let critical_section_ids = critical_section_cursors
+                    .iter()
+                    .map(|cursor| cursor.id)
                     .collect();
                 Ok(Some(LogicStep::Sample(LogicSelection {
                     sampler_id: id,
@@ -1146,6 +1177,7 @@ impl LogicRunner {
                     transactions,
                     transaction_details,
                     critical_sections,
+                    critical_section_ids,
                 })))
             }
             LogicNode::Sequence { id, children } => {
@@ -1181,29 +1213,32 @@ impl LogicRunner {
                 children,
             } => {
                 let enters = condition.evaluate(&self.variables, input.last_sample_success)?;
-                if enters {
-                    let mut path = path;
-                    path.push(cursor(id, "IfController", iteration));
-                    if evaluate_each_iteration {
-                        let reset_state_ids = collect_if_state_ids(&children);
-                        self.active_ifs.push(ActiveIfFrame {
-                            id,
-                            condition,
-                            reset_state_ids,
-                        });
-                        self.schedule_children(
-                            children,
-                            path,
-                            iteration,
-                            Some(WorkItem::IfEnd { id }),
-                        );
-                    } else {
-                        // This node is the controller-entry boundary. Parent
-                        // loop markers enqueue it again for each nested/repeated
-                        // visit, so entry-only evaluation must not be cached by
-                        // node ID across visits.
-                        self.schedule_children(children, path, iteration, None);
-                    }
+                if !enters {
+                    // A false IfController entry resets its descendants in
+                    // JMeter. Otherwise a later re-entry could observe stale
+                    // ForEach/OnceOnly/Interleave/Throughput state from a
+                    // skipped branch.
+                    let reset_state_ids = collect_if_state_ids(&children);
+                    self.reset_if_state(&reset_state_ids);
+                    return Ok(None);
+                }
+
+                let mut path = path;
+                path.push(cursor(id, "IfController", iteration));
+                if evaluate_each_iteration {
+                    let reset_state_ids = collect_if_state_ids(&children);
+                    self.active_ifs.push(ActiveIfFrame {
+                        id,
+                        condition,
+                        reset_state_ids,
+                    });
+                    self.schedule_children(children, path, iteration, Some(WorkItem::IfEnd { id }));
+                } else {
+                    // This node is the controller-entry boundary. Parent
+                    // loop markers enqueue it again for each nested/repeated
+                    // visit, so entry-only evaluation must not be cached by
+                    // node ID across visits.
+                    self.schedule_children(children, path, iteration, None);
                 }
                 Ok(None)
             }
@@ -1326,7 +1361,7 @@ impl LogicRunner {
                         if children.len() == 1 {
                             0
                         } else {
-                            let Some(value) = input.random_value else {
+                            let Some(value) = input.random_value.take() else {
                                 return Ok(Some(LogicStep::NeedsRandom));
                             };
                             let Some(index) = uniform_index(value, children.len()) else {
@@ -1374,7 +1409,7 @@ impl LogicRunner {
                 let index = if children.len() == 1 {
                     0
                 } else {
-                    let Some(value) = input.random_value else {
+                    let Some(value) = input.random_value.take() else {
                         return Ok(Some(LogicStep::NeedsRandom));
                     };
                     let Some(index) = uniform_index(value, children.len()) else {
@@ -1423,7 +1458,7 @@ impl LogicRunner {
                     });
                 }
 
-                let Some(value) = input.random_value else {
+                let Some(value) = input.random_value.take() else {
                     return Ok(Some(LogicStep::NeedsRandom));
                 };
                 let Some(pending) = self.pending_random_order.as_mut() else {
@@ -1480,9 +1515,10 @@ impl LogicRunner {
                 duration,
                 children,
             } => {
-                let start = self.run_start.unwrap_or(input.elapsed);
+                let start = *self.runtime_starts.entry(id).or_insert(input.elapsed);
                 let deadline = start.saturating_add(duration);
                 if input.elapsed >= deadline {
+                    self.runtime_starts.remove(&id);
                     return Ok(None);
                 }
                 let mut path = path;
@@ -1532,11 +1568,23 @@ impl LogicRunner {
                 lock_name,
                 children,
             } => {
+                // The deterministic coordinator intentionally has no
+                // re-entrant ownership semantics. A nested scope with the
+                // same name would otherwise queue behind the same user's
+                // held lock forever; fail explicitly until an oracle-backed
+                // re-entrant contract is available.
+                let lock_kind = format!("CriticalSection:{lock_name}");
+                if path.iter().any(|cursor| cursor.kind == lock_kind) {
+                    return Err(LogicControllerError::Unsupported {
+                        controller: format!("CriticalSectionController {id}"),
+                        capability_id: "critical-section-reentrant-name".to_owned(),
+                    });
+                }
                 let mut path = path;
                 path.push(cursor(id, "CriticalSectionController", iteration));
                 path.push(LogicCursor {
                     id,
-                    kind: format!("CriticalSection:{lock_name}"),
+                    kind: lock_kind,
                     iteration,
                 });
                 self.schedule_children(children, path, iteration, None);
@@ -1559,7 +1607,7 @@ impl LogicRunner {
             };
             let mut state = lock(&shared.throughput);
             let counters = state.entry(id).or_default();
-            let allow = throughput_decide(*counters, mode, limit, percent, true);
+            let allow = throughput_decide(*counters, mode, limit, percent);
             counters.iterations = counters.iterations.saturating_add(1);
             if allow {
                 counters.executions = counters.executions.saturating_add(1);
@@ -1568,7 +1616,7 @@ impl LogicRunner {
         }
 
         let counters = self.throughput.entry(id).or_default();
-        let allow = throughput_decide(*counters, mode, limit, percent, false);
+        let allow = throughput_decide(*counters, mode, limit, percent);
         counters.iterations = counters.iterations.saturating_add(1);
         if allow {
             counters.executions = counters.executions.saturating_add(1);
@@ -1713,7 +1761,11 @@ impl LogicRunner {
         }
     }
 
-    fn next_loop(&mut self, input: &LogicInput) -> Result<(), LogicControllerError> {
+    fn next_loop(&mut self, input: &mut LogicInput) -> Result<(), LogicControllerError> {
+        // JMeter propagates a logical next-loop action through every active
+        // non-iterating controller, including RunTime, before restarting the
+        // selected loop. Clear their per-entry clocks at that boundary.
+        self.runtime_starts.clear();
         let Some(marker_index) = self.work.iter().rposition(|item| {
             matches!(
                 item,
@@ -1791,6 +1843,34 @@ fn cursor(id: u64, kind: &str, iteration: u64) -> LogicCursor {
         kind: kind.to_owned(),
         iteration,
     }
+}
+
+/// Updates the iteration metadata for a controller frame that is being
+/// resumed by one of its finite/repeating work markers.
+///
+/// Markers retain the full active path so nested selections do not lose their
+/// ancestor identity.  The controller's own cursor is the one field that
+/// changes between visits; keeping it in sync is important to listeners and
+/// transaction/result routing, which use the path as their execution
+/// identity.  A missing cursor indicates a corrupted work frame and must not
+/// silently produce a plausible but wrong selection.
+fn update_cursor_iteration(
+    path: &mut [LogicCursor],
+    id: u64,
+    kind: &str,
+    iteration: u64,
+) -> Result<(), LogicControllerError> {
+    let Some(cursor) = path
+        .iter_mut()
+        .rev()
+        .find(|cursor| cursor.id == id && cursor.kind == kind)
+    else {
+        return Err(LogicControllerError::InvariantViolation {
+            detail: format!("{kind} {id} marker has no matching path cursor"),
+        });
+    };
+    cursor.iteration = iteration;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1987,7 +2067,7 @@ mod tests {
         let program = LogicProgram::compile(root(SwitchSelection::Index(9))).expect("program");
         assert_eq!(sample_ids(&program, 4), vec![10]);
 
-        for value in [None, Some(""), Some("-1"), Some("9")] {
+        for value in [None, Some(""), Some("9")] {
             let program =
                 LogicProgram::compile(root(SwitchSelection::Variable("choice".to_owned())))
                     .expect("program");
@@ -1998,10 +2078,38 @@ mod tests {
             assert_eq!(sample_ids_with_runner(&mut runner, 4), vec![10]);
         }
 
+        // A signed value is a non-numeric name in JMeter's SwitchController;
+        // the compact Variable form cannot resolve names without source
+        // child-name metadata and therefore fails explicitly.
+        let program = LogicProgram::compile(root(SwitchSelection::Variable("choice".to_owned())))
+            .expect("program");
+        let mut runner = program.runner();
+        runner.set_variable("choice", "-1");
+        assert!(matches!(
+            runner.step(LogicInput::default()),
+            Err(LogicControllerError::Unsupported { .. })
+        ));
+
         let program = LogicProgram::compile(root(SwitchSelection::Variable("choice".to_owned())))
             .expect("program");
         let mut runner = program.runner();
         runner.set_variable("choice", "1");
+        assert_eq!(sample_ids_with_runner(&mut runner, 4), vec![11]);
+    }
+
+    #[test]
+    fn switch_oversized_numeric_value_uses_default_name() {
+        let program = LogicProgram::compile(LogicNode::Switch {
+            id: 1,
+            selection: SwitchSelection::VariableWithNames {
+                variable: "choice".to_owned(),
+                child_names: vec!["first".to_owned(), "DEFAULT".to_owned()],
+            },
+            children: vec![LogicNode::Sample { id: 10 }, LogicNode::Sample { id: 11 }],
+        })
+        .expect("program");
+        let mut runner = program.runner();
+        runner.set_variable("choice", "2147483648");
         assert_eq!(sample_ids_with_runner(&mut runner, 4), vec![11]);
     }
 
@@ -2116,7 +2224,7 @@ mod tests {
                 LogicStep::NeedsRandom | LogicStep::Stopped(_) => break,
             }
         }
-        assert_eq!(selected_iterations, vec![0, 2, 4, 6, 8]);
+        assert_eq!(selected_iterations, vec![1, 3, 5, 7, 9]);
     }
 
     #[test]
@@ -2255,6 +2363,205 @@ mod tests {
     }
 
     #[test]
+    fn finite_controller_frames_update_path_iterations() {
+        let cases = [
+            (
+                LogicNode::Loop {
+                    id: 1,
+                    count: LoopCount::finite(3),
+                    children: vec![LogicNode::Sample { id: 10 }],
+                },
+                "LoopController",
+                1,
+                vec![0, 1, 2],
+            ),
+            (
+                LogicNode::While {
+                    id: 2,
+                    condition: LogicCondition::Always,
+                    max_iterations: Some(3),
+                    children: vec![LogicNode::Sample { id: 20 }],
+                },
+                "WhileController",
+                2,
+                vec![0, 1, 2],
+            ),
+            (
+                LogicNode::ForEach {
+                    id: 3,
+                    input_prefix: "item".to_owned(),
+                    output_variable: "current".to_owned(),
+                    children: vec![LogicNode::Sample { id: 30 }],
+                },
+                "ForeachController",
+                3,
+                vec![0, 1, 2],
+            ),
+        ];
+
+        for (node, kind, id, expected) in cases {
+            let program = LogicProgram::compile(node).expect("program");
+            let mut runner = program.runner();
+            if id == 3 {
+                runner.set_variable("item_matchNr", "3");
+                runner.set_variable("item_1", "a");
+                runner.set_variable("item_2", "b");
+                runner.set_variable("item_3", "c");
+            }
+            let mut actual = Vec::new();
+            for _ in 0..expected.len() {
+                let LogicStep::Sample(selection) =
+                    runner.step(LogicInput::default()).expect("sample")
+                else {
+                    panic!("finite controller ended before all samples");
+                };
+                actual.push(
+                    selection
+                        .path
+                        .iter()
+                        .find(|cursor| cursor.id == id && cursor.kind == kind)
+                        .expect("controller path cursor")
+                        .iteration,
+                );
+            }
+            assert_eq!(actual, expected);
+        }
+
+        let program = LogicProgram::compile(LogicNode::Runtime {
+            id: 4,
+            duration: Duration::from_secs(1),
+            children: vec![LogicNode::Sample { id: 40 }],
+        })
+        .expect("program");
+        let mut runner = program.runner();
+        let mut actual = Vec::new();
+        for _ in 0..3 {
+            let LogicStep::Sample(selection) =
+                runner.step(LogicInput::default()).expect("runtime sample")
+            else {
+                panic!("runtime controller ended before the clock advanced");
+            };
+            actual.push(
+                selection
+                    .path
+                    .iter()
+                    .find(|cursor| cursor.id == 4 && cursor.kind == "RunTime")
+                    .expect("runtime path cursor")
+                    .iteration,
+            );
+        }
+        assert_eq!(actual, vec![0, 1, 2]);
+        assert_eq!(
+            runner
+                .step(LogicInput {
+                    elapsed: Duration::from_secs(1),
+                    ..LogicInput::default()
+                })
+                .expect("runtime completion"),
+            LogicStep::Complete
+        );
+    }
+
+    #[test]
+    fn next_root_iteration_restarts_finite_frames_without_leaking_markers() {
+        let program = LogicProgram::compile(LogicNode::Loop {
+            id: 1,
+            count: LoopCount::finite(2),
+            children: vec![LogicNode::Sample { id: 2 }],
+        })
+        .expect("program");
+        let mut runner = program.runner();
+        for expected_iteration in [0, 1] {
+            let LogicStep::Sample(selection) = runner
+                .step(LogicInput::default())
+                .expect("finite-loop sample")
+            else {
+                panic!("finite loop ended before its second frame");
+            };
+            assert_eq!(
+                selection.path.last().map(|cursor| cursor.iteration),
+                Some(expected_iteration)
+            );
+        }
+        assert_eq!(
+            runner.step(LogicInput::default()).expect("first complete"),
+            LogicStep::Complete
+        );
+        runner.next_root_iteration().expect("next root iteration");
+        let LogicStep::Sample(selection) = runner
+            .step(LogicInput::default())
+            .expect("restarted finite-loop sample")
+        else {
+            panic!("finite loop marker leaked across root iterations");
+        };
+        assert_eq!(
+            selection.path.last().map(|cursor| cursor.iteration),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn skipped_if_reinitializes_finite_descendants_before_reentry() {
+        let program = LogicProgram::compile(LogicNode::Loop {
+            id: 1,
+            count: LoopCount::finite(2),
+            children: vec![LogicNode::Sequence {
+                id: 2,
+                children: vec![
+                    LogicNode::If {
+                        id: 3,
+                        condition: LogicCondition::VariableBoolean {
+                            name: "allow".to_owned(),
+                        },
+                        evaluate_each_iteration: true,
+                        children: vec![LogicNode::ForEach {
+                            id: 4,
+                            input_prefix: "item".to_owned(),
+                            output_variable: "current".to_owned(),
+                            children: vec![LogicNode::Sample { id: 10 }],
+                        }],
+                    },
+                    LogicNode::Sample { id: 20 },
+                ],
+            }],
+        })
+        .expect("program");
+        let mut runner = program.runner();
+        runner.set_variable("allow", "true");
+        runner.set_variable("item_matchNr", "2");
+        runner.set_variable("item_1", "a");
+        runner.set_variable("item_2", "b");
+
+        assert!(matches!(
+            runner.step(LogicInput::default()).expect("first foreach"),
+            LogicStep::Sample(LogicSelection { sampler_id: 10, .. })
+        ));
+        assert!(matches!(
+            runner.step(LogicInput::default()).expect("second foreach"),
+            LogicStep::Sample(LogicSelection { sampler_id: 10, .. })
+        ));
+        runner.set_variable("allow", "false");
+        assert!(matches!(
+            runner
+                .step(LogicInput::default())
+                .expect("sibling after skip"),
+            LogicStep::Sample(LogicSelection { sampler_id: 20, .. })
+        ));
+
+        runner.set_variable("allow", "true");
+        assert!(matches!(
+            runner
+                .step(LogicInput::default())
+                .expect("reentered foreach"),
+            LogicStep::Sample(LogicSelection { sampler_id: 10, .. })
+        ));
+        assert_eq!(
+            runner.variables().get("current").map(String::as_str),
+            Some("a")
+        );
+    }
+
+    #[test]
     fn selection_retains_transaction_and_critical_section_identity() {
         let root = LogicNode::Transaction {
             id: 2,
@@ -2275,6 +2582,29 @@ mod tests {
         };
         assert_eq!(selection.transactions, vec![2]);
         assert_eq!(selection.critical_sections, vec!["gate"]);
+        assert_eq!(selection.critical_section_ids, vec![3]);
+    }
+
+    #[test]
+    fn nested_same_name_critical_sections_fail_before_coordination() {
+        let program = LogicProgram::compile(LogicNode::CriticalSection {
+            id: 1,
+            lock_name: "gate".to_owned(),
+            children: vec![LogicNode::CriticalSection {
+                id: 2,
+                lock_name: "gate".to_owned(),
+                children: vec![LogicNode::Sample { id: 3 }],
+            }],
+        })
+        .expect("program compiles until runtime path is entered");
+        let mut runner = program.runner();
+        assert!(matches!(
+            runner.step(LogicInput::default()),
+            Err(LogicControllerError::Unsupported {
+                capability_id,
+                ..
+            }) if capability_id == "critical-section-reentrant-name"
+        ));
     }
 
     #[test]
@@ -2525,6 +2855,76 @@ mod tests {
                 })
                 .expect("sample"),
             LogicStep::Sample(LogicSelection { sampler_id: 3, .. })
+        ));
+    }
+
+    #[test]
+    fn nested_random_controllers_consume_distinct_seeded_values() {
+        let program = LogicProgram::compile(LogicNode::Random {
+            id: 1,
+            children: vec![
+                LogicNode::Sample { id: 99 },
+                LogicNode::Random {
+                    id: 2,
+                    children: vec![LogicNode::Sample { id: 10 }, LogicNode::Sample { id: 11 }],
+                },
+            ],
+        })
+        .expect("program");
+        let mut runner = program.runner();
+
+        assert_eq!(
+            runner.step(LogicInput::default()).expect("outer request"),
+            LogicStep::NeedsRandom
+        );
+        // The first value is consumed by the outer controller. A nested
+        // decision must request another value instead of accidentally
+        // reusing it within this same step call.
+        assert_eq!(
+            runner
+                .step(LogicInput {
+                    random_value: Some(1),
+                    ..LogicInput::default()
+                })
+                .expect("inner request"),
+            LogicStep::NeedsRandom
+        );
+        assert!(matches!(
+            runner
+                .step(LogicInput {
+                    random_value: Some(0),
+                    ..LogicInput::default()
+                })
+                .expect("nested sample"),
+            LogicStep::Sample(LogicSelection { sampler_id: 10, .. })
+        ));
+    }
+
+    #[test]
+    fn next_loop_without_an_active_loop_ends_the_current_root_iteration() {
+        let program = LogicProgram::compile(LogicNode::Sequence {
+            id: 1,
+            children: vec![LogicNode::Sample { id: 10 }, LogicNode::Sample { id: 11 }],
+        })
+        .expect("program");
+        let mut runner = program.runner();
+        assert!(matches!(
+            runner.step(LogicInput::default()).expect("first sample"),
+            LogicStep::Sample(LogicSelection { sampler_id: 10, .. })
+        ));
+        assert_eq!(
+            runner
+                .step(LogicInput {
+                    signal: ControlSignal::NextLoop,
+                    ..LogicInput::default()
+                })
+                .expect("next-loop action"),
+            LogicStep::Complete
+        );
+        runner.next_root_iteration().expect("next root iteration");
+        assert!(matches!(
+            runner.step(LogicInput::default()).expect("restarted root"),
+            LogicStep::Sample(LogicSelection { sampler_id: 10, .. })
         ));
     }
 

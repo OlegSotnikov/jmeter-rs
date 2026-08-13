@@ -5,7 +5,10 @@
 //! data and an in-memory codec; transports, process supervision, and sockets
 //! belong to adapters outside this crate.
 
-use std::{collections::BTreeMap, fmt};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+};
 
 use jmeter_rs_results::{
     AssertionResult, DataEncoding, DataType, ElapsedTime, HeaderBlock, LogicalAction, SampleData,
@@ -315,6 +318,13 @@ impl ProfileDescriptor {
     /// field/count bounds by constructing a profile directly.
     pub fn validate_with_limits(&self, limits: RemoteLimits) -> Result<(), RemoteError> {
         limits.validate()?;
+        if self.id.is_empty() || self.version.is_empty() {
+            return Err(RemoteError::new(
+                crate::RemoteErrorCode::Protocol,
+                false,
+                "remote profile identity must not be empty",
+            ));
+        }
         if self.id.len() > limits.max_field_bytes() || self.version.len() > limits.max_field_bytes()
         {
             return Err(RemoteError::new(
@@ -330,12 +340,20 @@ impl ProfileDescriptor {
                 "remote profile capability count exceeded its bound",
             ));
         }
-        for capability in &self.capabilities {
+        let mut seen = BTreeSet::new();
+        for (index, capability) in self.capabilities.iter().enumerate() {
             if capability.len() > limits.max_field_bytes() {
                 return Err(RemoteError::new(
                     crate::RemoteErrorCode::ResourceLimit,
                     false,
                     "remote profile capability exceeds its field bound",
+                ));
+            }
+            if !seen.insert(capability) {
+                return Err(RemoteError::new(
+                    crate::RemoteErrorCode::ConflictingDuplicate,
+                    false,
+                    format!("remote profile capability is duplicated at index {index}"),
                 ));
             }
         }
@@ -1204,6 +1222,104 @@ impl RemoteMessage {
     }
 }
 
+/// Checks message-level identity and lifecycle fields which are meaningful
+/// independently of the byte codec.  Keeping these checks here prevents an
+/// in-memory adapter from bypassing invariants that a decoded message would
+/// otherwise receive from the wire.
+fn validate_message_semantics(message: &RemoteMessage) -> Result<(), ProtocolError> {
+    match message {
+        RemoteMessage::Profile { .. }
+        | RemoteMessage::Plan { .. }
+        | RemoteMessage::Properties { .. } => {}
+        RemoteMessage::Start {
+            run_id,
+            thread_count,
+            ..
+        } => {
+            require_nonzero_id(*run_id, "run id")?;
+            if *thread_count == 0 {
+                return Err(ProtocolError::InvalidValue {
+                    field: "thread count",
+                    value: 0,
+                });
+            }
+        }
+        RemoteMessage::Stop { run_id, .. } => {
+            require_nonzero_id(*run_id, "run id")?;
+        }
+        RemoteMessage::Sample { sample } => {
+            require_nonzero_id(sample.run_id(), "sample run id")?;
+        }
+        RemoteMessage::Ack {
+            stage,
+            run_id,
+            thread_count,
+            sample_watermark,
+            ..
+        } => validate_ack_fields(*stage, *run_id, *thread_count, *sample_watermark)?,
+        RemoteMessage::Failure { run_id, .. } => {
+            if let Some(run_id) = run_id {
+                require_nonzero_id(*run_id, "failure run id")?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn require_nonzero_id(value: u64, field: &'static str) -> Result<(), ProtocolError> {
+    if value == 0 {
+        return Err(ProtocolError::InvalidValue { field, value });
+    }
+    Ok(())
+}
+
+fn validate_ack_fields(
+    stage: AckStage,
+    run_id: Option<RunId>,
+    thread_count: Option<u32>,
+    sample_watermark: Option<u64>,
+) -> Result<(), ProtocolError> {
+    match stage {
+        AckStage::Profile | AckStage::Plan | AckStage::Properties => {
+            if run_id.is_some() || thread_count.is_some() || sample_watermark.is_some() {
+                return Err(ProtocolError::InvalidValue {
+                    field: "configuration ack fields",
+                    value: 1,
+                });
+            }
+        }
+        AckStage::Started => {
+            if run_id.is_none() || thread_count.is_none() || sample_watermark.is_some() {
+                return Err(ProtocolError::InvalidValue {
+                    field: "started ack fields",
+                    value: 1,
+                });
+            }
+            if thread_count == Some(0) {
+                return Err(ProtocolError::InvalidValue {
+                    field: "started ack thread count",
+                    value: 0,
+                });
+            }
+            if let Some(run_id) = run_id {
+                require_nonzero_id(run_id, "started ack run id")?;
+            }
+        }
+        AckStage::Stopped => {
+            if run_id.is_none() || thread_count.is_none() || sample_watermark.is_none() {
+                return Err(ProtocolError::InvalidValue {
+                    field: "stopped ack fields",
+                    value: 1,
+                });
+            }
+            if let Some(run_id) = run_id {
+                require_nonzero_id(run_id, "stopped ack run id")?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Message discriminants in the current wire header.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[repr(u8)]
@@ -1772,6 +1888,7 @@ impl RemoteCodec {
     /// boundary.
     pub fn encode(&self, envelope: &RemoteEnvelope) -> Result<Vec<u8>, ProtocolError> {
         validate_codec_limits(self.limits)?;
+        validate_message_semantics(&envelope.message)?;
         if envelope.request_id == 0 {
             return Err(ProtocolError::InvalidValue {
                 field: "request id",
@@ -1854,6 +1971,7 @@ impl RemoteCodec {
         sample: &RemoteSample,
     ) -> Result<usize, ProtocolError> {
         validate_codec_limits(self.limits)?;
+        require_nonzero_id(sample.run_id(), "sample run id")?;
         if request_id == 0
             || !is_sample_envelope_request_id(request_id)
             || sample_envelope_worker(request_id) != Some(sample.worker())
@@ -1959,6 +2077,7 @@ impl RemoteCodec {
         }
         let mut reader = Reader::new(&input[REMOTE_HEADER_LEN..total]);
         let message = decode_message(&mut reader, kind, self.limits)?;
+        validate_message_semantics(&message)?;
         if let RemoteMessage::Sample { sample } = &message
             && sample_envelope_worker(request_id) != Some(sample.worker())
         {
@@ -2318,7 +2437,7 @@ fn encode_message(
         } => {
             writer.put_u64(*run_id)?;
             writer.put_u32(*thread_count)?;
-            encode_sender_mode(writer, *sender_mode)
+            encode_sender_mode(writer, *sender_mode, limits)
         }
         RemoteMessage::Stop { run_id, mode } => {
             writer.put_u64(*run_id)?;
@@ -2371,7 +2490,7 @@ fn decode_message(
         MessageKind::Start => {
             let run_id = reader.u64()?;
             let thread_count = reader.u32()?;
-            let sender_mode = decode_sender_mode(reader)?;
+            let sender_mode = decode_sender_mode(reader, limits)?;
             Ok(RemoteMessage::Start {
                 run_id,
                 thread_count,
@@ -2433,6 +2552,21 @@ fn encode_profile(
     profile: &ProfileDescriptor,
     limits: RemoteLimits,
 ) -> Result<(), ProtocolError> {
+    if profile.id.is_empty() || profile.version.is_empty() {
+        return Err(ProtocolError::InvalidValue {
+            field: "profile identity",
+            value: 0,
+        });
+    }
+    let mut seen = BTreeSet::new();
+    for capability in &profile.capabilities {
+        if !seen.insert(capability) {
+            return Err(ProtocolError::InvalidValue {
+                field: "duplicate capability",
+                value: 1,
+            });
+        }
+    }
     writer.put_string(&profile.id, "profile id", limits.max_field_bytes())?;
     writer.put_string(
         &profile.version,
@@ -2457,10 +2591,26 @@ fn decode_profile(
 ) -> Result<ProfileDescriptor, ProtocolError> {
     let id = reader.string("profile id", limits.max_field_bytes())?;
     let version = reader.string("profile version", limits.max_field_bytes())?;
+    if id.is_empty() || version.is_empty() {
+        return Err(ProtocolError::InvalidValue {
+            field: "profile identity",
+            value: 0,
+        });
+    }
     let count = read_count(reader, limits.max_capabilities, "capabilities")?;
-    let mut capabilities = Vec::with_capacity(count);
-    for _ in 0..count {
-        capabilities.push(reader.string("capability", limits.max_field_bytes())?);
+    // Do not reserve from a peer-controlled count before the first element is
+    // proven to fit. A fuzzed count may be large even when the bounded input
+    // ends immediately after the count field.
+    let mut capabilities = Vec::new();
+    for index in 0..count {
+        let capability = reader.string("capability", limits.max_field_bytes())?;
+        if capabilities.iter().any(|item: &String| item == &capability) {
+            return Err(ProtocolError::InvalidValue {
+                field: "duplicate capability",
+                value: index as u64,
+            });
+        }
+        capabilities.push(capability);
     }
     Ok(ProfileDescriptor::new(id, version).with_capabilities(capabilities))
 }
@@ -2606,7 +2756,9 @@ fn decode_plan(
             maximum: configuration.max_plan_references,
         });
     }
-    let mut data_references = Vec::with_capacity(data_count);
+    // Grow only as bytes are actually consumed; a malformed count must not
+    // trigger an attacker-sized allocation before the first reference exists.
+    let mut data_references = Vec::new();
     let mut reference_bytes = 0usize;
     for _ in 0..data_count {
         let path = reader.string("data reference path", limits.max_field_bytes())?;
@@ -2644,7 +2796,7 @@ fn decode_plan(
             maximum: configuration.max_plan_references,
         });
     }
-    let mut dependencies = Vec::with_capacity(dependency_count);
+    let mut dependencies = Vec::new();
     for _ in 0..dependency_count {
         let name = reader.string("dependency name", limits.max_field_bytes())?;
         let version = reader.string("dependency version", limits.max_field_bytes())?;
@@ -2774,49 +2926,71 @@ fn decode_properties(
     Ok(properties)
 }
 
-fn encode_sender_mode(writer: &mut Writer, mode: SampleSenderMode) -> Result<(), ProtocolError> {
-    if mode.has_zero_bound() {
-        return Err(ProtocolError::InvalidValue {
-            field: "sample sender bound",
-            value: 0,
-        });
-    }
+fn encode_sender_mode(
+    writer: &mut Writer,
+    mode: SampleSenderMode,
+    limits: RemoteLimits,
+) -> Result<(), ProtocolError> {
+    validate_sender_mode_bound(mode, limits.max_samples())?;
     match mode {
         SampleSenderMode::Standard => writer.put_u8(0),
         SampleSenderMode::Hold => writer.put_u8(1),
         SampleSenderMode::Batch { size } => {
             writer.put_u8(2)?;
-            writer.put_u64(size as u64)
+            put_sender_bound(writer, size, "batch size", limits.max_samples())
         }
         SampleSenderMode::Statistical { size } => {
             writer.put_u8(3)?;
-            writer.put_u64(size as u64)
+            put_sender_bound(writer, size, "statistical size", limits.max_samples())
         }
         SampleSenderMode::Stripped => writer.put_u8(4),
         SampleSenderMode::StrippedBatch { size } => {
             writer.put_u8(5)?;
-            writer.put_u64(size as u64)
+            put_sender_bound(writer, size, "stripped batch size", limits.max_samples())
         }
         SampleSenderMode::Asynch { capacity } => {
             writer.put_u8(6)?;
-            writer.put_u64(capacity as u64)
+            put_sender_bound(
+                writer,
+                capacity,
+                "asynchronous capacity",
+                limits.max_samples(),
+            )
         }
         SampleSenderMode::StrippedAsynch { capacity } => {
             writer.put_u8(7)?;
-            writer.put_u64(capacity as u64)
+            put_sender_bound(
+                writer,
+                capacity,
+                "stripped asynchronous capacity",
+                limits.max_samples(),
+            )
         }
         SampleSenderMode::DiskStore { capacity } => {
             writer.put_u8(8)?;
-            writer.put_u64(capacity as u64)
+            put_sender_bound(
+                writer,
+                capacity,
+                "disk-store capacity",
+                limits.max_samples(),
+            )
         }
         SampleSenderMode::StrippedDiskStore { capacity } => {
             writer.put_u8(9)?;
-            writer.put_u64(capacity as u64)
+            put_sender_bound(
+                writer,
+                capacity,
+                "stripped disk-store capacity",
+                limits.max_samples(),
+            )
         }
     }
 }
 
-fn decode_sender_mode(reader: &mut Reader<'_>) -> Result<SampleSenderMode, ProtocolError> {
+fn decode_sender_mode(
+    reader: &mut Reader<'_>,
+    limits: RemoteLimits,
+) -> Result<SampleSenderMode, ProtocolError> {
     let kind = reader.u8()?;
     let mode = match kind {
         0 => SampleSenderMode::Standard,
@@ -2850,13 +3024,51 @@ fn decode_sender_mode(reader: &mut Reader<'_>) -> Result<SampleSenderMode, Proto
             });
         }
     };
+    validate_sender_mode_bound(mode, limits.max_samples())?;
+    Ok(mode)
+}
+
+fn validate_sender_mode_bound(mode: SampleSenderMode, maximum: usize) -> Result<(), ProtocolError> {
     if mode.has_zero_bound() {
         return Err(ProtocolError::InvalidValue {
             field: "sample sender bound",
             value: 0,
         });
     }
-    Ok(mode)
+    if let Some(bound) = mode.capacity()
+        && bound > maximum
+    {
+        return Err(ProtocolError::FieldTooLarge {
+            field: "sample sender bound",
+            declared: bound,
+            maximum,
+        });
+    }
+    Ok(())
+}
+
+fn put_sender_bound(
+    writer: &mut Writer,
+    value: usize,
+    field: &'static str,
+    maximum: usize,
+) -> Result<(), ProtocolError> {
+    if value == 0 {
+        return Err(ProtocolError::InvalidValue { field, value: 0 });
+    }
+    if value > maximum {
+        return Err(ProtocolError::FieldTooLarge {
+            field,
+            declared: value,
+            maximum,
+        });
+    }
+    let value = u64::try_from(value).map_err(|_| ProtocolError::FieldTooLarge {
+        field,
+        declared: value,
+        maximum: usize::MAX,
+    })?;
+    writer.put_u64(value)
 }
 
 fn encode_sample(
@@ -2864,6 +3076,7 @@ fn encode_sample(
     sample: &RemoteSample,
     limits: RemoteLimits,
 ) -> Result<(), ProtocolError> {
+    require_nonzero_id(sample.run_id(), "sample run id")?;
     // Encode the event into a bounded probe first.  Decoding that probe and
     // comparing the public result value catches private JTL metadata which
     // the schema does not carry (aliases, opaque XML extensions,
@@ -3243,7 +3456,7 @@ fn decode_result(
             .map_err(|error| ProtocolError::InvalidSample(error.to_string()))?;
     }
     let child_count = read_count(reader, limits.max_references, "sub-results")?;
-    let mut children = Vec::with_capacity(child_count);
+    let mut children = Vec::new();
     for _ in 0..child_count {
         children.push(decode_result(reader, limits, depth + 1, nodes)?);
     }
@@ -3627,6 +3840,146 @@ mod tests {
                 })
             ));
         }
+        assert!(matches!(
+            codec.encode(&RemoteEnvelope::new(
+                1,
+                RemoteMessage::Start {
+                    run_id: 1,
+                    thread_count: 1,
+                    sender_mode: SampleSenderMode::Batch {
+                        size: codec.limits().max_samples() + 1,
+                    },
+                },
+            )),
+            Err(ProtocolError::FieldTooLarge {
+                field: "sample sender bound",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn in_memory_messages_enforce_generation_and_ack_identity() {
+        let codec = RemoteCodec::default();
+        let cases = [
+            RemoteEnvelope::new(
+                1,
+                RemoteMessage::Start {
+                    run_id: 0,
+                    thread_count: 1,
+                    sender_mode: SampleSenderMode::Standard,
+                },
+            ),
+            RemoteEnvelope::new(
+                1,
+                RemoteMessage::Start {
+                    run_id: 1,
+                    thread_count: 0,
+                    sender_mode: SampleSenderMode::Standard,
+                },
+            ),
+            RemoteEnvelope::new(
+                1,
+                RemoteMessage::Ack {
+                    worker: WorkerId::new(1),
+                    stage: AckStage::Started,
+                    run_id: Some(1),
+                    thread_count: Some(1),
+                    sample_watermark: Some(1),
+                },
+            ),
+            RemoteEnvelope::new(
+                1,
+                RemoteMessage::Ack {
+                    worker: WorkerId::new(1),
+                    stage: AckStage::Stopped,
+                    run_id: Some(1),
+                    thread_count: Some(1),
+                    sample_watermark: None,
+                },
+            ),
+        ];
+        for envelope in cases {
+            assert!(matches!(
+                codec.encode(&envelope),
+                Err(ProtocolError::InvalidValue { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn profile_capabilities_are_unique_and_profile_identity_is_required() {
+        let codec = RemoteCodec::default();
+        let duplicate = RemoteEnvelope::new(
+            1,
+            RemoteMessage::Profile {
+                profile: ProfileDescriptor::new("profile", "version")
+                    .with_capabilities(vec!["cap".to_owned(), "cap".to_owned()]),
+            },
+        );
+        assert!(matches!(
+            codec.encode(&duplicate),
+            Err(ProtocolError::InvalidValue {
+                field: "duplicate capability",
+                ..
+            })
+        ));
+        let empty = RemoteEnvelope::new(
+            1,
+            RemoteMessage::Profile {
+                profile: ProfileDescriptor::new("", "version"),
+            },
+        );
+        assert!(matches!(
+            codec.encode(&empty),
+            Err(ProtocolError::InvalidValue {
+                field: "profile identity",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn malformed_large_counts_fail_without_preallocating_peer_count() {
+        let limits = RemoteLimits::default()
+            .with_max_capabilities(u32::MAX as usize)
+            .with_max_field_bytes(64);
+        let codec = RemoteCodec::new(limits);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&REMOTE_MAGIC);
+        bytes.extend_from_slice(&REMOTE_PROTOCOL_VERSION.to_be_bytes());
+        bytes.push(MessageKind::Profile as u8);
+        bytes.push(0);
+        bytes.extend_from_slice(&1u64.to_be_bytes());
+        bytes.extend_from_slice(&14u32.to_be_bytes());
+        bytes.extend_from_slice(&1u32.to_be_bytes());
+        bytes.extend_from_slice(b"p");
+        bytes.extend_from_slice(&1u32.to_be_bytes());
+        bytes.extend_from_slice(b"v");
+        bytes.extend_from_slice(&u32::MAX.to_be_bytes());
+        assert!(matches!(
+            codec.decode(&bytes),
+            Err(ProtocolError::Incomplete { .. })
+        ));
+    }
+
+    #[test]
+    fn every_truncated_frame_is_a_bounded_decode_result() {
+        let codec = RemoteCodec::default();
+        let envelope = RemoteEnvelope::new(
+            1,
+            RemoteMessage::Plan {
+                plan: PlanDescriptor::new(b"<plan/>".to_vec()),
+            },
+        );
+        let encoded = codec.encode(&envelope).expect("fixture encodes");
+        for end in 0..encoded.len() {
+            assert!(matches!(
+                codec.decode(&encoded[..end]),
+                Err(ProtocolError::Incomplete { .. })
+            ));
+        }
+        assert_eq!(codec.decode(&encoded).expect("complete frame"), envelope);
     }
 
     #[test]

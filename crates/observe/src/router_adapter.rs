@@ -23,6 +23,14 @@ use core::fmt;
 /// Maximum bytes accepted for one canonical router identity.
 pub const MAX_ROUTER_IDENTITY_BYTES: usize = 128;
 
+/// Maximum bytes accepted for one router-provided diagnostic detail.
+///
+/// The observe crate applies a larger process-wide scan bound as a final
+/// safety net, but router diagnostics have a smaller contract-specific bound
+/// so a finalization report cannot retain an accidentally unbounded error
+/// chain or sink response.
+pub const MAX_ROUTER_DETAIL_BYTES: usize = 4 * 1024;
+
 /// The outcome reported by a typed router admission attempt.
 ///
 /// The variants mirror the bounded admission outcomes of the typed router;
@@ -44,7 +52,9 @@ pub enum RouterAdmissionOutcome {
 }
 
 impl RouterAdmissionOutcome {
-    const fn code(self) -> &'static str {
+    /// Returns the stable machine-readable outcome code.
+    #[must_use]
+    pub const fn code(self) -> &'static str {
         match self {
             Self::Accepted => "router.admission.accepted",
             Self::Full => "router.admission.full",
@@ -55,7 +65,9 @@ impl RouterAdmissionOutcome {
         }
     }
 
-    const fn severity(self) -> Severity {
+    /// Returns the severity used for the outcome event.
+    #[must_use]
+    pub const fn severity(self) -> Severity {
         match self {
             Self::Accepted => Severity::Info,
             Self::Full | Self::Closed | Self::Cancelled | Self::DiagnosedDrop => Severity::Warn,
@@ -80,7 +92,9 @@ pub enum RouterFinalizationStage {
 }
 
 impl RouterFinalizationStage {
-    const fn as_str(self) -> &'static str {
+    /// Returns the stable wire spelling of this phase.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::StopAdmission => "stop_admission",
             Self::Drain => "drain",
@@ -114,6 +128,55 @@ pub struct RouterConservationCounts {
     pub admitted_bytes: u64,
     /// Number of bytes durably acknowledged.
     pub durable_bytes: u64,
+}
+
+impl RouterConservationCounts {
+    /// The accepted count is the number admitted to a sink.  This alias makes
+    /// the Decision0003 equation explicit without changing the compact input
+    /// projection used by older callers.
+    #[must_use]
+    pub const fn accepted_events(self) -> u64 {
+        self.admitted_events
+    }
+
+    /// The failed count is the terminal failed-after-admission count in the
+    /// router projection.  A pre-admission failure is represented by the
+    /// selected-versus-admitted difference.
+    #[must_use]
+    pub const fn failed_after_admission_events(self) -> u64 {
+        self.failed_events
+    }
+
+    /// Returns the derived not-admitted count when the selected count can be
+    /// balanced against the admitted terminal accounting.
+    #[must_use]
+    pub const fn not_admitted_events(self) -> Option<u64> {
+        self.selected_events.checked_sub(self.admitted_events)
+    }
+
+    /// Returns whether the event-count conservation equations hold for this
+    /// compact projection.  `admitted_events` is the accepted count and
+    /// `failed_events` is failed-after-admission, matching the typed router's
+    /// finalization report.
+    #[must_use]
+    pub const fn event_conservation_valid(self) -> bool {
+        let Some(terminal) = self.durable_events.checked_add(self.diagnosed_drop_events) else {
+            return false;
+        };
+        let Some(terminal) = terminal.checked_add(self.failed_events) else {
+            return false;
+        };
+        self.admitted_events == terminal && self.selected_events >= terminal
+    }
+
+    /// Returns whether the byte counters are monotonic at each durability
+    /// boundary.  Event-level diagnosed-drop and failure bytes are not part of
+    /// this compact legacy projection, so byte conservation is deliberately a
+    /// monotonicity check rather than an invented equation.
+    #[must_use]
+    pub const fn byte_accounting_valid(self) -> bool {
+        self.selected_bytes >= self.admitted_bytes && self.admitted_bytes >= self.durable_bytes
+    }
 }
 
 /// Input projection for one typed router admission outcome.
@@ -234,10 +297,30 @@ pub enum RouterDiagnosticError {
         /// Maximum accepted byte length.
         maximum: usize,
     },
+    /// A stable identity contains whitespace or control bytes and is not in
+    /// the canonical spelling required by the typed router contract.
+    NonCanonicalIdentity {
+        /// Canonical field which was not valid.
+        field: &'static str,
+    },
+    /// A typed identity component used zero even though zero means absent.
+    ZeroIdentity {
+        /// Canonical field which was zero.
+        field: &'static str,
+    },
     /// A required typed diagnostic was empty.
     EmptyDetail {
         /// Canonical field which was empty.
         field: &'static str,
+    },
+    /// A diagnostic detail exceeds the router's bounded retention contract.
+    DetailTooLong {
+        /// Canonical field which exceeded its bound.
+        field: &'static str,
+        /// Input byte length.
+        actual: usize,
+        /// Maximum accepted byte length.
+        maximum: usize,
     },
     /// A caller did not assign a valid sequence identity.
     InvalidSequence,
@@ -252,7 +335,10 @@ impl RouterDiagnosticError {
         match self {
             Self::EmptyIdentity { .. } => "router.identity.empty",
             Self::IdentityTooLong { .. } => "router.identity.too_long",
+            Self::NonCanonicalIdentity { .. } => "router.identity.non_canonical",
+            Self::ZeroIdentity { .. } => "router.identity.zero",
             Self::EmptyDetail { .. } => "router.detail.empty",
+            Self::DetailTooLong { .. } => "router.detail.too_long",
             Self::InvalidSequence => "router.sequence.invalid",
             Self::Observe(error) => error.code(),
         }
@@ -271,7 +357,19 @@ impl fmt::Display for RouterDiagnosticError {
                 formatter,
                 "router.identity.too_long ({field}, {actual} > {maximum})"
             ),
+            Self::NonCanonicalIdentity { field } => {
+                write!(formatter, "router.identity.non_canonical ({field})")
+            }
+            Self::ZeroIdentity { field } => write!(formatter, "router.identity.zero ({field})"),
             Self::EmptyDetail { field } => write!(formatter, "router.detail.empty ({field})"),
+            Self::DetailTooLong {
+                field,
+                actual,
+                maximum,
+            } => write!(
+                formatter,
+                "router.detail.too_long ({field}, {actual} > {maximum})"
+            ),
             Self::InvalidSequence => formatter.write_str("router.sequence.invalid"),
             Self::Observe(error) => error.fmt(formatter),
         }
@@ -471,6 +569,9 @@ impl RouterDiagnosticAdapter {
                 maximum: MAX_ROUTER_IDENTITY_BYTES,
             });
         }
+        if value.trim() != value || value.chars().any(char::is_control) {
+            return Err(RouterDiagnosticError::NonCanonicalIdentity { field: key });
+        }
         let sanitized = self.policy.redact_value(value);
         let stable = if sanitized == value && sanitized.len() <= MAX_ROUTER_IDENTITY_BYTES {
             sanitized
@@ -488,6 +589,9 @@ impl RouterDiagnosticAdapter {
         value: Option<u64>,
     ) -> Result<(), RouterDiagnosticError> {
         if let Some(value) = value {
+            if value == 0 {
+                return Err(RouterDiagnosticError::ZeroIdentity { field: key });
+            }
             self.add_number(event, key, value)?;
         }
         Ok(())
@@ -521,6 +625,16 @@ impl RouterDiagnosticAdapter {
         key: &'static str,
         value: &str,
     ) -> Result<(), RouterDiagnosticError> {
+        if value.is_empty() {
+            return Err(RouterDiagnosticError::EmptyDetail { field: key });
+        }
+        if value.len() > MAX_ROUTER_DETAIL_BYTES {
+            return Err(RouterDiagnosticError::DetailTooLong {
+                field: key,
+                actual: value.len(),
+                maximum: MAX_ROUTER_DETAIL_BYTES,
+            });
+        }
         event.add_field(key, value)?;
         Ok(())
     }
@@ -627,6 +741,29 @@ mod tests {
         assert_eq!(field(&event, "router.durable_bytes"), "200");
         assert_eq!(field(&event, "router.event_id"), "event-19");
         assert!(!field(&event, "router.detail").contains("router-secret"));
+        assert!(input.counts.event_conservation_valid());
+        assert!(input.counts.byte_accounting_valid());
+    }
+
+    #[test]
+    fn conservation_helpers_fail_closed_on_overflow_and_non_monotonic_bytes() {
+        let overflow = RouterConservationCounts {
+            selected_events: u64::MAX,
+            admitted_events: u64::MAX,
+            durable_events: u64::MAX,
+            diagnosed_drop_events: 1,
+            ..RouterConservationCounts::default()
+        };
+        assert!(!overflow.event_conservation_valid());
+
+        let non_monotonic = RouterConservationCounts {
+            selected_bytes: 10,
+            admitted_bytes: 11,
+            durable_bytes: 12,
+            ..RouterConservationCounts::default()
+        };
+        assert!(!non_monotonic.byte_accounting_valid());
+        assert_eq!(non_monotonic.not_admitted_events(), Some(0));
     }
 
     #[test]
@@ -703,6 +840,33 @@ mod tests {
             adapter.admission(&valid, Timestamp::new(1, 1), SequenceId::default()),
             Err(RouterDiagnosticError::InvalidSequence)
         );
+
+        let zero_generation = RouterAdmissionDiagnosticInput {
+            run_generation: Some(0),
+            ..valid
+        };
+        assert_eq!(
+            adapter.admission(&zero_generation, Timestamp::new(1, 1), SequenceId::new(1)),
+            Err(RouterDiagnosticError::ZeroIdentity {
+                field: "router.run_generation"
+            })
+        );
+
+        let non_canonical = RouterAdmissionDiagnosticInput {
+            run_id: Some(" run-1"),
+            outcome: RouterAdmissionOutcome::Accepted,
+            run_generation: None,
+            event_id: None,
+            sink_id: None,
+            bytes: None,
+            detail: None,
+        };
+        assert_eq!(
+            adapter.admission(&non_canonical, Timestamp::new(1, 1), SequenceId::new(1)),
+            Err(RouterDiagnosticError::NonCanonicalIdentity {
+                field: "router.run_id"
+            })
+        );
     }
 
     #[test]
@@ -731,6 +895,24 @@ mod tests {
         assert_eq!(
             adapter.conservation(&conservation, Timestamp::new(1, 1), SequenceId::new(1)),
             Err(RouterDiagnosticError::EmptyDetail { field: "detail" })
+        );
+
+        let oversized = "x".repeat(MAX_ROUTER_DETAIL_BYTES + 1);
+        let finalization = RouterFinalizationDiagnosticInput {
+            stage: RouterFinalizationStage::Close,
+            run_id: None,
+            run_generation: None,
+            sink_id: None,
+            primary: &oversized,
+            secondary: None,
+        };
+        assert_eq!(
+            adapter.finalization(&finalization, Timestamp::new(1, 1), SequenceId::new(1)),
+            Err(RouterDiagnosticError::DetailTooLong {
+                field: "router.primary",
+                actual: MAX_ROUTER_DETAIL_BYTES + 1,
+                maximum: MAX_ROUTER_DETAIL_BYTES,
+            })
         );
     }
 }

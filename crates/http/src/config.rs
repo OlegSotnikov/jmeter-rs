@@ -10,7 +10,7 @@
 
 use std::fmt;
 
-use crate::{AuthEntry, CacheStore, CookieJar, DnsCache, HttpError, Request, Url};
+use crate::{AuthEntry, CacheStore, CookieJar, DnsCache, HttpError, Method, Request, Url};
 
 /// Maximum number of fields retained by one wire configuration element.
 pub const MAX_CONFIG_FIELDS: usize = 256;
@@ -22,6 +22,118 @@ pub const MAX_STATIC_DNS_HOSTS: usize = 256;
 pub const MAX_DNS_SERVERS: usize = 32;
 /// Maximum authentication entries accepted by one AuthManager descriptor.
 pub const MAX_AUTH_ENTRIES: usize = 128;
+/// Maximum concurrent embedded-resource workers accepted from an HTTP
+/// Request Defaults element.
+pub const MAX_CONCURRENT_POOL: u16 = 256;
+/// Maximum timeout accepted by an HTTP Request Defaults element.
+pub const MAX_HTTP_TIMEOUT_MS: u64 = 86_400_000;
+/// Maximum statically configured cookies retained by one Cookie Manager.
+pub const MAX_INITIAL_COOKIES: usize = 512;
+/// Maximum cache entries accepted by a Cache Manager descriptor.
+pub const MAX_CACHE_ENTRIES: usize = 1_000_000;
+/// JMeter HTTP sampler defaults that apply when a wire property is absent.
+pub const DEFAULT_HTTP_METHOD: &str = "GET";
+/// JMeter's default sampler protocol.
+pub const DEFAULT_HTTP_PROTOCOL: &str = "http";
+/// JMeter's default request content encoding.
+pub const DEFAULT_HTTP_CONTENT_ENCODING: &str = "UTF-8";
+/// JMeter's semantic redirect default.
+pub const DEFAULT_HTTP_FOLLOW_REDIRECTS: bool = true;
+/// JMeter's automatic-client-redirect default.
+pub const DEFAULT_HTTP_AUTO_REDIRECTS: bool = false;
+/// JMeter's persistent-connection default.
+pub const DEFAULT_HTTP_KEEPALIVE: bool = true;
+/// JMeter's embedded-resource concurrency default.
+pub const DEFAULT_HTTP_CONCURRENT_DOWNLOADS: bool = false;
+/// JMeter's embedded-resource worker-pool default.
+pub const DEFAULT_CONCURRENT_POOL: u16 = 6;
+/// JMeter's CacheManager maximum-entry default.
+pub const DEFAULT_CACHE_MAX_SIZE: usize = 5_000;
+/// JMeter's CookieManager policy default.
+pub const DEFAULT_COOKIE_POLICY: &str = "standard";
+/// JMeter's CookieManager handler default.
+pub const DEFAULT_COOKIE_IMPLEMENTATION: &str =
+    "org.apache.jmeter.protocol.http.control.HC4CookieHandler";
+/// JMeter wire names used by the HTTP configuration descriptors.
+pub const JMX_HTTP_DOMAIN: &str = "HTTPSampler.domain";
+/// JMeter HTTP sampler port property.
+pub const JMX_HTTP_PORT: &str = "HTTPSampler.port";
+/// JMeter HTTP sampler protocol property.
+pub const JMX_HTTP_PROTOCOL: &str = "HTTPSampler.protocol";
+/// JMeter HTTP sampler method property.
+pub const JMX_HTTP_METHOD: &str = "HTTPSampler.method";
+/// JMeter HTTP sampler content-encoding property.
+pub const JMX_HTTP_CONTENT_ENCODING: &str = "HTTPSampler.contentEncoding";
+/// JMeter HTTP sampler path property.
+pub const JMX_HTTP_PATH: &str = "HTTPSampler.path";
+/// JMeter HTTP sampler implementation property.
+pub const JMX_HTTP_IMPLEMENTATION: &str = "HTTPSampler.implementation";
+/// JMeter HTTP sampler connect-timeout property.
+pub const JMX_HTTP_CONNECT_TIMEOUT: &str = "HTTPSampler.connect_timeout";
+/// JMeter HTTP sampler response-timeout property.
+pub const JMX_HTTP_RESPONSE_TIMEOUT: &str = "HTTPSampler.response_timeout";
+/// JMeter HTTP sampler embedded-download concurrency property.
+pub const JMX_HTTP_CONCURRENT_DOWNLOADS: &str = "HTTPSampler.concurrentDwn";
+/// JMeter HTTP sampler embedded-download pool property.
+pub const JMX_HTTP_CONCURRENT_POOL: &str = "HTTPSampler.concurrentPool";
+/// JMeter HTTP sampler proxy-scheme property.
+pub const JMX_HTTP_PROXY_SCHEME: &str = "HTTPSampler.proxyScheme";
+/// JMeter HTTP sampler proxy-host property.
+pub const JMX_HTTP_PROXY_HOST: &str = "HTTPSampler.proxyHost";
+/// JMeter HTTP sampler proxy-port property.
+pub const JMX_HTTP_PROXY_PORT: &str = "HTTPSampler.proxyPort";
+/// JMeter HTTP sampler proxy-user property.
+pub const JMX_HTTP_PROXY_USER: &str = "HTTPSampler.proxyUser";
+/// JMeter HTTP sampler proxy-password property.
+pub const JMX_HTTP_PROXY_PASSWORD: &str = "HTTPSampler.proxyPass";
+/// JMeter HTTP sampler semantic-redirect property.
+pub const JMX_HTTP_FOLLOW_REDIRECTS: &str = "HTTPSampler.follow_redirects";
+/// JMeter HTTP sampler automatic-redirect property.
+pub const JMX_HTTP_AUTO_REDIRECTS: &str = "HTTPSampler.auto_redirects";
+/// JMeter HTTP sampler keep-alive property.
+pub const JMX_HTTP_KEEPALIVE: &str = "HTTPSampler.use_keepalive";
+/// JMeter HTTP sampler embedded-resource include expression.
+pub const JMX_HTTP_EMBEDDED_URL_REGEX: &str = "HTTPSampler.embedded_url_re";
+/// JMeter HTTP sampler embedded-resource exclusion expression.
+pub const JMX_HTTP_EMBEDDED_URL_EXCLUDE_REGEX: &str = "HTTPSampler.embedded_url_exclude_re";
+/// JMeter DNS manager iteration-reset property.
+pub const JMX_DNS_CLEAR_EACH_ITERATION: &str = "DNSCacheManager.clearEachIteration";
+/// JMeter DNS manager static-host collection property.
+pub const JMX_DNS_HOSTS: &str = "DNSCacheManager.hosts";
+/// JMeter DNS manager resolver-server property.
+pub const JMX_DNS_SERVERS: &str = "DNSCacheManager.servers";
+/// JMeter DNS manager custom-resolver property.
+pub const JMX_DNS_CUSTOM_RESOLVER: &str = "DNSCacheManager.isCustomResolver";
+/// JMeter cookie manager iteration-reset property.
+pub const JMX_COOKIE_CLEAR_EACH_ITERATION: &str = "CookieManager.clearEachIteration";
+/// JMeter cookie manager initial-cookie collection property.
+pub const JMX_COOKIE_ENTRIES: &str = "CookieManager.cookies";
+/// JMeter cookie manager variable-publication property.
+pub const JMX_COOKIE_SAVE_COOKIES: &str = "CookieManager.save.cookies";
+/// JMeter cookie manager validation property.
+pub const JMX_COOKIE_CHECK_COOKIES: &str = "CookieManager.check.cookies";
+/// JMeter cookie manager null-cookie deletion property.
+pub const JMX_COOKIE_DELETE_NULL_COOKIES: &str = "CookieManager.delete_null_cookies";
+/// JMeter cookie manager policy property.
+pub const JMX_COOKIE_POLICY: &str = "CookieManager.policy";
+/// JMeter cookie manager handler implementation property.
+pub const JMX_COOKIE_IMPLEMENTATION: &str = "CookieManager.implementation";
+/// JMeter cookie manager thread-group ownership property.
+pub const JMX_COOKIE_CONTROLLED_BY_THREAD_GROUP: &str = "CookieManager.controlledByThreadGroup";
+/// JMeter cache manager maximum-entry property.
+pub const JMX_CACHE_MAX_SIZE: &str = "maxSize";
+/// JMeter cache manager iteration-reset property.
+pub const JMX_CACHE_CLEAR_EACH_ITERATION: &str = "clearEachIteration";
+/// JMeter cache manager thread ownership property.
+pub const JMX_CACHE_CONTROLLED_BY_THREAD: &str = "CacheManager.controlledByThread";
+/// JMeter cache manager freshness property.
+pub const JMX_CACHE_USE_EXPIRES: &str = "useExpires";
+/// JMeter auth manager entry collection property.
+pub const JMX_AUTH_ENTRIES: &str = "AuthManager.auth_list";
+/// JMeter auth manager iteration-reset property.
+pub const JMX_AUTH_CLEAR_EACH_ITERATION: &str = "AuthManager.clearEachIteration";
+/// JMeter auth manager thread-group ownership property.
+pub const JMX_AUTH_CONTROLLED_BY_THREAD_GROUP: &str = "AuthManager.controlledByThreadGroup";
 const MAX_CONFIG_NAME_BYTES: usize = 256;
 const MAX_DNS_NAME_BYTES: usize = 255;
 const MAX_DNS_ADDRESS_BYTES: usize = 128;
@@ -264,7 +376,245 @@ impl HttpImplementation {
             Self::HttpClient4 => "HttpClient4",
         }
     }
+
+    /// Returns the versioned execution identity selected by this JMeter wire
+    /// value.  The Java and HttpClient4 identities are deliberately separate
+    /// from the native Rust transports; neither is silently downgraded to a
+    /// native capability when a JVM adapter is unavailable.
+    #[must_use]
+    pub const fn capability_path(self) -> HttpCapabilityPath {
+        match self {
+            Self::Java => HttpCapabilityPath::JmeterJavaV563,
+            Self::HttpClient4 => HttpCapabilityPath::JmeterHttpClient4V563,
+        }
+    }
+
+    /// Returns whether this JMeter implementation requires the optional
+    /// compatibility pack and a pinned JVM worker.
+    #[must_use]
+    pub const fn requires_jvm(self) -> bool {
+        true
+    }
+
+    /// Returns the JMeter wire default for an absent implementation field.
+    /// This is a source-format default only; selecting it does not authorize
+    /// an adapter or make a native run compatible with Java semantics.
+    #[must_use]
+    pub const fn jmeter_default() -> Self {
+        Self::HttpClient4
+    }
 }
+
+/// Versioned execution identities for HTTP implementation selection.
+///
+/// `NativeV1` and `NativeV2` are explicit standalone capabilities and are not
+/// JMeter wire spellings.  The two `Jmeter*` variants are compatibility-pack
+/// paths and must return a typed unavailable error when their worker is absent.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum HttpCapabilityPath {
+    /// Independently named native Rust transport.
+    NativeV1,
+    /// Separately versioned native Rust transport increment.
+    NativeV2,
+    /// Pinned JMeter Java URLConnection path.
+    JmeterJavaV563,
+    /// Pinned JMeter HttpClient4 path.
+    JmeterHttpClient4V563,
+}
+
+impl HttpCapabilityPath {
+    /// Returns the stable capability identifier.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NativeV1 => "http.native/1",
+            Self::NativeV2 => "http.native/2",
+            Self::JmeterJavaV563 => "http.jmeter-java/5.6.3",
+            Self::JmeterHttpClient4V563 => "http.jmeter-httpclient4/5.6.3",
+        }
+    }
+
+    /// Parses only versioned capability identifiers.  JMeter wire values
+    /// should be decoded with [`HttpImplementation::from_wire`] instead.
+    pub fn parse(value: &str) -> Result<Self, HttpError> {
+        match value {
+            "http.native/1" => Ok(Self::NativeV1),
+            "http.native/2" => Ok(Self::NativeV2),
+            "http.jmeter-java/5.6.3" => Ok(Self::JmeterJavaV563),
+            "http.jmeter-httpclient4/5.6.3" => Ok(Self::JmeterHttpClient4V563),
+            _ => Err(HttpError::Unsupported(format!(
+                "unsupported HTTP capability {value:?}"
+            ))),
+        }
+    }
+
+    /// Returns whether this path is a compatibility-pack/JVM path.  Both
+    /// explicitly selected native increments are JVM-free.
+    #[must_use]
+    pub const fn requires_jvm(self) -> bool {
+        !matches!(self, Self::NativeV1 | Self::NativeV2)
+    }
+
+    /// Fails closed when a caller tries to run an external path in this pure
+    /// crate.  The application-owned adapter is responsible for proving the
+    /// worker identity before admission.
+    pub fn require_native(self) -> Result<(), HttpError> {
+        if self.requires_jvm() {
+            return Err(HttpError::Unsupported(format!(
+                "{} requires the optional pinned JVM compatibility pack",
+                self.as_str()
+            )));
+        }
+        Ok(())
+    }
+}
+
+impl core::str::FromStr for HttpCapabilityPath {
+    type Err = HttpError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::parse(value)
+    }
+}
+
+/// HTTP sampler proxy fields as represented by JMeter's request element.
+///
+/// The password is represented only by its presence.  A decoder that has the
+/// wire secret must keep it behind the application-owned secret boundary (or
+/// retain an opaque redacted field); this pure descriptor never stores a
+/// plaintext proxy password.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ProxyConfiguration {
+    /// `http` or `https`; absent means no explicit proxy scheme.
+    pub scheme: OptionalString,
+    /// Proxy host, retaining source spelling until route validation.
+    pub host: OptionalString,
+    /// Proxy port; `Some(0)` preserves an explicit JMeter unspecified value.
+    pub port: Option<u16>,
+    /// Optional non-secret username presence/value.
+    pub username: OptionalString,
+    /// Whether the wire carried a proxy password.
+    pub password_present: OptionalBool,
+    /// Pipe-separated `nonProxyHosts` patterns.
+    pub non_proxy_hosts: OptionalString,
+    /// Exact unknown or secret-bearing fields.
+    pub opaque: WireConfig,
+}
+
+impl ProxyConfiguration {
+    /// Returns whether the source carried any proxy property.
+    #[must_use]
+    pub fn is_present(&self) -> bool {
+        self.scheme.is_present()
+            || self.host.is_present()
+            || self.port.is_some()
+            || self.username.is_present()
+            || self.password_present.is_present()
+            || self.non_proxy_hosts.is_present()
+            || !self.opaque.fields().is_empty()
+    }
+
+    /// Validates syntax and the bounded field model without opening a route.
+    pub fn validate(&self) -> Result<(), HttpError> {
+        if let Some(scheme) = self.scheme.value()
+            && !scheme.is_empty()
+            && !scheme.eq_ignore_ascii_case("http")
+            && !scheme.eq_ignore_ascii_case("https")
+        {
+            return Err(HttpError::Proxy(format!(
+                "unsupported HTTP proxy scheme {scheme:?}"
+            )));
+        }
+        if self.port.is_some_and(|port| port == 0)
+            && (self.host.is_present() || self.scheme.is_present())
+        {
+            return Err(HttpError::Proxy(
+                "HTTP proxy port must be non-zero when configured".to_owned(),
+            ));
+        }
+        if let Some(patterns) = self.non_proxy_hosts.value() {
+            crate::NoProxy::parse(patterns)?;
+        }
+        Ok(())
+    }
+
+    /// Merges a local proxy descriptor while retaining absent-versus-empty
+    /// values.  Secret/opaque fields stay ordered and are never deduplicated.
+    pub fn merge(&mut self, local: &Self) -> Result<(), HttpError> {
+        let mut candidate = self.clone();
+        if local.scheme.is_present() {
+            candidate.scheme = local.scheme.clone();
+        }
+        if local.host.is_present() {
+            candidate.host = local.host.clone();
+        }
+        if local.port.is_some() {
+            candidate.port = local.port;
+        }
+        if local.username.is_present() {
+            candidate.username = local.username.clone();
+        }
+        if local.password_present.is_present() {
+            candidate.password_present = local.password_present;
+        }
+        if local.non_proxy_hosts.is_present() {
+            candidate.non_proxy_hosts = local.non_proxy_hosts.clone();
+        }
+        for field in local.opaque.iter() {
+            candidate.opaque.push(field.clone())?;
+        }
+        // An explicit empty local value clears an outer secret-bearing field;
+        // preserve the exact field in the opaque stream for round-tripping.
+        candidate.validate_without_secret_presence()?;
+        *self = candidate;
+        Ok(())
+    }
+
+    fn validate_without_secret_presence(&self) -> Result<(), HttpError> {
+        self.validate()
+    }
+
+    /// Builds an unauthenticated explicit policy.  Proxy credentials always
+    /// return an unavailable-capability error because the application must
+    /// supply them through its protected secret provider.
+    pub fn to_policy(&self) -> Result<crate::ProxyPolicy, HttpError> {
+        self.validate_without_secret_presence()?;
+        if self.username.is_present()
+            || self.password_present.value().is_some_and(|present| present)
+        {
+            return Err(HttpError::Unsupported(
+                "http.proxy.credentials requires an application SecretRef adapter".to_owned(),
+            ));
+        }
+        let mut policy = crate::ProxyPolicy::default();
+        if let Some(patterns) = self.non_proxy_hosts.value() {
+            policy.no_proxy = crate::NoProxy::parse(patterns)?;
+        }
+        let Some(host) = self.host.value().filter(|value| !value.is_empty()) else {
+            return Ok(policy);
+        };
+        let Some(port) = self.port.filter(|port| *port != 0) else {
+            return Err(HttpError::Proxy(
+                "HTTP proxy host requires an explicit non-zero port".to_owned(),
+            ));
+        };
+        let scheme = self
+            .scheme
+            .value()
+            .filter(|value| !value.is_empty())
+            .unwrap_or("http");
+        let proxy_scheme = crate::ProxyScheme::parse(scheme)?;
+        let proxy = crate::Proxy::new(proxy_scheme, host, port)?;
+        match proxy_scheme {
+            crate::ProxyScheme::Http => policy.http = Some(proxy),
+            crate::ProxyScheme::Https => policy.https = Some(proxy),
+        }
+        Ok(policy)
+    }
+}
+
+/// Compatibility alias used by callers that name the sampler element.
+pub type HttpProxyConfiguration = ProxyConfiguration;
 
 /// A pure HTTP Request Defaults descriptor.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -280,8 +630,27 @@ pub struct HttpRequestDefaults {
     pub content_encoding: OptionalString,
     /// Optional default path.
     pub path: OptionalString,
+    /// Optional HTTP method when a defaults element carries one.
+    pub method: OptionalString,
+    /// Whether redirects should be followed when explicitly configured.
+    pub follow_redirects: OptionalBool,
+    /// Whether automatic redirect mode is requested.
+    pub auto_redirects: OptionalBool,
+    /// Whether the transport should use persistent connections.
+    pub use_keepalive: OptionalBool,
+    /// Whether embedded resources should be downloaded concurrently.
+    pub concurrent_downloads: OptionalBool,
+    /// Embedded-resource include expression.
+    pub embedded_url_regex: OptionalString,
+    /// Embedded-resource exclusion expression.
+    pub embedded_url_exclude_regex: OptionalString,
+    /// Explicit sampler proxy fields.
+    pub proxy: ProxyConfiguration,
     /// Optional HTTP implementation.
     pub implementation: Option<HttpImplementation>,
+    /// Original implementation spelling when it was present but not decoded
+    /// as one of the two JMeter 5.6.3 implementations.
+    pub implementation_wire: OptionalString,
     /// Optional connect timeout in milliseconds.
     pub connect_timeout_ms: Option<u64>,
     /// Optional response timeout in milliseconds.
@@ -292,9 +661,285 @@ pub struct HttpRequestDefaults {
     pub opaque: WireConfig,
 }
 
+/// Effective HTTP sampler values after applying an ancestry-ordered set of
+/// Request Defaults descriptors.
+///
+/// The descriptor keeps source presence separately; this type contains only
+/// values an execution adapter may consume. Fields that have no equivalent
+/// in [`Request`] or [`crate::ClientConfig`] (encoding, embedded-resource
+/// parsing, connection reuse, and the implementation identity) remain
+/// explicit here so an adapter cannot accidentally replace them with a
+/// native default.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EffectiveHttpRequestConfig {
+    /// Parsed request method.
+    pub method: Method,
+    /// Whether the source carried an explicit method property.
+    pub method_explicit: bool,
+    /// Effective protocol spelling.
+    pub protocol: String,
+    /// Effective entity encoding requested by JMeter.
+    pub content_encoding: String,
+    /// Whether the source carried an explicit encoding property.
+    pub content_encoding_explicit: bool,
+    /// Whether semantic redirect handling is enabled.
+    pub follow_redirects: bool,
+    /// Whether the upstream client should perform automatic redirects.
+    pub auto_redirects: bool,
+    /// Whether persistent connections are requested.
+    pub use_keepalive: bool,
+    /// Whether embedded resources are downloaded concurrently.
+    pub concurrent_downloads: bool,
+    /// Include expression for embedded-resource extraction.
+    pub embedded_url_regex: OptionalString,
+    /// Exclude expression for embedded-resource extraction.
+    pub embedded_url_exclude_regex: OptionalString,
+    /// Explicit proxy route policy.
+    pub proxy: crate::ProxyPolicy,
+    /// Whether the source carried any explicit proxy property.
+    pub proxy_explicit: bool,
+    /// JMeter implementation identity.
+    pub implementation: HttpImplementation,
+    /// Versioned capability selected by `implementation`.
+    pub capability: HttpCapabilityPath,
+    /// Optional connection timeout in milliseconds.
+    pub connect_timeout_ms: Option<u64>,
+    /// Whether the source carried a connect-timeout property, including 0.
+    pub connect_timeout_explicit: bool,
+    /// Optional response-read timeout in milliseconds.
+    pub response_timeout_ms: Option<u64>,
+    /// Whether the source carried a response-timeout property, including 0.
+    pub response_timeout_explicit: bool,
+    /// Embedded-resource worker pool size.
+    pub concurrent_pool: u16,
+}
+
+impl EffectiveHttpRequestConfig {
+    /// Builds effective values from one already-merged descriptor.
+    pub fn from_defaults(defaults: &HttpRequestDefaults) -> Result<Self, HttpError> {
+        defaults.validate()?;
+        let implementation = defaults.selected_implementation()?;
+        let method = Method::parse(defaults.effective_method())?;
+        Ok(Self {
+            method,
+            method_explicit: defaults.method.is_present(),
+            protocol: defaults.effective_protocol().to_owned(),
+            content_encoding: defaults.effective_content_encoding().to_owned(),
+            content_encoding_explicit: defaults.content_encoding.is_present(),
+            follow_redirects: defaults
+                .follow_redirects
+                .value()
+                .unwrap_or(DEFAULT_HTTP_FOLLOW_REDIRECTS),
+            auto_redirects: defaults
+                .auto_redirects
+                .value()
+                .unwrap_or(DEFAULT_HTTP_AUTO_REDIRECTS),
+            use_keepalive: defaults
+                .use_keepalive
+                .value()
+                .unwrap_or(DEFAULT_HTTP_KEEPALIVE),
+            concurrent_downloads: defaults
+                .concurrent_downloads
+                .value()
+                .unwrap_or(DEFAULT_HTTP_CONCURRENT_DOWNLOADS),
+            embedded_url_regex: defaults.embedded_url_regex.clone(),
+            embedded_url_exclude_regex: defaults.embedded_url_exclude_regex.clone(),
+            proxy: defaults.proxy.to_policy()?,
+            proxy_explicit: defaults.proxy.is_present(),
+            capability: implementation.capability_path(),
+            implementation,
+            connect_timeout_ms: defaults.effective_connect_timeout_ms(),
+            connect_timeout_explicit: defaults.connect_timeout_ms.is_some(),
+            response_timeout_ms: defaults.effective_response_timeout_ms(),
+            response_timeout_explicit: defaults.response_timeout_ms.is_some(),
+            concurrent_pool: defaults.effective_concurrent_pool(),
+        })
+    }
+
+    /// Merges a materialized JMX ancestry path (outermost first) and resolves
+    /// its effective execution values in one operation.
+    pub fn from_ancestry(
+        descriptors: impl IntoIterator<Item = Scoped<HttpRequestDefaults>>,
+    ) -> Result<Self, HttpError> {
+        let defaults = merge_request_defaults_in_ancestry_order(descriptors)?;
+        Self::from_defaults(&defaults)
+    }
+
+    /// Applies the fields that have a direct request representation.
+    ///
+    /// Content encoding and embedded-resource options are intentionally not
+    /// synthesized into headers: JMeter applies those while constructing the
+    /// entity and while parsing the response, respectively. Unsupported
+    /// non-default values return a typed error instead of being dropped.
+    pub fn apply_to_request(&self, request: &mut Request) -> Result<(), HttpError> {
+        if self.content_encoding_explicit
+            && !self.content_encoding.is_empty()
+            && !self
+                .content_encoding
+                .eq_ignore_ascii_case(DEFAULT_HTTP_CONTENT_ENCODING)
+        {
+            return Err(HttpError::Unsupported(
+                "non-UTF-8 HTTP request encoding requires an explicit sampler adapter".to_owned(),
+            ));
+        }
+        if self.concurrent_downloads
+            || self
+                .embedded_url_regex
+                .value()
+                .is_some_and(|value| !value.is_empty())
+            || self
+                .embedded_url_exclude_regex
+                .value()
+                .is_some_and(|value| !value.is_empty())
+        {
+            return Err(HttpError::Unsupported(
+                "embedded-resource extraction requires an explicit sampler adapter".to_owned(),
+            ));
+        }
+        if self.method_explicit {
+            request.set_method(self.method.clone());
+        }
+        if !self.use_keepalive {
+            request.remove_header("connection");
+            request.add_header("Connection", "close")?;
+        }
+        Ok(())
+    }
+
+    /// Applies the subset represented by the transport-independent client
+    /// policy. The caller must select and admit `self.capability` separately;
+    /// this method never maps a JMeter implementation to the native path.
+    pub fn apply_to_client_config(
+        &self,
+        config: &mut crate::ClientConfig,
+    ) -> Result<(), HttpError> {
+        if self.auto_redirects {
+            return Err(HttpError::Unsupported(
+                "automatic HTTP redirects require an explicit sampler adapter".to_owned(),
+            ));
+        }
+        let mut candidate = config.clone();
+        if self.proxy_explicit {
+            candidate.proxy = self.proxy.clone();
+        }
+        candidate.redirects.follow = self.follow_redirects;
+        if self.connect_timeout_explicit {
+            candidate.timeouts.connect = self
+                .connect_timeout_ms
+                .map(std::time::Duration::from_millis);
+        }
+        if self.response_timeout_explicit {
+            candidate.timeouts.read = self
+                .response_timeout_ms
+                .map(std::time::Duration::from_millis);
+        }
+        candidate.validate()?;
+        *config = candidate;
+        Ok(())
+    }
+}
+
 impl HttpRequestDefaults {
+    /// Resolves all JMeter sampler fields into an explicit execution value.
+    pub fn effective_config(&self) -> Result<EffectiveHttpRequestConfig, HttpError> {
+        EffectiveHttpRequestConfig::from_defaults(self)
+    }
+
+    /// Applies the effective transport policy selected by this descriptor.
+    pub fn apply_to_client_config(
+        &self,
+        config: &mut crate::ClientConfig,
+    ) -> Result<(), HttpError> {
+        self.effective_config()?.apply_to_client_config(config)
+    }
+    /// Decodes and retains the exact implementation property.  An unknown
+    /// spelling stays in `implementation_wire` and is rejected only when a
+    /// caller asks for an execution path, so JMX round-tripping never loses a
+    /// plugin/provider value.
+    pub fn set_implementation_wire(&mut self, value: Option<&str>) -> Result<(), HttpError> {
+        self.implementation_wire = match value {
+            Some(value) => OptionalString::present(value)?,
+            None => OptionalString::absent(),
+        };
+        self.implementation = match value {
+            Some(value) => HttpImplementation::from_wire(value).ok(),
+            None => None,
+        };
+        Ok(())
+    }
+
+    /// Resolves the implementation selected by the JMeter wire descriptor.
+    /// An absent property uses the pinned 5.6.3 HttpClient4 default; an
+    /// explicitly unknown spelling is an unavailable capability, never a
+    /// native fallback.
+    pub fn selected_implementation(&self) -> Result<HttpImplementation, HttpError> {
+        if let Some(value) = self.implementation_wire.value() {
+            return HttpImplementation::from_wire(value);
+        }
+        Ok(self
+            .implementation
+            .unwrap_or_else(HttpImplementation::jmeter_default))
+    }
+
+    /// Returns the exact versioned execution path selected by this
+    /// descriptor.  Both JMeter implementations require the optional JVM
+    /// compatibility pack.
+    pub fn capability_path(&self) -> Result<HttpCapabilityPath, HttpError> {
+        Ok(self.selected_implementation()?.capability_path())
+    }
+
+    /// Returns the effective HTTP method without erasing an explicit empty
+    /// wire property in the descriptor itself.
+    #[must_use]
+    pub fn effective_method(&self) -> &str {
+        self.method.value().unwrap_or(DEFAULT_HTTP_METHOD)
+    }
+
+    /// Returns the effective protocol used by a sampler.
+    #[must_use]
+    pub fn effective_protocol(&self) -> &str {
+        self.protocol.value().unwrap_or(DEFAULT_HTTP_PROTOCOL)
+    }
+
+    /// Returns the effective request encoding.  JMeter 5.6.3's HTTP sampler
+    /// uses UTF-8 after the 5.6.1 default-encoding fix.
+    #[must_use]
+    pub fn effective_content_encoding(&self) -> &str {
+        self.content_encoding
+            .value()
+            .unwrap_or(DEFAULT_HTTP_CONTENT_ENCODING)
+    }
+
+    /// Returns the effective embedded-resource worker pool size.
+    #[must_use]
+    pub const fn effective_concurrent_pool(&self) -> u16 {
+        match self.concurrent_pool {
+            Some(value) => value,
+            None => DEFAULT_CONCURRENT_POOL,
+        }
+    }
+
+    /// Converts an explicit JMeter timeout into an adapter phase cap.  A
+    /// missing or zero JMeter timeout means no per-phase cap; the overall
+    /// operation budget remains mandatory at the adapter boundary.
+    #[must_use]
+    pub fn effective_connect_timeout_ms(&self) -> Option<u64> {
+        self.connect_timeout_ms.filter(|value| *value != 0)
+    }
+
+    /// Converts an explicit JMeter timeout into an adapter phase cap.
+    #[must_use]
+    pub fn effective_response_timeout_ms(&self) -> Option<u64> {
+        self.response_timeout_ms.filter(|value| *value != 0)
+    }
+
     /// Validates explicit values without filling absent properties.
     pub fn validate(&self) -> Result<(), HttpError> {
+        if let Some(method) = self.method.value()
+            && !method.is_empty()
+        {
+            Method::parse(method)?;
+        }
         if let Some(protocol) = self.protocol.value()
             && !protocol.is_empty()
             && !protocol.eq_ignore_ascii_case("http")
@@ -308,15 +953,19 @@ impl HttpRequestDefaults {
             .into_iter()
             .flatten()
         {
-            if timeout == 0 {
+            if timeout > MAX_HTTP_TIMEOUT_MS {
                 return Err(HttpError::InvalidTimeout(
-                    "HTTP defaults timeout must be non-zero".to_owned(),
+                    "HTTP defaults timeout is outside the finite profile bound".to_owned(),
                 ));
             }
         }
-        if self.concurrent_pool.is_some_and(|pool| pool == 0) {
+        if self
+            .concurrent_pool
+            .is_some_and(|pool| pool == 0 || pool > MAX_CONCURRENT_POOL)
+        {
             return Err(HttpError::resource_limit("HTTP defaults concurrent pool"));
         }
+        self.proxy.validate()?;
         Ok(())
     }
 
@@ -324,9 +973,11 @@ impl HttpRequestDefaults {
     ///
     /// The caller supplies the already-merged sampler/default target in
     /// `request`; this adapter overlays each present descriptor field and
-    /// leaves absent fields untouched. It changes only the pure request URL.
+    /// leaves absent fields untouched. Request method and the explicit
+    /// keep-alive request header are also applied; encoding and embedded
+    /// resource settings are exposed through [`Self::effective_config`].
     pub fn apply_to_request(&self, request: &mut Request) -> Result<(), HttpError> {
-        self.validate()?;
+        let effective = self.effective_config()?;
         let current = request.url().clone();
         // Empty defaults are an explicit JMeter "no override" value. The
         // descriptor still retains that value, while this adapter leaves the
@@ -355,7 +1006,7 @@ impl HttpRequestDefaults {
         };
         let target = format!("{scheme}://{authority}{path}");
         request.set_url(Url::parse(target)?);
-        Ok(())
+        effective.apply_to_request(request)
     }
 
     /// Merges a more local descriptor over this one, preserving absent fields
@@ -377,8 +1028,36 @@ impl HttpRequestDefaults {
         if local.path.is_present() {
             candidate.path = local.path.clone();
         }
+        if local.method.is_present() {
+            candidate.method = local.method.clone();
+        }
+        if local.follow_redirects.is_present() {
+            candidate.follow_redirects = local.follow_redirects;
+        }
+        if local.auto_redirects.is_present() {
+            candidate.auto_redirects = local.auto_redirects;
+        }
+        if local.use_keepalive.is_present() {
+            candidate.use_keepalive = local.use_keepalive;
+        }
+        if local.concurrent_downloads.is_present() {
+            candidate.concurrent_downloads = local.concurrent_downloads;
+        }
+        if local.embedded_url_regex.is_present() {
+            candidate.embedded_url_regex = local.embedded_url_regex.clone();
+        }
+        if local.embedded_url_exclude_regex.is_present() {
+            candidate.embedded_url_exclude_regex = local.embedded_url_exclude_regex.clone();
+        }
+        candidate.proxy.merge(&local.proxy)?;
         if local.implementation.is_some() {
             candidate.implementation = local.implementation;
+            if !local.implementation_wire.is_present() {
+                candidate.implementation_wire = OptionalString::absent();
+            }
+        }
+        if local.implementation_wire.is_present() {
+            candidate.implementation_wire = local.implementation_wire.clone();
         }
         if local.connect_timeout_ms.is_some() {
             candidate.connect_timeout_ms = local.connect_timeout_ms;
@@ -413,7 +1092,7 @@ impl StaticDnsHost {
         let name = name.into();
         let address = address.into();
         validate_dns_text(&name, "DNS static host name", MAX_DNS_NAME_BYTES)?;
-        validate_dns_text(&address, "DNS static host address", MAX_DNS_ADDRESS_BYTES)?;
+        validate_static_addresses(&address)?;
         Ok(Self { name, address })
     }
 }
@@ -444,11 +1123,7 @@ impl DnsConfiguration {
         }
         for host in &self.static_hosts {
             validate_dns_text(&host.name, "DNS static host name", MAX_DNS_NAME_BYTES)?;
-            validate_dns_text(
-                &host.address,
-                "DNS static host address",
-                MAX_DNS_ADDRESS_BYTES,
-            )?;
+            validate_static_addresses(&host.address)?;
         }
         Ok(())
     }
@@ -496,7 +1171,8 @@ impl DnsConfiguration {
         candidate.set_custom_resolver(self.custom_resolver.value().unwrap_or(false));
         candidate.set_resolver_servers(self.servers.iter().cloned())?;
         for host in &self.static_hosts {
-            candidate.insert(&host.name, [host.address.clone()], std::time::Duration::MAX)?;
+            let addresses = host.address.split(',').map(str::trim).map(str::to_owned);
+            candidate.insert(&host.name, addresses, std::time::Duration::MAX)?;
         }
         *cache = candidate;
         Ok(())
@@ -527,6 +1203,8 @@ pub struct CookieConfiguration {
     pub policy: OptionalString,
     /// Handler implementation class/name as written on the wire.
     pub implementation: OptionalString,
+    /// Initial GUI-authored cookies copied into each virtual-user jar.
+    pub initial_cookies: Vec<crate::Cookie>,
     /// Exact unknown wire fields.
     pub opaque: WireConfig,
 }
@@ -541,12 +1219,35 @@ impl Default for CookieConfiguration {
             delete_null_cookies: OptionalBool::absent(),
             policy: OptionalString::default(),
             implementation: OptionalString::default(),
+            initial_cookies: Vec::new(),
             opaque: WireConfig::default(),
         }
     }
 }
 
 impl CookieConfiguration {
+    /// Validates bounded initial-cookie data and handler selections.
+    pub fn validate(&self) -> Result<(), HttpError> {
+        if self.initial_cookies.len() > MAX_INITIAL_COOKIES {
+            return Err(HttpError::resource_limit("initial cookie count"));
+        }
+        Ok(())
+    }
+
+    /// Returns the JMeter default policy for an absent property.
+    #[must_use]
+    pub fn effective_policy(&self) -> &str {
+        self.policy.value().unwrap_or(DEFAULT_COOKIE_POLICY)
+    }
+
+    /// Returns the JMeter default handler identity for an absent property.
+    #[must_use]
+    pub fn effective_implementation(&self) -> &str {
+        self.implementation
+            .value()
+            .unwrap_or(DEFAULT_COOKIE_IMPLEMENTATION)
+    }
+
     /// Merges a more local Cookie Manager descriptor over this one.
     pub fn merge(&mut self, local: &Self) -> Result<(), HttpError> {
         let mut candidate = self.clone();
@@ -571,6 +1272,11 @@ impl CookieConfiguration {
         if local.implementation.is_present() {
             candidate.implementation = local.implementation.clone();
         }
+        if !local.initial_cookies.is_empty() {
+            candidate
+                .initial_cookies
+                .extend(local.initial_cookies.iter().cloned());
+        }
         for field in local.opaque.iter() {
             candidate.opaque.push(field.clone())?;
         }
@@ -579,38 +1285,38 @@ impl CookieConfiguration {
         Ok(())
     }
 
-    /// Validates handler selections that this pure state crate cannot execute.
-    ///
-    /// A non-empty custom policy or implementation is retained in the
-    /// descriptor but must be handled by an explicit adapter; silently using
-    /// the native policy would lose the requested wire semantics.
-    pub fn validate(&self) -> Result<(), HttpError> {
-        if self.policy.value().is_some_and(|value| !value.is_empty()) {
-            return Err(HttpError::Unsupported(
-                "custom CookieManager policy requires an adapter".to_owned(),
-            ));
-        }
-        if self
-            .implementation
-            .value()
-            .is_some_and(|value| !value.is_empty())
-        {
-            return Err(HttpError::Unsupported(
-                "custom CookieManager implementation requires an adapter".to_owned(),
-            ));
-        }
-        Ok(())
-    }
-
+    /// Validates and applies handler selections that this pure state crate
+    /// cannot execute. Custom values remain representable for JMX
+    /// round-tripping, but an explicit adapter is required at execution.
     /// Applies cookie validation, deletion, and variable-publication options
     /// at the pure state boundary. Variable creation itself remains an
     /// execution-layer concern and is represented by `save_cookies` on the
     /// jar for that adapter.
     pub fn apply(&self, jar: &mut CookieJar) -> Result<(), HttpError> {
         self.validate()?;
-        jar.set_check_cookies(self.check_cookies.value().unwrap_or(true));
-        jar.set_delete_null_cookies(self.delete_null_cookies.value().unwrap_or(true));
-        jar.set_save_cookies(self.save_cookies.value().unwrap_or(false));
+        if self.policy.is_present() && self.effective_policy() != DEFAULT_COOKIE_POLICY {
+            return Err(HttpError::Unsupported(
+                "custom CookieManager policy requires an adapter".to_owned(),
+            ));
+        }
+        if self.implementation.is_present()
+            && self.effective_implementation() != DEFAULT_COOKIE_IMPLEMENTATION
+        {
+            return Err(HttpError::Unsupported(
+                "custom CookieManager implementation requires an adapter".to_owned(),
+            ));
+        }
+        let mut candidate = jar.clone();
+        candidate.set_check_cookies(self.check_cookies.value().unwrap_or(true));
+        candidate.set_delete_null_cookies(self.delete_null_cookies.value().unwrap_or(true));
+        candidate.set_save_cookies(self.save_cookies.value().unwrap_or(false));
+        for cookie in &self.initial_cookies {
+            candidate.add(
+                cookie.clone(),
+                crate::ClockReading::new(0, std::time::Duration::ZERO),
+            )?;
+        }
+        *jar = candidate;
         Ok(())
     }
 
@@ -627,7 +1333,7 @@ impl CookieConfiguration {
 /// Cache Manager configuration options and reset policy.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CacheConfiguration {
-    /// Maximum cache entries (`CacheManager.maxSize`).
+    /// Maximum cache entries (`maxSize`).
     pub max_size: Option<usize>,
     /// Clear cache at each iteration.
     pub clear_each_iteration: OptionalBool,
@@ -652,6 +1358,26 @@ impl Default for CacheConfiguration {
 }
 
 impl CacheConfiguration {
+    /// Returns JMeter's 5.6.3 default maximum cache-entry count.
+    #[must_use]
+    pub const fn effective_max_size(&self) -> usize {
+        match self.max_size {
+            Some(value) => value,
+            None => DEFAULT_CACHE_MAX_SIZE,
+        }
+    }
+
+    /// Returns whether cache freshness metadata is honored.  JMeter's
+    /// CacheManager default is false; this differs from the lower-level
+    /// `CacheStore` default and is therefore applied explicitly here.
+    #[must_use]
+    pub const fn effective_use_expires(&self) -> bool {
+        match self.use_expires.value() {
+            Some(value) => value,
+            None => false,
+        }
+    }
+
     /// Merges a more local Cache Manager descriptor over this one.
     pub fn merge(&mut self, local: &Self) -> Result<(), HttpError> {
         let mut candidate = self.clone();
@@ -677,7 +1403,10 @@ impl CacheConfiguration {
 
     /// Validates options without mutating a cache state.
     pub fn validate(&self) -> Result<(), HttpError> {
-        if self.max_size.is_some_and(|size| size == 0) {
+        if self
+            .max_size
+            .is_some_and(|size| size == 0 || size > MAX_CACHE_ENTRIES)
+        {
             return Err(HttpError::resource_limit("CacheManager.maxSize"));
         }
         Ok(())
@@ -690,9 +1419,12 @@ impl CacheConfiguration {
         if let Some(max_size) = self.max_size {
             candidate.set_maximum(max_size)?;
         }
-        // JMeter's CacheManager default is true, but the descriptor retains an
-        // absent field until this explicit adapter boundary.
-        candidate.set_use_expires(self.use_expires.value().unwrap_or(true));
+        // JMeter's CacheManager default is false, but the descriptor retains
+        // an absent field until this explicit adapter boundary.
+        if self.max_size.is_none() {
+            candidate.set_maximum(DEFAULT_CACHE_MAX_SIZE)?;
+        }
+        candidate.set_use_expires(self.effective_use_expires());
         *cache = candidate;
         Ok(())
     }
@@ -712,6 +1444,8 @@ impl CacheConfiguration {
 pub struct AuthConfiguration {
     /// Clear authentication state at each iteration.
     pub clear_each_iteration: OptionalBool,
+    /// Clear authentication state at the owning thread-group boundary.
+    pub controlled_by_thread_group: OptionalBool,
     /// Ordered URL-prefix entries.
     pub entries: Vec<AuthEntry>,
     /// Exact unknown wire fields.
@@ -754,6 +1488,9 @@ impl AuthConfiguration {
         if local.clear_each_iteration.is_present() {
             candidate.clear_each_iteration = local.clear_each_iteration;
         }
+        if local.controlled_by_thread_group.is_present() {
+            candidate.controlled_by_thread_group = local.controlled_by_thread_group;
+        }
         candidate.entries.extend(local.entries.iter().cloned());
         for field in local.opaque.iter() {
             candidate.opaque.push(field.clone())?;
@@ -777,6 +1514,15 @@ impl AuthConfiguration {
     /// Clears authentication state when requested by lifecycle policy.
     pub fn reset(&self, store: &mut crate::AuthStore) {
         if self.clear_each_iteration.value().unwrap_or(false) {
+            store.clear();
+        }
+    }
+
+    /// Applies both iteration and thread-group reset policy explicitly.
+    pub fn reset_for_boundary(&self, store: &mut crate::AuthStore, thread_group_boundary: bool) {
+        if self.clear_each_iteration.value().unwrap_or(false)
+            || (thread_group_boundary && self.controlled_by_thread_group.value().unwrap_or(false))
+        {
             store.clear();
         }
     }
@@ -806,11 +1552,26 @@ pub struct Scoped<T> {
     pub value: T,
 }
 
-/// Deterministically merges HTTP Request Defaults from outer to inner scope.
+/// Merges HTTP Request Defaults in the exact order supplied by the caller.
+///
+/// The input must be the actual JMX ancestry path, outermost element first
+/// and sampler-local element last. Scope labels and sibling order are
+/// retained for diagnostics but are deliberately not used to invent an
+/// ordering: a plan may contain multiple branches with the same scope.
 pub fn merge_request_defaults(
-    mut descriptors: Vec<Scoped<HttpRequestDefaults>>,
+    descriptors: Vec<Scoped<HttpRequestDefaults>>,
 ) -> Result<HttpRequestDefaults, HttpError> {
-    descriptors.sort_by_key(|descriptor| (descriptor.scope, descriptor.order));
+    merge_request_defaults_in_ancestry_order(descriptors)
+}
+
+/// Merges descriptors from an already materialized JMX ancestry path.
+///
+/// This named entry point is the preferred API for callers walking a tree;
+/// unlike the legacy [`merge_request_defaults`] name it makes the ordering
+/// contract visible at the call site.
+pub fn merge_request_defaults_in_ancestry_order(
+    descriptors: impl IntoIterator<Item = Scoped<HttpRequestDefaults>>,
+) -> Result<HttpRequestDefaults, HttpError> {
     let mut effective = HttpRequestDefaults::default();
     for descriptor in descriptors {
         effective.merge(&descriptor.value)?;
@@ -854,6 +1615,29 @@ fn validate_dns_text(value: &str, what: &str, maximum_bytes: usize) -> Result<()
         })
     {
         return Err(HttpError::InvalidUrl(what.to_owned()));
+    }
+    Ok(())
+}
+
+fn validate_static_addresses(value: &str) -> Result<(), HttpError> {
+    if value.len() > MAX_CONFIG_BYTES || value.is_empty() {
+        return Err(HttpError::resource_limit("DNS static host address"));
+    }
+    let mut count = 0usize;
+    for address in value.split(',') {
+        let address = address.trim();
+        if address.is_empty() {
+            return Err(HttpError::InvalidUrl(
+                "DNS static host address contains an empty entry".to_owned(),
+            ));
+        }
+        validate_dns_text(address, "DNS static host address", MAX_DNS_ADDRESS_BYTES)?;
+        count = count
+            .checked_add(1)
+            .ok_or_else(|| HttpError::resource_limit("DNS static host address count"))?;
+        if count > 64 {
+            return Err(HttpError::resource_limit("DNS static host address count"));
+        }
     }
     Ok(())
 }
@@ -905,6 +1689,209 @@ mod tests {
     }
 
     #[test]
+    fn request_defaults_use_caller_ancestry_order_not_scope_sorting() {
+        let outer = HttpRequestDefaults {
+            method: string("POST"),
+            ..HttpRequestDefaults::default()
+        };
+        let inner = HttpRequestDefaults {
+            method: string("PUT"),
+            ..HttpRequestDefaults::default()
+        };
+        let effective = merge_request_defaults_in_ancestry_order([
+            Scoped {
+                // Deliberately labels the local value as an outer scope. The
+                // tree walk's sequence, not this invented category, is the
+                // source of truth.
+                scope: ConfigScope::Sampler,
+                order: 99,
+                value: outer,
+            },
+            Scoped {
+                scope: ConfigScope::TestPlan,
+                order: 0,
+                value: inner,
+            },
+        ])
+        .expect("ancestry merge");
+        assert_eq!(effective.method.value(), Some("PUT"));
+        let resolved = EffectiveHttpRequestConfig::from_ancestry([Scoped {
+            scope: ConfigScope::TestPlan,
+            order: 0,
+            value: HttpRequestDefaults {
+                method: string("PATCH"),
+                ..HttpRequestDefaults::default()
+            },
+        }])
+        .expect("resolved ancestry");
+        assert_eq!(resolved.method, Method::Patch);
+    }
+
+    #[test]
+    fn effective_request_defaults_apply_method_keepalive_and_client_policy() {
+        let defaults = HttpRequestDefaults {
+            method: string("POST"),
+            follow_redirects: OptionalBool::present(false),
+            use_keepalive: OptionalBool::present(false),
+            connect_timeout_ms: Some(125),
+            response_timeout_ms: Some(250),
+            proxy: ProxyConfiguration {
+                scheme: string("http"),
+                host: string("proxy.example"),
+                port: Some(8080),
+                ..ProxyConfiguration::default()
+            },
+            ..HttpRequestDefaults::default()
+        };
+        let effective = defaults.effective_config().expect("effective config");
+        assert_eq!(effective.method, Method::Post);
+        assert!(!effective.follow_redirects);
+        assert!(!effective.use_keepalive);
+        assert_eq!(effective.connect_timeout_ms, Some(125));
+        assert_eq!(effective.response_timeout_ms, Some(250));
+
+        let mut request = Request::get("http://origin.example/path").expect("request");
+        defaults
+            .apply_to_request(&mut request)
+            .expect("request defaults");
+        assert_eq!(request.method(), &Method::Post);
+        assert_eq!(request.headers().get("connection"), Some("close"));
+
+        let mut client = crate::ClientConfig::default();
+        effective
+            .apply_to_client_config(&mut client)
+            .expect("client defaults");
+        assert!(!client.redirects.follow);
+        assert_eq!(
+            client.timeouts.connect,
+            Some(std::time::Duration::from_millis(125))
+        );
+        assert_eq!(
+            client.timeouts.read,
+            Some(std::time::Duration::from_millis(250))
+        );
+        assert!(matches!(
+            client
+                .proxy
+                .route(&Url::parse("http://origin.example/").expect("url")),
+            crate::Route::Proxy(_)
+        ));
+
+        let absent_method = HttpRequestDefaults::default();
+        let mut existing =
+            Request::post("http://origin.example/path", b"body".to_vec()).expect("request");
+        absent_method
+            .apply_to_request(&mut existing)
+            .expect("absent method remains untouched");
+        assert_eq!(existing.method(), &Method::Post);
+
+        let inherited_proxy =
+            crate::Proxy::new(crate::ProxyScheme::Http, "proxy.example", 8080).expect("proxy");
+        let mut inherited = crate::ClientConfig::default();
+        inherited.proxy.http = Some(inherited_proxy);
+        absent_method
+            .apply_to_client_config(&mut inherited)
+            .expect("absent proxy remains untouched");
+        assert!(matches!(
+            inherited
+                .proxy
+                .route(&Url::parse("http://origin.example/").expect("url")),
+            crate::Route::Proxy(_)
+        ));
+    }
+
+    #[test]
+    fn effective_request_defaults_keep_explicit_zero_timeout_as_unlimited() {
+        let defaults = HttpRequestDefaults {
+            connect_timeout_ms: Some(0),
+            response_timeout_ms: Some(0),
+            ..HttpRequestDefaults::default()
+        };
+        let effective = defaults.effective_config().expect("effective config");
+        assert_eq!(effective.connect_timeout_ms, None);
+        assert!(effective.connect_timeout_explicit);
+        assert!(effective.response_timeout_explicit);
+
+        let mut client = crate::ClientConfig::default();
+        client.timeouts.connect = Some(std::time::Duration::from_millis(1));
+        client.timeouts.read = Some(std::time::Duration::from_millis(1));
+        effective
+            .apply_to_client_config(&mut client)
+            .expect("unlimited timeout");
+        assert_eq!(client.timeouts.connect, None);
+        assert_eq!(client.timeouts.read, None);
+    }
+
+    #[test]
+    fn implementation_identity_defaults_and_unknown_values_fail_closed() {
+        let defaults = HttpRequestDefaults::default();
+        assert_eq!(
+            defaults.selected_implementation().expect("JMeter default"),
+            HttpImplementation::HttpClient4
+        );
+        assert_eq!(
+            defaults.capability_path().expect("capability").as_str(),
+            "http.jmeter-httpclient4/5.6.3"
+        );
+
+        let mut unknown = HttpRequestDefaults::default();
+        unknown
+            .set_implementation_wire(Some("PluginHttp"))
+            .expect("retain implementation");
+        assert_eq!(unknown.implementation_wire.value(), Some("PluginHttp"));
+        assert!(matches!(
+            unknown.effective_config(),
+            Err(HttpError::Unsupported(_))
+        ));
+    }
+
+    #[test]
+    fn proxy_credentials_are_unavailable_without_a_secret_adapter() {
+        let proxy = ProxyConfiguration {
+            host: string("proxy.example"),
+            port: Some(8080),
+            username: string("user"),
+            password_present: OptionalBool::present(true),
+            ..ProxyConfiguration::default()
+        };
+        assert!(matches!(proxy.to_policy(), Err(HttpError::Unsupported(_))));
+    }
+
+    #[test]
+    fn automatic_redirect_mode_is_not_silently_mapped_to_semantic_redirects() {
+        let defaults = HttpRequestDefaults {
+            auto_redirects: OptionalBool::present(true),
+            ..HttpRequestDefaults::default()
+        };
+        let effective = defaults.effective_config().expect("effective config");
+        assert!(matches!(
+            effective.apply_to_client_config(&mut crate::ClientConfig::default()),
+            Err(HttpError::Unsupported(_))
+        ));
+    }
+
+    #[test]
+    fn unsupported_body_encoding_and_embedded_options_fail_explicitly() {
+        let encoding = HttpRequestDefaults {
+            content_encoding: string("ISO-8859-1"),
+            ..HttpRequestDefaults::default()
+        };
+        assert!(matches!(
+            encoding.apply_to_request(&mut Request::get("http://example.test/").expect("request")),
+            Err(HttpError::Unsupported(_))
+        ));
+
+        let embedded = HttpRequestDefaults {
+            embedded_url_regex: string("img\\.png"),
+            ..HttpRequestDefaults::default()
+        };
+        assert!(matches!(
+            embedded.apply_to_request(&mut Request::get("http://example.test/").expect("request")),
+            Err(HttpError::Unsupported(_))
+        ));
+    }
+
+    #[test]
     fn header_manager_replaces_case_insensitively_and_keeps_order() {
         let mut outer = crate::HeaderManager::new(4).expect("manager");
         outer.add("X-Test", "one").expect("header");
@@ -927,7 +1914,9 @@ mod tests {
         let config = DnsConfiguration {
             custom_resolver: OptionalBool::present(true),
             servers: vec!["127.0.0.1".to_owned()],
-            static_hosts: vec![StaticDnsHost::new("fixture.test", "127.0.0.1").expect("host")],
+            static_hosts: vec![
+                StaticDnsHost::new("fixture.test", "127.0.0.1, 127.0.0.2").expect("host"),
+            ],
             ..DnsConfiguration::default()
         };
         let mut cache = DnsCache::new(2).expect("cache");
@@ -939,7 +1928,7 @@ mod tests {
                 "FIXTURE.TEST",
                 crate::ClockReading::new(0, std::time::Duration::ZERO)
             ),
-            Some(vec!["127.0.0.1".to_owned()])
+            Some(vec!["127.0.0.1".to_owned(), "127.0.0.2".to_owned()])
         );
         DnsConfiguration {
             clear_each_iteration: OptionalBool::present(true),
@@ -957,6 +1946,15 @@ mod tests {
 
     #[test]
     fn cookie_and_cache_reset_follow_explicit_lifecycle() {
+        let default_cookie = CookieConfiguration::default();
+        assert_eq!(default_cookie.effective_policy(), DEFAULT_COOKIE_POLICY);
+        assert_eq!(
+            default_cookie.effective_implementation(),
+            DEFAULT_COOKIE_IMPLEMENTATION
+        );
+        assert_eq!(CacheConfiguration::default().effective_max_size(), 5_000);
+        assert!(!CacheConfiguration::default().effective_use_expires());
+
         let cookie_config = CookieConfiguration {
             clear_each_iteration: OptionalBool::present(true),
             check_cookies: OptionalBool::present(false),
@@ -1197,7 +2195,7 @@ mod tests {
         ));
         assert!(matches!(
             (HttpRequestDefaults {
-                connect_timeout_ms: Some(0),
+                connect_timeout_ms: Some(MAX_HTTP_TIMEOUT_MS + 1),
                 ..HttpRequestDefaults::default()
             })
             .validate(),
@@ -1219,17 +2217,78 @@ mod tests {
             .validate(),
             Err(HttpError::ResourceLimit(_))
         ));
+        let custom_cookie = CookieConfiguration {
+            implementation: string("custom.CookieHandler"),
+            ..CookieConfiguration::default()
+        };
+        assert!(custom_cookie.validate().is_ok());
+        let mut jar = CookieJar::new(2).expect("jar");
         assert!(matches!(
-            (CookieConfiguration {
-                implementation: string("custom.CookieHandler"),
-                ..CookieConfiguration::default()
-            })
-            .validate(),
+            custom_cookie.apply(&mut jar),
             Err(HttpError::Unsupported(_))
         ));
         assert!(matches!(
             WireConfig::new(MAX_CONFIG_FIELDS + 1, MAX_CONFIG_BYTES),
             Err(HttpError::ResourceLimit(_))
         ));
+    }
+
+    #[test]
+    fn capability_paths_are_exact_and_exhaustive() {
+        let cases = [
+            (HttpCapabilityPath::NativeV1, "http.native/1", false),
+            (HttpCapabilityPath::NativeV2, "http.native/2", false),
+            (
+                HttpCapabilityPath::JmeterJavaV563,
+                "http.jmeter-java/5.6.3",
+                true,
+            ),
+            (
+                HttpCapabilityPath::JmeterHttpClient4V563,
+                "http.jmeter-httpclient4/5.6.3",
+                true,
+            ),
+        ];
+
+        for (path, wire, requires_jvm) in cases {
+            assert_eq!(path.as_str(), wire);
+            assert_eq!(HttpCapabilityPath::parse(wire), Ok(path));
+            assert_eq!(wire.parse::<HttpCapabilityPath>(), Ok(path));
+            assert_eq!(path.requires_jvm(), requires_jvm);
+            if requires_jvm {
+                assert!(matches!(
+                    path.require_native(),
+                    Err(HttpError::Unsupported(_))
+                ));
+            } else {
+                assert!(path.require_native().is_ok());
+            }
+        }
+
+        assert_ne!(HttpCapabilityPath::NativeV1, HttpCapabilityPath::NativeV2);
+        assert_eq!(
+            HttpImplementation::Java.capability_path(),
+            HttpCapabilityPath::JmeterJavaV563
+        );
+        assert_eq!(
+            HttpImplementation::HttpClient4.capability_path(),
+            HttpCapabilityPath::JmeterHttpClient4V563
+        );
+
+        for unknown in [
+            "http.native/3",
+            "http.native/01",
+            "http.native/2/",
+            "HTTP.NATIVE/2",
+            "http.native/2 ",
+            "http.native",
+            "NativeV2",
+            "HttpClient4",
+        ] {
+            assert!(
+                HttpCapabilityPath::parse(unknown).is_err(),
+                "unexpected HTTP capability alias: {unknown:?}"
+            );
+        }
     }
 }

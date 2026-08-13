@@ -137,6 +137,23 @@ pub enum ComponentCategory {
     Replaceable,
 }
 
+/// Execution support declared for one exact component binding.
+///
+/// A source class can be known without being executable by the standalone
+/// runtime.  Keeping that state separate from the component category prevents
+/// a decoder skeleton (or a preserved JMX alias) from becoming an accidental
+/// native implementation path.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ComponentAvailability {
+    /// A bounded native implementation is available in the active runtime.
+    Native,
+    /// Exact behavior requires the optional JVM/plugin/service boundary.
+    External,
+    /// The class is recognized and retained, but no executable adapter is
+    /// currently declared.
+    Unavailable,
+}
+
 /// A registry entry preserving the exact upstream class name.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ComponentBinding {
@@ -148,6 +165,8 @@ pub struct ComponentBinding {
     pub capability_id: String,
     /// Whether the class requires an external adapter.
     pub external: bool,
+    /// Closed support state used by scope and plan classification.
+    pub availability: ComponentAvailability,
 }
 
 /// The native or external timer family associated with an exact JMeter
@@ -189,6 +208,1125 @@ pub struct TimerAlias {
     /// Whether this alias requires an external runtime boundary.
     pub external: bool,
 }
+
+/// One exact built-in class and its category/support metadata.
+///
+/// This table is the single source of truth shared by `ComponentRegistry` and
+/// the scope/plan compilers.  Aliases are intentionally case-sensitive and
+/// are never inferred from class-name substrings.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct BuiltinComponentSpec {
+    /// Exact upstream alias or class name.
+    pub alias: &'static str,
+    /// Runtime component category.
+    pub category: ComponentCategory,
+    /// Stable capability identity.
+    pub capability_id: &'static str,
+    /// Declared execution support.
+    pub availability: ComponentAvailability,
+}
+
+/// Built-in non-timer/non-assertion vocabulary for the pinned profile.
+///
+/// The entries include the aliases needed by the runtime model and the
+/// fully-qualified spellings accepted by callers that construct a semantic
+/// tree without the JMX SaveService canonicalization pass.  A fully-qualified
+/// spelling is a distinct exact alias; no case folding is performed.
+pub(crate) const BUILTIN_COMPONENT_SPECS: &[BuiltinComponentSpec] = &[
+    BuiltinComponentSpec {
+        alias: "TestPlan",
+        category: ComponentCategory::Lifecycle,
+        capability_id: "runtime.TestPlan",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "Arguments",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.Arguments",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "ConfigTestElement",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.ConfigTestElement",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "UserDefinedVariables",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.UserDefinedVariables",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "ThreadGroup",
+        category: ComponentCategory::Lifecycle,
+        capability_id: "runtime.ThreadGroup",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "SetupThreadGroup",
+        category: ComponentCategory::Lifecycle,
+        capability_id: "runtime.SetupThreadGroup",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "PostThreadGroup",
+        category: ComponentCategory::Lifecycle,
+        capability_id: "runtime.PostThreadGroup",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "TearDownThreadGroup",
+        category: ComponentCategory::Lifecycle,
+        capability_id: "runtime.TearDownThreadGroup",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "OpenModelThreadGroup",
+        category: ComponentCategory::Lifecycle,
+        capability_id: "runtime.lifecycle.open-model-thread-group",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "OpenModelThreadGroupController",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.lifecycle.open-model-thread-group",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.threads.openmodel.OpenModelThreadGroupController",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.lifecycle.open-model-thread-group",
+        availability: ComponentAvailability::Unavailable,
+    },
+    // Reflection groups are a recognized JMeter lifecycle family, but the
+    // standalone runtime has no lifecycle adapter.  They are represented as
+    // unavailable controller entries here so PlanCompiler cannot treat them
+    // as preservation-only lifecycle nodes and silently drop an enabled one.
+    BuiltinComponentSpec {
+        alias: "ReflectionThreadGroup",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.lifecycle.reflection-thread-group",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.threads.ReflectionThreadGroup",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.lifecycle.reflection-thread-group",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "TestFragmentController",
+        category: ComponentCategory::Lifecycle,
+        capability_id: "runtime.TestFragmentController",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.control.TestFragmentController",
+        category: ComponentCategory::Lifecycle,
+        capability_id: "runtime.TestFragmentController",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "WorkBench",
+        category: ComponentCategory::Lifecycle,
+        capability_id: "runtime.WorkBench",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.testelement.WorkBench",
+        category: ComponentCategory::Lifecycle,
+        capability_id: "runtime.WorkBench",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "GenericController",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.GenericController",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.control.GenericController",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.GenericController",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "SimpleController",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.SimpleController",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "LoopController",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.LoopController",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "IfController",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.IfController",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "WhileController",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.WhileController",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "ForEachController",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.ForEachController",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "ForeachController",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.ForeachController",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "SwitchController",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.SwitchController",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "InterleaveControl",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.InterleaveControl",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "RandomController",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.RandomController",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "RandomOrderController",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.RandomOrderController",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "OnceOnlyController",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.OnceOnlyController",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "ThroughputController",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.ThroughputController",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "RunTime",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.RunTime",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "RuntimeController",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.RuntimeController",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "TransactionController",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.TransactionController",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "CriticalSectionController",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.CriticalSectionController",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "ModuleController",
+        category: ComponentCategory::Replaceable,
+        capability_id: "runtime.controller.ModuleController",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "IncludeController",
+        category: ComponentCategory::Replaceable,
+        capability_id: "runtime.controller.IncludeController",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "RecordingController",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.controller.recording",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.http.control.RecordingController",
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.controller.recording",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "DebugSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.DebugSampler",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "HTTPHC4Impl",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.HTTPHC4Impl",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "HTTPSamplerProxy",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.HTTPSamplerProxy",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.http.sampler.HTTPSamplerProxy",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.HTTPSamplerProxy",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "ResultCollector",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.ResultCollector",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.reporters.ResultCollector",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.ResultCollector",
+        availability: ComponentAvailability::Native,
+    },
+    BuiltinComponentSpec {
+        alias: "UserParameters",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.UserParameters",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.modifiers.UserParameters",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.UserParameters",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "RegExUserParameters",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.RegExUserParameters",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.http.modifier.RegExUserParameters",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.RegExUserParameters",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "SampleTimeout",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.SampleTimeout",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.modifiers.SampleTimeout",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.SampleTimeout",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "URLRewritingModifier",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.URLRewritingModifier",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.http.modifier.URLRewritingModifier",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.URLRewritingModifier",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "UserParameterModifier",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.UserParameterModifier",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.http.modifier.UserParameterModifier",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.UserParameterModifier",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "ParamMask",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.external.ParamMask",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.http.modifier.ParamMask",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.external.ParamMask",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "ParamModifier",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.external.ParamModifier",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.http.modifier.ParamModifier",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.external.ParamModifier",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "AnchorModifier",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.external.AnchorModifier",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.http.modifier.AnchorModifier",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.external.AnchorModifier",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "RegexExtractor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.RegexExtractor",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.extractor.RegexExtractor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.RegexExtractor",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "BoundaryExtractor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.BoundaryExtractor",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.extractor.BoundaryExtractor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.BoundaryExtractor",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "DebugPostProcessor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.DebugPostProcessor",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.extractor.DebugPostProcessor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.DebugPostProcessor",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "ResultAction",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.ResultAction",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.reporters.ResultAction",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.ResultAction",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "JSONPostProcessor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.external.JSONPostProcessor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.extractor.json.jsonpath.JSONPostProcessor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.external.JSONPostProcessor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "JMESPathExtractor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.external.JMESPathExtractor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.extractor.json.jmespath.JMESPathExtractor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.external.JMESPathExtractor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "HtmlExtractor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.external.HtmlExtractor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.extractor.HtmlExtractor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.external.HtmlExtractor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "XPathExtractor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.external.XPathExtractor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.extractor.XPathExtractor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.external.XPathExtractor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "XPath2Extractor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.external.XPath2Extractor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.extractor.XPath2Extractor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.external.XPath2Extractor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "JSR223PostProcessor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.external.JSR223PostProcessor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.extractor.JSR223PostProcessor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.external.JSR223PostProcessor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "BeanShellPostProcessor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.external.BeanShellPostProcessor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.extractor.BeanShellPostProcessor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.external.BeanShellPostProcessor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "BSFPostProcessor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.external.BSFPostProcessor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.extractor.BSFPostProcessor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.external.BSFPostProcessor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "JDBCPostProcessor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.external.JDBCPostProcessor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.jdbc.processor.JDBCPostProcessor",
+        category: ComponentCategory::Postprocessor,
+        capability_id: "runtime.external.JDBCPostProcessor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "JSR223PreProcessor",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.external.JSR223PreProcessor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.modifiers.JSR223PreProcessor",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.external.JSR223PreProcessor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "BeanShellPreProcessor",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.external.BeanShellPreProcessor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.modifiers.BeanShellPreProcessor",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.external.BeanShellPreProcessor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "BSFPreProcessor",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.external.BSFPreProcessor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.modifiers.BSFPreProcessor",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.external.BSFPreProcessor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "JDBCPreProcessor",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.external.JDBCPreProcessor",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.jdbc.processor.JDBCPreProcessor",
+        category: ComponentCategory::Preprocessor,
+        capability_id: "runtime.external.JDBCPreProcessor",
+        availability: ComponentAvailability::External,
+    },
+    // Configuration elements.  These aliases are deliberately registered
+    // even when the standalone executable has no corresponding decoder: a
+    // recognized element must produce a stable unavailable/external result,
+    // not be mistaken for an unknown plugin or silently ignored.
+    BuiltinComponentSpec {
+        alias: "CSVDataSet",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.CSVDataSet",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.config.CSVDataSet",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.CSVDataSet",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "AuthManager",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.AuthManager",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.http.control.AuthManager",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.AuthManager",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "CacheManager",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.CacheManager",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.http.control.CacheManager",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.CacheManager",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "CookieManager",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.CookieManager",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.http.control.CookieManager",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.CookieManager",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "DNSCacheManager",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.DNSCacheManager",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.http.control.DNSCacheManager",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.DNSCacheManager",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "HeaderManager",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.HeaderManager",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.http.control.HeaderManager",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.HeaderManager",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "JDBCDataSource",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.external.JDBCDataSource",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.jdbc.config.DataSourceElement",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.external.JDBCDataSource",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "JavaConfig",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.external.JavaConfig",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.java.config.JavaConfig",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.external.JavaConfig",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "KeystoreConfig",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.external.KeystoreConfig",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.config.KeystoreConfig",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.external.KeystoreConfig",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "LoginConfig",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.LoginConfig",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.config.LoginConfig",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.LoginConfig",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "LDAPArguments",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.external.LDAPArguments",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "RandomVariableConfig",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.RandomVariableConfig",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.config.RandomVariableConfig",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.RandomVariableConfig",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "CounterConfig",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.CounterConfig",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.modifiers.CounterConfig",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.CounterConfig",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "MongoSourceElement",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.external.MongoSourceElement",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.mongodb.config.MongoSourceElement",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.external.MongoSourceElement",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "BoltConnectionElement",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.external.BoltConnectionElement",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.bolt.config.BoltConnectionElement",
+        category: ComponentCategory::Configuration,
+        capability_id: "runtime.external.BoltConnectionElement",
+        availability: ComponentAvailability::External,
+    },
+    // External and deprecated samplers.  The class identity is retained so
+    // admission can name the exact required service/JVM boundary.
+    BuiltinComponentSpec {
+        alias: "AccessLogSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.AccessLogSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.http.sampler.AccessLogSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.AccessLogSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "AjpSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.AjpSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "BeanShellSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.BeanShellSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "BSFSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.BSFSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "FTPSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.FTPSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.ftp.sampler.FTPSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.FTPSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "JavaSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.JavaSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "JDBCSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.JDBCSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.jdbc.sampler.JDBCSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.JDBCSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "JMSSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.JMSSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "JSR223Sampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.JSR223Sampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "JUnitSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.JUnitSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "LDAPSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.LDAPSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "LDAPExtSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.LDAPExtSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "MailReaderSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.MailReaderSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "MongoScriptSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.MongoScriptSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "BoltSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.BoltSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "PublisherSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.PublisherSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "SubscriberSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.SubscriberSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "SmtpSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.SmtpSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "SoapSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.SoapSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "SystemSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.SystemSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "TCPSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.TCPSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "WebServiceSampler",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.WebServiceSampler",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "TestAction",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.TestAction",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "HTTPSampler2",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.external.HTTPSampler2",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "org.apache.jmeter.protocol.http.sampler.HTTPSamplerFull",
+        category: ComponentCategory::Sampler,
+        capability_id: "runtime.HTTPSamplerProxy",
+        availability: ComponentAvailability::Native,
+    },
+    // Listener/result-consumer vocabulary.  ResultCollector is the only
+    // native scope listener in this runtime wave; all other known listeners
+    // remain explicitly unavailable or external.
+    BuiltinComponentSpec {
+        alias: "BackendListener",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.external.BackendListener",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "BeanShellListener",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.external.BeanShellListener",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "BSFListener",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.external.BSFListener",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "JSR223Listener",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.external.JSR223Listener",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "MailerResultCollector",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.external.MailerResultCollector",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "ResultSaver",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.ResultSaver",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "SimpleDataWriter",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.SimpleDataWriter",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "StatVisualizer",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.StatVisualizer",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "SummaryReport",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.SummaryReport",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "GraphVisualizer",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.GraphVisualizer",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "GraphAccumVisualizer",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.GraphAccumVisualizer",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "RespTimeGraphVisualizer",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.RespTimeGraphVisualizer",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "TableVisualizer",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.TableVisualizer",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "ViewResultsFullVisualizer",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.ViewResultsFullVisualizer",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "AssertionVisualizer",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.AssertionVisualizer",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "ComparisonVisualizer",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.ComparisonVisualizer",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "DistributionGraphVisualizer",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.DistributionGraphVisualizer",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "MonitorHealthVisualizer",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.MonitorHealthVisualizer",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "MailerVisualizer",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.MailerVisualizer",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "SplineVisualizer",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.SplineVisualizer",
+        availability: ComponentAvailability::Unavailable,
+    },
+    BuiltinComponentSpec {
+        alias: "StatGraphVisualizer",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.StatGraphVisualizer",
+        availability: ComponentAvailability::Unavailable,
+    },
+    // Legacy report aliases remain loadable and diagnosable, but are not
+    // transparent native listeners.
+    BuiltinComponentSpec {
+        alias: "ReportPlan",
+        // PlanCompiler treats generic lifecycle entries as preservation-only;
+        // use an unavailable controller-shaped owner here so an enabled
+        // legacy report root cannot disappear silently before its external
+        // capability is diagnosed.
+        category: ComponentCategory::Controller,
+        capability_id: "runtime.external.ReportPlan",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "ReportPage",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.external.ReportPage",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "ReportTable",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.external.ReportTable",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "LineGraph",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.external.LineGraph",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "BarChart",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.external.BarChart",
+        availability: ComponentAvailability::External,
+    },
+    BuiltinComponentSpec {
+        alias: "HTMLReportWriter",
+        category: ComponentCategory::Listener,
+        capability_id: "runtime.external.HTMLReportWriter",
+        availability: ComponentAvailability::External,
+    },
+];
 
 /// Exact timer aliases from the pinned JMeter 5.6.3 SaveService vocabulary.
 ///
@@ -261,18 +1399,30 @@ pub const fn builtin_timer_aliases() -> &'static [TimerAlias] {
 }
 
 impl ComponentBinding {
-    /// Creates a native component binding.
+    /// Creates a component binding from a capability ID.
+    ///
+    /// IDs in an explicitly external namespace are normalized to
+    /// [`ComponentAvailability::External`] even when this constructor is
+    /// used, so a caller cannot accidentally advertise a JVM/plugin class as
+    /// native.
     #[must_use]
     pub fn native(
         test_class: impl Into<String>,
         category: ComponentCategory,
         capability_id: impl Into<String>,
     ) -> Self {
+        let capability_id = capability_id.into();
+        let external = capability_requires_external(&capability_id);
         Self {
             test_class: test_class.into(),
             category,
-            capability_id: capability_id.into(),
-            external: false,
+            capability_id,
+            external,
+            availability: if external {
+                ComponentAvailability::External
+            } else {
+                ComponentAvailability::Native
+            },
         }
     }
 
@@ -280,8 +1430,66 @@ impl ComponentBinding {
     #[must_use]
     pub fn external(mut self) -> Self {
         self.external = true;
+        self.availability = ComponentAvailability::External;
         self
     }
+
+    /// Marks a recognized class as unavailable without claiming a JVM path.
+    #[must_use]
+    pub fn unavailable(mut self) -> Self {
+        self.external = false;
+        self.availability = ComponentAvailability::Unavailable;
+        self
+    }
+
+    /// Returns the closed execution-support state.
+    #[must_use]
+    pub const fn availability(&self) -> ComponentAvailability {
+        self.availability
+    }
+
+    /// Returns whether the binding is a native implementation path.
+    #[must_use]
+    pub const fn is_native(&self) -> bool {
+        matches!(self.availability, ComponentAvailability::Native)
+    }
+
+    /// Returns whether the binding requires an explicit external boundary.
+    #[must_use]
+    pub const fn is_external(&self) -> bool {
+        matches!(self.availability, ComponentAvailability::External)
+    }
+
+    /// Returns whether the class is recognized but currently unavailable.
+    #[must_use]
+    pub const fn is_unavailable(&self) -> bool {
+        matches!(self.availability, ComponentAvailability::Unavailable)
+    }
+}
+
+/// Returns whether a capability ID crosses the explicit JVM/service/RMI
+/// boundary.  Class aliases and capability IDs are both checked by the
+/// registry so a caller cannot accidentally reclassify an external adapter as
+/// native by constructing a binding through the generic constructor.
+pub(crate) fn capability_requires_external(capability_id: &str) -> bool {
+    capability_id.starts_with("runtime.external.")
+        || capability_id.starts_with("runtime.assertion.jvm.")
+        || capability_id.starts_with("jmeter.rmi")
+        || matches!(capability_id, "assertion.json" | "assertion.jmespath")
+}
+
+fn normalize_binding(mut binding: ComponentBinding) -> ComponentBinding {
+    match binding.availability {
+        ComponentAvailability::External => binding.external = true,
+        ComponentAvailability::Unavailable => binding.external = false,
+        ComponentAvailability::Native => {
+            if binding.external || capability_requires_external(&binding.capability_id) {
+                binding.external = true;
+                binding.availability = ComponentAvailability::External;
+            }
+        }
+    }
+    binding
 }
 
 /// A class registry used by the scope compiler.
@@ -289,6 +1497,54 @@ impl ComponentBinding {
 pub struct ComponentRegistry {
     bindings: BTreeMap<String, ComponentBinding>,
     timer_bindings: BTreeMap<String, TimerBinding>,
+}
+
+fn binding_from_spec(spec: BuiltinComponentSpec) -> ComponentBinding {
+    let binding = ComponentBinding::native(spec.alias, spec.category, spec.capability_id);
+    match spec.availability {
+        ComponentAvailability::Native => binding,
+        ComponentAvailability::External => binding.external(),
+        ComponentAvailability::Unavailable => binding.unavailable(),
+    }
+}
+
+/// Returns the canonical built-in binding for one exact alias.
+///
+/// This helper intentionally includes the timer and assertion tables as well
+/// as [`BUILTIN_COMPONENT_SPECS`], so a caller never needs a second class-name
+/// match statement to answer the same registry question.
+pub(crate) fn builtin_component_binding(class: &str) -> Option<ComponentBinding> {
+    if let Some(alias) = builtin_timer_aliases()
+        .iter()
+        .find(|alias| alias.alias == class)
+    {
+        let binding =
+            ComponentBinding::native(alias.alias, ComponentCategory::Timer, alias.capability_id);
+        return Some(if alias.external {
+            binding.external()
+        } else {
+            binding
+        });
+    }
+    if let Some(spec) = BUILTIN_COMPONENT_SPECS
+        .iter()
+        .find(|spec| spec.alias == class)
+        .copied()
+    {
+        return Some(binding_from_spec(spec));
+    }
+    JMETER_ASSERTION_BINDINGS
+        .iter()
+        .find(|(alias, _)| *alias == class)
+        .map(|(alias, capability_id)| {
+            let binding =
+                ComponentBinding::native(*alias, ComponentCategory::Assertion, *capability_id);
+            if capability_requires_external(capability_id) {
+                binding.external()
+            } else {
+                binding
+            }
+        })
 }
 
 impl ComponentRegistry {
@@ -300,6 +1556,7 @@ impl ComponentRegistry {
 
     /// Registers a class or alias, retaining insertion-independent lookup.
     pub fn register(&mut self, binding: ComponentBinding) {
+        let binding = normalize_binding(binding);
         self.timer_bindings.remove(&binding.test_class);
         self.bindings.insert(binding.test_class.clone(), binding);
     }
@@ -312,10 +1569,11 @@ impl ComponentRegistry {
         capability_id: impl Into<String>,
     ) {
         let alias = alias.into();
-        self.bindings.insert(
+        self.register(ComponentBinding::native(
             alias.clone(),
-            ComponentBinding::native(alias.clone(), ComponentCategory::Timer, capability_id),
-        );
+            ComponentCategory::Timer,
+            capability_id,
+        ));
         self.timer_bindings.insert(alias, binding);
     }
 
@@ -328,8 +1586,7 @@ impl ComponentRegistry {
         capability_id: impl Into<String>,
     ) {
         let alias = alias.into();
-        self.bindings.insert(
-            alias.clone(),
+        self.register(
             ComponentBinding::native(alias.clone(), ComponentCategory::Timer, capability_id)
                 .external(),
         );
@@ -337,7 +1594,8 @@ impl ComponentRegistry {
             .insert(alias, TimerBinding::ExternalScript);
     }
 
-    /// Registers a native class in one call.
+    /// Registers a class in one call, preserving explicit capability-boundary
+    /// normalization performed by [`ComponentBinding::native`].
     pub fn register_native(
         &mut self,
         test_class: impl Into<String>,
@@ -374,51 +1632,8 @@ impl ComponentRegistry {
     #[must_use]
     pub fn builtins() -> Self {
         let mut registry = Self::new();
-        for (name, category) in [
-            ("TestPlan", ComponentCategory::Lifecycle),
-            ("Arguments", ComponentCategory::Configuration),
-            ("ConfigTestElement", ComponentCategory::Configuration),
-            ("UserDefinedVariables", ComponentCategory::Configuration),
-            ("ThreadGroup", ComponentCategory::Lifecycle),
-            ("SetupThreadGroup", ComponentCategory::Lifecycle),
-            ("PostThreadGroup", ComponentCategory::Lifecycle),
-            ("GenericController", ComponentCategory::Controller),
-            ("LoopController", ComponentCategory::Controller),
-            ("IfController", ComponentCategory::Controller),
-            ("WhileController", ComponentCategory::Controller),
-            ("ForEachController", ComponentCategory::Controller),
-            ("ForeachController", ComponentCategory::Controller),
-            ("SwitchController", ComponentCategory::Controller),
-            ("InterleaveControl", ComponentCategory::Controller),
-            ("RandomController", ComponentCategory::Controller),
-            ("RandomOrderController", ComponentCategory::Controller),
-            ("OnceOnlyController", ComponentCategory::Controller),
-            ("ThroughputController", ComponentCategory::Controller),
-            ("RunTime", ComponentCategory::Controller),
-            ("RuntimeController", ComponentCategory::Controller),
-            ("TransactionController", ComponentCategory::Controller),
-            ("ModuleController", ComponentCategory::Replaceable),
-            ("IncludeController", ComponentCategory::Replaceable),
-            ("RecordingController", ComponentCategory::Controller),
-            ("CriticalSectionController", ComponentCategory::Controller),
-            ("ResponseAssertion", ComponentCategory::Assertion),
-            ("JSONPostProcessor", ComponentCategory::Postprocessor),
-            ("RegexExtractor", ComponentCategory::Postprocessor),
-            ("XPathExtractor", ComponentCategory::Postprocessor),
-            ("JSR223PostProcessor", ComponentCategory::Postprocessor),
-            ("DebugPostProcessor", ComponentCategory::Postprocessor),
-            (
-                "UserParametersPreProcessor",
-                ComponentCategory::Preprocessor,
-            ),
-            ("JSR223PreProcessor", ComponentCategory::Preprocessor),
-            ("BeanShellPreProcessor", ComponentCategory::Preprocessor),
-            ("DebugSampler", ComponentCategory::Sampler),
-            ("HTTPHC4Impl", ComponentCategory::Sampler),
-            ("HTTPSamplerProxy", ComponentCategory::Sampler),
-            ("ResultCollector", ComponentCategory::Listener),
-        ] {
-            registry.register_native(name, category, format!("runtime.{name}"));
+        for spec in BUILTIN_COMPONENT_SPECS {
+            registry.register(binding_from_spec(*spec));
         }
         for alias in builtin_timer_aliases() {
             if alias.external {
@@ -427,29 +1642,10 @@ impl ComponentRegistry {
                 registry.register_timer(alias.alias, alias.binding, alias.capability_id);
             }
         }
-        for (name, category) in [
-            ("JSR223PostProcessor", ComponentCategory::Postprocessor),
-            ("BeanShellPostProcessor", ComponentCategory::Postprocessor),
-            ("JSR223PreProcessor", ComponentCategory::Preprocessor),
-            ("BeanShellPreProcessor", ComponentCategory::Preprocessor),
-            ("RegexExtractor", ComponentCategory::Postprocessor),
-            ("XPathExtractor", ComponentCategory::Postprocessor),
-            ("JSONPostProcessor", ComponentCategory::Postprocessor),
-            ("HTTPHC4Impl", ComponentCategory::Sampler),
-            ("HTTPSamplerProxy", ComponentCategory::Sampler),
-        ] {
-            registry.register(
-                ComponentBinding::native(name, category, format!("runtime.external.{name}"))
-                    .external(),
-            );
-        }
-        for (name, capability_id) in JMETER_ASSERTION_BINDINGS {
-            // The class is known to the pinned profile, but not every
-            // assertion family has a native evaluator.  The compiler's
-            // assertion factory supplies a typed unsupported component for
-            // those families; marking the binding as a generic unknown here
-            // would lose its profile-specific capability identity.
-            registry.register_native(*name, ComponentCategory::Assertion, *capability_id);
+        for (name, _) in JMETER_ASSERTION_BINDINGS {
+            if let Some(binding) = builtin_component_binding(name) {
+                registry.register(binding);
+            }
         }
         registry
     }
@@ -628,7 +1824,10 @@ impl ScopeComponent {
     #[must_use]
     pub fn result_collector_kind(&self) -> Option<ResultCollectorKind> {
         if self.binding.category != ComponentCategory::Listener
-            || self.binding.test_class != "ResultCollector"
+            || !matches!(
+                self.binding.test_class.as_str(),
+                "ResultCollector" | "org.apache.jmeter.reporters.ResultCollector"
+            )
         {
             return None;
         }
@@ -647,11 +1846,11 @@ impl ScopeComponent {
 pub struct ScopePlan {
     /// Sampler identity.
     pub sampler_id: NodeId,
-    /// Configuration from outermost to innermost scope.
+    /// Configuration from the sampler's nearest scope outward.
     pub configurations: Vec<ComponentBinding>,
     /// Preprocessors from outermost to innermost scope.
     pub preprocessors: Vec<ComponentBinding>,
-    /// Timers from outermost to innermost scope.
+    /// Timers from the sampler's nearest scope outward.
     pub timers: Vec<ComponentBinding>,
     /// The sampler binding.
     pub sampler: ComponentBinding,
@@ -659,7 +1858,8 @@ pub struct ScopePlan {
     pub postprocessors: Vec<ComponentBinding>,
     /// Assertions from outermost to innermost scope.
     pub assertions: Vec<ComponentBinding>,
-    /// Listeners in scope/tree order.
+    /// Listeners from the sampler's nearest scope outward, preserving sibling
+    /// order within each scope.
     pub listeners: Vec<ComponentBinding>,
     /// Controller/transaction path, outermost to innermost.
     pub controller_path: Vec<NodeId>,
@@ -680,7 +1880,7 @@ pub struct ScopePlan {
 }
 
 impl ScopePlan {
-    /// Returns all configuration records in lexical scope order.
+    /// Returns configuration records from the nearest scope outward.
     #[must_use]
     pub fn configuration_nodes(&self) -> &[ScopeComponent] {
         &self.configuration_components
@@ -692,7 +1892,7 @@ impl ScopePlan {
         &self.preprocessor_components
     }
 
-    /// Returns all timer records in lexical scope order.
+    /// Returns timer records from the nearest scope outward.
     #[must_use]
     pub fn timer_nodes(&self) -> &[ScopeComponent] {
         &self.timer_components
@@ -716,7 +1916,7 @@ impl ScopePlan {
         &self.assertion_components
     }
 
-    /// Returns all listener records in lexical scope order.
+    /// Returns listener records from the nearest scope outward.
     #[must_use]
     pub fn listener_nodes(&self) -> &[ScopeComponent] {
         &self.listener_components
@@ -810,6 +2010,14 @@ pub enum ScopeFactoryError {
         expected: ComponentCategory,
         actual: ComponentCategory,
     },
+    /// A factory declared an exact class identity different from the source
+    /// alias under which it was selected.
+    IdentityMismatch {
+        node_id: NodeId,
+        path: Vec<NodeId>,
+        expected: String,
+        actual: String,
+    },
     /// A factory registration itself is invalid.
     InvalidRegistration { test_class: String, detail: String },
 }
@@ -823,6 +2031,7 @@ impl ScopeFactoryError {
             Self::MissingFactory { .. } => "runtime.scope.missing-factory",
             Self::Decode { .. } => "runtime.scope.factory-decode",
             Self::CategoryMismatch { .. } => "runtime.scope.factory-category-mismatch",
+            Self::IdentityMismatch { .. } => "runtime.scope.factory-identity-mismatch",
             Self::InvalidRegistration { .. } => "runtime.scope.invalid-factory-registration",
         }
     }
@@ -863,6 +2072,16 @@ impl fmt::Display for ScopeFactoryError {
                 "{}: node {node_id} path {path:?}: expected {expected:?}, got {actual:?}",
                 self.code()
             ),
+            Self::IdentityMismatch {
+                node_id,
+                path,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "{}: node {node_id} path {path:?}: expected factory for {expected:?}, got {actual:?}",
+                self.code()
+            ),
             Self::InvalidRegistration { test_class, detail } => {
                 write!(formatter, "{}: class {test_class:?}: {detail}", self.code())
             }
@@ -891,6 +2110,9 @@ pub enum ScopeCompileError {
     ByteLimit { bytes: usize, limit: usize },
     /// Source depth exceeded the package policy.
     DepthLimit { depth: usize, limit: usize },
+    /// A bounded count or metadata-size calculation overflowed before a
+    /// configured limit could be applied.
+    ArithmeticOverflow { path: Vec<NodeId>, detail: String },
     /// An executable class has no native or external binding.
     Unsupported(UnsupportedComponent),
     /// A class name is present but contains invalid control characters.
@@ -950,6 +2172,7 @@ impl ScopeCompileError {
             Self::ComponentLimit { .. } => "runtime.scope.component-limit",
             Self::ByteLimit { .. } => "runtime.scope.byte-limit",
             Self::DepthLimit { .. } => "runtime.scope.depth-limit",
+            Self::ArithmeticOverflow { .. } => "runtime.scope.arithmetic-overflow",
             Self::Unsupported(_) => "runtime.scope.unsupported",
             Self::InvalidTestClass { .. } => "runtime.scope.invalid-test-class",
             Self::EmptyTestClass { .. } => "runtime.scope.empty-test-class",
@@ -983,6 +2206,9 @@ impl fmt::Display for ScopeCompileError {
             }
             Self::DepthLimit { depth, limit } => {
                 write!(formatter, "{}: {depth}/{limit}", self.code())
+            }
+            Self::ArithmeticOverflow { path, detail } => {
+                write!(formatter, "{}: path {path:?}: {detail}", self.code())
             }
             Self::Unsupported(component) => write!(formatter, "{}: {component:?}", self.code()),
             Self::InvalidTestClass {
@@ -1187,7 +2413,9 @@ impl From<TreeError> for ScopeCompileError {
 #[allow(clippy::expect_used, reason = "deterministic scope setup")]
 mod tests {
     use super::*;
-    use crate::UnsupportedSampler;
+    use crate::{
+        ComponentFactoryRegistry, FactoryComponent, ScopeComponentFactory, UnsupportedSampler,
+    };
     use jmeter_rs_model::PropertyValue;
     use std::sync::Arc;
 
@@ -1241,8 +2469,368 @@ mod tests {
             assert_eq!(binding.test_class, *alias);
             assert_eq!(binding.category, ComponentCategory::Assertion);
             assert_eq!(binding.capability_id, *capability_id);
+            assert_eq!(
+                binding.external,
+                capability_requires_external(capability_id)
+            );
+        }
+    }
+
+    #[test]
+    fn native_http_sampler_aliases_are_not_marked_external() {
+        let registry = ComponentRegistry::builtins();
+        for test_class in ["HTTPHC4Impl", "HTTPSamplerProxy"] {
+            let binding = registry.get(test_class).expect("native HTTP sampler alias");
+            assert_eq!(binding.category, ComponentCategory::Sampler);
+            assert_eq!(binding.test_class, test_class);
+            assert_eq!(binding.capability_id, format!("runtime.{test_class}"));
             assert!(!binding.external);
         }
+    }
+
+    #[test]
+    fn processor_aliases_are_exact_and_do_not_promote_decoder_skeletons() {
+        let registry = ComponentRegistry::builtins();
+        for (class, category, capability_id, availability) in [
+            (
+                "SimpleController",
+                ComponentCategory::Controller,
+                "runtime.SimpleController",
+                ComponentAvailability::Native,
+            ),
+            (
+                "UserParameters",
+                ComponentCategory::Preprocessor,
+                "runtime.UserParameters",
+                ComponentAvailability::Unavailable,
+            ),
+            (
+                "SampleTimeout",
+                ComponentCategory::Preprocessor,
+                "runtime.SampleTimeout",
+                ComponentAvailability::Unavailable,
+            ),
+            (
+                "BoundaryExtractor",
+                ComponentCategory::Postprocessor,
+                "runtime.BoundaryExtractor",
+                ComponentAvailability::Unavailable,
+            ),
+            (
+                "URLRewritingModifier",
+                ComponentCategory::Preprocessor,
+                "runtime.URLRewritingModifier",
+                ComponentAvailability::Unavailable,
+            ),
+            (
+                "AnchorModifier",
+                ComponentCategory::Preprocessor,
+                "runtime.external.AnchorModifier",
+                ComponentAvailability::External,
+            ),
+            (
+                "ResultAction",
+                ComponentCategory::Postprocessor,
+                "runtime.ResultAction",
+                ComponentAvailability::Unavailable,
+            ),
+            (
+                "RecordingController",
+                ComponentCategory::Controller,
+                "runtime.controller.recording",
+                ComponentAvailability::Unavailable,
+            ),
+        ] {
+            let binding = registry.get(class).expect("exact built-in alias");
+            assert_eq!(binding.category, category);
+            assert_eq!(binding.capability_id, capability_id);
+            assert_eq!(binding.availability(), availability);
+        }
+        assert!(registry.get("userparameters").is_none());
+        assert!(registry.get("UserParametersPreProcessor").is_none());
+        for (alias, fqcn) in [
+            (
+                "UserParameters",
+                "org.apache.jmeter.modifiers.UserParameters",
+            ),
+            ("SampleTimeout", "org.apache.jmeter.modifiers.SampleTimeout"),
+            (
+                "URLRewritingModifier",
+                "org.apache.jmeter.protocol.http.modifier.URLRewritingModifier",
+            ),
+            (
+                "AnchorModifier",
+                "org.apache.jmeter.protocol.http.modifier.AnchorModifier",
+            ),
+            (
+                "BoundaryExtractor",
+                "org.apache.jmeter.extractor.BoundaryExtractor",
+            ),
+            ("ResultAction", "org.apache.jmeter.reporters.ResultAction"),
+            (
+                "JDBCPostProcessor",
+                "org.apache.jmeter.protocol.jdbc.processor.JDBCPostProcessor",
+            ),
+            (
+                "JDBCPreProcessor",
+                "org.apache.jmeter.protocol.jdbc.processor.JDBCPreProcessor",
+            ),
+        ] {
+            let short = registry.get(alias).expect("short alias");
+            let qualified = registry.get(fqcn).expect("fully-qualified alias");
+            assert_eq!(qualified.category, short.category);
+            assert_eq!(qualified.capability_id, short.capability_id);
+            assert_eq!(qualified.availability(), short.availability());
+            assert_eq!(qualified.test_class, fqcn);
+        }
+    }
+
+    #[test]
+    fn scope_registry_has_one_exact_vocabulary_for_fixture_component_families() {
+        let registry = ComponentRegistry::builtins();
+        for (class, category, availability, capability_id) in [
+            (
+                "CSVDataSet",
+                ComponentCategory::Configuration,
+                ComponentAvailability::Unavailable,
+                "runtime.CSVDataSet",
+            ),
+            (
+                "HeaderManager",
+                ComponentCategory::Configuration,
+                ComponentAvailability::Unavailable,
+                "runtime.HeaderManager",
+            ),
+            (
+                "JDBCPreProcessor",
+                ComponentCategory::Preprocessor,
+                ComponentAvailability::External,
+                "runtime.external.JDBCPreProcessor",
+            ),
+            (
+                "JSONPostProcessor",
+                ComponentCategory::Postprocessor,
+                ComponentAvailability::External,
+                "runtime.external.JSONPostProcessor",
+            ),
+            (
+                "ConstantTimer",
+                ComponentCategory::Timer,
+                ComponentAvailability::Native,
+                "runtime.ConstantTimer",
+            ),
+            (
+                "ResultCollector",
+                ComponentCategory::Listener,
+                ComponentAvailability::Native,
+                "runtime.ResultCollector",
+            ),
+            (
+                "HTTPSampler2",
+                ComponentCategory::Sampler,
+                ComponentAvailability::External,
+                "runtime.external.HTTPSampler2",
+            ),
+            (
+                "TransactionController",
+                ComponentCategory::Controller,
+                ComponentAvailability::Native,
+                "runtime.TransactionController",
+            ),
+            (
+                "ReflectionThreadGroup",
+                ComponentCategory::Controller,
+                ComponentAvailability::Unavailable,
+                "runtime.lifecycle.reflection-thread-group",
+            ),
+        ] {
+            let binding = registry.get(class).expect("fixture class binding");
+            assert_eq!(binding.category, category, "{class}");
+            assert_eq!(binding.availability(), availability, "{class}");
+            assert_eq!(binding.capability_id, capability_id, "{class}");
+        }
+
+        for (short, qualified) in [
+            (
+                "JDBCDataSource",
+                "org.apache.jmeter.protocol.jdbc.config.DataSourceElement",
+            ),
+            (
+                "TestFragmentController",
+                "org.apache.jmeter.control.TestFragmentController",
+            ),
+            ("WorkBench", "org.apache.jmeter.testelement.WorkBench"),
+            (
+                "ResultCollector",
+                "org.apache.jmeter.reporters.ResultCollector",
+            ),
+        ] {
+            let short_binding = registry.get(short).expect("short alias");
+            let qualified_binding = registry.get(qualified).expect("qualified alias");
+            assert_eq!(qualified_binding.category, short_binding.category);
+            assert_eq!(
+                qualified_binding.availability(),
+                short_binding.availability()
+            );
+            assert_eq!(qualified_binding.capability_id, short_binding.capability_id);
+        }
+
+        // Embedded JMX property classes and application/plugin classes are
+        // source data, not transparent executable scope elements.
+        for class in [
+            "FloatProperty",
+            "JMSProperties",
+            "JMSProperty",
+            "com.example.plugin.PluginSampler",
+        ] {
+            assert!(registry.get(class).is_none(), "{class} must stay unknown");
+        }
+    }
+
+    #[test]
+    fn unavailable_lifecycle_bindings_fail_closed_instead_of_being_ignored() {
+        for class in ["ReflectionThreadGroup", "OpenModelThreadGroupController"] {
+            let mut tree = ElementTree::new();
+            tree.insert_root(TestElement::named(class, "Gui", class))
+                .expect("unavailable lifecycle node");
+            let error = ScopeCompiler::builtins()
+                .compile(&tree)
+                .expect_err("unsupported lifecycle must be explicit");
+            assert!(matches!(
+                error,
+                ScopeCompileError::Unsupported(UnsupportedComponent {
+                    capability_id: Some(capability_id),
+                    external: false,
+                    ..
+                }) if capability_id.starts_with("runtime.lifecycle.")
+            ));
+        }
+    }
+
+    #[test]
+    fn simple_controller_is_a_native_scope_owner() {
+        let mut tree = ElementTree::new();
+        let plan = tree
+            .insert_root(TestElement::named("TestPlan", "Gui", "plan"))
+            .expect("plan");
+        let group = tree
+            .insert_child(plan, TestElement::named("ThreadGroup", "Gui", "group"))
+            .expect("group");
+        let controller = tree
+            .insert_child(
+                group,
+                TestElement::named("SimpleController", "Gui", "sequence"),
+            )
+            .expect("controller");
+        tree.insert_child(
+            controller,
+            TestElement::named("DebugSampler", "Gui", "sample"),
+        )
+        .expect("sampler");
+
+        let plan = ScopeCompiler::builtins().compile(&tree).expect("scope");
+        assert_eq!(plan.len(), 1);
+    }
+
+    #[test]
+    fn provider_assertions_keep_their_external_jvm_boundary() {
+        let registry = ComponentRegistry::builtins();
+        for class in [
+            "BeanShellAssertion",
+            "BSFAssertion",
+            "HTMLAssertion",
+            "JSONPathAssertion",
+            "JMESPathAssertion",
+            "JSR223Assertion",
+            "SMIMEAssertion",
+            "XMLSchemaAssertion",
+            "XPath2Assertion",
+        ] {
+            let binding = registry.get(class).expect("assertion alias");
+            assert_eq!(binding.availability(), ComponentAvailability::External);
+            assert!(binding.external);
+        }
+        for class in [
+            "ResponseAssertion",
+            "DurationAssertion",
+            "SizeAssertion",
+            "MD5HexAssertion",
+            "XMLAssertion",
+            "XPathAssertion",
+        ] {
+            let binding = registry.get(class).expect("native assertion alias");
+            assert_eq!(binding.availability(), ComponentAvailability::Native);
+            assert!(!binding.external);
+        }
+    }
+
+    #[test]
+    fn external_capability_ids_cannot_be_registered_as_native() {
+        let mut registry = ComponentRegistry::new();
+        registry.register(ComponentBinding::native(
+            "ProviderProcessor",
+            ComponentCategory::Postprocessor,
+            "runtime.external.ProviderProcessor",
+        ));
+        let binding = registry.get("ProviderProcessor").expect("binding");
+        assert_eq!(binding.availability(), ComponentAvailability::External);
+        assert!(binding.external);
+    }
+
+    struct NativeHttpSamplerFactory;
+
+    impl ScopeComponentFactory for NativeHttpSamplerFactory {
+        fn create(
+            &self,
+            _component: &ScopeComponent,
+        ) -> Result<FactoryComponent, ScopeFactoryError> {
+            // The transport adapter belongs to the application edge. This
+            // deterministic hook only proves that runtime can select an
+            // exact native sampler registration without performing I/O.
+            Ok(FactoryComponent::Sampler(Arc::new(
+                UnsupportedSampler::new("native HTTP test hook"),
+            )))
+        }
+    }
+
+    #[test]
+    fn native_http_sampler_aliases_accept_caller_owned_factories() {
+        for test_class in ["HTTPHC4Impl", "HTTPSamplerProxy"] {
+            let mut tree = ElementTree::new();
+            tree.insert_root(TestElement::named(test_class, "HttpSamplerGui", "sample"))
+                .expect("sampler");
+            let mut factories = ComponentFactoryRegistry::with_capacity(1);
+            factories
+                .register(test_class, Arc::new(NativeHttpSamplerFactory))
+                .expect("HTTP sampler factory");
+
+            let packages = ScopeCompiler::builtins()
+                .compile_with_factories(&tree, &factories)
+                .expect("native HTTP sampler factory package");
+            assert_eq!(packages.len(), 1);
+        }
+    }
+
+    #[test]
+    fn native_http_sampler_without_factory_is_typed_and_fail_closed() {
+        let mut tree = ElementTree::new();
+        tree.insert_root(TestElement::named(
+            "HTTPSamplerProxy",
+            "HttpSamplerGui",
+            "sample",
+        ))
+        .expect("sampler");
+
+        let error = ScopeCompiler::builtins()
+            .compile_with_factories(&tree, &ComponentFactoryRegistry::default())
+            .expect_err("HTTP transport must be supplied by the application edge");
+        assert_eq!(error.code(), "runtime.scope.factory");
+        assert!(matches!(
+            error,
+            ScopeCompileError::Factory {
+                source: ScopeFactoryError::MissingFactory { test_class, .. }
+            } if test_class == "HTTPSamplerProxy"
+        ));
     }
 
     #[test]

@@ -21,6 +21,8 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
+jmeter-rs-http = { version = "0.1.0", path = "../../crates/http" }
+jmeter-rs-http-native = { version = "0.1.0", path = "../../crates/http-native" }
 jmeter-rs-jmx = { version = "0.1.0", path = "../../crates/jmx" }
 jmeter-rs-model = { version = "0.1.0", path = "../../crates/model" }
 jmeter-rs-report = { version = "0.1.0", path = "../../crates/report" }
@@ -32,3 +34,4 @@ jmeter-rs-runtime = { version = "0.1.0", path = "../../crates/runtime" }
 # expression resolver used by RuntimeCapabilities; production code remains
 # coupled only to the runtime adapter boundary.
 jmeter-rs-expr = { version = "0.1.0", path = "../../crates/expr" }
+rcgen = { version = "=0.14.9", default-features = false, features = ["crypto", "ring"] }

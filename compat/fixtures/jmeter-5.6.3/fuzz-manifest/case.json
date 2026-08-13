@@ -20,28 +20,28 @@
     "source_of_truth": "The repository fuzz workspace is authoritative. This fixture contains no copied target or corpus bytes; every source input is referenced by repository-relative path and SHA-256.",
     "workspace": [
       {"path": "fuzz/.gitignore", "sha256": "d3f471ee1a2ee9e88cd30b966cbe1261962e6421fa9db9707f39dbefff5321ec"},
-      {"path": "fuzz/Cargo.toml", "sha256": "3ca71ed6119a5c4d99eb6770216445fcbe85734ccbc66a420ec3833f2946c676"},
-      {"path": "fuzz/Cargo.lock", "sha256": "7622b39738dbcd34709106aaa1282582149685e502b2dd8baf57028c0dca9eb3"}
+      {"path": "fuzz/Cargo.toml", "sha256": "328e9ee5e0c9edb2eed2033d6b8019020f226f8243a6abb06b1cdb5aaa427bae"},
+      {"path": "fuzz/Cargo.lock", "sha256": "85efe1dfd37c5abbff7635a438ac5e8b4f01fe089d03f833cfb00865e9d43996"}
     ],
     "documentation": [
-      {"path": "fuzz/README.md", "sha256": "fefe067eb843e9fa9ba273b1d5ea57f2174bbdc41e950cc3efa20320b95085d5"},
-      {"path": "fuzz/campaign/README.md", "sha256": "4e62af0eca5030d36bf305ba156fa5a6ca65eabdc58b818c6df2bbf89a36094d"},
-      {"path": "fuzz/corpus/PROVENANCE.md", "sha256": "4b8d30bb1a7ac53887ecddae65e975fa0f56a0ea9f911dde4fb4f199b0cd14af"}
+      {"path": "fuzz/README.md", "sha256": "c19a6f4e0eefeadcacbff745731bd3268d10489439a9b3609f57d1c0a21b5781"},
+      {"path": "fuzz/campaign/README.md", "sha256": "40ad7963149cc9e40750ced2340087b4f1267f5562c9e2c7329be242c935428a"},
+      {"path": "fuzz/corpus/PROVENANCE.md", "sha256": "c7b4e7be441f3e75cebad1ffdf93855ce85f1aed81e2b64f2efffa04efe0dda0"}
     ],
     "campaign_contracts": [
-      {"path": "fuzz/campaign/evidence.schema.json", "sha256": "e7f1ab943859b6006227d4c54d5860266c009a8eade00da7d2f2e3255605756d"},
-      {"path": "fuzz/campaign/evidence.example.json", "sha256": "336ac3ea79195d5f10cfb5e4a5073117fec67831cad237ac7050a491c1401c25"}
+      {"path": "fuzz/campaign/evidence.schema.json", "sha256": "aa35775ccbe140f3ab2b92abddafddb0b362b485009bb513eaf7f53b4a33f345"},
+      {"path": "fuzz/campaign/evidence.example.json", "sha256": "b0bc64a954e5ddf5b3b898a32fba945d53fc3f766c601b985a5aa262f6752449"}
     ],
     "fixture_contracts": [
       {"path": "compat/fixtures/jmeter-5.6.3/fuzz-manifest/expected/campaign-evidence.schema.json", "sha256": "e2f76943e5451d52f02f55f573d901a54894f7ee3b27e34c4aab2cbd7a7c3cea"},
-      {"path": "compat/fixtures/jmeter-5.6.3/fuzz-manifest/expected/campaign-evidence.example.json", "sha256": "2e563d168651d7565b7718b3003e51f9f33ddc4f3446c0fe6f105b65790e546a"},
+      {"path": "compat/fixtures/jmeter-5.6.3/fuzz-manifest/expected/campaign-evidence.example.json", "sha256": "58755677e31fe60a491efdef90cc22d486bc0a3aad66943033e9ecdf89aa439e"},
       {"path": "compat/fixtures/jmeter-5.6.3/fuzz-manifest/expected/campaign-evidence.negative.json", "sha256": "eafdc65c0cb6a714609a6b5f9293539b4ca736c7475e3460340ec304b879de1b"}
     ],
     "targets": [
       {
         "target": "jmx_xml",
         "path": "fuzz/fuzz_targets/jmx_xml.rs",
-        "sha256": "59b00b33a2a08d00528199360b8d532deeb1329530b9ddc1555c9779474fce4b",
+        "sha256": "269c3ecf7cc2b2358a705f1f1518631b43d786bd9ff54e6b1779650a1e1b8680",
         "corpus_directory": "fuzz/corpus/jmx_xml",
         "bounds": {"max_input_bytes": 262144, "max_output_bytes": 524288},
         "invariant_ids": ["JMX-LIMIT-001", "JMX-SOURCE-RETAIN-001", "JMX-OPAQUE-INVENTORY-001", "JMX-DROPPED-INVENTORY-001"],
@@ -51,7 +51,7 @@
       {
         "target": "jtl_csv",
         "path": "fuzz/fuzz_targets/jtl_csv.rs",
-        "sha256": "505d5afb50f39893c921befa5005daede8a1e3d3f6bda96ed3151daaf469e8ed",
+        "sha256": "2b0d9333da9c255935559543e49711f02179d57703b45d089d84f0b1df90d2bf",
         "corpus_directory": "fuzz/corpus/jtl_csv",
         "bounds": {"max_input_bytes": 262144, "max_record_bytes": 16384, "max_attribute_bytes": 4096, "max_columns": 64, "max_depth": 16, "max_nodes": 512, "max_samples": 128, "max_attributes": 64, "max_output_bytes": 524288},
         "invariant_ids": ["JTL-CSV-PROJECTION-001", "JTL-CSV-LIMIT-001", "JTL-CSV-UNKNOWN-HEADER-001"],
@@ -61,7 +61,7 @@
       {
         "target": "jtl_xml",
         "path": "fuzz/fuzz_targets/jtl_xml.rs",
-        "sha256": "7a001ca474b77e7ef8fa39239d26954bc35456ce3ab491747c512f4bcdb3567b",
+        "sha256": "c7099fb103987965501cc9b37859145a19b1e723514ee17d27b35074ed2ed365",
         "corpus_directory": "fuzz/corpus/jtl_xml",
         "bounds": {"max_input_bytes": 262144, "max_record_bytes": 16384, "max_attribute_bytes": 4096, "max_columns": 64, "max_depth": 16, "max_nodes": 512, "max_samples": 128, "max_attributes": 64, "max_output_bytes": 524288},
         "invariant_ids": ["JTL-XML-PROJECTION-001", "JTL-XML-LIMIT-001", "JTL-XML-WIRE-001"],
@@ -71,7 +71,7 @@
       {
         "target": "expr",
         "path": "fuzz/fuzz_targets/expr.rs",
-        "sha256": "88eb6ef44671a2fa40a8795524c1921917051a28f6b38c3f7db3822f953f8f5a",
+        "sha256": "19f64b843687d7eb5eff0cbf7c30e72dd1342a1c60aaa3814e8d8a68fc66bdb4",
         "corpus_directory": "fuzz/corpus/expr",
         "bounds": {"max_input_bytes": 65536, "max_expansions": 256, "max_nesting": 16, "max_output_bytes": 131072},
         "invariant_ids": ["EXPR-UNDEFINED-001", "EXPR-LIMITS-001", "EXPR-PROGRESS-001"],
@@ -81,7 +81,7 @@
       {
         "target": "bridge",
         "path": "fuzz/fuzz_targets/bridge.rs",
-        "sha256": "ef8ffd271875a4f446da582f1d3de64802ccea48e36e7b9f8c8beddb35386c3c",
+        "sha256": "0c580017073f81a99192989fc39ab0a89a8b3888a1daf7b7e3dea776503f07bb",
         "corpus_directory": "fuzz/corpus/bridge",
         "bounds": {"max_input_bytes": 262144, "max_payload_bytes": 65536},
         "invariant_ids": ["BRIDGE-FRAME-ROUNDTRIP-001", "BRIDGE-METADATA-001", "BRIDGE-LIMIT-001"],
@@ -91,7 +91,7 @@
       {
         "target": "property_config",
         "path": "fuzz/fuzz_targets/property_config.rs",
-        "sha256": "18b1b70c0a539f86a244ef2975fe581d4d70da1b9b47791355d00e14b089d903",
+        "sha256": "2e9eb697966dc967c2b6763c22738ef328b99878260c329328ea9938d43b2dad",
         "corpus_directory": "fuzz/corpus/property_config",
         "bounds": {"max_input_bytes": 65536, "max_lines": 64, "max_line_bytes": 2048, "max_columns": 64},
         "invariant_ids": ["CONFIG-UNKNOWN-IGNORED-001", "CONFIG-DUPLICATE-001", "CONFIG-BOUNDS-001"],
@@ -101,7 +101,7 @@
       {
         "target": "http_policy",
         "path": "fuzz/fuzz_targets/http_policy.rs",
-        "sha256": "b10a56e779e5c229842a7d49db3bf883a90534ce4d11879b274d45324ae5c528",
+        "sha256": "8cc285d41a368c78d4c905a4931d99cd25fb7232d6dc0c7c3020faced71c08eb",
         "corpus_directory": "fuzz/corpus/http_policy",
         "bounds": {"max_input_bytes": 65536, "max_field_bytes": 4096, "max_url_bytes": 8192, "max_authority_bytes": 2048, "max_path_query_bytes": 6144, "max_fragment_bytes": 2048, "max_header_entries": 8, "max_header_bytes": 65536, "max_cookie_entries": 8, "max_cookie_header_bytes": 65536},
         "invariant_ids": ["HTTP-URL-BOUNDS-001", "HTTP-HEADER-BOUNDS-001", "HTTP-COOKIE-BOUNDS-001"],
@@ -111,7 +111,7 @@
       {
         "target": "plugin_json",
         "path": "fuzz/fuzz_targets/plugin_json.rs",
-        "sha256": "514b2c60deea0d8a4c679619b26836dfb034c3902832782edd501a92d80e6404",
+        "sha256": "a447d4574bf1534f85516b7c8a57f98d2940c73193c3de0d7557cf5a54ecd050",
         "corpus_directory": "fuzz/corpus/plugin_json",
         "bounds": {"max_input_bytes": 65536, "max_message_bytes": 32768, "max_raw_bytes": 49152},
         "invariant_ids": ["PLUGIN-JSON-PREFLIGHT-001"],
@@ -121,7 +121,7 @@
       {
         "target": "remote",
         "path": "fuzz/fuzz_targets/remote.rs",
-        "sha256": "3946acbf8e33deb1ae9d0f0b2478a8a84ed1c74b1be48c21bfa10915197f9964",
+        "sha256": "035de74759b1bebd6a5aa9de80a488d2478346b0201967b5179d20d99ffa0918",
         "corpus_directory": "fuzz/corpus/remote",
         "bounds": {"max_input_bytes": 65536, "max_field_bytes": 4096, "max_frame_bytes": 131072, "max_plan_bytes": 65536, "max_properties": 8, "max_references": 8, "max_capabilities": 8, "max_sample_depth": 8, "max_sample_nodes": 64, "max_samples": 8},
         "invariant_ids": ["REMOTE-CODEC-ROUNDTRIP-001", "REMOTE-STATE-001", "REMOTE-BOUNDS-001"],
@@ -131,7 +131,7 @@
       {
         "target": "runtime",
         "path": "fuzz/fuzz_targets/runtime.rs",
-        "sha256": "f460b2c99ac7cff8747bd9793869a2ac75ca8b75b365c1fbfe9b09213cf85fa8",
+        "sha256": "69c869ff339490b1017c200e56780fca95cda5b9a37cee41c059e19bff11fc84",
         "corpus_directory": "fuzz/corpus/runtime",
         "bounds": {"max_input_bytes": 65536, "max_children": 8, "max_loop_count": 3, "max_run_samples": 32, "max_run_steps": 128, "max_scheduler_wakes": 8, "max_step_budget": 1},
         "invariant_ids": ["RUNTIME-CONTROLLER-001", "RUNTIME-SCHEDULER-001", "RUNTIME-BOUNDS-001"],

@@ -1,6 +1,6 @@
 # Decision 0003: run-level result sinks and output routing
 
-Status: accepted architecture, revision 4; implementation and oracle evidence pending  
+Status: accepted architecture, revision 5; implementation and oracle evidence pending
 Date: 2026-08-13  
 Compatibility features: `ELEM-004`, `REPORT-001`, `REPORT-002`, `JTL-001`,
 `JTL-002`, `JTL-003`, `JTL-004`, `JTL-005`
@@ -96,13 +96,19 @@ Disabled collectors are preserved and do not start a sink.
 
 ### Event contract and ordering
 
-The engine emits one immutable envelope at the point the listener phase has a
-complete `SampleEvent`. The envelope contains:
+Under [`Decision 0016`](0016-source-ordered-listener-effects.md), the engine
+emits one immutable envelope at each compiled snapshot-observer position in
+the source-ordered listener program. A single sampler may therefore produce
+several immutable revisions targeted at different collectors; an earlier
+revision cannot be rewritten by a later listener effect. Each envelope
+contains:
 
-- a monotonic run sequence assigned exactly once;
+- a monotonic run sequence assigned exactly once to that observer revision;
 - the complete result/event snapshot;
 - source `NodeId` and ordered plan path;
 - run, group, virtual-user, thread, and sample identities;
+- listener-program identity, observer identity/source position, and captured
+  live-result generation; and
 - explicit origin metadata distinguishing a sampler from a transaction
   controller, including controller identity and parentage where applicable.
 
@@ -138,10 +144,11 @@ root event and are serialized according to the effective save configuration;
 they are not independently treated as listener notifications unless the
 pinned oracle establishes such an event.
 
-The router preserves the engine's listener notification order. Sharing an
-output cannot create duplicates: deduplication, where the upstream contract
-requires it, uses the run sequence and bound sink identity, never equality of
-label, time, or result data.
+The router preserves listener-observer revision order. Sharing an output
+cannot create duplicates: deduplication, where the upstream contract requires
+it, uses the observer occurrence, run sequence, and bound sink identity, never
+equality of sample ID, label, time, payload, or result data. Two revisions of
+one root sample are distinct semantic events.
 
 One event has one immutable payload digest. Remote or retried delivery retains
 the same domain-qualified `EventId`; it does not mint a second semantic event.
@@ -203,15 +210,22 @@ the explicitly non-compatible `DiagnosedDrop`. Backpressure consumes the run's
 single remaining operation/finalization budget; it has no independent reset
 timeout. Cancellation cannot turn a full queue into apparent acceptance.
 
-Runtime creates one executor-neutral `RunOperationBudget` from an injected
-monotonic clock before sink startup. Sink `start`, `admit`, `process`, `flush`,
-`finish`, recovery, and publication receive borrowed budget and cancellation
-capabilities; their futures cannot outlive those borrows. The budget exposes
-only remaining duration and earlier phase deadlines. It is finite, never reset
-by a retry or phase, and cancellation must wake every blocked admission or sink
-operation. A cross-process sink receives a rounded-down finite remaining
-duration, never a process-local instant. A bare future without this budget and
-cancellation seam cannot implement a compatibility sink.
+Result-operation liveness follows
+[`Decision 0015`](0015-result-sink-operation-liveness.md). The application
+creates one run-owned budget authority before sink startup. It shares the
+run's fallible monotonic domain, cancellation source, and checked retry ledger,
+but it does not impose an implicit maximum duration on the complete load test.
+Each semantic start, admission-backpressure, process, flush, finish, or
+recovery operation owns one finite linear lease whose absolute deadline cannot
+be refreshed by polling, retry, or phase transition. Finalization establishes
+one shared deadline that caps drain, flush, finish, and exact owner cleanup.
+
+Every effectful sink future that can return `Pending` owns an exact RAII wait
+registration before doing so. Cancellation and the time driver wake it, and
+completion, timeout, error, cancellation, or drop retires it. A cross-process
+sink receives a rounded-down finite remaining duration, never a process-local
+instant. A bare future without an operation lease, cancellation wake, and wait
+registration cannot implement a compatibility sink.
 
 The lifecycle is:
 
@@ -259,11 +273,12 @@ outcome.
 
 Per-sink queues and workers are isolated and scheduled by a deterministic
 bounded round-robin arbiter. One full sink cannot consume another sink's
-capacity, but an event's compatibility admission is transactional across all
-selected sinks: reservations are acquired in stable `SinkId` order and either
-all commit or all roll back before any worker observes the event. No global
-sequential callback is permitted to make sink latency an implicit sampler
-ordering dependency.
+capacity, but a revision's compatibility admission is transactional across
+all sinks selected by that exact observer entry: reservations are acquired in
+stable `SinkId` order and either all commit or all roll back before any worker
+observes the revision. Source-position snapshot and admission remain ordered;
+actual sink processing is never a global sequential callback and cannot mutate
+the live result seen by later listener entries.
 
 ### Output identity and conflicts
 

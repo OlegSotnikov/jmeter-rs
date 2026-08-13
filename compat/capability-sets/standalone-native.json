@@ -1,0 +1,2212 @@
+{
+  "schema_id": "jmeter-rs.capability-set-projection",
+  "schema_version": 1,
+  "capability_set_id": "standalone-native",
+  "capability_set_version": 1,
+  "projection_kind": "profile-projection",
+  "projection_date": "2026-08-13",
+  "decision": {
+    "id": "0009",
+    "path": "docs/decisions/0009-standalone-rust-product-and-compatibility-pack.md",
+    "status": "accepted architecture; implementation and evidence pending"
+  },
+  "provenance": {
+    "kind": "checked-in-static-projection",
+    "generator": "deterministic profile projection from the pinned parent profile and repository research; no build.rs or runtime discovery",
+    "canonicalization": "UTF-8 JSON with stable schema-key order, parent feature order, and lexical case/capability order",
+    "source_paths": [
+      "compat/profiles/jmeter-5.6.3.json",
+      "docs/decisions/0009-standalone-rust-product-and-compatibility-pack.md",
+      "docs/research/compatibility-surface.md",
+      "docs/research/repository-baseline.md",
+      "docs/research/rust-testing-strategy.md",
+      "README.md",
+      "apps/jmeter-rs/src/runner.rs",
+      "crates/jmx/src/registry.rs",
+      "crates/jmx/src/semantic.rs",
+      "crates/expr/src/builtins.rs",
+      "crates/http/src/client.rs",
+      "crates/results/src/csv.rs",
+      "crates/results/src/jtl.rs",
+      "crates/report/src/dashboard.rs",
+      "crates/runtime/src/adapters.rs"
+    ],
+    "parent_profile_digest_field": "parent_profile.sha256",
+    "reproducibility": "Re-run the static validation in compat/capability-sets/README.md; any parent-profile byte or identity change invalidates this projection until regenerated and reviewed."
+  },
+  "parent_profile": {
+    "path": "compat/profiles/jmeter-5.6.3.json",
+    "sha256": "949903e1a4198806ab90fa613eee1ce6e550bf50fc05776199650f653d826468",
+    "schema_id": "jmeter-rs.compatibility-profile",
+    "schema_version": 1,
+    "profile_id": "jmeter-5.6.3",
+    "profile_version": 2,
+    "profile_date": "2026-08-13",
+    "upstream": {
+      "project": "Apache JMeter",
+      "version": "5.6.3",
+      "release_tag": "rel/v5.6.3",
+      "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+      "artifact_filename": "apache-jmeter-5.6.3.zip",
+      "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076"
+    }
+  },
+  "embedding": {
+    "asset_path": "compat/capability-sets/standalone-native.json",
+    "checked_in": true,
+    "include_bytes_compatible": true,
+    "build_script_required": false,
+    "runtime_consumer": "application-owned whole-plan capability router",
+    "unknown_fields": "reject",
+    "missing_or_mismatched_parent_profile": "fail-closed"
+  },
+  "claim_policy": {
+    "is_second_profile_definition": false,
+    "is_compatibility_claim": false,
+    "native_partition_is_support_claim": false,
+    "counts_are_informational": true,
+    "row_promotion": "forbidden",
+    "row_status_source": "parent_profile.features[id].status",
+    "allowed_parent_statuses": [
+      "planned",
+      "external"
+    ],
+    "allowed_case_partitions": [
+      "native",
+      "optional-pack",
+      "unavailable"
+    ],
+    "promotion_requires": "Update the parent profile status and evidence reference only after every profile-required oracle, adapter, and test gate passes.",
+    "native_case_meaning": "The current Rust tree contains a bounded implementation boundary for the named case. It is not proof of JMeter 5.6.3 conformance and does not promote its parent row.",
+    "optional_pack_case_meaning": "The exact case is delegated to an explicitly selected, identity-checked compatibility pack. The pack is not provisioned by this projection and is never an implicit fallback.",
+    "unavailable_case_meaning": "The current standalone product rejects the named case with a typed capability boundary or defers it. A plan containing it must not execute a native prefix."
+  },
+  "standalone_constraints": {
+    "java_runtime_required": false,
+    "jmeter_distribution_required": false,
+    "helper_executable_required": false,
+    "implicit_java_discovery": false,
+    "implicit_fallback": false,
+    "admission": "whole-plan atomic classification before setup, I/O, process creation, script evaluation, listener publication, or output publication",
+    "unknown_jmx": "bounded unknown and external subtrees remain loadable, inspectable, and saveable; execution is a separate capability decision",
+    "gui": {
+      "runtime": "deferred",
+      "full_profile_rows": [
+        "GUI-001",
+        "GUI-002",
+        "GUI-003"
+      ],
+      "standalone_native_counted": false,
+      "future_exact_path": "compat.jvm.gui@1"
+    }
+  },
+  "ordering": {
+    "capabilities": "sorted by path_id ascending",
+    "cases": "sorted in parent profile feature order, then by case_id ascending",
+    "features": "same order as parent_profile.features",
+    "case_ids_per_feature": "sorted by case_id ascending",
+    "object_keys": "written in this stable schema order; consumers must not use object order as meaning"
+  },
+  "evidence_requirements": [
+    {
+      "id": "EVID-NATIVE-ORACLE",
+      "kind": "required",
+      "description": "Run the parent feature's exact pinned JMeter 5.6.3 fixture and compare the declared observable fields using every referenced normalization policy.",
+      "source": "parent_profile.features[id].required_oracle_fixture_ids, normalization_policy_refs, required_evidence"
+    },
+    {
+      "id": "EVID-NATIVE-UNIT",
+      "kind": "required",
+      "description": "Deterministic unit, property, fuzz, state-machine, or local integration evidence at the lowest useful Rust boundary, including negative and resource-limit paths.",
+      "source": "docs/research/rust-testing-strategy.md and parent profile evidence"
+    },
+    {
+      "id": "EVID-NATIVE-ISOLATION",
+      "kind": "required",
+      "description": "Run in an isolated environment with no Java executable, JAVA_HOME, JMeter home, classpath, plugin directory, or helper files; trace that no JVM/helper process is discovered or spawned.",
+      "source": "Decision 0009 acceptance gates"
+    },
+    {
+      "id": "EVID-OPTIONAL-PACK",
+      "kind": "required",
+      "description": "Verify the signed pinned compatibility-pack artifact, helper, Java runtime, ordered classpath, provider/plugin identities, bridge limits, cancellation, crash, and exact differential fixture before useful work.",
+      "source": "Decision 0009 and parent_profile.external_runtime_boundaries"
+    },
+    {
+      "id": "EVID-UNAVAILABLE",
+      "kind": "required",
+      "description": "Exercise the stable unsupported-capability result, source location, no-side-effect admission, and lossless preservation requirements for the unavailable case.",
+      "source": "Decision 0009 acceptance gates and architecture section 8"
+    },
+    {
+      "id": "EVID-GUI-DEFERRED",
+      "kind": "required",
+      "description": "Keep GUI-001..003 in the parent profile, preserve GUI-authored JMX headlessly, and prove GUI invocation fails closed without opening a partial editor or starting a run.",
+      "source": "Decision 0002 and Decision 0009 GUI priority"
+    },
+    {
+      "id": "EVID-RELEASE-ARTIFACT",
+      "kind": "required",
+      "description": "Build and inspect the one-executable release boundary for each declared target; cross-compilation is not native-runtime evidence.",
+      "source": "Decision 0009 acceptance gates and .github/scripts/check-standalone-artifact.py"
+    }
+  ],
+  "capabilities": [
+    {
+      "path_id": "compat.jvm.external-elements@1",
+      "capability_id": "jvm.external-elements",
+      "version": 1,
+      "partition": "optional-pack",
+      "availability": "not-provisioned",
+      "runtime_selectable": false,
+      "scope": "Exact Java/provider-backed samplers, processors, extractors, and deprecated Java elements named by a plan.",
+      "source_paths": [
+        "crates/runtime/src/adapters.rs",
+        "docs/decisions/0005-pinned-jvm-scripting-and-plugins.md",
+        "docs/decisions/0007-external-samplers-services-and-drivers.md"
+      ],
+      "evidence_refs": [
+        "EVID-OPTIONAL-PACK",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "compat.jvm.gui@1",
+      "capability_id": "jvm.gui",
+      "version": 1,
+      "partition": "optional-pack",
+      "availability": "deferred-not-provisioned",
+      "runtime_selectable": false,
+      "scope": "The exact Swing, Java Preferences, GUI-triggered execution, and plugin GUI editor boundary if GUI work resumes.",
+      "source_paths": [
+        "docs/decisions/0002-hybrid-gui-compatibility.md",
+        "docs/decisions/0009-standalone-rust-product-and-compatibility-pack.md"
+      ],
+      "evidence_refs": [
+        "EVID-GUI-DEFERRED",
+        "EVID-OPTIONAL-PACK"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "compat.jvm.plugins@1",
+      "capability_id": "jvm.plugins",
+      "version": 1,
+      "partition": "optional-pack",
+      "availability": "not-provisioned",
+      "runtime_selectable": false,
+      "scope": "Exact Java plugin discovery, class loading, aliases, plugin elements/functions, and plugin-provided GUI behavior.",
+      "source_paths": [
+        "crates/plugin-host/src/discovery.rs",
+        "crates/plugin-host/src/manifest.rs",
+        "docs/decisions/0005-pinned-jvm-scripting-and-plugins.md"
+      ],
+      "evidence_refs": [
+        "EVID-OPTIONAL-PACK",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "compat.jvm.scripting@1",
+      "capability_id": "jvm.scripting",
+      "version": 1,
+      "partition": "optional-pack",
+      "availability": "not-provisioned",
+      "runtime_selectable": false,
+      "scope": "BeanShell, Groovy, JEXL, Rhino, JSR223, Java Sampler, JUnit, and arbitrary user-class execution.",
+      "source_paths": [
+        "crates/bridge-protocol/src/jvm_capability.rs",
+        "crates/java-bridge/src/lib.rs",
+        "docs/decisions/0005-pinned-jvm-scripting-and-plugins.md"
+      ],
+      "evidence_refs": [
+        "EVID-OPTIONAL-PACK",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "compat.jvm.tls@1",
+      "capability_id": "jvm.tls-and-keytool",
+      "version": 1,
+      "partition": "optional-pack",
+      "availability": "not-provisioned",
+      "runtime_selectable": false,
+      "scope": "JMeter's JVM/provider certificate, JKS, recorder, and Java TLS workflow where exact Java behavior is selected.",
+      "source_paths": [
+        "docs/decisions/0006-http-transport-tls-proxy-boundaries.md",
+        "docs/research/compatibility-surface.md"
+      ],
+      "evidence_refs": [
+        "EVID-OPTIONAL-PACK",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "compat.rmi.jmeter@1",
+      "capability_id": "jmeter.rmi",
+      "version": 1,
+      "partition": "optional-pack",
+      "availability": "not-provisioned",
+      "runtime_selectable": false,
+      "scope": "Exact Java RMI controller/worker lifecycle, SSL, sample senders, and Java-provider behavior.",
+      "source_paths": [
+        "crates/bridge-protocol/src/rmi.rs",
+        "crates/java-bridge/src/lib.rs",
+        "docs/decisions/0004-pinned-java-rmi-adapter.md"
+      ],
+      "evidence_refs": [
+        "EVID-OPTIONAL-PACK",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "native.cli.configuration@1",
+      "capability_id": "cli.configuration",
+      "version": 1,
+      "partition": "native",
+      "availability": "code-boundary",
+      "runtime_selectable": true,
+      "scope": "Bounded option grammar, mode selection, ordered configuration inputs, and typed process-edge diagnostics; not a blanket CLI compatibility claim.",
+      "source_paths": [
+        "apps/jmeter-rs/src/lib.rs",
+        "apps/jmeter-rs/src/config.rs",
+        "apps/jmeter-rs/src/runner.rs"
+      ],
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE",
+        "EVID-NATIVE-ISOLATION"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "native.config.properties@1",
+      "capability_id": "config.properties",
+      "version": 1,
+      "partition": "native",
+      "availability": "code-boundary",
+      "runtime_selectable": true,
+      "scope": "Bounded Java-properties decoding, ordered precedence, explicit environment allowlist, and unknown-property retention.",
+      "source_paths": [
+        "apps/jmeter-rs/src/config.rs",
+        "apps/jmeter-rs/src/runner.rs"
+      ],
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE",
+        "EVID-NATIVE-ISOLATION"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "native.expr.bounded@1",
+      "capability_id": "expression.bounded",
+      "version": 1,
+      "partition": "native",
+      "availability": "code-boundary",
+      "runtime_selectable": true,
+      "scope": "Bounded expression syntax, variables, properties, and finite native function implementations where their injected capabilities are present.",
+      "source_paths": [
+        "crates/expr/src/lib.rs",
+        "crates/expr/src/builtins.rs"
+      ],
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "native.http.contract@1",
+      "capability_id": "http.contract",
+      "version": 1,
+      "partition": "native",
+      "availability": "code-boundary",
+      "runtime_selectable": true,
+      "scope": "Explicit HTTP request, response, redirect, cookie/cache/authentication, proxy, TLS-policy, timeout, and transport contracts with deterministic injected transports; not an app-wired JMX HTTP sampler claim.",
+      "source_paths": [
+        "crates/http/src/client.rs",
+        "crates/http/src/config.rs",
+        "crates/http/src/policy.rs",
+        "crates/http/src/protocol_v1.rs"
+      ],
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE",
+        "EVID-NATIVE-ISOLATION"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "native.jmx.semantic@1",
+      "capability_id": "jmx.semantic",
+      "version": 1,
+      "partition": "native",
+      "availability": "code-boundary",
+      "runtime_selectable": true,
+      "scope": "Bounded JMX syntax/semantic decoding, ordered topology, typed properties, aliases/upgrades, and opaque preservation without class loading.",
+      "source_paths": [
+        "crates/jmx/src/semantic.rs",
+        "crates/jmx/src/registry.rs",
+        "crates/model/src/tree.rs",
+        "crates/model/src/opaque.rs"
+      ],
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE",
+        "EVID-NATIVE-ISOLATION"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "native.jtl.csv@1",
+      "capability_id": "jtl.csv",
+      "version": 1,
+      "partition": "native",
+      "availability": "code-boundary",
+      "runtime_selectable": true,
+      "scope": "Bounded CSV result decoding/encoding, save configuration, columns, quoting, line endings, and event projection.",
+      "source_paths": [
+        "crates/results/src/csv.rs",
+        "crates/results/src/data.rs",
+        "crates/results/src/save_config_resolution.rs"
+      ],
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "native.jtl.xml@1",
+      "capability_id": "jtl.xml",
+      "version": 1,
+      "partition": "native",
+      "availability": "code-boundary",
+      "runtime_selectable": true,
+      "scope": "Bounded XML result decoding/encoding, nested samples, assertions, headers, response data, and event projection.",
+      "source_paths": [
+        "crates/results/src/jtl.rs",
+        "crates/results/src/xml.rs",
+        "crates/results/src/data.rs"
+      ],
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "native.results.reporting@1",
+      "capability_id": "results.reporting",
+      "version": 1,
+      "partition": "native",
+      "availability": "code-boundary",
+      "runtime_selectable": true,
+      "scope": "Deterministic result-event capture, listener/summary aggregates, dashboard metrics, HTML/JSON report models, and bounded publication adapters.",
+      "source_paths": [
+        "crates/results/src/event.rs",
+        "crates/report/src/listener.rs",
+        "crates/report/src/dashboard.rs",
+        "apps/jmeter-rs/src/runner.rs"
+      ],
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE",
+        "EVID-NATIVE-ISOLATION"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "native.runtime.adapters@1",
+      "capability_id": "runtime.bounded-adapters",
+      "version": 1,
+      "partition": "native",
+      "availability": "code-boundary",
+      "runtime_selectable": true,
+      "scope": "Bounded local expression configuration/preprocessor, literal extraction, and in-memory listener adapters; these are fixture adapters, not a complete JMeter component catalog.",
+      "source_paths": [
+        "crates/runtime/src/adapters.rs"
+      ],
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "native.runtime.local-plan@1",
+      "capability_id": "runtime.local-plan",
+      "version": 1,
+      "partition": "native",
+      "availability": "code-boundary",
+      "runtime_selectable": true,
+      "scope": "The current application adapter's bounded local ThreadGroup/TestPlan tree with GenericController, LoopController, DebugSampler, and whole-plan admission; unsupported nodes reject the run.",
+      "source_paths": [
+        "apps/jmeter-rs/src/runner.rs",
+        "crates/runtime/src/compiler.rs",
+        "crates/runtime/src/logic.rs",
+        "crates/runtime/src/lifecycle.rs"
+      ],
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE",
+        "EVID-NATIVE-ISOLATION"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "native.test-fixtures@1",
+      "capability_id": "test.local-fixtures",
+      "version": 1,
+      "partition": "native",
+      "availability": "code-boundary",
+      "runtime_selectable": false,
+      "scope": "Repository-local deterministic fixture, canonicalization, clock, scheduler, transport, and fuzz boundaries used to gather evidence.",
+      "source_paths": [
+        "crates/test-support/src/fixture.rs",
+        "crates/test-support/src/canonical.rs",
+        "fuzz/fuzz_targets"
+      ],
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "unavailable.cli-result-router@1",
+      "capability_id": "cli.result-router",
+      "version": 1,
+      "partition": "unavailable",
+      "availability": "unavailable",
+      "runtime_selectable": false,
+      "reason_code": "result-router-not-wired",
+      "scope": "CLI -l result persistence, report-at-end, and any output path requiring the not-yet-wired run-owned result router.",
+      "source_paths": [
+        "apps/jmeter-rs/src/runner.rs"
+      ],
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-NATIVE-ISOLATION"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "unavailable.external-services@1",
+      "capability_id": "external.services",
+      "version": 1,
+      "partition": "unavailable",
+      "availability": "unavailable",
+      "runtime_selectable": false,
+      "reason_code": "service-adapter-not-wired",
+      "scope": "External service, driver, backend-listener, recorder, or provider execution without an exact selected adapter and local pinned fixture.",
+      "source_paths": [
+        "crates/runtime/src/adapters.rs",
+        "docs/decisions/0007-external-samplers-services-and-drivers.md"
+      ],
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "unavailable.gui-deferred@1",
+      "capability_id": "gui.deferred",
+      "version": 1,
+      "partition": "unavailable",
+      "availability": "deferred",
+      "runtime_selectable": false,
+      "reason_code": "gui-runtime-deferred",
+      "future_partition": "optional-pack",
+      "future_capability_id": "compat.jvm.gui@1",
+      "scope": "Swing/Preferences GUI startup, editing, GUI-triggered execution, plugin editors, backups, autosave, templates, WorkBench, and look-and-feel behavior.",
+      "source_paths": [
+        "apps/jmeter-rs/src/runner.rs",
+        "docs/decisions/0002-hybrid-gui-compatibility.md",
+        "docs/decisions/0009-standalone-rust-product-and-compatibility-pack.md"
+      ],
+      "evidence_refs": [
+        "EVID-GUI-DEFERRED",
+        "EVID-UNAVAILABLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "unavailable.oracle-evidence@1",
+      "capability_id": "conformance.oracle-evidence",
+      "version": 1,
+      "partition": "unavailable",
+      "availability": "unavailable",
+      "runtime_selectable": false,
+      "reason_code": "pinned-oracle-not-materialized",
+      "scope": "A conformance evidence capability; local code/tests do not become profile evidence without the pinned oracle, fixture, provenance, and normalized diff.",
+      "source_paths": [
+        "compat/README.md",
+        "tools/jmeter-oracle/src/lib.rs",
+        "tools/xtask/src/external_acceptance.rs"
+      ],
+      "evidence_refs": [
+        "EVID-NATIVE-ORACLE",
+        "EVID-UNAVAILABLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "unavailable.os-process@1",
+      "capability_id": "external.os-process",
+      "version": 1,
+      "partition": "unavailable",
+      "availability": "unavailable",
+      "runtime_selectable": false,
+      "reason_code": "supervisor-gate-not-passed",
+      "scope": "OS Process sampler, access-log process behavior, or any subprocess fallback not activated through the shared exact-child supervisor.",
+      "source_paths": [
+        "crates/process-supervision/src/lib.rs",
+        "docs/decisions/0001-shared-process-supervision.md",
+        "docs/decisions/0007-external-samplers-services-and-drivers.md"
+      ],
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-NATIVE-ISOLATION"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "path_id": "unavailable.unsupported-elements@1",
+      "capability_id": "runtime.unsupported-elements",
+      "version": 1,
+      "partition": "unavailable",
+      "availability": "unavailable",
+      "runtime_selectable": false,
+      "reason_code": "unsupported-capability",
+      "scope": "Enabled JMX elements, controllers, timers, assertions, processors, extractors, listeners, or services outside a named bounded native case or explicitly negotiated compatibility-pack case.",
+      "source_paths": [
+        "apps/jmeter-rs/src/runner.rs",
+        "crates/runtime/src/capabilities.rs",
+        "crates/runtime/src/adapters.rs"
+      ],
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-NATIVE-ISOLATION"
+      ],
+      "claim_status": "not-promoted"
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "CLI-001.native-option-parser",
+      "feature_id": "CLI-001",
+      "partition": "native",
+      "capability_id": "native.cli.configuration@1",
+      "implementation_state": "code-boundary",
+      "scope": "Bounded short/long option token parsing and repeat preservation.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE",
+        "EVID-NATIVE-ISOLATION"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "CLI-001.unavailable-last-gui-state",
+      "feature_id": "CLI-001",
+      "partition": "unavailable",
+      "capability_id": "unavailable.gui-deferred@1",
+      "implementation_state": "fail-closed",
+      "scope": "LAST based on implicit GUI recent-project state; only an explicit bounded recent JMX path is accepted by the current adapter.",
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-GUI-DEFERRED"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "CLI-002.native-mode-guards",
+      "feature_id": "CLI-002",
+      "partition": "native",
+      "capability_id": "native.cli.configuration@1",
+      "implementation_state": "code-boundary",
+      "scope": "Bounded mode restrictions for non-GUI, report-only, GUI, and remote selections.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "CLI-002.unavailable-result-router",
+      "feature_id": "CLI-002",
+      "partition": "unavailable",
+      "capability_id": "unavailable.cli-result-router@1",
+      "implementation_state": "fail-closed",
+      "scope": "Option combinations requiring -l result publication, report-at-end, or force-delete output before the run-owned result router is wired.",
+      "evidence_refs": [
+        "EVID-UNAVAILABLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "CLI-003.native-run-category",
+      "feature_id": "CLI-003",
+      "partition": "native",
+      "capability_id": "native.cli.configuration@1",
+      "implementation_state": "code-boundary",
+      "scope": "Typed normal, sample-failure, fatal, and remote outcome categories for the current bounded application edge.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE",
+        "EVID-NATIVE-ISOLATION"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "CLI-003.unavailable-oracle-log",
+      "feature_id": "CLI-003",
+      "partition": "unavailable",
+      "capability_id": "unavailable.oracle-evidence@1",
+      "implementation_state": "fail-closed",
+      "scope": "Exact JMeter process exit/logging behavior and pinned differential output.",
+      "evidence_refs": [
+        "EVID-NATIVE-ORACLE",
+        "EVID-UNAVAILABLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "CFG-001.native-ordered-resolution",
+      "feature_id": "CFG-001",
+      "partition": "native",
+      "capability_id": "native.config.properties@1",
+      "implementation_state": "code-boundary",
+      "scope": "Ordered bounded property sources and explicit command-line operation precedence.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "CFG-002.native-lossless-property-map",
+      "feature_id": "CFG-002",
+      "partition": "native",
+      "capability_id": "native.config.properties@1",
+      "implementation_state": "code-boundary",
+      "scope": "Bounded Java-properties decoding with unknown values retained and explicit UTF-16 handling.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "CFG-002.unavailable-full-default-inventory",
+      "feature_id": "CFG-002",
+      "partition": "unavailable",
+      "capability_id": "unavailable.unsupported-elements@1",
+      "implementation_state": "fail-closed",
+      "scope": "The complete documented 5.6.3 property family/default inventory as an executable compatibility claim.",
+      "evidence_refs": [
+        "EVID-NATIVE-ORACLE",
+        "EVID-UNAVAILABLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "CFG-003.native-allowlisted-environment",
+      "feature_id": "CFG-003",
+      "partition": "native",
+      "capability_id": "native.config.properties@1",
+      "implementation_state": "code-boundary",
+      "scope": "Explicit bounded locale/timezone/environment allowlist and rooted path policy.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ISOLATION"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "CFG-003.unavailable-cross-platform",
+      "feature_id": "CFG-003",
+      "partition": "unavailable",
+      "capability_id": "unavailable.oracle-evidence@1",
+      "implementation_state": "fail-closed",
+      "scope": "Cross-platform path, locale, encoding, timezone, and inherited-environment conformance matrix.",
+      "evidence_refs": [
+        "EVID-NATIVE-ORACLE",
+        "EVID-UNAVAILABLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "JMX-001.native-topology",
+      "feature_id": "JMX-001",
+      "partition": "native",
+      "capability_id": "native.jmx.semantic@1",
+      "implementation_state": "code-boundary",
+      "scope": "Root metadata and ordered alternating element/hashTree topology in the bounded semantic model.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE",
+        "EVID-NATIVE-ISOLATION"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "JMX-002.native-typed-properties",
+      "feature_id": "JMX-002",
+      "partition": "native",
+      "capability_id": "native.jmx.semantic@1",
+      "implementation_state": "code-boundary",
+      "scope": "Typed property nodes, XML escaping, absent-versus-empty values, and bounded opaque payload retention.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "JMX-003.native-registry",
+      "feature_id": "JMX-003",
+      "partition": "native",
+      "capability_id": "native.jmx.semantic@1",
+      "implementation_state": "code-boundary",
+      "scope": "Pinned 5.6.3 SaveService alias and upgrade table parsing without class loading.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "JMX-004.native-opaque-preservation",
+      "feature_id": "JMX-004",
+      "partition": "native",
+      "capability_id": "native.jmx.semantic@1",
+      "implementation_state": "code-boundary",
+      "scope": "Unknown/plugin element and property subtrees survive bounded load, inspection, and save; they are not executable.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE",
+        "EVID-UNAVAILABLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "JMX-004.optional-plugin-execution",
+      "feature_id": "JMX-004",
+      "partition": "optional-pack",
+      "capability_id": "compat.jvm.plugins@1",
+      "implementation_state": "not-provisioned",
+      "scope": "Execution or exact class/alias resolution of plugin elements.",
+      "evidence_refs": [
+        "EVID-OPTIONAL-PACK",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "JTL-001.native-xml-structure",
+      "feature_id": "JTL-001",
+      "partition": "native",
+      "capability_id": "native.jtl.xml@1",
+      "implementation_state": "code-boundary",
+      "scope": "Bounded XML testResults/sample/httpSample roots, aliases, and event tree shape.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "JTL-002.native-xml-details",
+      "feature_id": "JTL-002",
+      "partition": "native",
+      "capability_id": "native.jtl.xml@1",
+      "implementation_state": "code-boundary",
+      "scope": "Bounded nested results, assertions, headers, sampler data, response data/files, and optional fields.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "JTL-003.native-csv",
+      "feature_id": "JTL-003",
+      "partition": "native",
+      "capability_id": "native.jtl.csv@1",
+      "implementation_state": "code-boundary",
+      "scope": "Bounded CSV headers, configured columns, delimiter/quoting, sample variables, and row/event conversion.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "JTL-004.native-time-encoding",
+      "feature_id": "JTL-004",
+      "partition": "native",
+      "capability_id": "native.jtl.csv@1",
+      "implementation_state": "code-boundary",
+      "scope": "Bounded timestamp formats, encoding, line endings, and explicit locale/timezone inputs.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "JTL-005.native-save-config",
+      "feature_id": "JTL-005",
+      "partition": "native",
+      "capability_id": "native.jtl.csv@1",
+      "implementation_state": "code-boundary",
+      "scope": "Bounded save-service field resolution and explicit CSV/XML wire configuration.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "ELEM-001.native-http-contract",
+      "feature_id": "ELEM-001",
+      "partition": "native",
+      "capability_id": "native.http.contract@1",
+      "implementation_state": "code-boundary",
+      "scope": "HTTP transport/request policy contracts and deterministic injected-transport behavior; the current CLI does not wire this crate as a JMX HTTP Request sampler.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE",
+        "EVID-NATIVE-ISOLATION"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "ELEM-001.optional-provider-samplers",
+      "feature_id": "ELEM-001",
+      "partition": "optional-pack",
+      "capability_id": "compat.jvm.external-elements@1",
+      "implementation_state": "not-provisioned",
+      "scope": "FTP/JDBC/Java/LDAP/TCP exact provider or arbitrary-Java sampler cases.",
+      "evidence_refs": [
+        "EVID-OPTIONAL-PACK",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "ELEM-001.unavailable-plan-sampler",
+      "feature_id": "ELEM-001",
+      "partition": "unavailable",
+      "capability_id": "unavailable.unsupported-elements@1",
+      "implementation_state": "fail-closed",
+      "scope": "A JMX plan selecting a sampler not covered by the bounded local adapter or an explicitly negotiated pack path.",
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-NATIVE-ISOLATION"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "ELEM-002.optional-provider-samplers",
+      "feature_id": "ELEM-002",
+      "partition": "optional-pack",
+      "capability_id": "compat.jvm.external-elements@1",
+      "implementation_state": "not-provisioned",
+      "scope": "JMS/mail/MongoDB/Bolt/JUnit exact provider, service, or user-class cases.",
+      "evidence_refs": [
+        "EVID-OPTIONAL-PACK",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "ELEM-002.unavailable-os-access-log",
+      "feature_id": "ELEM-002",
+      "partition": "unavailable",
+      "capability_id": "unavailable.os-process@1",
+      "implementation_state": "fail-closed",
+      "scope": "OS Process and access-log cases until shared supervisor and exact parser evidence gates pass.",
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-NATIVE-ISOLATION"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "ELEM-003.native-local-core",
+      "feature_id": "ELEM-003",
+      "partition": "native",
+      "capability_id": "native.runtime.local-plan@1",
+      "implementation_state": "code-boundary",
+      "scope": "Current bounded local ThreadGroup/TestPlan tree with GenericController and LoopController traversal/lifecycle.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE",
+        "EVID-NATIVE-ISOLATION"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "ELEM-003.unavailable-unimplemented-controllers",
+      "feature_id": "ELEM-003",
+      "partition": "unavailable",
+      "capability_id": "unavailable.unsupported-elements@1",
+      "implementation_state": "fail-closed",
+      "scope": "Logic controllers, lifecycle groups, and scheduler interactions outside GenericController/LoopController/ThreadGroup.",
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "ELEM-004.native-report-capture",
+      "feature_id": "ELEM-004",
+      "partition": "native",
+      "capability_id": "native.results.reporting@1",
+      "implementation_state": "code-boundary",
+      "scope": "Bounded in-memory event capture and report-layer result aggregation.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "ELEM-004.unavailable-cli-listener",
+      "feature_id": "ELEM-004",
+      "partition": "unavailable",
+      "capability_id": "unavailable.cli-result-router@1",
+      "implementation_state": "fail-closed",
+      "scope": "JMX listener execution and CLI -l publication until the run-owned result router is wired.",
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-NATIVE-ISOLATION"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "ELEM-005.native-adapter-config",
+      "feature_id": "ELEM-005",
+      "partition": "native",
+      "capability_id": "native.runtime.adapters@1",
+      "implementation_state": "code-boundary",
+      "scope": "Bounded expression-backed configuration adapter only; it is not the JMeter configuration-element catalog.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "ELEM-005.unavailable-jmeter-config",
+      "feature_id": "ELEM-005",
+      "partition": "unavailable",
+      "capability_id": "unavailable.unsupported-elements@1",
+      "implementation_state": "fail-closed",
+      "scope": "Full JMeter configuration-element scope, precedence, cookies/cache/DNS state, CSV sharing, and provider pools.",
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "ELEM-006.native-debug-shape",
+      "feature_id": "ELEM-006",
+      "partition": "native",
+      "capability_id": "native.runtime.local-plan@1",
+      "implementation_state": "code-boundary",
+      "scope": "The bounded DebugSampler adapter's deterministic response-assertion failure shape only.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "ELEM-006.unavailable-assertions",
+      "feature_id": "ELEM-006",
+      "partition": "unavailable",
+      "capability_id": "unavailable.unsupported-elements@1",
+      "implementation_state": "fail-closed",
+      "scope": "General assertion parsing, evaluation, and failure propagation outside the bounded DebugSampler fixture.",
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "ELEM-007.unavailable-timers",
+      "feature_id": "ELEM-007",
+      "partition": "unavailable",
+      "capability_id": "unavailable.unsupported-elements@1",
+      "implementation_state": "fail-closed",
+      "scope": "JMeter timer elements and scheduler/ramp-up interactions are not wired into the current application plan compiler.",
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "ELEM-008.native-fixture-adapters",
+      "feature_id": "ELEM-008",
+      "partition": "native",
+      "capability_id": "native.runtime.adapters@1",
+      "implementation_state": "code-boundary",
+      "scope": "Bounded expression preprocessor and literal response extractor fixture adapters only.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "ELEM-008.optional-external-processors",
+      "feature_id": "ELEM-008",
+      "partition": "optional-pack",
+      "capability_id": "compat.jvm.external-elements@1",
+      "implementation_state": "not-provisioned",
+      "scope": "JVM/script/plugin/JDBC and provider-backed processor/extractor cases.",
+      "evidence_refs": [
+        "EVID-OPTIONAL-PACK",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "ELEM-008.unavailable-remaining-processors",
+      "feature_id": "ELEM-008",
+      "partition": "unavailable",
+      "capability_id": "unavailable.unsupported-elements@1",
+      "implementation_state": "fail-closed",
+      "scope": "Full JMeter processor/extractor catalog and response mutation semantics outside the named fixture or pack cases.",
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "ELEM-009.native-alias-preservation",
+      "feature_id": "ELEM-009",
+      "partition": "native",
+      "capability_id": "native.jmx.semantic@1",
+      "implementation_state": "code-boundary",
+      "scope": "Lossless retention and pinned alias/upgrade-table handling for legacy element syntax.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE",
+        "EVID-UNAVAILABLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "ELEM-009.optional-legacy-java-alias",
+      "feature_id": "ELEM-009",
+      "partition": "optional-pack",
+      "capability_id": "compat.jvm.external-elements@1",
+      "implementation_state": "not-provisioned",
+      "scope": "Execution of deprecated BSF/report/MongoDB aliases using their exact Java/provider semantics.",
+      "evidence_refs": [
+        "EVID-OPTIONAL-PACK",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "FUNC-001.native-builtin-core",
+      "feature_id": "FUNC-001",
+      "partition": "native",
+      "capability_id": "native.expr.bounded@1",
+      "implementation_state": "code-boundary",
+      "scope": "Finite built-in expression registry and pure argument/value functions with explicitly injected capabilities.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "FUNC-001.unavailable-context-dependent",
+      "feature_id": "FUNC-001",
+      "partition": "unavailable",
+      "capability_id": "unavailable.unsupported-elements@1",
+      "implementation_state": "fail-closed",
+      "scope": "File, clock, host, response, mutation, or script functions when their explicit capability is absent.",
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "FUNC-002.native-expression",
+      "feature_id": "FUNC-002",
+      "partition": "native",
+      "capability_id": "native.expr.bounded@1",
+      "implementation_state": "code-boundary",
+      "scope": "Bounded variable/function parsing, expansion timing within the supplied context, and explicit undefined-name behavior.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "FUNC-002.unavailable-full-timing",
+      "feature_id": "FUNC-002",
+      "partition": "unavailable",
+      "capability_id": "unavailable.unsupported-elements@1",
+      "implementation_state": "fail-closed",
+      "scope": "The complete JMeter thread/function-instance timing and cross-thread behavior matrix.",
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "FUNC-003.optional-script-functions",
+      "feature_id": "FUNC-003",
+      "partition": "optional-pack",
+      "capability_id": "compat.jvm.scripting@1",
+      "implementation_state": "not-provisioned",
+      "scope": "BeanShell/Groovy/JEXL/Rhino script-function engines.",
+      "evidence_refs": [
+        "EVID-OPTIONAL-PACK",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "SCRIPT-001.optional-jsr223",
+      "feature_id": "SCRIPT-001",
+      "partition": "optional-pack",
+      "capability_id": "compat.jvm.scripting@1",
+      "implementation_state": "not-provisioned",
+      "scope": "JSR223 bindings, caching, script files, exceptions, and engine lifecycle.",
+      "evidence_refs": [
+        "EVID-OPTIONAL-PACK",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "SCRIPT-002.optional-user-classes",
+      "feature_id": "SCRIPT-002",
+      "partition": "optional-pack",
+      "capability_id": "compat.jvm.scripting@1",
+      "implementation_state": "not-provisioned",
+      "scope": "Java Sampler, JUnit Request, arbitrary user classes, and class-loader identity.",
+      "evidence_refs": [
+        "EVID-OPTIONAL-PACK",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "REPORT-001.native-aggregates",
+      "feature_id": "REPORT-001",
+      "partition": "native",
+      "capability_id": "native.results.reporting@1",
+      "implementation_state": "code-boundary",
+      "scope": "Deterministic Aggregate/Summary/graph data models over bounded result events.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "REPORT-001.unavailable-cli-gui-listeners",
+      "feature_id": "REPORT-001",
+      "partition": "unavailable",
+      "capability_id": "unavailable.cli-result-router@1",
+      "implementation_state": "fail-closed",
+      "scope": "Complete CLI/GUI listener execution and output publication.",
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "REPORT-002.native-dashboard",
+      "feature_id": "REPORT-002",
+      "partition": "native",
+      "capability_id": "native.results.reporting@1",
+      "implementation_state": "code-boundary",
+      "scope": "Bounded HTML/JSON dashboard metrics and separate dashboard percentile/report projections from CSV/XML input.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE",
+        "EVID-NATIVE-ISOLATION"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "REPORT-003.unavailable-backend",
+      "feature_id": "REPORT-003",
+      "partition": "unavailable",
+      "capability_id": "unavailable.external-services@1",
+      "implementation_state": "fail-closed",
+      "scope": "Graphite/InfluxDB backend listener network/service execution without a named pinned adapter and fixture.",
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "DIST-001.optional-rmi",
+      "feature_id": "DIST-001",
+      "partition": "optional-pack",
+      "capability_id": "compat.rmi.jmeter@1",
+      "implementation_state": "not-provisioned",
+      "scope": "Exact Java RMI server/client, -r/-R/-G/-X, worker multiplication, and lifecycle.",
+      "evidence_refs": [
+        "EVID-OPTIONAL-PACK",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "DIST-001.unavailable-native",
+      "feature_id": "DIST-001",
+      "partition": "unavailable",
+      "capability_id": "unavailable.unsupported-elements@1",
+      "implementation_state": "fail-closed",
+      "scope": "Java RMI compatibility cannot be satisfied by the separate Rust-native remote protocol or a hidden fallback.",
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "DIST-002.optional-rmi-tls",
+      "feature_id": "DIST-002",
+      "partition": "optional-pack",
+      "capability_id": "compat.rmi.jmeter@1",
+      "implementation_state": "not-provisioned",
+      "scope": "JMeter RMI SSL, ports, keystore/truststore, and failure behavior.",
+      "evidence_refs": [
+        "EVID-OPTIONAL-PACK",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "DIST-003.optional-sender",
+      "feature_id": "DIST-003",
+      "partition": "optional-pack",
+      "capability_id": "compat.rmi.jmeter@1",
+      "implementation_state": "not-provisioned",
+      "scope": "Exact Java sample-sender and backpressure modes.",
+      "evidence_refs": [
+        "EVID-OPTIONAL-PACK",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "DIST-004.optional-transfer",
+      "feature_id": "DIST-004",
+      "partition": "optional-pack",
+      "capability_id": "compat.rmi.jmeter@1",
+      "implementation_state": "not-provisioned",
+      "scope": "Exact Java RMI plan-transfer and non-transfer of data/dependencies.",
+      "evidence_refs": [
+        "EVID-OPTIONAL-PACK",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "PROXY-001.native-proxy-policy",
+      "feature_id": "PROXY-001",
+      "partition": "native",
+      "capability_id": "native.http.contract@1",
+      "implementation_state": "code-boundary",
+      "scope": "Explicit HTTP/HTTPS proxy, no-proxy, credential-redaction, and route policy models with injected transport context.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "PROXY-001.unavailable-cli-proxy-execution",
+      "feature_id": "PROXY-001",
+      "partition": "unavailable",
+      "capability_id": "unavailable.external-services@1",
+      "implementation_state": "fail-closed",
+      "scope": "JMX/CLI HTTP sampler proxy execution in the current app, which does not yet wire the HTTP crate as a sampler.",
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "PROXY-002.optional-recorder-jvm",
+      "feature_id": "PROXY-002",
+      "partition": "optional-pack",
+      "capability_id": "compat.jvm.tls@1",
+      "implementation_state": "not-provisioned",
+      "scope": "Exact JMeter HTTP(S) recorder, Java certificate generation, CONNECT/TLS interception, filters, and generated JMX.",
+      "evidence_refs": [
+        "EVID-OPTIONAL-PACK",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "PROXY-002.unavailable-recorder-runtime",
+      "feature_id": "PROXY-002",
+      "partition": "unavailable",
+      "capability_id": "unavailable.gui-deferred@1",
+      "implementation_state": "fail-closed",
+      "scope": "Recorder startup and GUI-triggered operation in standalone mode.",
+      "evidence_refs": [
+        "EVID-GUI-DEFERRED",
+        "EVID-UNAVAILABLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "PROXY-003.unavailable-mirror",
+      "feature_id": "PROXY-003",
+      "partition": "unavailable",
+      "capability_id": "unavailable.external-services@1",
+      "implementation_state": "fail-closed",
+      "scope": "JMeter HTTP Mirror Server CLI/UI execution is not wired into the current application.",
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "TLS-001.native-tls-policy",
+      "feature_id": "TLS-001",
+      "partition": "native",
+      "capability_id": "native.http.contract@1",
+      "implementation_state": "code-boundary",
+      "scope": "Explicit bounded TLS policy and transport-context fields; provider execution and JMeter Java trust-store equivalence are not claimed.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "TLS-001.unavailable-provider-execution",
+      "feature_id": "TLS-001",
+      "partition": "unavailable",
+      "capability_id": "unavailable.external-services@1",
+      "implementation_state": "fail-closed",
+      "scope": "JMeter SSL Manager/keystore/provider execution without an exact selected native transport or compatibility-pack identity.",
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "TLS-002.optional-recorder-jks",
+      "feature_id": "TLS-002",
+      "partition": "optional-pack",
+      "capability_id": "compat.jvm.tls@1",
+      "implementation_state": "not-provisioned",
+      "scope": "JKS/dynamic certificate/keytool recorder workflow and exact Java defaults.",
+      "evidence_refs": [
+        "EVID-OPTIONAL-PACK",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "PLUG-001.optional-discovery",
+      "feature_id": "PLUG-001",
+      "partition": "optional-pack",
+      "capability_id": "compat.jvm.plugins@1",
+      "implementation_state": "not-provisioned",
+      "scope": "Exact Java classpath/plugin discovery and ordering.",
+      "evidence_refs": [
+        "EVID-OPTIONAL-PACK",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "PLUG-002.optional-contract",
+      "feature_id": "PLUG-002",
+      "partition": "optional-pack",
+      "capability_id": "compat.jvm.plugins@1",
+      "implementation_state": "not-provisioned",
+      "scope": "Exact plugin element/function/JMX alias contract and declared plugin dependencies.",
+      "evidence_refs": [
+        "EVID-OPTIONAL-PACK",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "PLUG-003.native-subtree-preservation",
+      "feature_id": "PLUG-003",
+      "partition": "native",
+      "capability_id": "native.jmx.semantic@1",
+      "implementation_state": "code-boundary",
+      "scope": "Missing plugin classes remain bounded opaque JMX data and are not silently dropped.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-UNAVAILABLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "PLUG-003.unavailable-diagnostics",
+      "feature_id": "PLUG-003",
+      "partition": "unavailable",
+      "capability_id": "unavailable.unsupported-elements@1",
+      "implementation_state": "fail-closed",
+      "scope": "Exact plugin-unavailable execution diagnostics and plugin negotiation.",
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "GUI-001.native-guiclass-preservation",
+      "feature_id": "GUI-001",
+      "partition": "native",
+      "capability_id": "native.jmx.semantic@1",
+      "implementation_state": "code-boundary",
+      "scope": "Headless retention of guiclass and GUI-originated JMX fields during bounded semantic load/save.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-GUI-DEFERRED",
+        "EVID-NATIVE-ORACLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "GUI-001.unavailable-runtime-deferred",
+      "feature_id": "GUI-001",
+      "partition": "unavailable",
+      "capability_id": "unavailable.gui-deferred@1",
+      "implementation_state": "deferred",
+      "scope": "Exact GUI startup/editor/plugin-editor behavior and GUI-triggered execution.",
+      "evidence_refs": [
+        "EVID-GUI-DEFERRED",
+        "EVID-UNAVAILABLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "GUI-002.unavailable-gui-persistence",
+      "feature_id": "GUI-002",
+      "partition": "unavailable",
+      "capability_id": "unavailable.gui-deferred@1",
+      "implementation_state": "deferred",
+      "scope": "Backups, autosave, LAST GUI state, templates, WorkBench, and GUI filesystem persistence.",
+      "evidence_refs": [
+        "EVID-GUI-DEFERRED",
+        "EVID-UNAVAILABLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "GUI-003.unavailable-gui-runtime",
+      "feature_id": "GUI-003",
+      "partition": "unavailable",
+      "capability_id": "unavailable.gui-deferred@1",
+      "implementation_state": "deferred",
+      "scope": "Locale/look-and-feel/toolbar/tree/undo GUI runtime behavior.",
+      "evidence_refs": [
+        "EVID-GUI-DEFERRED",
+        "EVID-UNAVAILABLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "TEST-001.native-local-tests",
+      "feature_id": "TEST-001",
+      "partition": "native",
+      "capability_id": "native.test-fixtures@1",
+      "implementation_state": "code-boundary",
+      "scope": "Repository-local unit/property/fuzz fixture infrastructure and deterministic test-support adapters.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "TEST-001.unavailable-oracle-harness",
+      "feature_id": "TEST-001",
+      "partition": "unavailable",
+      "capability_id": "unavailable.oracle-evidence@1",
+      "implementation_state": "fail-closed",
+      "scope": "A completed pinned-oracle differential harness and release conformance report.",
+      "evidence_refs": [
+        "EVID-NATIVE-ORACLE",
+        "EVID-UNAVAILABLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "TEST-002.unavailable-external-pins",
+      "feature_id": "TEST-002",
+      "partition": "unavailable",
+      "capability_id": "unavailable.external-services@1",
+      "implementation_state": "fail-closed",
+      "scope": "Protocol fixture containers, external dependency pins, and provider/plugin provenance are not a standalone native capability.",
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-OPTIONAL-PACK"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "TEST-003.native-fuzz-boundaries",
+      "feature_id": "TEST-003",
+      "partition": "native",
+      "capability_id": "native.test-fixtures@1",
+      "implementation_state": "code-boundary",
+      "scope": "Bounded malformed/unknown/interrupted JMX/JTL parser inputs and no-drop fixture invariants.",
+      "evidence_refs": [
+        "EVID-NATIVE-UNIT",
+        "EVID-UNAVAILABLE"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "TEST-004.unavailable-external-suite",
+      "feature_id": "TEST-004",
+      "partition": "unavailable",
+      "capability_id": "unavailable.external-services@1",
+      "implementation_state": "fail-closed",
+      "scope": "Distributed, recorder, TLS, service, and external-adapter integration suite without the required isolated dependencies.",
+      "evidence_refs": [
+        "EVID-UNAVAILABLE",
+        "EVID-OPTIONAL-PACK"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "TEST-005.native-artifact-check",
+      "feature_id": "TEST-005",
+      "partition": "native",
+      "capability_id": "native.test-fixtures@1",
+      "implementation_state": "code-boundary",
+      "scope": "Deterministic standalone archive inventory and negative assertions for Java/JMeter/helper/plugin sidecars.",
+      "evidence_refs": [
+        "EVID-RELEASE-ARTIFACT",
+        "EVID-NATIVE-ISOLATION"
+      ],
+      "claim_status": "not-promoted"
+    },
+    {
+      "case_id": "TEST-005.unavailable-cross-platform",
+      "feature_id": "TEST-005",
+      "partition": "unavailable",
+      "capability_id": "unavailable.oracle-evidence@1",
+      "implementation_state": "fail-closed",
+      "scope": "Cross-platform native-runtime and performance evidence for every declared release target.",
+      "evidence_refs": [
+        "EVID-RELEASE-ARTIFACT",
+        "EVID-NATIVE-ORACLE",
+        "EVID-UNAVAILABLE"
+      ],
+      "claim_status": "not-promoted"
+    }
+  ],
+  "features": [
+    {
+      "parent_profile_index": 0,
+      "id": "CLI-001",
+      "parent_status": "planned",
+      "case_ids": [
+        "CLI-001.native-option-parser",
+        "CLI-001.unavailable-last-gui-state"
+      ],
+      "evidence_source": "parent_profile.features[CLI-001]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 1,
+      "id": "CLI-002",
+      "parent_status": "planned",
+      "case_ids": [
+        "CLI-002.native-mode-guards",
+        "CLI-002.unavailable-result-router"
+      ],
+      "evidence_source": "parent_profile.features[CLI-002]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 2,
+      "id": "CLI-003",
+      "parent_status": "planned",
+      "case_ids": [
+        "CLI-003.native-run-category",
+        "CLI-003.unavailable-oracle-log"
+      ],
+      "evidence_source": "parent_profile.features[CLI-003]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 3,
+      "id": "CFG-001",
+      "parent_status": "planned",
+      "case_ids": [
+        "CFG-001.native-ordered-resolution"
+      ],
+      "evidence_source": "parent_profile.features[CFG-001]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 4,
+      "id": "CFG-002",
+      "parent_status": "planned",
+      "case_ids": [
+        "CFG-002.native-lossless-property-map",
+        "CFG-002.unavailable-full-default-inventory"
+      ],
+      "evidence_source": "parent_profile.features[CFG-002]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 5,
+      "id": "CFG-003",
+      "parent_status": "planned",
+      "case_ids": [
+        "CFG-003.native-allowlisted-environment",
+        "CFG-003.unavailable-cross-platform"
+      ],
+      "evidence_source": "parent_profile.features[CFG-003]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 6,
+      "id": "JMX-001",
+      "parent_status": "planned",
+      "case_ids": [
+        "JMX-001.native-topology"
+      ],
+      "evidence_source": "parent_profile.features[JMX-001]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 7,
+      "id": "JMX-002",
+      "parent_status": "planned",
+      "case_ids": [
+        "JMX-002.native-typed-properties"
+      ],
+      "evidence_source": "parent_profile.features[JMX-002]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 8,
+      "id": "JMX-003",
+      "parent_status": "planned",
+      "case_ids": [
+        "JMX-003.native-registry"
+      ],
+      "evidence_source": "parent_profile.features[JMX-003]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 9,
+      "id": "JMX-004",
+      "parent_status": "external",
+      "case_ids": [
+        "JMX-004.native-opaque-preservation",
+        "JMX-004.optional-plugin-execution"
+      ],
+      "evidence_source": "parent_profile.features[JMX-004]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 10,
+      "id": "JTL-001",
+      "parent_status": "planned",
+      "case_ids": [
+        "JTL-001.native-xml-structure"
+      ],
+      "evidence_source": "parent_profile.features[JTL-001]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 11,
+      "id": "JTL-002",
+      "parent_status": "planned",
+      "case_ids": [
+        "JTL-002.native-xml-details"
+      ],
+      "evidence_source": "parent_profile.features[JTL-002]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 12,
+      "id": "JTL-003",
+      "parent_status": "planned",
+      "case_ids": [
+        "JTL-003.native-csv"
+      ],
+      "evidence_source": "parent_profile.features[JTL-003]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 13,
+      "id": "JTL-004",
+      "parent_status": "planned",
+      "case_ids": [
+        "JTL-004.native-time-encoding"
+      ],
+      "evidence_source": "parent_profile.features[JTL-004]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 14,
+      "id": "JTL-005",
+      "parent_status": "planned",
+      "case_ids": [
+        "JTL-005.native-save-config"
+      ],
+      "evidence_source": "parent_profile.features[JTL-005]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 15,
+      "id": "ELEM-001",
+      "parent_status": "external",
+      "case_ids": [
+        "ELEM-001.native-http-contract",
+        "ELEM-001.optional-provider-samplers",
+        "ELEM-001.unavailable-plan-sampler"
+      ],
+      "evidence_source": "parent_profile.features[ELEM-001]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 16,
+      "id": "ELEM-002",
+      "parent_status": "external",
+      "case_ids": [
+        "ELEM-002.optional-provider-samplers",
+        "ELEM-002.unavailable-os-access-log"
+      ],
+      "evidence_source": "parent_profile.features[ELEM-002]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 17,
+      "id": "ELEM-003",
+      "parent_status": "planned",
+      "case_ids": [
+        "ELEM-003.native-local-core",
+        "ELEM-003.unavailable-unimplemented-controllers"
+      ],
+      "evidence_source": "parent_profile.features[ELEM-003]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 18,
+      "id": "ELEM-004",
+      "parent_status": "planned",
+      "case_ids": [
+        "ELEM-004.native-report-capture",
+        "ELEM-004.unavailable-cli-listener"
+      ],
+      "evidence_source": "parent_profile.features[ELEM-004]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 19,
+      "id": "ELEM-005",
+      "parent_status": "planned",
+      "case_ids": [
+        "ELEM-005.native-adapter-config",
+        "ELEM-005.unavailable-jmeter-config"
+      ],
+      "evidence_source": "parent_profile.features[ELEM-005]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 20,
+      "id": "ELEM-006",
+      "parent_status": "planned",
+      "case_ids": [
+        "ELEM-006.native-debug-shape",
+        "ELEM-006.unavailable-assertions"
+      ],
+      "evidence_source": "parent_profile.features[ELEM-006]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 21,
+      "id": "ELEM-007",
+      "parent_status": "planned",
+      "case_ids": [
+        "ELEM-007.unavailable-timers"
+      ],
+      "evidence_source": "parent_profile.features[ELEM-007]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 22,
+      "id": "ELEM-008",
+      "parent_status": "external",
+      "case_ids": [
+        "ELEM-008.native-fixture-adapters",
+        "ELEM-008.optional-external-processors",
+        "ELEM-008.unavailable-remaining-processors"
+      ],
+      "evidence_source": "parent_profile.features[ELEM-008]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 23,
+      "id": "ELEM-009",
+      "parent_status": "external",
+      "case_ids": [
+        "ELEM-009.native-alias-preservation",
+        "ELEM-009.optional-legacy-java-alias"
+      ],
+      "evidence_source": "parent_profile.features[ELEM-009]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 24,
+      "id": "FUNC-001",
+      "parent_status": "planned",
+      "case_ids": [
+        "FUNC-001.native-builtin-core",
+        "FUNC-001.unavailable-context-dependent"
+      ],
+      "evidence_source": "parent_profile.features[FUNC-001]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 25,
+      "id": "FUNC-002",
+      "parent_status": "planned",
+      "case_ids": [
+        "FUNC-002.native-expression",
+        "FUNC-002.unavailable-full-timing"
+      ],
+      "evidence_source": "parent_profile.features[FUNC-002]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 26,
+      "id": "FUNC-003",
+      "parent_status": "external",
+      "case_ids": [
+        "FUNC-003.optional-script-functions"
+      ],
+      "evidence_source": "parent_profile.features[FUNC-003]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 27,
+      "id": "SCRIPT-001",
+      "parent_status": "external",
+      "case_ids": [
+        "SCRIPT-001.optional-jsr223"
+      ],
+      "evidence_source": "parent_profile.features[SCRIPT-001]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 28,
+      "id": "SCRIPT-002",
+      "parent_status": "external",
+      "case_ids": [
+        "SCRIPT-002.optional-user-classes"
+      ],
+      "evidence_source": "parent_profile.features[SCRIPT-002]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 29,
+      "id": "REPORT-001",
+      "parent_status": "planned",
+      "case_ids": [
+        "REPORT-001.native-aggregates",
+        "REPORT-001.unavailable-cli-gui-listeners"
+      ],
+      "evidence_source": "parent_profile.features[REPORT-001]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 30,
+      "id": "REPORT-002",
+      "parent_status": "planned",
+      "case_ids": [
+        "REPORT-002.native-dashboard"
+      ],
+      "evidence_source": "parent_profile.features[REPORT-002]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 31,
+      "id": "REPORT-003",
+      "parent_status": "external",
+      "case_ids": [
+        "REPORT-003.unavailable-backend"
+      ],
+      "evidence_source": "parent_profile.features[REPORT-003]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 32,
+      "id": "DIST-001",
+      "parent_status": "external",
+      "case_ids": [
+        "DIST-001.optional-rmi",
+        "DIST-001.unavailable-native"
+      ],
+      "evidence_source": "parent_profile.features[DIST-001]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 33,
+      "id": "DIST-002",
+      "parent_status": "external",
+      "case_ids": [
+        "DIST-002.optional-rmi-tls"
+      ],
+      "evidence_source": "parent_profile.features[DIST-002]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 34,
+      "id": "DIST-003",
+      "parent_status": "planned",
+      "case_ids": [
+        "DIST-003.optional-sender"
+      ],
+      "evidence_source": "parent_profile.features[DIST-003]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 35,
+      "id": "DIST-004",
+      "parent_status": "planned",
+      "case_ids": [
+        "DIST-004.optional-transfer"
+      ],
+      "evidence_source": "parent_profile.features[DIST-004]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 36,
+      "id": "PROXY-001",
+      "parent_status": "external",
+      "case_ids": [
+        "PROXY-001.native-proxy-policy",
+        "PROXY-001.unavailable-cli-proxy-execution"
+      ],
+      "evidence_source": "parent_profile.features[PROXY-001]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 37,
+      "id": "PROXY-002",
+      "parent_status": "external",
+      "case_ids": [
+        "PROXY-002.optional-recorder-jvm",
+        "PROXY-002.unavailable-recorder-runtime"
+      ],
+      "evidence_source": "parent_profile.features[PROXY-002]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 38,
+      "id": "PROXY-003",
+      "parent_status": "planned",
+      "case_ids": [
+        "PROXY-003.unavailable-mirror"
+      ],
+      "evidence_source": "parent_profile.features[PROXY-003]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 39,
+      "id": "TLS-001",
+      "parent_status": "external",
+      "case_ids": [
+        "TLS-001.native-tls-policy",
+        "TLS-001.unavailable-provider-execution"
+      ],
+      "evidence_source": "parent_profile.features[TLS-001]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 40,
+      "id": "TLS-002",
+      "parent_status": "external",
+      "case_ids": [
+        "TLS-002.optional-recorder-jks"
+      ],
+      "evidence_source": "parent_profile.features[TLS-002]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 41,
+      "id": "PLUG-001",
+      "parent_status": "external",
+      "case_ids": [
+        "PLUG-001.optional-discovery"
+      ],
+      "evidence_source": "parent_profile.features[PLUG-001]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 42,
+      "id": "PLUG-002",
+      "parent_status": "external",
+      "case_ids": [
+        "PLUG-002.optional-contract"
+      ],
+      "evidence_source": "parent_profile.features[PLUG-002]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 43,
+      "id": "PLUG-003",
+      "parent_status": "planned",
+      "case_ids": [
+        "PLUG-003.native-subtree-preservation",
+        "PLUG-003.unavailable-diagnostics"
+      ],
+      "evidence_source": "parent_profile.features[PLUG-003]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 44,
+      "id": "GUI-001",
+      "parent_status": "planned",
+      "case_ids": [
+        "GUI-001.native-guiclass-preservation",
+        "GUI-001.unavailable-runtime-deferred"
+      ],
+      "evidence_source": "parent_profile.features[GUI-001]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 45,
+      "id": "GUI-002",
+      "parent_status": "planned",
+      "case_ids": [
+        "GUI-002.unavailable-gui-persistence"
+      ],
+      "evidence_source": "parent_profile.features[GUI-002]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 46,
+      "id": "GUI-003",
+      "parent_status": "planned",
+      "case_ids": [
+        "GUI-003.unavailable-gui-runtime"
+      ],
+      "evidence_source": "parent_profile.features[GUI-003]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 47,
+      "id": "TEST-001",
+      "parent_status": "planned",
+      "case_ids": [
+        "TEST-001.native-local-tests",
+        "TEST-001.unavailable-oracle-harness"
+      ],
+      "evidence_source": "parent_profile.features[TEST-001]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 48,
+      "id": "TEST-002",
+      "parent_status": "external",
+      "case_ids": [
+        "TEST-002.unavailable-external-pins"
+      ],
+      "evidence_source": "parent_profile.features[TEST-002]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 49,
+      "id": "TEST-003",
+      "parent_status": "planned",
+      "case_ids": [
+        "TEST-003.native-fuzz-boundaries"
+      ],
+      "evidence_source": "parent_profile.features[TEST-003]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 50,
+      "id": "TEST-004",
+      "parent_status": "external",
+      "case_ids": [
+        "TEST-004.unavailable-external-suite"
+      ],
+      "evidence_source": "parent_profile.features[TEST-004]",
+      "claim_status": "not-promoted"
+    },
+    {
+      "parent_profile_index": 51,
+      "id": "TEST-005",
+      "parent_status": "planned",
+      "case_ids": [
+        "TEST-005.native-artifact-check",
+        "TEST-005.unavailable-cross-platform"
+      ],
+      "evidence_source": "parent_profile.features[TEST-005]",
+      "claim_status": "not-promoted"
+    }
+  ],
+  "counts": {
+    "informational": true,
+    "feature_rows": 52,
+    "case_records": 79,
+    "capability_records": 23,
+    "feature_rows_by_parent_status": {
+      "planned": 33,
+      "external": 19
+    },
+    "case_records_by_partition": {
+      "native": 33,
+      "optional-pack": 16,
+      "unavailable": 30
+    },
+    "feature_rows_with_partition": {
+      "native": 33,
+      "optional-pack": 16,
+      "unavailable": 30
+    },
+    "promoted_parent_rows": 0,
+    "verified_parent_rows": 0,
+    "gui_runtime_cases": 3,
+    "gui_deferred_cases": 4
+  }
+}

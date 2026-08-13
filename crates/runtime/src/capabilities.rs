@@ -117,7 +117,11 @@ impl CapabilityIdentityError {
 
 impl fmt::Display for CapabilityIdentityError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{} in {}: {}", self.code, self.field, self.detail)
+        write!(
+            formatter,
+            "{} in {}: {}",
+            self.code, self.field, self.detail
+        )
     }
 }
 
@@ -183,10 +187,7 @@ fn validate_token(
     Ok(())
 }
 
-fn validate_digest(
-    digest: Digest32,
-    field: &'static str,
-) -> Result<(), CapabilityIdentityError> {
+fn validate_digest(digest: Digest32, field: &'static str) -> Result<(), CapabilityIdentityError> {
     if digest.is_zero() {
         return Err(CapabilityIdentityError::new(
             CapabilityIdentityErrorCode::ZeroDigest,
@@ -346,10 +347,7 @@ pub struct VersionedCapability {
 
 impl VersionedCapability {
     /// Creates and validates a versioned capability.
-    pub fn new(
-        id: impl Into<String>,
-        version: u32,
-    ) -> Result<Self, CapabilityIdentityError> {
+    pub fn new(id: impl Into<String>, version: u32) -> Result<Self, CapabilityIdentityError> {
         let capability = Self {
             id: id.into(),
             version,
@@ -851,16 +849,13 @@ impl RuntimeCapabilitySet {
     /// either one complete [`PlanAdmission`] or one error; it never exposes a
     /// partially admitted native prefix when a later path needs Java or is
     /// unavailable.
-    pub fn classify<I>(
-        &self,
-        identities: I,
-    ) -> Result<PlanAdmission, PlanAdmissionError>
+    pub fn classify<I>(&self, identities: I) -> Result<PlanAdmission, PlanAdmissionError>
     where
         I: IntoIterator<Item = ImplementationPathIdentity>,
     {
         self.validate().map_err(PlanAdmissionError::SetIdentity)?;
-        let manifest = ImplementationPathManifest::new(identities)
-            .map_err(PlanAdmissionError::Manifest)?;
+        let manifest =
+            ImplementationPathManifest::new(identities).map_err(PlanAdmissionError::Manifest)?;
 
         for identity in manifest.entries() {
             if identity.profile != *self.profile() {
@@ -952,12 +947,12 @@ impl RuntimeCapabilitySet {
             Self::StandaloneNative { capabilities, .. } => {
                 family == ImplementationPathFamily::Native && capabilities.contains(capability)
             }
-            Self::CompatibilityPack { capabilities, .. } => capabilities.contains(
-                &NegotiatedCapability {
+            Self::CompatibilityPack { capabilities, .. } => {
+                capabilities.contains(&NegotiatedCapability {
                     family,
                     capability: capability.clone(),
-                },
-            ),
+                })
+            }
         }
     }
 }
@@ -1042,7 +1037,10 @@ impl fmt::Display for ManifestError {
             Self::Identity(error) => write!(formatter, "invalid path identity: {error}"),
             Self::Limit { limit } => write!(formatter, "path manifest exceeds {limit} entries"),
             Self::DuplicateSource { source } => {
-                write!(formatter, "duplicate executable source identity: {source:?}")
+                write!(
+                    formatter,
+                    "duplicate executable source identity: {source:?}"
+                )
             }
         }
     }
@@ -1222,15 +1220,8 @@ mod tests {
     }
 
     fn identity(source: SourceIdentity, path: ImplementationPath) -> ImplementationPathIdentity {
-        ImplementationPathIdentity::new(
-            profile(),
-            digest(2),
-            source,
-            provider(),
-            digest(3),
-            path,
-        )
-        .expect("identity")
+        ImplementationPathIdentity::new(profile(), digest(2), source, provider(), digest(3), path)
+            .expect("identity")
     }
 
     fn native_set() -> RuntimeCapabilitySet {
@@ -1265,8 +1256,8 @@ mod tests {
             SourceIdentity::node(NodeId::new(10)),
             ImplementationPath::native(capability("earlier")),
         );
-        let manifest = ImplementationPathManifest::new([later.clone(), earlier.clone()])
-            .expect("manifest");
+        let manifest =
+            ImplementationPathManifest::new([later.clone(), earlier.clone()]).expect("manifest");
         assert_eq!(manifest.entries()[0].source, earlier.source);
         assert_eq!(manifest.entries()[1].source, later.source);
 
@@ -1288,16 +1279,15 @@ mod tests {
         let error = native_set()
             .classify([native, jvm])
             .expect_err("mixed standalone plan must fail");
-        assert!(matches!(
-            error,
+        let rejected_at_expected_node = match error {
             PlanAdmissionError::RequiresCompatibilityPack {
-                source: SourceIdentity::Node {
-                    node_id: NodeId(2)
-                },
+                source,
                 family: ImplementationPathFamily::CompatJvm,
                 ..
-            }
-        ));
+            } => source == SourceIdentity::node(NodeId::new(2)),
+            _ => false,
+        };
+        assert!(rejected_at_expected_node);
     }
 
     #[test]
@@ -1381,7 +1371,10 @@ mod tests {
         let error = native_set()
             .classify([wrong_plan])
             .expect_err("plan mismatch");
-        assert!(matches!(error, PlanAdmissionError::PlanDigestMismatch { .. }));
+        assert!(matches!(
+            error,
+            PlanAdmissionError::PlanDigestMismatch { .. }
+        ));
     }
 
     #[test]

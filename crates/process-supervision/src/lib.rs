@@ -44,20 +44,24 @@ pub const fn process_tree_supported() -> bool {
 }
 
 /// Pure validation of a root PID for Unix process-group use.
+///
+/// The numeric identity is intentionally not returned.  Callers may ask the
+/// supervisor to validate an observed value for diagnostics, but no caller
+/// receives a PID/PGID token that it could later signal or wait on.
 #[cfg(unix)]
-pub fn validate_process_group_id(root_pid: u32) -> Result<i32> {
-    unix::validate_process_group_id(root_pid)
+pub fn validate_process_group_id(root_pid: u32) -> Result<()> {
+    unix::validate_process_group_id(root_pid).map(|_| ())
 }
 
 /// Pure validation of a group/root identity pair on Unix.
 #[cfg(unix)]
-pub fn validate_group_id(group: i32, root_pid: u32) -> Result<i32> {
-    unix::validate_group_id(group, root_pid).map(|token| token.raw())
+pub fn validate_group_id(group: i32, root_pid: u32) -> Result<()> {
+    unix::validate_group_id(group, root_pid).map(|_| ())
 }
 
 /// Non-Unix process-group validation fails closed.
 #[cfg(not(unix))]
-pub fn validate_process_group_id(_: u32) -> Result<i32> {
+pub fn validate_process_group_id(_: u32) -> Result<()> {
     Err(SupervisionError::new(
         ErrorCode::UnsupportedPlatform,
         ErrorCategory::Unsupported,
@@ -68,7 +72,7 @@ pub fn validate_process_group_id(_: u32) -> Result<i32> {
 
 /// Non-Unix process-group validation fails closed.
 #[cfg(not(unix))]
-pub fn validate_group_id(_: i32, _: u32) -> Result<i32> {
+pub fn validate_group_id(_: i32, _: u32) -> Result<()> {
     Err(SupervisionError::new(
         ErrorCode::UnsupportedPlatform,
         ErrorCategory::Unsupported,
@@ -152,7 +156,7 @@ mod tests {
     fn pure_group_identity_validation_never_signals() {
         assert!(validate_process_group_id(0).is_err());
         assert!(validate_process_group_id(1).is_err());
-        assert_eq!(validate_group_id(7, 7).expect("valid group"), 7);
+        assert!(validate_group_id(7, 7).is_ok());
         assert_eq!(
             validate_group_id(7, 8).expect_err("mismatch").code(),
             ErrorCode::ProcessGroupMismatch

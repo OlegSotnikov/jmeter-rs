@@ -31,9 +31,9 @@ use windows_sys::Win32::System::JobObjects::{
 };
 use windows_sys::Win32::System::Threading::{
     CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DeleteProcThreadAttributeList,
-    EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, InitializeProcThreadAttributeList,
-    LPPROC_THREAD_ATTRIBUTE_LIST, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROCESS_INFORMATION,
-    ResumeThread, STARTUPINFOEXW, UpdateProcThreadAttribute, WaitForSingleObject,
+    GetExitCodeProcess, InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST,
+    PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROCESS_INFORMATION, ResumeThread, STARTUPINFOEXW,
+    UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
 const MAX_ATTRIBUTE_BYTES: usize = 4096;
@@ -336,30 +336,22 @@ fn create_suspended(
         ));
     }
 
-    let (attributes, mut storage) = match attribute_list(&[]) {
-        Ok(value) => value,
-        Err(error) => {
-            return Err(CreateFailure::with_resources(
-                error,
-                None,
-                Some(WindowsJobToken {
-                    job,
-                    thread: OwnedHandle::empty(),
-                    assigned: false,
-                    resumed: false,
-                }),
-            ));
-        }
-    };
     let mut startup = STARTUPINFOEXW::default();
-    startup.StartupInfo.cb = size_of::<STARTUPINFOEXW>() as u32;
-    startup.lpAttributeList = attributes;
+    // Stage-one launches expose only the Null stdio contract, so there are no
+    // child handles to inherit.  Do not manufacture an empty
+    // PROC_THREAD_ATTRIBUTE_HANDLE_LIST: Windows treats that attribute as a
+    // real allowlist and a zero-sized update is not a valid proof.  A future
+    // bounded endpoint implementation must provide a nonempty typed handle
+    // array and use the audited attribute-list builder below.
+    startup.StartupInfo.cb =
+        size_of::<windows_sys::Win32::System::Threading::STARTUPINFOW>() as u32;
+    startup.lpAttributeList = null_mut();
     let mut process_info = PROCESS_INFORMATION::default();
-    let flags = CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT;
+    let flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT;
     // SAFETY: all UTF-16 buffers are NUL-terminated and live across the call;
-    // `command_line` is mutable as required by CreateProcessW; startup's
-    // attribute list and handle allowlist are initialized in `storage`; no
-    // ambient inherited handles are enabled.
+    // `command_line` is mutable as required by CreateProcessW; the startup
+    // extension has no attribute list because the Null stdio contract has no
+    // child handles; no ambient inherited handles are enabled.
     let created = unsafe {
         CreateProcessW(
             application.as_ptr(),
@@ -378,10 +370,6 @@ fn create_suspended(
             &mut process_info,
         )
     } != 0;
-    // SAFETY: `storage` owns the initialized attribute-list buffer and the
-    // list is no longer used after CreateProcessW returns.
-    unsafe { DeleteProcThreadAttributeList(attributes) };
-    let _storage_keepalive = &mut storage;
     if !created {
         return Err(CreateFailure::with_resources(
             last_error(
@@ -447,9 +435,10 @@ fn create_suspended(
     let previous = unsafe { ResumeThread(token.thread.handle()) };
     if previous != 1 {
         return Err(CreateFailure::with_resources(
-            last_error(
+            SupervisionError::new(
                 ErrorCode::ThreadResumeFailed,
                 ErrorCategory::Containment,
+                false,
                 "ResumeThread did not return the required initial count of one",
             ),
             Some(root),
@@ -673,10 +662,14 @@ pub(crate) fn validate(
 
 pub(crate) fn observe(root: &mut RootHandle) -> Result<RootObservation, SupervisionError> {
     if root.reaped {
-        return Ok(RootObservation::Waitable(root.exit.unwrap_or(ExitInfo {
-            code: 0,
-            signaled: false,
-        })));
+        return root.exit.map(RootObservation::Waitable).ok_or_else(|| {
+            SupervisionError::new(
+                ErrorCode::InvariantViolation,
+                ErrorCategory::Internal,
+                false,
+                "reaped Windows root has no cached exit status",
+            )
+        });
     }
     if !root.process.is_owned() {
         return Err(SupervisionError::new(

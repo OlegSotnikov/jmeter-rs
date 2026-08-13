@@ -18,19 +18,139 @@ use std::time::Duration;
 use jmeter_rs_model::NodeId;
 use jmeter_rs_results::{ElapsedTime, HostIdentity, RunIdentity, SampleResult, ThreadIdentity};
 
+use crate::observation::{
+    ObservationError, ObservationState, RunObservationPolicyV1, RunObservationSummaryV1,
+    RunObservationTerminalState, RunObservationTraceV1,
+};
+use crate::progress::{ProgressError, ProgressHandle, ProgressOwner};
+use crate::result_router::{
+    TypedAdmissionOutcome, TypedResultEnvelope, TypedResultOrigin, TypedResultRouterAdapter,
+    TypedRouterError, TypedSampleId, TypedUserIdentity,
+};
 use crate::{
     AdmissionOutcome, CancellationToken, CompiledPackages, ControlSignal, ControllerError,
     ControllerProgram, ControllerStep, CriticalSectionError, ExecutionContext, ExecutionPipeline,
-    LogicInput, LogicProgram, LogicSharedState, LogicStep, PackageCompileError, PipelineError,
-    ResultEventMetadata, ResultOrigin, ResultRouter, ResultRouterError, RuntimeCapabilities,
-    SampleFailure, SampleIdentity, TransactionInfo, UserIdentity,
+    InitialVariables, InitialVariablesError, LogicInput, LogicProgram, LogicSharedState, LogicStep,
+    PackageCompileError, PipelineError, ResultEventMetadata, ResultOrigin, ResultRouter,
+    ResultRouterError, RuntimeCapabilities, SampleFailure, SampleIdentity, TransactionInfo,
+    UserIdentity,
 };
 
 const MAX_GROUPS: usize = 1_024;
 const MAX_THREADS: usize = 1_000_000;
-const MAX_EVENTS: usize = 1_000_000;
 const MAX_CONCURRENT_TASKS: usize = 65_536;
-const MAX_SCHEDULER_POLLS: usize = 1_000_000;
+const MAX_TYPED_ADMISSION_WAITERS: usize = MAX_CONCURRENT_TASKS;
+
+/// A small async gate for the one run-owned typed admission sequence.
+///
+/// The router itself is protected by its own mutex, but admission includes a
+/// potentially pending sink drain.  Holding a synchronous mutex across that
+/// await would block the current-thread executor when another scheduler clone
+/// reaches the next sample.  This gate therefore parks contenders by waker,
+/// while keeping the number of retained waiters bounded by the existing task
+/// limit.
+struct TypedAdmissionGate {
+    state: Mutex<TypedAdmissionGateState>,
+}
+
+#[derive(Default)]
+struct TypedAdmissionGateState {
+    held: bool,
+    waiters: Vec<std::task::Waker>,
+}
+
+impl TypedAdmissionGate {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(TypedAdmissionGateState::default()),
+        }
+    }
+
+    fn acquire(self: &Arc<Self>) -> TypedAdmissionAcquire {
+        TypedAdmissionAcquire {
+            gate: Arc::clone(self),
+            waiter: None,
+        }
+    }
+
+    fn release(&self) {
+        let waiters = {
+            let mut state = lock(&self.state);
+            state.held = false;
+            std::mem::take(&mut state.waiters)
+        };
+        for waiter in waiters {
+            waiter.wake();
+        }
+    }
+}
+
+struct TypedAdmissionAcquire {
+    gate: Arc<TypedAdmissionGate>,
+    waiter: Option<std::task::Waker>,
+}
+
+impl Future for TypedAdmissionAcquire {
+    type Output = Result<TypedAdmissionPermit, EngineError>;
+
+    fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        // Clone the gate before borrowing its state. This keeps the mutex
+        // guard independent from the pinned future's mutable waiter slot.
+        let gate = Arc::clone(&self.gate);
+        let mut state = lock(&gate.state);
+        if !state.held {
+            state.held = true;
+            if let Some(waiter) = self.waiter.take() {
+                state.waiters.retain(|candidate| !candidate.will_wake(&waiter));
+            }
+            drop(state);
+            return Poll::Ready(Ok(TypedAdmissionPermit {
+                gate,
+            }));
+        }
+
+        let waker = context.waker();
+        if !self
+            .waiter
+            .as_ref()
+            .is_some_and(|waiter| waiter.will_wake(waker))
+        {
+            if state.waiters.len() >= MAX_TYPED_ADMISSION_WAITERS {
+                return Poll::Ready(Err(EngineError::ResourceLimit {
+                    detail: "typed admission waiter limit".to_owned(),
+                }));
+            }
+            if let Some(previous) = self.waiter.replace(waker.clone()) {
+                state
+                    .waiters
+                    .retain(|candidate| !candidate.will_wake(&previous));
+            }
+            state.waiters.push(waker.clone());
+        }
+        Poll::Pending
+    }
+}
+
+impl Drop for TypedAdmissionAcquire {
+    fn drop(&mut self) {
+        let Some(waiter) = self.waiter.take() else {
+            return;
+        };
+        lock(&self.gate.state)
+            .waiters
+            .retain(|candidate| !candidate.will_wake(&waiter));
+    }
+}
+
+struct TypedAdmissionPermit {
+    gate: Arc<TypedAdmissionGate>,
+}
+
+impl Drop for TypedAdmissionPermit {
+    fn drop(&mut self) {
+        self.gate.release();
+    }
+}
 
 fn lock<T>(value: &Mutex<T>) -> MutexGuard<'_, T> {
     value
@@ -53,6 +173,24 @@ fn combined_engine_error(primary: EngineError, secondary: EngineError) -> Engine
     EngineError::Combined {
         primary: Box::new(primary),
         secondary: Box::new(secondary),
+    }
+}
+
+fn group_allowed_after_stop(
+    plan: &EnginePlan,
+    group: &ThreadGroupPlan,
+    signal: ControlSignal,
+) -> bool {
+    match signal {
+        ControlSignal::StopTestImmediate => {
+            group.kind == GroupKind::Teardown
+                && plan.teardown_on_shutdown
+                && group.teardown_on_shutdown
+        }
+        // A graceful stop drains setup/teardown boundaries. The shutdown
+        // teardown policy is specifically an immediate-stop policy.
+        ControlSignal::StopTestGraceful => group.kind != GroupKind::Main,
+        _ => true,
     }
 }
 
@@ -139,38 +277,74 @@ pub struct RampSchedule {
 }
 
 impl RampSchedule {
-    /// Creates a validated schedule.
-    pub fn new(threads: usize, ramp_up: Duration) -> Result<Self, EngineError> {
-        if threads > MAX_THREADS {
+    fn validate(self) -> Result<(), EngineError> {
+        if self.threads > MAX_THREADS {
             return Err(EngineError::InvalidSchedule {
                 detail: "thread count exceeds runtime bound".to_owned(),
             });
         }
-        Ok(Self { threads, ramp_up })
+        Ok(())
+    }
+
+    /// Creates a validated schedule.
+    pub fn new(threads: usize, ramp_up: Duration) -> Result<Self, EngineError> {
+        let schedule = Self { threads, ramp_up };
+        schedule.validate()?;
+        Ok(schedule)
     }
 
     /// Returns the start offset for a zero-based thread index.
-    #[must_use]
-    pub fn offset(self, index: usize) -> Duration {
+    ///
+    /// The calculation is performed at nanosecond precision and uses checked
+    /// multiplication.  The index is clamped to the last executable user,
+    /// matching the execution loop's one task per configured user semantics.
+    pub fn offset(self, index: usize) -> Result<Duration, EngineError> {
+        self.validate()?;
         if self.threads <= 1 || index == 0 || self.ramp_up.is_zero() {
-            return Duration::ZERO;
+            return Ok(Duration::ZERO);
         }
-        let bounded = index.min(self.threads.saturating_sub(1)) as u128;
-        let numerator = self.ramp_up.as_nanos().saturating_mul(bounded);
+        let last_index =
+            self.threads
+                .checked_sub(1)
+                .ok_or_else(|| EngineError::InvalidSchedule {
+                    detail: "ramp thread index underflow".to_owned(),
+                })?;
+        let bounded = index.min(last_index) as u128;
+        let numerator = self
+            .ramp_up
+            .as_nanos()
+            .checked_mul(bounded)
+            .ok_or_else(|| EngineError::InvalidSchedule {
+                detail: "ramp offset arithmetic overflow".to_owned(),
+            })?;
         let denominator = self.threads as u128;
         let nanos = numerator / denominator;
         let seconds = nanos / 1_000_000_000;
         let subnanos = (nanos % 1_000_000_000) as u32;
-        if seconds > u64::MAX as u128 {
-            Duration::MAX
-        } else {
-            Duration::new(seconds as u64, subnanos)
+        let seconds = u64::try_from(seconds).map_err(|_| EngineError::InvalidSchedule {
+            detail: "ramp offset duration overflow".to_owned(),
+        })?;
+        Ok(Duration::new(seconds, subnanos))
+    }
+
+    /// Alias for [`RampSchedule::offset`] that makes its checked contract
+    /// explicit at call sites that calculate startup bounds.
+    pub fn checked_offset(self, index: usize) -> Result<Duration, EngineError> {
+        self.offset(index)
+    }
+
+    /// Returns the greatest offset actually used by the execution loop.
+    pub fn max_actual_user_offset(self) -> Result<Duration, EngineError> {
+        self.validate()?;
+        match self.threads.checked_sub(1) {
+            Some(last_index) => self.offset(last_index),
+            None => Ok(Duration::ZERO),
         }
     }
 
     /// Returns all offsets in deterministic thread-number order.
-    #[must_use]
-    pub fn offsets(self) -> Vec<Duration> {
+    pub fn offsets(self) -> Result<Vec<Duration>, EngineError> {
+        self.validate()?;
         (0..self.threads).map(|index| self.offset(index)).collect()
     }
 }
@@ -199,13 +373,47 @@ impl Default for GroupSchedule {
 impl GroupSchedule {
     /// Validates schedule values and creates a ramp calculation.
     pub fn ramp(self, threads: usize) -> Result<RampSchedule, EngineError> {
-        if let Some(duration) = self.duration
-            && duration.is_zero()
-            && self.delay.is_zero()
-        {
-            return RampSchedule::new(threads, self.ramp_up);
-        }
-        RampSchedule::new(threads, self.ramp_up)
+        let ramp = RampSchedule::new(threads, self.ramp_up)?;
+        // The startup bound must use the same clamped offset calculation as
+        // execution.  This rejects delay + ramp overflow before any user
+        // task is admitted, without imposing a duration policy of its own.
+        self.delay
+            .checked_add(ramp.max_actual_user_offset()?)
+            .ok_or_else(|| EngineError::InvalidSchedule {
+                detail: "group startup offset arithmetic overflow".to_owned(),
+            })?;
+        Ok(ramp)
+    }
+
+    /// Returns the maximum actual user offset, excluding the group delay.
+    pub fn max_actual_user_offset(self, threads: usize) -> Result<Duration, EngineError> {
+        RampSchedule::new(threads, self.ramp_up)?.max_actual_user_offset()
+    }
+
+    /// Returns the checked delay through the final user's actual startup.
+    pub fn startup_bound(self, threads: usize) -> Result<Duration, EngineError> {
+        let ramp = self.ramp(threads)?;
+        self.delay
+            .checked_add(ramp.max_actual_user_offset()?)
+            .ok_or_else(|| EngineError::InvalidSchedule {
+                detail: "group startup offset arithmetic overflow".to_owned(),
+            })
+    }
+
+    /// Returns the checked absolute duration boundary for a group start.
+    pub fn checked_duration_end(
+        self,
+        group_start: Duration,
+    ) -> Result<Option<Duration>, EngineError> {
+        self.duration
+            .map(|duration| {
+                group_start
+                    .checked_add(duration)
+                    .ok_or_else(|| EngineError::InvalidSchedule {
+                        detail: "group duration end arithmetic overflow".to_owned(),
+                    })
+            })
+            .transpose()
     }
 }
 
@@ -386,6 +594,9 @@ pub struct EnginePlan {
     pub serialize_thread_groups: bool,
     /// Whether teardown groups run after an immediate stop.
     pub teardown_on_shutdown: bool,
+    /// Immutable TestPlan user-defined variables copied into each fresh user
+    /// lifecycle before its first component or condition is evaluated.
+    initial_variables: InitialVariables,
 }
 
 impl EnginePlan {
@@ -396,7 +607,46 @@ impl EnginePlan {
             groups: Vec::new(),
             serialize_thread_groups: false,
             teardown_on_shutdown: true,
+            initial_variables: InitialVariables::empty(),
         }
+    }
+
+    /// Returns the immutable TestPlan variable seed.
+    #[must_use]
+    pub const fn initial_variables(&self) -> &InitialVariables {
+        &self.initial_variables
+    }
+
+    /// Installs a previously validated immutable TestPlan variable seed.
+    #[must_use]
+    pub fn with_initial_variables(mut self, initial: InitialVariables) -> Self {
+        self.initial_variables = initial;
+        self
+    }
+
+    /// Validates and installs a TestPlan variable map without exposing a
+    /// mutable map inside the executable plan.
+    pub fn try_with_initial_variables(
+        self,
+        values: BTreeMap<String, String>,
+    ) -> Result<Self, InitialVariablesError> {
+        Ok(self.with_initial_variables(InitialVariables::try_from_map(values)?))
+    }
+
+    /// Replaces the seed before a run is admitted.
+    pub fn set_initial_variables(&mut self, initial: InitialVariables) {
+        self.initial_variables = initial;
+    }
+
+    /// Validates a replacement map before mutating this plan.  On error the
+    /// existing immutable seed remains unchanged.
+    pub fn try_set_initial_variables(
+        &mut self,
+        values: BTreeMap<String, String>,
+    ) -> Result<(), InitialVariablesError> {
+        let initial = InitialVariables::try_from_map(values)?;
+        self.set_initial_variables(initial);
+        Ok(())
     }
 
     /// Adds a source-order group, enforcing a finite group bound.
@@ -434,8 +684,10 @@ impl VirtualUser {
         run_id: &RunIdentity,
         host: &HostIdentity,
         capabilities: &RuntimeCapabilities,
-    ) -> Self {
+        initial_variables: &InitialVariables,
+    ) -> Result<Self, InitialVariablesError> {
         let mut context = ExecutionContext::with_capabilities(capabilities.clone_for_user());
+        context.seed_initial_variables(initial_variables)?;
         context.set_run(run_id.clone());
         context.set_host(host.clone());
         context.set_thread(ThreadIdentity::with_group(
@@ -445,13 +697,13 @@ impl VirtualUser {
         ));
         context.set_lifecycle_id(Some(lifecycle_id));
         context.set_iteration_id(Some(0));
-        Self {
+        Ok(Self {
             lifecycle_id,
             group_id: group.id,
             thread_number,
             iteration: IterationState::default(),
             context,
-        }
+        })
     }
 }
 
@@ -506,16 +758,36 @@ pub enum EngineEvent {
 }
 
 /// Aggregate report returned by a run.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct EngineReport {
-    /// Ordered lifecycle/sample events.
-    pub events: Vec<EngineEvent>,
+    /// Immutable ordered lifecycle/sample trace.  Summary mode leaves this
+    /// allocation empty; full-trace reports clone only the `Arc` handle.
+    pub trace: RunObservationTraceV1,
+    /// Backwards-compatible alias for [`EngineReport::trace`].  Both fields
+    /// point at the same immutable allocation and never deep-clone events.
+    pub events: RunObservationTraceV1,
+    /// Checked constant-memory observation counters.
+    pub summary: RunObservationSummaryV1,
     /// Highest cancellation signal observed.
     pub signal: ControlSignal,
     /// Number of users started.
     pub users_started: usize,
     /// Number of users finished.
     pub users_finished: usize,
+}
+
+impl Default for EngineReport {
+    fn default() -> Self {
+        let trace: RunObservationTraceV1 = Arc::from(Vec::<EngineEvent>::new().into_boxed_slice());
+        Self {
+            trace: Arc::clone(&trace),
+            events: trace,
+            summary: RunObservationSummaryV1::default(),
+            signal: ControlSignal::Continue,
+            users_started: 0,
+            users_finished: 0,
+        }
+    }
 }
 
 struct ActiveTransaction {
@@ -526,36 +798,284 @@ struct ActiveTransaction {
     unrepresented_timers: Duration,
 }
 
+struct CriticalSectionScope {
+    controller_id: u64,
+    name: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CriticalSectionSyncOutcome {
+    /// The desired scope stack is held and the sampler may run.
+    Acquired,
+    /// Runtime cancellation was observed while waiting for a scope.
+    Cancelled(ControlSignal),
+}
+
+struct PendingCriticalAcquisition {
+    coordinator: Arc<dyn crate::CriticalSectionCoordinator>,
+    name: String,
+    lifecycle_id: u64,
+    armed: bool,
+}
+
+impl PendingCriticalAcquisition {
+    fn new(
+        coordinator: Arc<dyn crate::CriticalSectionCoordinator>,
+        name: impl Into<String>,
+        lifecycle_id: u64,
+    ) -> Self {
+        Self {
+            coordinator,
+            name: name.into(),
+            lifecycle_id,
+            armed: false,
+        }
+    }
+
+    fn arm(&mut self) {
+        self.armed = true;
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+
+    fn cancel(&mut self) -> Result<(), CriticalSectionError> {
+        if !self.armed {
+            return Ok(());
+        }
+        self.armed = false;
+        self.coordinator
+            .cancel_acquire(&self.name, self.lifecycle_id)
+            .map(|_| ())
+    }
+}
+
+impl Drop for PendingCriticalAcquisition {
+    fn drop(&mut self) {
+        if self.armed {
+            // A dropped run future is itself cancellation. The coordinator
+            // operation is synchronous and bounded, so it is safe to retire
+            // the exact queued request from Drop when no poll can observe the
+            // cancellation signal again.
+            let _ = self
+                .coordinator
+                .cancel_acquire(&self.name, self.lifecycle_id);
+            self.armed = false;
+        }
+    }
+}
+
 struct CriticalSectionLeases {
     coordinator: Arc<dyn crate::CriticalSectionCoordinator>,
     lifecycle_id: u64,
-    names: Vec<String>,
-    drop_error: Arc<Mutex<Option<CriticalSectionError>>>,
+    /// Held scopes in outer-to-inner order. This stack spans sampler
+    /// selections until the controller path exits the corresponding scope.
+    scopes: Vec<CriticalSectionScope>,
+    drop_error: Arc<Mutex<Vec<CriticalSectionError>>>,
 }
 
 impl CriticalSectionLeases {
-    fn release(&mut self) -> Result<(), CriticalSectionError> {
-        while let Some(name) = self.names.pop() {
-            if let Err(error) = self.coordinator.release(&name, self.lifecycle_id) {
-                self.names.push(name);
-                return Err(error);
+    fn new(context: &ExecutionContext) -> Self {
+        Self {
+            coordinator: context.capabilities().critical_sections_arc(),
+            lifecycle_id: context.lifecycle_id().unwrap_or(0),
+            scopes: Vec::new(),
+            drop_error: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn set_lifecycle(&mut self, lifecycle_id: u64) {
+        self.lifecycle_id = lifecycle_id;
+    }
+
+    fn release_all(&mut self) -> Vec<CriticalSectionError> {
+        let scopes = std::mem::take(&mut self.scopes);
+        let mut errors = Vec::new();
+        for scope in scopes.into_iter().rev() {
+            if let Err(error) = self.coordinator.release(&scope.name, self.lifecycle_id) {
+                errors.push(error);
             }
         }
-        Ok(())
+        errors
+    }
+
+    fn take_drop_errors(&self) -> Vec<CriticalSectionError> {
+        std::mem::take(&mut *lock(&self.drop_error))
+    }
+
+    async fn synchronize(
+        &mut self,
+        group_id: NodeId,
+        selection: &crate::LogicSelection,
+        cancellation: &CancellationToken,
+    ) -> Result<CriticalSectionSyncOutcome, EngineError> {
+        if selection.critical_sections.len() != selection.critical_section_ids.len() {
+            return Err(EngineError::ResourceLimit {
+                detail: "critical-section selection identity/name mismatch".to_owned(),
+            });
+        }
+
+        let desired = selection
+            .critical_section_ids
+            .iter()
+            .copied()
+            .zip(selection.critical_sections.iter().cloned())
+            .map(|(controller_id, name)| CriticalSectionScope {
+                controller_id,
+                name,
+            })
+            .collect::<Vec<_>>();
+        let common = self
+            .scopes
+            .iter()
+            .zip(&desired)
+            .take_while(|(held, wanted)| {
+                held.controller_id == wanted.controller_id && held.name == wanted.name
+            })
+            .count();
+
+        let mut release_errors = Vec::new();
+        while self.scopes.len() > common {
+            let scope = self
+                .scopes
+                .pop()
+                .ok_or_else(|| EngineError::ResourceLimit {
+                    detail: "critical-section lease stack underflow".to_owned(),
+                })?;
+            if let Err(error) = self.coordinator.release(&scope.name, self.lifecycle_id) {
+                release_errors.push(error);
+            }
+        }
+        if let Some(error) = critical_section_errors(group_id, release_errors) {
+            return Err(error);
+        }
+        if cancellation.signal().is_stop() {
+            return Ok(CriticalSectionSyncOutcome::Cancelled(cancellation.signal()));
+        }
+
+        for scope in desired.into_iter().skip(common) {
+            match poll_critical_section_acquire(
+                Arc::clone(&self.coordinator),
+                group_id,
+                scope.name.clone(),
+                self.lifecycle_id,
+                cancellation.clone(),
+            )
+            .await?
+            {
+                CriticalSectionSyncOutcome::Acquired => self.scopes.push(scope),
+                CriticalSectionSyncOutcome::Cancelled(signal) => {
+                    return Ok(CriticalSectionSyncOutcome::Cancelled(signal));
+                }
+            }
+        }
+        if cancellation.signal().is_stop() {
+            return Ok(CriticalSectionSyncOutcome::Cancelled(cancellation.signal()));
+        }
+        Ok(CriticalSectionSyncOutcome::Acquired)
+    }
+
+    fn release_error(&mut self, group_id: NodeId) -> Option<EngineError> {
+        let mut errors = self.release_all();
+        errors.extend(self.take_drop_errors());
+        critical_section_errors(group_id, errors)
     }
 }
 
 impl Drop for CriticalSectionLeases {
     fn drop(&mut self) {
-        while let Some(name) = self.names.pop() {
-            if let Err(error) = self.coordinator.release(&name, self.lifecycle_id) {
-                let mut slot = lock(&self.drop_error);
-                if slot.is_none() {
-                    *slot = Some(error);
-                }
-            }
+        let errors = self.release_all();
+        if !errors.is_empty() {
+            lock(&self.drop_error).extend(errors);
         }
     }
+}
+
+fn critical_section_errors(
+    group_id: NodeId,
+    errors: Vec<CriticalSectionError>,
+) -> Option<EngineError> {
+    let mut aggregate = None;
+    for source in errors {
+        combine_engine_error(
+            &mut aggregate,
+            EngineError::CriticalSection { group_id, source },
+        );
+    }
+    aggregate
+}
+
+async fn poll_critical_section_acquire(
+    coordinator: Arc<dyn crate::CriticalSectionCoordinator>,
+    group_id: NodeId,
+    name: String,
+    lifecycle_id: u64,
+    cancellation: CancellationToken,
+) -> Result<CriticalSectionSyncOutcome, EngineError> {
+    let mut pending =
+        PendingCriticalAcquisition::new(Arc::clone(&coordinator), name.clone(), lifecycle_id);
+    let mut acquired = false;
+    future::poll_fn(|context| {
+        let signal = cancellation.signal();
+        if signal.is_stop() {
+            let cancel_result = pending
+                .cancel()
+                .map_err(|source| EngineError::CriticalSection { group_id, source });
+            let release_result = if acquired {
+                acquired = false;
+                coordinator
+                    .release(&name, lifecycle_id)
+                    .map_err(|source| EngineError::CriticalSection { group_id, source })
+            } else {
+                Ok(())
+            };
+            return Poll::Ready(match (cancel_result, release_result) {
+                (Ok(()), Ok(())) => Ok(CriticalSectionSyncOutcome::Cancelled(signal)),
+                (Err(primary), Ok(())) | (Ok(()), Err(primary)) => Err(primary),
+                (Err(primary), Err(secondary)) => Err(combined_engine_error(primary, secondary)),
+            });
+        }
+
+        match coordinator.poll_acquire(&name, lifecycle_id, context.waker()) {
+            Poll::Pending => {
+                pending.arm();
+                cancellation.register_waker(context.waker());
+                // Close the race where cancellation was requested between
+                // the signal check and waker registration.
+                if cancellation.signal().is_stop() {
+                    context.waker().wake_by_ref();
+                }
+                Poll::Pending
+            }
+            Poll::Ready(Ok(())) => {
+                acquired = true;
+                if cancellation.signal().is_stop() {
+                    let signal = cancellation.signal();
+                    let cancel_result = pending
+                        .cancel()
+                        .map_err(|source| EngineError::CriticalSection { group_id, source });
+                    acquired = false;
+                    let release_result = coordinator
+                        .release(&name, lifecycle_id)
+                        .map_err(|source| EngineError::CriticalSection { group_id, source });
+                    return Poll::Ready(match (cancel_result, release_result) {
+                        (Ok(()), Ok(())) => Ok(CriticalSectionSyncOutcome::Cancelled(signal)),
+                        (Err(primary), Ok(())) | (Ok(()), Err(primary)) => Err(primary),
+                        (Err(primary), Err(secondary)) => {
+                            Err(combined_engine_error(primary, secondary))
+                        }
+                    });
+                }
+                pending.disarm();
+                Poll::Ready(Ok(CriticalSectionSyncOutcome::Acquired))
+            }
+            Poll::Ready(Err(source)) => {
+                Poll::Ready(Err(EngineError::CriticalSection { group_id, source }))
+            }
+        }
+    })
+    .await
 }
 
 struct LifecycleCleanupGuard {
@@ -644,6 +1164,9 @@ pub enum EngineError {
         group_id: NodeId,
         source: PackageCompileError,
     },
+    /// The immutable TestPlan initial-variable seed could not be applied to a
+    /// fresh virtual-user context.
+    InitialVariables { source: InitialVariablesError },
     /// A critical-section acquisition or release failed.
     CriticalSection {
         group_id: NodeId,
@@ -662,6 +1185,12 @@ pub enum EngineError {
     },
     /// Run-level result routing or sink admission failed.
     ResultRouter { source: ResultRouterError },
+    /// Run-level typed result routing or effectful sink finalization failed.
+    TypedResultRouter { source: TypedRouterError },
+    /// Run-level observation retention or counter accounting failed.
+    Observation { source: ObservationError },
+    /// Run-level semantic progress accounting failed.
+    Progress { source: ProgressError },
     /// A lifecycle failure occurred while another failure was already active.
     Combined {
         primary: Box<Self>,
@@ -681,10 +1210,14 @@ impl EngineError {
             Self::Logic { .. } => "runtime.engine.logic",
             Self::MissingPackage { .. } => "runtime.engine.missing-package",
             Self::Package { .. } => "runtime.engine.package",
+            Self::InitialVariables { .. } => "runtime.engine.initial-variables",
             Self::CriticalSection { .. } => "runtime.engine.critical-section",
             Self::ExpressionCleanup { .. } => "runtime.engine.expression-cleanup",
             Self::Pipeline { .. } => "runtime.engine.pipeline",
             Self::ResultRouter { .. } => "runtime.engine.result-router",
+            Self::TypedResultRouter { .. } => "runtime.engine.typed-result-router",
+            Self::Observation { .. } => "runtime.engine.observation",
+            Self::Progress { .. } => "runtime.engine.progress",
             Self::Combined { .. } => "runtime.engine.combined",
         }
     }
@@ -715,6 +1248,7 @@ impl fmt::Display for EngineError {
             Self::Package { group_id, source } => {
                 write!(formatter, "{} at group {group_id}: {source}", self.code())
             }
+            Self::InitialVariables { source } => write!(formatter, "{}: {source}", self.code()),
             Self::CriticalSection { group_id, source } => {
                 write!(formatter, "{} at group {group_id}: {source}", self.code())
             }
@@ -736,6 +1270,9 @@ impl fmt::Display for EngineError {
                 self.code()
             ),
             Self::ResultRouter { source } => write!(formatter, "{}: {source}", self.code()),
+            Self::TypedResultRouter { source } => write!(formatter, "{}: {source}", self.code()),
+            Self::Observation { source } => write!(formatter, "{}: {source}", self.code()),
+            Self::Progress { source } => write!(formatter, "{}: {source}", self.code()),
             Self::Combined { primary, secondary } => write!(
                 formatter,
                 "{}: primary={primary}; secondary={secondary}",
@@ -751,25 +1288,28 @@ impl std::error::Error for EngineError {}
 ///
 /// Tasks are visited in insertion order on every poll. The future never
 /// creates an OS thread or chooses an ambient executor; pending component
-/// futures retain ownership of their own wake registrations. A task-set poll
-/// bound converts a broken/non-waking capability into a typed resource error
-/// instead of spinning forever.
+/// futures retain ownership of their own wake registrations. Each parent
+/// poll visits at most the bounded task set once; no lifetime poll counter is
+/// used. A production/current-thread driver owns no-progress and wake-storm
+/// detection, while this join never loops internally when all tasks are
+/// pending.
 struct DeterministicJoin<'a, T> {
     tasks: Vec<Pin<Box<dyn Future<Output = T> + 'a>>>,
     results: Vec<Option<T>>,
-    polls: usize,
-    max_polls: usize,
 }
 
 impl<'a, T> DeterministicJoin<'a, T> {
-    fn new(tasks: Vec<Pin<Box<dyn Future<Output = T> + 'a>>>) -> Self {
+    fn new(tasks: Vec<Pin<Box<dyn Future<Output = T> + 'a>>>) -> Result<Self, EngineError> {
+        if tasks.len() > MAX_CONCURRENT_TASKS {
+            return Err(EngineError::ResourceLimit {
+                detail: "deterministic concurrent task limit".to_owned(),
+            });
+        }
         let result_count = tasks.len();
-        Self {
+        Ok(Self {
             tasks,
             results: (0..result_count).map(|_| None).collect(),
-            polls: 0,
-            max_polls: MAX_SCHEDULER_POLLS,
-        }
+        })
     }
 }
 
@@ -787,12 +1327,11 @@ impl<T> Future for DeterministicJoin<'_, T> {
             if this.results[index].is_some() {
                 continue;
             }
-            if this.polls >= this.max_polls {
-                return Poll::Ready(Err(EngineError::ResourceLimit {
-                    detail: "deterministic concurrent scheduler poll limit".to_owned(),
-                }));
-            }
-            this.polls = this.polls.saturating_add(1);
+            // One visit per task per parent poll is the complete turn.  The
+            // task count is bounded by MAX_CONCURRENT_TASKS at every caller,
+            // so this loop has a finite per-turn work bound.  Do not retain a
+            // lifetime poll counter: a long run with real progress is not a
+            // stalled scheduler merely because it has many turns.
             if let Poll::Ready(result) = this.tasks[index].as_mut().poll(context) {
                 this.results[index] = Some(result);
             }
@@ -867,18 +1406,70 @@ struct GroupTaskResult {
 }
 
 /// A future returned by [`RuntimeEngine::run`].
-pub type RuntimeEngineFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<EngineReport, EngineError>> + 'a>>;
+///
+/// The wrapper keeps the read-only progress handle alongside the borrowed run
+/// future.  An application can therefore obtain progress before polling or
+/// awaiting the run, without attempting a second mutable borrow of the
+/// [`RuntimeEngine`].
+pub struct RuntimeEngineFuture<'a> {
+    inner: Pin<Box<dyn Future<Output = Result<EngineReport, EngineError>> + 'a>>,
+    progress: ProgressHandle,
+}
+
+impl<'a> RuntimeEngineFuture<'a> {
+    fn new(
+        inner: Pin<Box<dyn Future<Output = Result<EngineReport, EngineError>> + 'a>>,
+        progress: ProgressHandle,
+    ) -> Self {
+        Self { inner, progress }
+    }
+
+    /// Returns a cloned, read-only handle for this run's semantic progress.
+    #[must_use]
+    pub fn progress_handle(&self) -> ProgressHandle {
+        self.progress.clone()
+    }
+}
+
+impl Unpin for RuntimeEngineFuture<'_> {}
+
+impl Future for RuntimeEngineFuture<'_> {
+    type Output = Result<EngineReport, EngineError>;
+
+    fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        self.inner.as_mut().poll(context)
+    }
+}
 
 struct EngineRunDropGuard {
     router: Option<ResultRouter>,
+    typed_router: Option<Arc<TypedResultRouterAdapter>>,
+    cancellation: CancellationToken,
+    observation: Arc<Mutex<ObservationState>>,
+    progress: ProgressOwner,
+    progress_error: Arc<Mutex<Option<ProgressError>>>,
+    result_router_error: Arc<Mutex<Option<EngineError>>>,
     armed: bool,
 }
 
 impl EngineRunDropGuard {
-    fn new(router: Option<ResultRouter>) -> Self {
+    fn new(
+        router: Option<ResultRouter>,
+        typed_router: Option<Arc<TypedResultRouterAdapter>>,
+        cancellation: CancellationToken,
+        observation: Arc<Mutex<ObservationState>>,
+        progress: ProgressOwner,
+        progress_error: Arc<Mutex<Option<ProgressError>>>,
+        result_router_error: Arc<Mutex<Option<EngineError>>>,
+    ) -> Self {
         Self {
             router,
+            typed_router,
+            cancellation,
+            observation,
+            progress,
+            progress_error,
+            result_router_error,
             armed: true,
         }
     }
@@ -890,10 +1481,38 @@ impl EngineRunDropGuard {
 
 impl Drop for EngineRunDropGuard {
     fn drop(&mut self) {
-        if self.armed
-            && let Some(router) = self.router.as_ref()
-        {
-            let _ = router.cancel();
+        if self.armed {
+            // Publish the terminal progress state before waking interruptible
+            // capability futures so observers cannot see an immediate stop
+            // paired with a still-running progress owner.
+            if let Err(source) = self.progress.cancel() {
+                let mut error = lock(&self.progress_error);
+                if error.is_none() {
+                    *error = Some(source);
+                }
+            }
+            // Dropping the run future is cancellation, not successful
+            // completion.  Raise the run-wide immediate signal before
+            // dropping child futures so interruptible capabilities can
+            // observe it while their owners are being unwound.
+            self.cancellation.cancel_immediate();
+            lock(&self.observation).mark_cancelled();
+            if let Some(router) = self.typed_router.as_ref()
+                && let Err(source) = router.cancel()
+            {
+                let mut error = lock(&self.result_router_error);
+                if error.is_none() {
+                    *error = Some(EngineError::TypedResultRouter { source });
+                }
+            }
+            if let Some(router) = self.router.as_ref() {
+                if let Err(source) = router.cancel() {
+                    let mut error = lock(&self.result_router_error);
+                    if error.is_none() {
+                        *error = Some(EngineError::ResultRouter { source });
+                    }
+                }
+            }
         }
     }
 }
@@ -905,9 +1524,16 @@ pub struct RuntimeEngine {
     run_id: RunIdentity,
     host: HostIdentity,
     result_router: Option<ResultRouter>,
+    typed_result_router: Option<Arc<TypedResultRouterAdapter>>,
     cancellation: CancellationToken,
-    events: Arc<Mutex<Vec<EngineEvent>>>,
+    observation: Arc<Mutex<ObservationState>>,
+    progress: Option<ProgressOwner>,
+    progress_signal: Arc<Mutex<ControlSignal>>,
+    progress_error: Arc<Mutex<Option<ProgressError>>>,
+    result_router_error: Arc<Mutex<Option<EngineError>>>,
     next_lifecycle: Arc<AtomicU64>,
+    next_sample: Arc<AtomicU64>,
+    typed_admission_lock: Arc<Mutex<()>>,
     mode: EngineMode,
 }
 
@@ -919,6 +1545,7 @@ impl fmt::Debug for RuntimeEngine {
             .field("run_id", &self.run_id)
             .field("host", &self.host)
             .field("result_router", &self.result_router)
+            .field("typed_result_router", &self.typed_result_router)
             .field("mode", &self.mode)
             .finish_non_exhaustive()
     }
@@ -939,9 +1566,18 @@ impl RuntimeEngine {
             run_id: run_id.into(),
             host: host.into(),
             result_router: None,
+            typed_result_router: None,
             cancellation: CancellationToken::new(),
-            events: Arc::new(Mutex::new(Vec::new())),
+            observation: Arc::new(Mutex::new(ObservationState::new(
+                RunObservationPolicyV1::Summary,
+            ))),
+            progress: None,
+            progress_signal: Arc::new(Mutex::new(ControlSignal::Continue)),
+            progress_error: Arc::new(Mutex::new(None)),
+            result_router_error: Arc::new(Mutex::new(None)),
             next_lifecycle: Arc::new(AtomicU64::new(1)),
+            next_sample: Arc::new(AtomicU64::new(1)),
+            typed_admission_lock: Arc::new(Mutex::new(())),
             mode: EngineMode::Setup,
         }
     }
@@ -953,9 +1589,16 @@ impl RuntimeEngine {
             run_id: self.run_id.clone(),
             host: self.host.clone(),
             result_router: self.result_router.clone(),
+            typed_result_router: self.typed_result_router.clone(),
             cancellation: self.cancellation.clone(),
-            events: Arc::clone(&self.events),
+            observation: Arc::clone(&self.observation),
+            progress: self.progress.clone(),
+            progress_signal: Arc::clone(&self.progress_signal),
+            progress_error: Arc::clone(&self.progress_error),
+            result_router_error: Arc::clone(&self.result_router_error),
             next_lifecycle: Arc::clone(&self.next_lifecycle),
+            next_sample: Arc::clone(&self.next_sample),
+            typed_admission_lock: Arc::clone(&self.typed_admission_lock),
             mode: self.mode,
         }
     }
@@ -985,35 +1628,181 @@ impl RuntimeEngine {
         self.result_router.as_ref()
     }
 
+    /// Installs the run-owned typed router/sink contract.  Its explicit
+    /// plan/run/worker identity is used for every event; the deprecated
+    /// compatibility router is disabled when this production path is chosen.
+    #[must_use]
+    pub fn with_typed_result_router(mut self, router: TypedResultRouterAdapter) -> Self {
+        self.result_router = None;
+        self.typed_result_router = Some(Arc::new(router));
+        self
+    }
+
+    /// Replaces the run-owned typed router/sink contract before a run starts.
+    pub fn set_typed_result_router(&mut self, router: Option<TypedResultRouterAdapter>) {
+        self.result_router = None;
+        self.typed_result_router = router.map(Arc::new);
+    }
+
+    /// Returns the shared typed router/sink contract, if configured.
+    #[must_use]
+    pub fn typed_result_router(&self) -> Option<Arc<TypedResultRouterAdapter>> {
+        self.typed_result_router.clone()
+    }
+
     /// Returns the immutable plan.
     #[must_use]
     pub const fn plan(&self) -> &EnginePlan {
         &self.plan
     }
 
+    /// Returns the configured observation policy.
+    #[must_use]
+    pub fn observation_policy(&self) -> RunObservationPolicyV1 {
+        lock(&self.observation).policy()
+    }
+
+    /// Selects an observation policy before a run starts.
+    pub fn set_observation_policy(
+        &mut self,
+        policy: RunObservationPolicyV1,
+    ) -> Result<(), EngineError> {
+        lock(&self.observation)
+            .set_policy(policy)
+            .map_err(|source| EngineError::Observation { source })
+    }
+
+    /// Returns the run summary without exposing mutable observation state.
+    #[must_use]
+    pub fn summary(&self) -> RunObservationSummaryV1 {
+        lock(&self.observation).summary()
+    }
+
+    /// Returns a progress error captured while a pending run was dropped.
+    ///
+    /// A `Drop` implementation cannot return an error. Keeping this typed
+    /// diagnostic on the owning engine prevents an exceptional terminal path
+    /// from becoming an ignored progress mutation.
+    #[must_use]
+    pub fn last_progress_error(&self) -> Option<ProgressError> {
+        lock(&self.progress_error).as_ref().copied()
+    }
+
+    /// Returns a result-router error captured while a pending run was
+    /// dropped. A drop path cannot return an error, so the owning engine keeps
+    /// this diagnostic for explicit inspection.
+    #[must_use]
+    pub fn last_result_router_error(&self) -> Option<EngineError> {
+        lock(&self.result_router_error).clone()
+    }
+
+    /// Returns an immutable shared trace from the most recent terminal run.
+    #[must_use]
+    pub fn trace(&self) -> RunObservationTraceV1 {
+        lock(&self.observation).trace()
+    }
+
     /// Returns retained event snapshots from a previous/current run.
     #[must_use]
-    pub fn events(&self) -> Vec<EngineEvent> {
-        lock(&self.events).clone()
+    pub fn events(&self) -> RunObservationTraceV1 {
+        self.trace()
+    }
+
+    /// Selects a policy while constructing an engine.
+    #[must_use]
+    pub fn with_observation_policy(mut self, policy: RunObservationPolicyV1) -> Self {
+        // A newly-created engine cannot be running, so replacing the state is
+        // infallible while the mutable setter remains explicit.
+        self.observation = Arc::new(Mutex::new(ObservationState::new(policy)));
+        self
     }
 
     /// Starts one run. The future owns no executor and performs no ambient
     /// I/O; all component effects enter through their explicit capabilities.
     pub fn run<'a>(&'a mut self) -> RuntimeEngineFuture<'a> {
-        Box::pin(async move {
-            let guard = EngineRunDropGuard::new(self.result_router.clone());
-            let primary = self.run_inner().await;
-            let finalization = if let Some(router) = self.result_router.as_ref() {
-                router
+        // Every invocation gets a new allocation.  Replacing the engine's
+        // owner (rather than resetting it) keeps handles from an earlier run
+        // permanently attached to that run's terminal state.
+        let progress = ProgressOwner::new();
+        self.progress = Some(progress.clone());
+        self.progress_signal = Arc::new(Mutex::new(ControlSignal::Continue));
+        let progress_handle = progress.handle();
+        debug_assert_eq!(progress.snapshot(), progress_handle.snapshot());
+        let begin = lock(&self.observation)
+            .begin_run()
+            .map_err(|source| EngineError::Observation { source });
+        let typed_router_for_guard = self.typed_result_router.clone();
+        let guard = begin.as_ref().ok().map(|_| {
+            EngineRunDropGuard::new(
+                self.result_router.clone(),
+                typed_router_for_guard,
+                self.cancellation.clone(),
+                Arc::clone(&self.observation),
+                progress.clone(),
+                Arc::clone(&self.progress_error),
+                Arc::clone(&self.result_router_error),
+            )
+        });
+        let inner = Box::pin(async move {
+            let guard = match guard {
+                Some(guard) => guard,
+                None => {
+                    let primary = match begin {
+                        Ok(()) => EngineError::Observation {
+                            source: ObservationError::AlreadyRunning,
+                        },
+                        Err(error) => error,
+                    };
+                    return Err(match progress.fail() {
+                        Ok(_) => primary,
+                        Err(source) => {
+                            combined_engine_error(primary, EngineError::Progress { source })
+                        }
+                    });
+                }
+            };
+            let (primary, finalization) = if let Some(router) = self.typed_result_router.clone() {
+                // The typed adapter owns one run-shared ResultDeliveryBudget
+                // and its wait registrar. Runtime only drives the lifecycle;
+                // it never borrows mutable budget state across unrelated
+                // awaits and never invents a run-duration ceiling.
+                let primary = self.run_inner().await;
+                let finish = router
                     .finish()
                     .await
                     .err()
-                    .map(|source| EngineError::ResultRouter { source })
+                    .map(|source| EngineError::TypedResultRouter { source });
+                (primary, finish)
             } else {
-                None
+                let primary = self.run_inner().await;
+                let finalization = if let Some(router) = self.result_router.as_ref() {
+                    let delivered_before = router.stats().delivered_items;
+                    let finish = router
+                        .finish()
+                        .await
+                        .err()
+                        .map(|source| EngineError::ResultRouter { source });
+                    let delivery_progress = if router.stats().delivered_items > delivered_before {
+                        progress
+                            .advance()
+                            .err()
+                            .map(|source| EngineError::Progress { source })
+                    } else {
+                        None
+                    };
+                    match (finish, delivery_progress) {
+                        (None, None) => None,
+                        (Some(error), None) | (None, Some(error)) => Some(error),
+                        (Some(primary), Some(secondary)) => {
+                            Some(combined_engine_error(primary, secondary))
+                        }
+                    }
+                } else {
+                    None
+                };
+                (primary, finalization)
             };
-            guard.disarm();
-            match (primary, finalization) {
+            let result = match (primary, finalization) {
                 (Ok(report), None) => Ok(report),
                 (Ok(_), Some(error)) => Err(error),
                 (Err(primary), None) => Err(primary),
@@ -1021,12 +1810,55 @@ impl RuntimeEngine {
                     primary: Box::new(primary),
                     secondary: Box::new(secondary),
                 }),
+            };
+            let result = match result {
+                Ok(report) => match progress.complete() {
+                    Ok(_) => Ok(report),
+                    Err(source) => Err(EngineError::Progress { source }),
+                },
+                Err(primary) => match progress.fail() {
+                    Ok(_) => Err(primary),
+                    Err(source) => Err(combined_engine_error(
+                        primary,
+                        EngineError::Progress { source },
+                    )),
+                },
+            };
+            let terminal = if result.is_ok() {
+                RunObservationTerminalState::Completed
+            } else {
+                RunObservationTerminalState::Failed
+            };
+            let (summary, trace) = {
+                let mut observation = lock(&self.observation);
+                observation.finish(terminal);
+                (observation.summary(), observation.trace())
+            };
+            // Terminalization was attempted exactly once, including the
+            // typed-error path. Do not let Drop attempt a second terminal
+            // transition with a different state.
+            guard.disarm();
+            match result {
+                Ok(mut report) => {
+                    report.summary = summary;
+                    report.signal = report.summary.highest_control_signal;
+                    report.trace = Arc::clone(&trace);
+                    report.events = trace;
+                    Ok(report)
+                }
+                Err(error) => Err(error),
             }
-        })
+        });
+        RuntimeEngineFuture::new(inner, progress_handle)
     }
 
     async fn run_inner(&mut self) -> Result<EngineReport, EngineError> {
-        if let Some(router) = self.result_router.as_ref() {
+        if let Some(router) = self.typed_result_router.as_ref() {
+            router
+                .start()
+                .await
+                .map_err(|source| EngineError::TypedResultRouter { source })?;
+        } else if let Some(router) = self.result_router.as_ref() {
             router
                 .start()
                 .await
@@ -1054,12 +1886,7 @@ impl RuntimeEngine {
                 .iter()
                 .filter(|group| group.kind == kind)
                 .filter(|group| {
-                    let signal = self.cancellation.signal();
-                    !((signal == ControlSignal::StopTestImmediate
-                        && (kind != GroupKind::Teardown
-                            || !self.plan.teardown_on_shutdown
-                            || !group.teardown_on_shutdown))
-                        || (signal == ControlSignal::StopTestGraceful && kind == GroupKind::Main))
+                    group_allowed_after_stop(&self.plan, group, self.cancellation.signal())
                 })
                 .cloned()
                 .collect::<Vec<_>>();
@@ -1111,23 +1938,29 @@ impl RuntimeEngine {
                     })
                         as Pin<Box<dyn Future<Output = GroupTaskResult>>>);
                 }
-                match DeterministicJoin::new(tasks).await {
-                    Ok(results) => {
-                        for result in results {
-                            let _ = (result.id, result.kind);
-                            report.users_started = report
-                                .users_started
-                                .saturating_add(result.report.users_started);
-                            report.users_finished = report
-                                .users_finished
-                                .saturating_add(result.report.users_finished);
-                            report.signal = report.signal.combine(result.report.signal);
-                            if let Err(error) = result.result {
-                                combine_engine_error(&mut failure, error);
-                                self.cancellation.cancel_immediate();
+                match DeterministicJoin::new(tasks) {
+                    Ok(join) => match join.await {
+                        Ok(results) => {
+                            for result in results {
+                                let _ = (result.id, result.kind);
+                                report.users_started = report
+                                    .users_started
+                                    .saturating_add(result.report.users_started);
+                                report.users_finished = report
+                                    .users_finished
+                                    .saturating_add(result.report.users_finished);
+                                report.signal = report.signal.combine(result.report.signal);
+                                if let Err(error) = result.result {
+                                    combine_engine_error(&mut failure, error);
+                                    self.cancellation.cancel_immediate();
+                                }
                             }
                         }
-                    }
+                        Err(error) => {
+                            combine_engine_error(&mut failure, error);
+                            self.cancellation.cancel_immediate();
+                        }
+                    },
                     Err(error) => {
                         combine_engine_error(&mut failure, error);
                         self.cancellation.cancel_immediate();
@@ -1137,12 +1970,7 @@ impl RuntimeEngine {
             }
             for group in candidates {
                 let signal = self.cancellation.signal();
-                if (signal == ControlSignal::StopTestImmediate
-                    && (kind != GroupKind::Teardown
-                        || !self.plan.teardown_on_shutdown
-                        || !group.teardown_on_shutdown))
-                    || (signal == ControlSignal::StopTestGraceful && kind == GroupKind::Main)
-                {
+                if !group_allowed_after_stop(&self.plan, &group, signal) {
                     continue;
                 }
                 let group_start = self.capabilities.clock().now().monotonic;
@@ -1187,7 +2015,15 @@ impl RuntimeEngine {
         }) {
             combine_engine_error(&mut failure, error);
         }
-        report.events = self.events();
+        if let Some(router) = self.typed_result_router.as_ref()
+            && let Err(error) = router.deliver().await
+        {
+            combine_engine_error(
+                &mut failure,
+                EngineError::TypedResultRouter { source: error },
+            );
+        }
+        report.summary = self.summary();
         if let Some(error) = failure {
             Err(error)
         } else {
@@ -1214,34 +2050,36 @@ impl RuntimeEngine {
             });
         }
         let ramp = group.schedule.ramp(group.threads)?;
+        let duration_end = group.schedule.checked_duration_end(group_start)?;
         self.push_event(EngineEvent::GroupStarted {
             id: group.id,
             kind: group.kind,
         })?;
+        if cooperative {
+            cooperative_yield().await;
+        }
         let mut tasks = Vec::with_capacity(group.threads);
         let mut preparation_error = None;
         for thread_index in 0..group.threads {
             if self.cancellation.signal().is_stop() && group.kind != GroupKind::Teardown {
                 break;
             }
-            if group.schedule.duration.is_some_and(|duration| {
-                self.capabilities
-                    .clock()
-                    .now()
-                    .monotonic
-                    .saturating_sub(group_start)
-                    >= duration
-            }) {
+            if duration_end.is_some_and(|end| self.capabilities.clock().now().monotonic >= end) {
                 break;
             }
             let offset = group
                 .schedule
                 .delay
-                .checked_add(ramp.offset(thread_index))
+                .checked_add(ramp.offset(thread_index)?)
                 .ok_or_else(|| EngineError::InvalidSchedule {
                     detail: "group schedule delay overflow".to_owned(),
                 })?;
-            let target = group_start.saturating_add(offset);
+            let target =
+                group_start
+                    .checked_add(offset)
+                    .ok_or_else(|| EngineError::InvalidSchedule {
+                        detail: "group user startup target overflow".to_owned(),
+                    })?;
             let thread_number =
                 thread_index
                     .checked_add(1)
@@ -1250,7 +2088,6 @@ impl RuntimeEngine {
                     })?;
             let group_id = group.id;
             let group_kind = group.kind;
-            let duration = group.schedule.duration;
             let mut runtime = self.clone_for_scheduler();
             let shared_logic = Arc::clone(&shared_logic);
             tasks.push(Box::pin(async move {
@@ -1296,15 +2133,8 @@ impl RuntimeEngine {
                     }
                 }
                 if (runtime.cancellation.signal().is_stop() && group_kind != GroupKind::Teardown)
-                    || duration.is_some_and(|limit| {
-                        runtime
-                            .capabilities
-                            .clock()
-                            .now()
-                            .monotonic
-                            .saturating_sub(group_start)
-                            >= limit
-                    })
+                    || duration_end
+                        .is_some_and(|end| runtime.capabilities.clock().now().monotonic >= end)
                 {
                     return UserTaskResult {
                         result: Ok(()),
@@ -1324,14 +2154,25 @@ impl RuntimeEngine {
                         };
                     }
                 };
-                let mut user = VirtualUser::new(
+                let mut user = match VirtualUser::new(
                     lifecycle_id,
                     group,
                     thread_number,
                     &runtime.run_id,
                     &runtime.host,
                     &runtime.capabilities,
-                );
+                    &runtime.plan.initial_variables,
+                ) {
+                    Ok(user) => user,
+                    Err(source) => {
+                        return UserTaskResult {
+                            result: Err(EngineError::InitialVariables { source }),
+                            signal: runtime.cancellation.signal(),
+                            started: 0,
+                            finished: 0,
+                        };
+                    }
+                };
                 let mut cleanup = LifecycleCleanupGuard::new(&user.context);
                 if group_kind != GroupKind::Teardown {
                     user.context.attach_cancellation(&runtime.cancellation);
@@ -1352,6 +2193,9 @@ impl RuntimeEngine {
                         started: 1,
                         finished: 0,
                     };
+                }
+                if cooperative {
+                    cooperative_yield().await;
                 }
                 let packages = match group.packages.clone_for_user() {
                     Ok(packages) => packages,
@@ -1384,6 +2228,7 @@ impl RuntimeEngine {
                     .run_user(
                         group,
                         group_start,
+                        duration_end,
                         &mut user,
                         &mut task_report,
                         packages,
@@ -1430,17 +2275,21 @@ impl RuntimeEngine {
             })
                 as Pin<Box<dyn Future<Output = UserTaskResult>>>);
         }
-        match DeterministicJoin::new(tasks).await {
-            Ok(results) => {
-                for result in results {
-                    report.users_started = report.users_started.saturating_add(result.started);
-                    report.users_finished = report.users_finished.saturating_add(result.finished);
-                    report.signal = report.signal.combine(result.signal);
-                    if let Err(error) = result.result {
-                        combine_engine_error(&mut preparation_error, error);
+        match DeterministicJoin::new(tasks) {
+            Ok(join) => match join.await {
+                Ok(results) => {
+                    for result in results {
+                        report.users_started = report.users_started.saturating_add(result.started);
+                        report.users_finished =
+                            report.users_finished.saturating_add(result.finished);
+                        report.signal = report.signal.combine(result.signal);
+                        if let Err(error) = result.result {
+                            combine_engine_error(&mut preparation_error, error);
+                        }
                     }
                 }
-            }
+                Err(error) => combine_engine_error(&mut preparation_error, error),
+            },
             Err(error) => combine_engine_error(&mut preparation_error, error),
         }
         if let Some(error) = preparation_error {
@@ -1471,6 +2320,7 @@ impl RuntimeEngine {
         &mut self,
         group: &ThreadGroupPlan,
         group_start: Duration,
+        duration_end: Option<Duration>,
         user: &mut VirtualUser,
         report: &mut EngineReport,
         mut packages: CompiledPackages,
@@ -1478,11 +2328,15 @@ impl RuntimeEngine {
         cleanup: &mut LifecycleCleanupGuard,
         cooperative: bool,
     ) -> Result<(), EngineError> {
+        if group.iterations == Some(0) {
+            return Ok(());
+        }
         if let Some(program) = group.logic_controller.clone() {
             return self
                 .run_logic_user(
                     group,
                     group_start,
+                    duration_end,
                     user,
                     report,
                     packages,
@@ -1526,14 +2380,8 @@ impl RuntimeEngine {
                     let continue_iterations = group
                         .iterations
                         .is_none_or(|limit| completed_iterations < limit)
-                        && group.schedule.duration.is_none_or(|duration| {
-                            self.capabilities
-                                .clock()
-                                .now()
-                                .monotonic
-                                .saturating_sub(group_start)
-                                < duration
-                        });
+                        && duration_end
+                            .is_none_or(|end| self.capabilities.clock().now().monotonic < end);
                     if !continue_iterations {
                         break;
                     }
@@ -1548,7 +2396,9 @@ impl RuntimeEngine {
                             &self.run_id,
                             &self.host,
                             &self.capabilities,
+                            &self.plan.initial_variables,
                         )
+                        .map_err(|source| EngineError::InitialVariables { source })?
                         .context;
                         if group.kind != GroupKind::Teardown {
                             user.context.attach_cancellation(&self.cancellation);
@@ -1572,6 +2422,7 @@ impl RuntimeEngine {
                 }
                 ControllerStep::Stopped(signal) => {
                     report.signal = report.signal.combine(signal);
+                    self.observe_control_signal(signal)?;
                     if matches!(
                         signal,
                         ControlSignal::StopTestGraceful | ControlSignal::StopTestImmediate
@@ -1581,6 +2432,11 @@ impl RuntimeEngine {
                     break;
                 }
                 ControllerStep::Sample(selection) => {
+                    if duration_end
+                        .is_some_and(|end| self.capabilities.clock().now().monotonic >= end)
+                    {
+                        break;
+                    }
                     user.context
                         .set_sampler_name(Some(selection.sampler_id.to_string()));
                     let package = packages.get(NodeId::new(selection.sampler_id)).ok_or(
@@ -1589,7 +2445,7 @@ impl RuntimeEngine {
                             sampler_id: NodeId::new(selection.sampler_id),
                         },
                     )?;
-                    let result = ExecutionPipeline::execute(package, &mut user.context)
+                    let mut result = ExecutionPipeline::execute(package, &mut user.context)
                         .await
                         .map_err(|source| EngineError::Pipeline {
                             group_id: group.id,
@@ -1597,7 +2453,9 @@ impl RuntimeEngine {
                             source,
                         })?;
                     let signal = result.signal;
-                    if let Some(event) = result.event.clone() {
+                    if !result.result.as_ref().is_some_and(SampleResult::is_ignored)
+                        && let Some(event) = result.event.take()
+                    {
                         self.route_event(
                             event,
                             group,
@@ -1610,14 +2468,15 @@ impl RuntimeEngine {
                         )?;
                     }
                     self.deliver_result_router().await?;
-                    self.push_event(EngineEvent::Sample {
-                        group_id: group.id,
-                        thread_number: user.thread_number,
-                        sampler_id: result.sampler_id,
-                        result: result.result.clone(),
-                        failure: result.sample_failure.clone(),
+                    self.push_sample_event(
+                        group.id,
+                        user.thread_number,
+                        result.sampler_id,
+                        result.result.as_ref(),
+                        result.sample_failure.as_ref(),
                         signal,
-                    })?;
+                        false,
+                    )?;
                     report.signal = report.signal.combine(signal);
                     if result.sample_failure.is_some()
                         || result
@@ -1628,6 +2487,13 @@ impl RuntimeEngine {
                         let policy_signal = group.on_sample_error.signal();
                         user.context.request_control(policy_signal);
                         report.signal = report.signal.combine(policy_signal);
+                        self.observe_control_signal(policy_signal)?;
+                        if matches!(
+                            policy_signal,
+                            ControlSignal::StopTestGraceful | ControlSignal::StopTestImmediate
+                        ) {
+                            self.cancellation.request(policy_signal);
+                        }
                     }
                     if matches!(
                         signal,
@@ -1655,6 +2521,49 @@ impl RuntimeEngine {
         &mut self,
         group: &ThreadGroupPlan,
         group_start: Duration,
+        duration_end: Option<Duration>,
+        user: &mut VirtualUser,
+        report: &mut EngineReport,
+        packages: CompiledPackages,
+        shared_logic: Arc<LogicSharedState>,
+        program: LogicProgram,
+        cleanup: &mut LifecycleCleanupGuard,
+        cooperative: bool,
+    ) -> Result<(), EngineError> {
+        let mut leases = CriticalSectionLeases::new(&user.context);
+        let primary = self
+            .run_logic_user_inner(
+                group,
+                group_start,
+                duration_end,
+                user,
+                report,
+                packages,
+                shared_logic,
+                program,
+                cleanup,
+                cooperative,
+                &mut leases,
+            )
+            .await;
+        let release_error = leases.release_error(group.id);
+        match (primary, release_error) {
+            (Ok(()), None) => Ok(()),
+            (Ok(()), Some(secondary)) => Err(secondary),
+            (Err(primary), None) => Err(primary),
+            (Err(primary), Some(secondary)) => Err(combined_engine_error(primary, secondary)),
+        }
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the lifecycle seam keeps group, clock, user, report, package, shared-state, program, cleanup, and lease ownership explicit"
+    )]
+    async fn run_logic_user_inner(
+        &mut self,
+        group: &ThreadGroupPlan,
+        group_start: Duration,
+        duration_end: Option<Duration>,
         user: &mut VirtualUser,
         report: &mut EngineReport,
         mut packages: CompiledPackages,
@@ -1662,8 +2571,13 @@ impl RuntimeEngine {
         program: LogicProgram,
         cleanup: &mut LifecycleCleanupGuard,
         cooperative: bool,
+        leases: &mut CriticalSectionLeases,
     ) -> Result<(), EngineError> {
+        if group.iterations == Some(0) {
+            return Ok(());
+        }
         let mut completed_iterations = 0_u64;
+        let mut total_steps = 0usize;
         let max_steps = group
             .packages
             .len()
@@ -1677,7 +2591,8 @@ impl RuntimeEngine {
             let mut steps = 0usize;
             loop {
                 steps = steps.saturating_add(1);
-                if steps > max_steps {
+                total_steps = total_steps.saturating_add(1);
+                if steps > max_steps || total_steps > max_steps {
                     return Err(EngineError::ResourceLimit {
                         detail: "virtual-user logic transition limit".to_owned(),
                     });
@@ -1689,7 +2604,10 @@ impl RuntimeEngine {
                     .clock()
                     .now()
                     .monotonic
-                    .saturating_sub(group_start);
+                    .checked_sub(group_start)
+                    .ok_or_else(|| EngineError::InvalidSchedule {
+                        detail: "group clock moved before startup".to_owned(),
+                    })?;
                 runner.replace_variables(&user.context.variables());
                 let mut input = LogicInput {
                     signal,
@@ -1717,27 +2635,70 @@ impl RuntimeEngine {
                             )?);
                     };
                 match step {
-                    LogicStep::Complete => break,
+                    LogicStep::Complete => {
+                        if let Some(error) = leases.release_error(group.id) {
+                            return Err(error);
+                        }
+                        break;
+                    }
                     LogicStep::NeedsRandom => continue,
                     LogicStep::Stopped(signal) => {
                         report.signal = report.signal.combine(signal);
-                        self.finish_transactions(
+                        self.observe_control_signal(signal)?;
+                        let lease_error = leases.release_error(group.id);
+                        let mut stop_error = None;
+                        if let Err(error) = self.finish_transactions(
                             group,
                             user,
                             report,
                             &mut transactions,
                             &mut transaction_order,
-                        )?;
-                        self.deliver_result_router().await?;
+                        ) {
+                            combine_engine_error(&mut stop_error, error);
+                        }
+                        if let Err(error) = self.deliver_result_router().await {
+                            combine_engine_error(&mut stop_error, error);
+                        }
                         if matches!(
                             signal,
                             ControlSignal::StopTestGraceful | ControlSignal::StopTestImmediate
                         ) {
                             self.cancellation.request(signal);
                         }
+                        if let Some(error) = lease_error {
+                            combine_engine_error(&mut stop_error, error);
+                        }
+                        if let Some(error) = stop_error {
+                            return Err(error);
+                        }
                         return Ok(());
                     }
                     LogicStep::Sample(selection) => {
+                        if duration_end.is_some_and(|end| {
+                            user.context.capabilities().clock().now().monotonic >= end
+                        }) {
+                            let lease_error = leases.release_error(group.id);
+                            let mut duration_error = None;
+                            if let Err(error) = self.finish_transactions(
+                                group,
+                                user,
+                                report,
+                                &mut transactions,
+                                &mut transaction_order,
+                            ) {
+                                combine_engine_error(&mut duration_error, error);
+                            }
+                            if let Err(error) = self.deliver_result_router().await {
+                                combine_engine_error(&mut duration_error, error);
+                            }
+                            if let Some(error) = lease_error {
+                                combine_engine_error(&mut duration_error, error);
+                            }
+                            if let Some(error) = duration_error {
+                                return Err(error);
+                            }
+                            return Ok(());
+                        }
                         let runner_variables = runner.variables_owned();
                         user.context.variables_mut().clone_from(&runner_variables);
                         self.sync_transactions(
@@ -1757,41 +2718,54 @@ impl RuntimeEngine {
                                 sampler_id: NodeId::new(selection.sampler_id),
                             },
                         )?;
-                        let mut acquired =
-                            self.acquire_critical_sections(group, user, &selection)?;
-                        let pipeline_result =
-                            ExecutionPipeline::execute(package, &mut user.context)
-                                .await
-                                .map_err(|source| EngineError::Pipeline {
-                                    group_id: group.id,
-                                    sampler_id: package.sampler_id(),
-                                    source,
-                                });
-                        let release_result =
-                            acquired
-                                .release()
-                                .map_err(|source| EngineError::CriticalSection {
-                                    group_id: group.id,
-                                    source,
-                                });
-                        let result = match (pipeline_result, release_result) {
-                            (Ok(result), Ok(())) => result,
-                            (Err(primary), Ok(())) => return Err(primary),
-                            (Ok(_), Err(secondary)) => return Err(secondary),
-                            (Err(primary), Err(secondary)) => {
-                                return Err(EngineError::Combined {
-                                    primary: Box::new(primary),
-                                    secondary: Box::new(secondary),
-                                });
+                        let cancellation = user.context.cancellation_token().clone();
+                        match leases
+                            .synchronize(group.id, &selection, &cancellation)
+                            .await?
+                        {
+                            CriticalSectionSyncOutcome::Acquired => {}
+                            CriticalSectionSyncOutcome::Cancelled(signal) => {
+                                report.signal = report.signal.combine(signal);
+                                self.observe_control_signal(signal)?;
+                                let lease_error = leases.release_error(group.id);
+                                let mut cancellation_error = None;
+                                if let Err(error) = self.finish_transactions(
+                                    group,
+                                    user,
+                                    report,
+                                    &mut transactions,
+                                    &mut transaction_order,
+                                ) {
+                                    combine_engine_error(&mut cancellation_error, error);
+                                }
+                                if let Err(error) = self.deliver_result_router().await {
+                                    combine_engine_error(&mut cancellation_error, error);
+                                }
+                                if let Some(error) = lease_error {
+                                    combine_engine_error(&mut cancellation_error, error);
+                                }
+                                if let Some(error) = cancellation_error {
+                                    return Err(error);
+                                }
+                                return Ok(());
                             }
                         };
+                        let mut result = ExecutionPipeline::execute(package, &mut user.context)
+                            .await
+                            .map_err(|source| EngineError::Pipeline {
+                                group_id: group.id,
+                                sampler_id: package.sampler_id(),
+                                source,
+                            })?;
                         let context_variables = user.context.variables().clone();
                         runner.replace_variables(&context_variables);
                         if let Some(sample) = result.result.as_ref() {
                             last_sample_success = sample.success();
                         }
                         let result_signal = result.signal;
-                        if let Some(event) = result.event.clone() {
+                        if !result.result.as_ref().is_some_and(SampleResult::is_ignored)
+                            && let Some(event) = result.event.take()
+                        {
                             let mut plan_path = Vec::with_capacity(selection.path.len() + 2);
                             plan_path.push(group.id);
                             plan_path
@@ -1868,14 +2842,15 @@ impl RuntimeEngine {
                                     })?;
                             }
                         }
-                        self.push_event(EngineEvent::Sample {
-                            group_id: group.id,
-                            thread_number: user.thread_number,
-                            sampler_id: result.sampler_id,
-                            result: result.result.clone(),
-                            failure: result.sample_failure.clone(),
-                            signal: result_signal,
-                        })?;
+                        self.push_sample_event(
+                            group.id,
+                            user.thread_number,
+                            result.sampler_id,
+                            result.result.as_ref(),
+                            result.sample_failure.as_ref(),
+                            result_signal,
+                            false,
+                        )?;
                         report.signal = report.signal.combine(result_signal);
                         if result.sample_failure.is_some()
                             || result
@@ -1886,6 +2861,13 @@ impl RuntimeEngine {
                             let policy_signal = group.on_sample_error.signal();
                             user.context.request_control(policy_signal);
                             report.signal = report.signal.combine(policy_signal);
+                            self.observe_control_signal(policy_signal)?;
+                            if matches!(
+                                policy_signal,
+                                ControlSignal::StopTestGraceful | ControlSignal::StopTestImmediate
+                            ) {
+                                self.cancellation.request(policy_signal);
+                            }
                         }
                         if matches!(
                             result_signal,
@@ -1899,13 +2881,23 @@ impl RuntimeEngine {
                     }
                 }
             }
-            self.finish_transactions(
+            let lease_error = leases.release_error(group.id);
+            let transaction_result = self.finish_transactions(
                 group,
                 user,
                 report,
                 &mut transactions,
                 &mut transaction_order,
-            )?;
+            );
+            if let Err(primary) = transaction_result {
+                return Err(match lease_error {
+                    Some(secondary) => combined_engine_error(primary, secondary),
+                    None => primary,
+                });
+            }
+            if let Some(error) = lease_error {
+                return Err(error);
+            }
             self.deliver_result_router().await?;
             self.push_event(EngineEvent::Iteration {
                 group_id: group.id,
@@ -1919,15 +2911,8 @@ impl RuntimeEngine {
             if !group
                 .iterations
                 .is_none_or(|limit| completed_iterations < limit)
-                || group.schedule.duration.is_some_and(|duration| {
-                    user.context
-                        .capabilities()
-                        .clock()
-                        .now()
-                        .monotonic
-                        .saturating_sub(group_start)
-                        >= duration
-                })
+                || duration_end
+                    .is_some_and(|end| user.context.capabilities().clock().now().monotonic >= end)
             {
                 break;
             }
@@ -1942,12 +2927,15 @@ impl RuntimeEngine {
                     &self.run_id,
                     &self.host,
                     &self.capabilities,
+                    &self.plan.initial_variables,
                 )
+                .map_err(|source| EngineError::InitialVariables { source })?
                 .context;
                 if group.kind != GroupKind::Teardown {
                     user.context.attach_cancellation(&self.cancellation);
                 }
                 cleanup.set_lifecycle(lifecycle_id);
+                leases.set_lifecycle(lifecycle_id);
                 packages =
                     group
                         .packages
@@ -2092,74 +3080,91 @@ impl RuntimeEngine {
                 parent: transaction.parent_id.map(NodeId::new),
             },
         )?;
-        self.push_event(EngineEvent::Sample {
-            group_id: group.id,
-            thread_number: user.thread_number,
-            sampler_id: NodeId::new(transaction.info.id),
-            result: Some(result),
-            failure: None,
-            signal: ControlSignal::Continue,
-        })?;
+        self.push_sample_event(
+            group.id,
+            user.thread_number,
+            NodeId::new(transaction.info.id),
+            Some(&result),
+            None,
+            ControlSignal::Continue,
+            true,
+        )?;
         report.signal = report.signal.combine(ControlSignal::Continue);
         Ok(())
     }
 
-    fn acquire_critical_sections(
-        &self,
-        group: &ThreadGroupPlan,
-        user: &VirtualUser,
-        selection: &crate::LogicSelection,
-    ) -> Result<CriticalSectionLeases, EngineError> {
-        let coordinator = user.context.capabilities().critical_sections_arc();
-        let mut acquired: Vec<String> = Vec::new();
-        let mut seen = BTreeSet::new();
-        for name in &selection.critical_sections {
-            if !seen.insert(name.clone()) {
-                continue;
+    fn push_event(&self, event: EngineEvent) -> Result<(), EngineError> {
+        let signal = match &event {
+            EngineEvent::Sample { signal, .. } | EngineEvent::TestFinished { signal } => {
+                Some(*signal)
             }
-            if let Err(source) = coordinator.try_acquire(name, user.lifecycle_id) {
-                let primary = EngineError::CriticalSection {
-                    group_id: group.id,
-                    source,
-                };
-                let mut rollback_error = None;
-                for held in acquired.iter().rev() {
-                    if let Err(error) = coordinator.release(held, user.lifecycle_id) {
-                        combine_engine_error(
-                            &mut rollback_error,
-                            EngineError::CriticalSection {
-                                group_id: group.id,
-                                source: error,
-                            },
-                        );
-                    }
-                }
-                return Err(match rollback_error {
-                    Some(secondary) => EngineError::Combined {
-                        primary: Box::new(primary),
-                        secondary: Box::new(secondary),
-                    },
-                    None => primary,
-                });
-            }
-            acquired.push(name.clone());
+            _ => None,
+        };
+        lock(&self.observation)
+            .record_event(event)
+            .map_err(|source| EngineError::Observation { source })?;
+        self.advance_progress()?;
+        if let Some(signal) = signal {
+            self.observe_control_signal(signal)?;
         }
-        Ok(CriticalSectionLeases {
-            coordinator,
-            lifecycle_id: user.lifecycle_id,
-            names: acquired,
-            drop_error: Arc::new(Mutex::new(None)),
-        })
+        Ok(())
     }
 
-    fn push_event(&self, event: EngineEvent) -> Result<(), EngineError> {
-        let mut events = lock(&self.events);
-        if events.len() >= MAX_EVENTS {
-            return Err(EngineError::ResourceLimit {
-                detail: "engine event capacity".to_owned(),
-            });
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "sample observation keeps lifecycle identities and borrowed payload facts explicit"
+    )]
+    fn push_sample_event(
+        &self,
+        group_id: NodeId,
+        thread_number: usize,
+        sampler_id: NodeId,
+        result: Option<&SampleResult>,
+        failure: Option<&SampleFailure>,
+        signal: ControlSignal,
+        transaction: bool,
+    ) -> Result<(), EngineError> {
+        lock(&self.observation)
+            .record_sample(
+                group_id,
+                thread_number,
+                sampler_id,
+                result,
+                failure,
+                signal,
+                transaction,
+            )
+            .map_err(|source| EngineError::Observation { source })?;
+        self.advance_progress()?;
+        self.observe_control_signal(signal)
+    }
+
+    fn advance_progress(&self) -> Result<(), EngineError> {
+        self.progress
+            .as_ref()
+            .ok_or(EngineError::Progress {
+                source: ProgressError::NotRunning {
+                    state: crate::ProgressTerminalState::Cancelled,
+                },
+            })?
+            .advance()
+            .map(|_| ())
+            .map_err(|source| EngineError::Progress { source })
+    }
+
+    fn observe_control_signal(&self, signal: ControlSignal) -> Result<(), EngineError> {
+        let escalated = {
+            let mut observed = lock(&self.progress_signal);
+            if signal > *observed {
+                *observed = signal;
+                true
+            } else {
+                false
+            }
+        };
+        if escalated {
+            self.advance_progress()?;
         }
-        events.push(event);
         Ok(())
     }
 
@@ -2171,6 +3176,120 @@ impl RuntimeEngine {
         plan_path: Vec<NodeId>,
         origin: ResultOrigin,
     ) -> Result<(), EngineError> {
+        if let Some(router) = self.typed_result_router.as_ref() {
+            // Sequence allocation and all-sink admission are one run-owned
+            // transaction. Scheduler clones share this lock so two users
+            // cannot both observe the same next sequence before admission.
+            let _admission_guard = lock(&self.typed_admission_lock);
+            let identity = router.identity();
+            let source = router.node(origin.source_node()).map_err(|source| {
+                EngineError::TypedResultRouter {
+                    source: TypedRouterError::Identity(source),
+                }
+            })?;
+            let qualified_path =
+                router
+                    .path(&plan_path)
+                    .map_err(|source| EngineError::TypedResultRouter {
+                        source: TypedRouterError::Identity(source),
+                    })?;
+            let group_ref =
+                router
+                    .node(group.id)
+                    .map_err(|source| EngineError::TypedResultRouter {
+                        source: TypedRouterError::Identity(source),
+                    })?;
+            let user_identity = TypedUserIdentity::new(
+                user.lifecycle_id,
+                group_ref,
+                u64::try_from(user.thread_number).map_err(|_| EngineError::TypedResultRouter {
+                    source: TypedRouterError::Identity(
+                        crate::result_router::IdentityError::Overflow {
+                            field: "thread-number",
+                        },
+                    ),
+                })?,
+                user.iteration.current(),
+            )
+            .map_err(|source| EngineError::TypedResultRouter {
+                source: TypedRouterError::Identity(source),
+            })?;
+            let typed_origin = match origin {
+                ResultOrigin::Sampler { sampler_id, parent } => TypedResultOrigin::Sampler {
+                    sampler: router.node(sampler_id).map_err(|source| {
+                        EngineError::TypedResultRouter {
+                            source: TypedRouterError::Identity(source),
+                        }
+                    })?,
+                    parent: parent
+                        .map(|parent| router.node(parent))
+                        .transpose()
+                        .map_err(|source| EngineError::TypedResultRouter {
+                            source: TypedRouterError::Identity(source),
+                        })?,
+                },
+                ResultOrigin::Transaction {
+                    controller_id,
+                    parent,
+                } => TypedResultOrigin::Transaction {
+                    controller: router.node(controller_id).map_err(|source| {
+                        EngineError::TypedResultRouter {
+                            source: TypedRouterError::Identity(source),
+                        }
+                    })?,
+                    parent: parent
+                        .map(|parent| router.node(parent))
+                        .transpose()
+                        .map_err(|source| EngineError::TypedResultRouter {
+                            source: TypedRouterError::Identity(source),
+                        })?,
+                },
+            };
+            let sample_value = self
+                .next_sample
+                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                    current.checked_add(1)
+                })
+                .map_err(|_| EngineError::TypedResultRouter {
+                    source: TypedRouterError::Identity(
+                        crate::result_router::IdentityError::Overflow { field: "sample-id" },
+                    ),
+                })?;
+            let sample = TypedSampleId::new(sample_value).map_err(|source| {
+                EngineError::TypedResultRouter {
+                    source: TypedRouterError::Identity(source),
+                }
+            })?;
+            let sequence = router
+                .next_sequence()
+                .map_err(|source| EngineError::TypedResultRouter { source })?;
+            let envelope = TypedResultEnvelope::new(
+                sequence,
+                identity.run(),
+                identity.run_generation(),
+                identity.worker(),
+                identity.worker_generation(),
+                source,
+                qualified_path,
+                user_identity,
+                event.thread().clone(),
+                sample,
+                typed_origin,
+                event,
+            )
+            .map_err(|source| EngineError::TypedResultRouter {
+                source: TypedRouterError::Identity(source),
+            })?;
+            let outcome = router
+                .admit(envelope)
+                .map_err(|source| EngineError::TypedResultRouter { source })?;
+            return match outcome {
+                TypedAdmissionOutcome::Accepted { .. } | TypedAdmissionOutcome::Ignored => Ok(()),
+                outcome => Err(EngineError::TypedResultRouter {
+                    source: TypedRouterError::Admission(outcome),
+                }),
+            };
+        }
         let Some(router) = self.result_router.as_ref() else {
             return Ok(());
         };
@@ -2188,7 +3307,7 @@ impl RuntimeEngine {
         )
         .map_err(|source| EngineError::ResultRouter { source })?;
         match router.admit(event, metadata) {
-            AdmissionOutcome::Accepted { .. } => Ok(()),
+            AdmissionOutcome::Accepted { .. } | AdmissionOutcome::Ignored => Ok(()),
             outcome => Err(EngineError::ResultRouter {
                 source: ResultRouterError::Admission { outcome },
             }),
@@ -2196,11 +3315,26 @@ impl RuntimeEngine {
     }
 
     async fn deliver_result_router(&self) -> Result<(), EngineError> {
+        // Typed production routing drains with the single run-owned budget at
+        // the lifecycle boundary.  Per-sample calls remain no-ops here so
+        // concurrently scheduled users cannot alias one mutable budget.
+        if self.typed_result_router.is_some() {
+            return Ok(());
+        }
         if let Some(router) = self.result_router.as_ref() {
+            let delivered_before = router.stats().delivered_items;
             router
                 .deliver()
                 .await
                 .map_err(|source| EngineError::ResultRouter { source })?;
+            // A successful delivery boundary is semantic progress distinct
+            // from sample/transaction observation.  Waker activity while the
+            // delivery future is pending does not reach this point.  An
+            // empty drain is not an event and therefore does not advance the
+            // run generation.
+            if router.stats().delivered_items > delivered_before {
+                self.advance_progress()?;
+            }
         }
         Ok(())
     }
@@ -2277,16 +3411,34 @@ fn transaction_result_without_children(
 #[allow(clippy::expect_used, reason = "deterministic lifecycle setup")]
 mod tests {
     use super::*;
+    use crate::result_router::{
+        DeliveryLease, DurabilityAck, FullPolicy, PlanDomain, QualifiedSinkId,
+        ResultDeliveryBudget, ResultMonotonicClock, ResultOperationScope, ResultOperationWindows,
+        RetryBudget, RunGeneration, SinkPlanGeneration, TypedResultOrigin, TypedResultRouter,
+        TypedResultRouterAdapter, TypedRouterIdentity, TypedRouterPhase, TypedRunId,
+        TypedSinkAdapter, TypedSinkError, TypedSinkFuture, TypedSinkPlan, WorkerGeneration,
+        WorkerId,
+    };
     use crate::{
-        CapabilityFuture, Clock, ClockReading, ComponentFuture, ResultEnvelope, ResultOrigin,
-        ResultRouter, ResultSink, ResultSinkFuture, ResultSinkSpec, RunSequence, SamplePackage,
-        SamplerFactory, SamplerOutput, SinkId, SinkLimits, Sleeper, TimerFactory,
+        CapabilityFuture, Clock, ClockReading, ComponentFuture, CriticalSectionCoordinator,
+        ResultEnvelope, ResultOrigin, ResultRouter, ResultSink, ResultSinkFuture, ResultSinkSpec,
+        RunSequence, SamplePackage, SamplerFactory, SamplerOutput, SinkId, SinkLimits, Sleeper,
+        TimerFactory,
     };
     use jmeter_rs_expr::BuiltinFunctions;
     use std::future::Future;
     use std::pin::Pin;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
     use std::task::{Context, Poll, Waker};
+    use std::time::Duration;
+
+    struct TestResultClock;
+
+    impl ResultMonotonicClock for TestResultClock {
+        fn now(&self) -> Result<crate::MonotonicInstant, crate::result_router::ResultClockError> {
+            Ok(crate::MonotonicInstant::zero())
+        }
+    }
 
     fn block_on<F: Future>(future: F) -> F::Output {
         let waker = Waker::noop();
@@ -2298,6 +3450,20 @@ mod tests {
                 Poll::Pending => std::hint::spin_loop(),
             }
         }
+    }
+
+    fn trace_engine(
+        plan: EnginePlan,
+        capabilities: RuntimeCapabilities,
+        run_id: &str,
+        host: &str,
+    ) -> RuntimeEngine {
+        RuntimeEngine::new(plan, capabilities, run_id, host).with_observation_policy(
+            RunObservationPolicyV1::full_trace(
+                std::num::NonZeroUsize::new(100_000).expect("finite trace event bound"),
+                std::num::NonZeroUsize::new(128 * 1024 * 1024).expect("finite trace byte bound"),
+            ),
+        )
     }
 
     struct Sampler;
@@ -2348,10 +3514,144 @@ mod tests {
         }
     }
 
+    struct RecordingTypedSink {
+        envelopes: Arc<Mutex<Vec<crate::result_router::TypedResultEnvelope>>>,
+    }
+
+    impl TypedSinkAdapter for RecordingTypedSink {
+        fn process<'a>(
+            &'a self,
+            lease: &'a DeliveryLease,
+            _operation: &'a crate::result_router::ResultOperationLease,
+            _wait_registrar: &'a dyn crate::result_router::ResultWaitRegistrar,
+        ) -> TypedSinkFuture<'a, DurabilityAck> {
+            let envelope = lease.envelope().clone();
+            let result = lease
+                .acknowledge(lease.durability_boundary())
+                .map_err(|error| TypedSinkError::permanent(error.to_string()));
+            let envelopes = Arc::clone(&self.envelopes);
+            Box::pin(std::future::ready({
+                if result.is_ok() {
+                    lock(&envelopes).push(envelope);
+                }
+                result
+            }))
+        }
+    }
+
     struct SamplerFactoryImpl;
     impl SamplerFactory for SamplerFactoryImpl {
         fn create(&self) -> Arc<dyn crate::Sampler> {
             Arc::new(Sampler)
+        }
+    }
+
+    struct ScopeTraceSampler {
+        trace: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl crate::Sampler for ScopeTraceSampler {
+        fn sample<'a>(
+            &'a self,
+            context: &'a mut crate::SampleContext<'_>,
+        ) -> ComponentFuture<'a, SamplerOutput> {
+            let thread = context.execution().thread().name().to_owned();
+            let sampler = context
+                .execution()
+                .sampler_name()
+                .unwrap_or("unknown")
+                .to_owned();
+            lock(&self.trace).push(format!("{thread}:{sampler}"));
+            Box::pin(std::future::ready(Ok(SamplerOutput::result(
+                SampleResult::new(sampler),
+            ))))
+        }
+    }
+
+    struct ScopeTraceSamplerFactory {
+        trace: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl SamplerFactory for ScopeTraceSamplerFactory {
+        fn create(&self) -> Arc<dyn crate::Sampler> {
+            Arc::new(ScopeTraceSampler {
+                trace: Arc::clone(&self.trace),
+            })
+        }
+    }
+
+    struct FailingScopeSampler;
+
+    impl crate::Sampler for FailingScopeSampler {
+        fn sample<'a>(
+            &'a self,
+            _context: &'a mut crate::SampleContext<'_>,
+        ) -> ComponentFuture<'a, SamplerOutput> {
+            Box::pin(std::future::ready(Err(crate::ComponentError::failure(
+                "critical-section pipeline failure",
+            ))))
+        }
+    }
+
+    struct FailingScopeSamplerFactory;
+
+    impl SamplerFactory for FailingScopeSamplerFactory {
+        fn create(&self) -> Arc<dyn crate::Sampler> {
+            Arc::new(FailingScopeSampler)
+        }
+    }
+
+    struct RecordingCriticalCoordinator {
+        inner: crate::DeterministicCriticalSectionCoordinator,
+        events: Arc<Mutex<Vec<String>>>,
+        cancellations: Arc<AtomicUsize>,
+        fail_release: Arc<AtomicBool>,
+    }
+
+    impl crate::CriticalSectionCoordinator for RecordingCriticalCoordinator {
+        fn try_acquire(
+            &self,
+            name: &str,
+            lifecycle_id: u64,
+        ) -> Result<(), crate::CriticalSectionError> {
+            self.inner.try_acquire(name, lifecycle_id)
+        }
+
+        fn release(
+            &self,
+            name: &str,
+            lifecycle_id: u64,
+        ) -> Result<(), crate::CriticalSectionError> {
+            lock(&self.events).push(format!("release:{name}:{lifecycle_id}"));
+            if self.fail_release.load(Ordering::Acquire) {
+                return Err(crate::CriticalSectionError::NotOwner {
+                    name: name.to_owned(),
+                    owner: lifecycle_id,
+                });
+            }
+            self.inner.release(name, lifecycle_id)
+        }
+
+        fn poll_acquire(
+            &self,
+            name: &str,
+            lifecycle_id: u64,
+            waker: &Waker,
+        ) -> Poll<Result<(), crate::CriticalSectionError>> {
+            let result = self.inner.poll_acquire(name, lifecycle_id, waker);
+            if matches!(result, Poll::Ready(Ok(()))) {
+                lock(&self.events).push(format!("acquire:{name}:{lifecycle_id}"));
+            }
+            result
+        }
+
+        fn cancel_acquire(
+            &self,
+            name: &str,
+            lifecycle_id: u64,
+        ) -> Result<bool, crate::CriticalSectionError> {
+            self.cancellations.fetch_add(1, Ordering::AcqRel);
+            self.inner.cancel_acquire(name, lifecycle_id)
         }
     }
 
@@ -2442,6 +3742,51 @@ mod tests {
         }
     }
 
+    struct InitialVariableSampler {
+        seen: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl crate::Sampler for InitialVariableSampler {
+        fn sample<'a>(
+            &'a self,
+            context: &'a mut crate::SampleContext<'_>,
+        ) -> ComponentFuture<'a, SamplerOutput> {
+            let before = context
+                .execution()
+                .variable("seed")
+                .unwrap_or_else(|| "<missing>".to_owned());
+            lock(&self.seen).push(before);
+            context.execution_mut().set_variable("seed", "mutated");
+            Box::pin(std::future::ready(Ok(SamplerOutput::result(
+                SampleResult::new("initial-variable"),
+            ))))
+        }
+    }
+
+    struct InitialVariableSamplerFactory {
+        seen: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl SamplerFactory for InitialVariableSamplerFactory {
+        fn create(&self) -> Arc<dyn crate::Sampler> {
+            Arc::new(InitialVariableSampler {
+                seen: Arc::clone(&self.seen),
+            })
+        }
+    }
+
+    fn initial_variable_packages(seen: Arc<Mutex<Vec<String>>>) -> CompiledPackages {
+        let package = SamplePackage::builder(
+            NodeId::new(1),
+            Arc::new(InitialVariableSampler {
+                seen: Arc::clone(&seen),
+            }),
+        )
+        .sampler_factory(Arc::new(InitialVariableSamplerFactory { seen }))
+        .build();
+        CompiledPackages::from_packages([package]).expect("initial-variable package")
+    }
+
     struct StopFirstSampler {
         first: Arc<AtomicBool>,
         signal: ControlSignal,
@@ -2474,6 +3819,88 @@ mod tests {
             Arc::new(StopFirstSampler {
                 first: Arc::clone(&self.first),
                 signal: self.signal,
+            })
+        }
+    }
+
+    struct PolicyFailureSampler {
+        invocations: Arc<AtomicUsize>,
+    }
+
+    impl crate::Sampler for PolicyFailureSampler {
+        fn sample<'a>(
+            &'a self,
+            _context: &'a mut crate::SampleContext<'_>,
+        ) -> ComponentFuture<'a, SamplerOutput> {
+            self.invocations.fetch_add(1, Ordering::AcqRel);
+            let mut result = SampleResult::new("policy-failure");
+            result.set_successful(false);
+            Box::pin(std::future::ready(Ok(SamplerOutput::failure(
+                SampleFailure::new(NodeId::new(1), "deterministic sample failure")
+                    .with_result(result),
+            ))))
+        }
+    }
+
+    struct PolicyFailureSamplerFactory {
+        invocations: Arc<AtomicUsize>,
+    }
+
+    impl SamplerFactory for PolicyFailureSamplerFactory {
+        fn create(&self) -> Arc<dyn crate::Sampler> {
+            Arc::new(PolicyFailureSampler {
+                invocations: Arc::clone(&self.invocations),
+            })
+        }
+    }
+
+    #[derive(Clone)]
+    struct AdvancingClock {
+        nanos: Arc<AtomicU64>,
+    }
+
+    impl Clock for AdvancingClock {
+        fn now(&self) -> ClockReading {
+            let nanos = self.nanos.load(Ordering::Acquire);
+            let millis = nanos / 1_000_000;
+            ClockReading {
+                wall: jmeter_rs_results::WallTimestamp::from_millis(millis as i64),
+                monotonic: Duration::from_nanos(nanos),
+            }
+        }
+    }
+
+    struct AdvanceClockSampler {
+        nanos: Arc<AtomicU64>,
+        invocations: Arc<AtomicUsize>,
+    }
+
+    impl crate::Sampler for AdvanceClockSampler {
+        fn sample<'a>(
+            &'a self,
+            _context: &'a mut crate::SampleContext<'_>,
+        ) -> ComponentFuture<'a, SamplerOutput> {
+            self.invocations.fetch_add(1, Ordering::AcqRel);
+            self.nanos.store(
+                Duration::from_millis(10).as_nanos() as u64,
+                Ordering::Release,
+            );
+            Box::pin(std::future::ready(Ok(SamplerOutput::result(
+                SampleResult::new("advance-clock"),
+            ))))
+        }
+    }
+
+    struct AdvanceClockSamplerFactory {
+        nanos: Arc<AtomicU64>,
+        invocations: Arc<AtomicUsize>,
+    }
+
+    impl SamplerFactory for AdvanceClockSamplerFactory {
+        fn create(&self) -> Arc<dyn crate::Sampler> {
+            Arc::new(AdvanceClockSampler {
+                nanos: Arc::clone(&self.nanos),
+                invocations: Arc::clone(&self.invocations),
             })
         }
     }
@@ -2574,8 +4001,109 @@ mod tests {
     #[test]
     fn ramp_offsets_use_first_immediate_and_last_before_end() {
         let ramp = RampSchedule::new(10, Duration::from_secs(100)).expect("ramp");
-        assert_eq!(ramp.offset(0), Duration::ZERO);
-        assert_eq!(ramp.offset(9), Duration::from_secs(90));
+        assert_eq!(ramp.offset(0).expect("first offset"), Duration::ZERO);
+        assert_eq!(
+            ramp.offset(9).expect("last offset"),
+            Duration::from_secs(90)
+        );
+    }
+
+    #[test]
+    fn ramp_offsets_use_checked_arithmetic_at_duration_boundary() {
+        let ramp = RampSchedule::new(3, Duration::MAX).expect("boundary ramp");
+        let offset = ramp.offset(usize::MAX).expect("clamped boundary offset");
+        let nanos = Duration::MAX.as_nanos() * 2 / 3;
+        let expected = Duration::new(
+            u64::try_from(nanos / 1_000_000_000).expect("seconds fit"),
+            u32::try_from(nanos % 1_000_000_000).expect("subseconds fit"),
+        );
+        assert_eq!(offset, expected);
+        assert_eq!(
+            ramp.max_actual_user_offset().expect("maximum offset"),
+            offset
+        );
+        assert_eq!(ramp.offsets().expect("all offsets").len(), 3);
+
+        let empty = RampSchedule::new(0, Duration::MAX).expect("empty ramp");
+        assert_eq!(
+            empty.max_actual_user_offset().expect("empty maximum"),
+            Duration::ZERO
+        );
+        assert!(empty.offsets().expect("empty offsets").is_empty());
+
+        let unvalidated = RampSchedule {
+            threads: MAX_THREADS + 1,
+            ramp_up: Duration::MAX,
+        };
+        assert_eq!(
+            unvalidated
+                .offset(0)
+                .expect_err("unvalidated public fields must remain bounded")
+                .code(),
+            "runtime.engine.invalid-schedule"
+        );
+    }
+
+    #[test]
+    fn group_schedule_checks_startup_and_duration_boundaries() {
+        let overflow = GroupSchedule {
+            delay: Duration::MAX,
+            ramp_up: Duration::from_nanos(2),
+            duration: None,
+        };
+        let error = overflow
+            .startup_bound(3)
+            .expect_err("delay plus actual ramp offset must reject overflow");
+        assert_eq!(error.code(), "runtime.engine.invalid-schedule");
+        assert!(matches!(
+            error,
+            EngineError::InvalidSchedule { detail }
+                if detail == "group startup offset arithmetic overflow"
+        ));
+
+        let duration = GroupSchedule {
+            delay: Duration::ZERO,
+            ramp_up: Duration::ZERO,
+            duration: Some(Duration::from_nanos(1)),
+        };
+        let error = duration
+            .checked_duration_end(Duration::MAX)
+            .expect_err("duration end must reject overflow");
+        assert_eq!(error.code(), "runtime.engine.invalid-schedule");
+    }
+
+    #[test]
+    fn representable_eight_day_schedule_has_no_product_ceiling() {
+        let eight_days = Duration::from_secs(8 * 24 * 60 * 60);
+        let schedule = GroupSchedule {
+            delay: eight_days,
+            ramp_up: eight_days,
+            duration: None,
+        };
+        let ramp = schedule.ramp(2).expect("eight-day schedule");
+        assert_eq!(ramp.offset(1).expect("last user offset"), eight_days / 2);
+        assert_eq!(
+            schedule.startup_bound(2).expect("startup bound"),
+            eight_days + eight_days / 2
+        );
+    }
+
+    #[test]
+    fn deterministic_join_allows_progressing_runs_beyond_lifetime_poll_count() {
+        const REQUIRED_POLLS: usize = 1_000_001;
+        let mut remaining = REQUIRED_POLLS;
+        let task: Pin<Box<dyn Future<Output = ()>>> = Box::pin(future::poll_fn(move |context| {
+            if remaining == 0 {
+                Poll::Ready(())
+            } else {
+                remaining -= 1;
+                context.waker().wake_by_ref();
+                Poll::Pending
+            }
+        }));
+        let join = DeterministicJoin::new(vec![task]).expect("bounded join task set");
+        let result = block_on(join);
+        assert_eq!(result.expect("progressing join must complete"), vec![()]);
     }
 
     #[test]
@@ -2614,7 +4142,7 @@ mod tests {
                 delays: Arc::clone(&delays),
             }))
             .with_properties(properties);
-        let mut engine = RuntimeEngine::new(plan, capabilities, "run", "host");
+        let mut engine = trace_engine(plan, capabilities, "run", "host");
         let report = block_on(engine.run()).expect("run");
         assert_eq!(report.users_started, 3);
         assert_eq!(report.users_finished, 3);
@@ -2646,6 +4174,212 @@ mod tests {
     }
 
     #[test]
+    fn initial_variables_are_seeded_once_and_isolated_between_users() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let packages = initial_variable_packages(Arc::clone(&seen));
+        let controller =
+            ControllerProgram::compile(crate::ControllerNode::sample(1)).expect("controller");
+        let group = ThreadGroupPlan::new(NodeId::new(10), "initial", 2, controller, packages)
+            .expect("group");
+        let initial =
+            InitialVariables::try_from_iter([("seed", "compiled")]).expect("initial variables");
+        let mut plan = EnginePlan::new().with_initial_variables(initial);
+        plan.push_group(group).expect("group");
+
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
+        let report = block_on(engine.run()).expect("run");
+
+        assert_eq!(report.users_started, 2);
+        assert_eq!(
+            lock(&seen).as_slice(),
+            ["compiled".to_owned(), "compiled".to_owned()]
+        );
+    }
+
+    #[test]
+    fn initial_variables_are_visible_to_the_first_condition() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let packages = initial_variable_packages(Arc::clone(&seen));
+        let program = LogicProgram::compile(crate::LogicNode::If {
+            id: 2,
+            condition: crate::LogicCondition::VariableBoolean {
+                name: "enabled".to_owned(),
+            },
+            evaluate_each_iteration: true,
+            children: vec![crate::LogicNode::Sample { id: 1 }],
+        })
+        .expect("logic controller");
+        let group = ThreadGroupPlan::new_logic(NodeId::new(10), "condition", 1, program, packages)
+            .expect("group");
+        let initial = InitialVariables::try_from_iter([("enabled", "true"), ("seed", "compiled")])
+            .expect("initial variables");
+        let mut plan = EnginePlan::new().with_initial_variables(initial);
+        plan.push_group(group).expect("group");
+
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
+        let report = block_on(engine.run()).expect("run");
+
+        assert_eq!(
+            report
+                .events
+                .iter()
+                .filter(|event| matches!(event, EngineEvent::Sample { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(
+            lock(&seen).as_slice(),
+            ["compiled".to_owned()],
+            "condition must not let the sampler rewrite its input"
+        );
+    }
+
+    #[test]
+    fn initial_variables_survive_same_user_iterations_but_not_a_fresh_run() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let packages = initial_variable_packages(Arc::clone(&seen));
+        let controller =
+            ControllerProgram::compile(crate::ControllerNode::sample(1)).expect("controller");
+        let group = ThreadGroupPlan::new(NodeId::new(10), "iterations", 1, controller, packages)
+            .expect("group")
+            .with_iterations(Some(2));
+        let initial =
+            InitialVariables::try_from_iter([("seed", "compiled")]).expect("initial variables");
+        let mut plan = EnginePlan::new().with_initial_variables(initial);
+        plan.push_group(group).expect("group");
+
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
+        block_on(engine.run()).expect("first run");
+        assert_eq!(
+            lock(&seen).as_slice(),
+            ["compiled".to_owned(), "mutated".to_owned()]
+        );
+
+        block_on(engine.run()).expect("second run");
+        assert_eq!(
+            lock(&seen).as_slice(),
+            [
+                "compiled".to_owned(),
+                "mutated".to_owned(),
+                "compiled".to_owned(),
+                "mutated".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn each_setup_main_and_teardown_user_gets_the_compiled_seed() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let packages = initial_variable_packages(Arc::clone(&seen));
+        let controller =
+            ControllerProgram::compile(crate::ControllerNode::sample(1)).expect("controller");
+        let setup = ThreadGroupPlan::new(
+            NodeId::new(1),
+            "setup",
+            1,
+            controller.clone(),
+            packages.clone(),
+        )
+        .expect("setup")
+        .with_kind(GroupKind::Setup);
+        let main = ThreadGroupPlan::new(
+            NodeId::new(2),
+            "main",
+            1,
+            controller.clone(),
+            packages.clone(),
+        )
+        .expect("main");
+        let teardown = ThreadGroupPlan::new(NodeId::new(3), "teardown", 1, controller, packages)
+            .expect("teardown")
+            .with_kind(GroupKind::Teardown);
+        let initial =
+            InitialVariables::try_from_iter([("seed", "compiled")]).expect("initial variables");
+        let mut plan = EnginePlan::new().with_initial_variables(initial);
+        for group in [setup, main, teardown] {
+            plan.push_group(group).expect("group");
+        }
+
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
+        block_on(engine.run()).expect("run");
+
+        assert_eq!(
+            lock(&seen).as_slice(),
+            [
+                "compiled".to_owned(),
+                "compiled".to_owned(),
+                "compiled".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn initial_variables_reset_only_when_same_user_iteration_is_disabled() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let packages = initial_variable_packages(Arc::clone(&seen));
+        let controller =
+            ControllerProgram::compile(crate::ControllerNode::sample(1)).expect("controller");
+        let group = ThreadGroupPlan::new(NodeId::new(10), "fresh-loop", 1, controller, packages)
+            .expect("group")
+            .with_iterations(Some(2))
+            .with_same_user_on_next_iteration(false);
+        let initial =
+            InitialVariables::try_from_iter([("seed", "compiled")]).expect("initial variables");
+        let mut plan = EnginePlan::new().with_initial_variables(initial);
+        plan.push_group(group).expect("group");
+
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
+        block_on(engine.run()).expect("run");
+
+        assert_eq!(
+            lock(&seen).as_slice(),
+            ["compiled".to_owned(), "compiled".to_owned()]
+        );
+    }
+
+    #[test]
+    fn initial_variable_seed_rejects_bounds_and_preserves_context_on_collision() {
+        let too_many = (0..=crate::MAX_INITIAL_VARIABLES)
+            .map(|index| (format!("v{index}"), String::from("value")));
+        let error = InitialVariables::try_from_iter(too_many).expect_err("count bound");
+        assert_eq!(error.code(), "runtime.initial-variables.count-limit");
+
+        let error = InitialVariables::try_from_iter([("", "value")]).expect_err("empty name");
+        assert_eq!(error.code(), "runtime.initial-variables.empty-name");
+
+        let error =
+            InitialVariables::try_from_iter([("duplicate", "first"), ("duplicate", "second")])
+                .expect_err("duplicate name");
+        assert_eq!(error.code(), "runtime.initial-variables.duplicate-name");
+
+        let oversized = "x".repeat(crate::MAX_INITIAL_VARIABLE_VALUE_BYTES + 1);
+        let error =
+            InitialVariables::try_from_iter([("large", oversized)]).expect_err("value bound");
+        assert_eq!(error.code(), "runtime.initial-variables.value-limit");
+
+        let mut plan = EnginePlan::new();
+        let error = plan
+            .try_set_initial_variables(BTreeMap::from([(
+                "large".to_owned(),
+                "x".repeat(crate::MAX_INITIAL_VARIABLE_VALUE_BYTES + 1),
+            )]))
+            .expect_err("plan replacement bound");
+        assert_eq!(error.code(), "runtime.initial-variables.value-limit");
+        assert!(plan.initial_variables().is_empty());
+
+        let seed = InitialVariables::try_from_iter([("existing", "seed"), ("new", "value")])
+            .expect("seed");
+        let mut context = ExecutionContext::new();
+        context.set_variable("existing", "before");
+        let error = context
+            .seed_initial_variables(&seed)
+            .expect_err("collision must not overwrite");
+        assert_eq!(error.code(), "runtime.initial-variables.duplicate-name");
+        assert_eq!(context.variable("existing").as_deref(), Some("before"));
+        assert_eq!(context.variable("new"), None);
+    }
+
+    #[test]
     fn expression_counter_receives_each_root_iteration_identity() {
         let values = Arc::new(Mutex::new(Vec::new()));
         let functions = Arc::new(BuiltinFunctions::new());
@@ -2671,7 +4405,7 @@ mod tests {
         plan.push_group(group).expect("group");
         let capabilities =
             RuntimeCapabilities::default().with_expression_cleanup(functions.clone());
-        let mut engine = RuntimeEngine::new(plan, capabilities, "run", "host");
+        let mut engine = trace_engine(plan, capabilities, "run", "host");
         block_on(engine.run()).expect("run");
         assert_eq!(lock(&values).clone(), vec!["1", "2"]);
     }
@@ -2690,12 +4424,16 @@ mod tests {
         plan.push_group(group).expect("group");
         let capabilities = RuntimeCapabilities::default()
             .with_expression_cleanup(Arc::new(FailingExpressionCleanup));
-        let mut engine = RuntimeEngine::new(plan, capabilities, "run", "host");
+        let mut engine = trace_engine(plan, capabilities, "run", "host");
         let error = block_on(engine.run()).expect_err("cleanup failure");
         assert!(
             error
                 .to_string()
                 .contains("runtime.engine.expression-cleanup")
+        );
+        assert_eq!(
+            engine.summary().terminal_state,
+            RunObservationTerminalState::Failed
         );
     }
 
@@ -2741,7 +4479,7 @@ mod tests {
         plan.push_group(main_a).expect("main-a");
         plan.push_group(main_b).expect("main-b");
         plan.push_group(teardown).expect("teardown");
-        let mut engine = RuntimeEngine::new(plan, RuntimeCapabilities::default(), "run", "host");
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
         let report = block_on(engine.run()).expect("run");
         let group_starts = report
             .events
@@ -2810,7 +4548,7 @@ mod tests {
         plan.serialize_thread_groups = true;
         plan.push_group(first).expect("first");
         plan.push_group(second).expect("second");
-        let mut engine = RuntimeEngine::new(plan, RuntimeCapabilities::default(), "run", "host");
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
         let report = block_on(engine.run()).expect("run");
         let first_finished = report
             .events
@@ -2863,7 +4601,7 @@ mod tests {
                 lifecycle_ids: Arc::clone(&cleaned),
             },
         ));
-        let mut engine = RuntimeEngine::new(plan, capabilities, "run", "host");
+        let mut engine = trace_engine(plan, capabilities, "run", "host");
         let report = block_on(engine.run()).expect("run");
         assert_eq!(report.users_started, 2);
         assert_eq!(report.users_finished, 2);
@@ -2911,7 +4649,7 @@ mod tests {
         let mut plan = EnginePlan::new();
         plan.push_group(main).expect("main");
         plan.push_group(teardown).expect("teardown");
-        let mut engine = RuntimeEngine::new(plan, RuntimeCapabilities::default(), "run", "host");
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
         let report = block_on(engine.run()).expect("immediate stop is a report");
         assert_eq!(report.signal, ControlSignal::StopTestImmediate);
         let events = engine.events();
@@ -2942,6 +4680,467 @@ mod tests {
     }
 
     #[test]
+    fn sample_error_test_stop_propagates_to_both_users_deterministically() {
+        for logic_controller in [false, true] {
+            for (policy, expected_signal) in [
+                (
+                    SampleErrorPolicy::StopTestGraceful,
+                    ControlSignal::StopTestGraceful,
+                ),
+                (
+                    SampleErrorPolicy::StopTestImmediate,
+                    ControlSignal::StopTestImmediate,
+                ),
+            ] {
+                let invocations = Arc::new(AtomicUsize::new(0));
+                let package = SamplePackage::builder(
+                    NodeId::new(1),
+                    Arc::new(PolicyFailureSampler {
+                        invocations: Arc::clone(&invocations),
+                    }),
+                )
+                .sampler_factory(Arc::new(PolicyFailureSamplerFactory {
+                    invocations: Arc::clone(&invocations),
+                }))
+                .build();
+                let packages = CompiledPackages::from_packages([package]).expect("packages");
+                let group = if logic_controller {
+                    let program = LogicProgram::compile(crate::LogicNode::Sequence {
+                        id: 2,
+                        children: vec![crate::LogicNode::Sample { id: 1 }],
+                    })
+                    .expect("logic program");
+                    ThreadGroupPlan::new_logic(NodeId::new(10), "main", 2, program, packages)
+                } else {
+                    let controller = ControllerProgram::compile(crate::ControllerNode::sample(1))
+                        .expect("controller");
+                    ThreadGroupPlan::new(NodeId::new(10), "main", 2, controller, packages)
+                }
+                .expect("group")
+                .with_error_policy(policy);
+                let mut plan = EnginePlan::new();
+                plan.push_group(group).expect("group");
+                let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
+
+                let report = block_on(engine.run()).expect("test stop is a report");
+
+                assert_eq!(report.signal, expected_signal);
+                assert_eq!(report.users_started, 2);
+                assert_eq!(report.users_finished, 2);
+                assert_eq!(
+                    report
+                        .events
+                        .iter()
+                        .filter(|event| matches!(event, EngineEvent::Sample { .. }))
+                        .count(),
+                    1
+                );
+                assert_eq!(invocations.load(Ordering::Acquire), 1);
+            }
+        }
+    }
+
+    #[test]
+    fn group_duration_is_checked_before_each_legacy_sample() {
+        let nanos = Arc::new(AtomicU64::new(0));
+        let invocations = Arc::new(AtomicUsize::new(0));
+        let package = SamplePackage::builder(
+            NodeId::new(1),
+            Arc::new(AdvanceClockSampler {
+                nanos: Arc::clone(&nanos),
+                invocations: Arc::clone(&invocations),
+            }),
+        )
+        .sampler_factory(Arc::new(AdvanceClockSamplerFactory {
+            nanos: Arc::clone(&nanos),
+            invocations: Arc::clone(&invocations),
+        }))
+        .build();
+        let packages = CompiledPackages::from_packages([package]).expect("packages");
+        let controller = ControllerProgram::compile(crate::ControllerNode::loop_controller(
+            2,
+            crate::LoopCount::finite(2),
+            vec![crate::ControllerNode::sample(1)],
+        ))
+        .expect("controller");
+        let group = ThreadGroupPlan::new(NodeId::new(10), "duration", 1, controller, packages)
+            .expect("group")
+            .with_schedule(GroupSchedule {
+                delay: Duration::ZERO,
+                ramp_up: Duration::ZERO,
+                duration: Some(Duration::from_millis(5)),
+            });
+        let mut plan = EnginePlan::new();
+        plan.push_group(group).expect("group");
+        let capabilities = RuntimeCapabilities::default().with_clock(Arc::new(AdvancingClock {
+            nanos: Arc::clone(&nanos),
+        }));
+        let mut engine = trace_engine(plan, capabilities, "run", "host");
+
+        let report = block_on(engine.run()).expect("duration run");
+
+        assert_eq!(invocations.load(Ordering::Acquire), 1);
+        assert_eq!(
+            report
+                .events
+                .iter()
+                .filter(|event| matches!(event, EngineEvent::Sample { .. }))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn group_duration_is_checked_before_each_logic_sample() {
+        let nanos = Arc::new(AtomicU64::new(0));
+        let invocations = Arc::new(AtomicUsize::new(0));
+        let package = SamplePackage::builder(
+            NodeId::new(1),
+            Arc::new(AdvanceClockSampler {
+                nanos: Arc::clone(&nanos),
+                invocations: Arc::clone(&invocations),
+            }),
+        )
+        .sampler_factory(Arc::new(AdvanceClockSamplerFactory {
+            nanos: Arc::clone(&nanos),
+            invocations: Arc::clone(&invocations),
+        }))
+        .build();
+        let packages = CompiledPackages::from_packages([package]).expect("packages");
+        let program = LogicProgram::compile(crate::LogicNode::Loop {
+            id: 2,
+            count: crate::LoopCount::finite(2),
+            children: vec![crate::LogicNode::Sample { id: 1 }],
+        })
+        .expect("logic program");
+        let group = ThreadGroupPlan::new_logic(NodeId::new(10), "duration", 1, program, packages)
+            .expect("group")
+            .with_schedule(GroupSchedule {
+                delay: Duration::ZERO,
+                ramp_up: Duration::ZERO,
+                duration: Some(Duration::from_millis(5)),
+            });
+        let mut plan = EnginePlan::new();
+        plan.push_group(group).expect("group");
+        let capabilities = RuntimeCapabilities::default().with_clock(Arc::new(AdvancingClock {
+            nanos: Arc::clone(&nanos),
+        }));
+        let mut engine = trace_engine(plan, capabilities, "run", "host");
+
+        let report = block_on(engine.run()).expect("duration run");
+
+        assert_eq!(invocations.load(Ordering::Acquire), 1);
+        assert_eq!(
+            report
+                .events
+                .iter()
+                .filter(|event| matches!(event, EngineEvent::Sample { .. }))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn critical_section_spans_child_sequence_and_waits_fifo_between_users() {
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let package_one = SamplePackage::builder(
+            NodeId::new(10),
+            Arc::new(ScopeTraceSampler {
+                trace: Arc::clone(&trace),
+            }),
+        )
+        .sampler_factory(Arc::new(ScopeTraceSamplerFactory {
+            trace: Arc::clone(&trace),
+        }))
+        .build();
+        let package_two = SamplePackage::builder(
+            NodeId::new(11),
+            Arc::new(ScopeTraceSampler {
+                trace: Arc::clone(&trace),
+            }),
+        )
+        .sampler_factory(Arc::new(ScopeTraceSamplerFactory {
+            trace: Arc::clone(&trace),
+        }))
+        .build();
+        let packages =
+            CompiledPackages::from_packages([package_one, package_two]).expect("packages");
+        let program = LogicProgram::compile(crate::LogicNode::CriticalSection {
+            id: 100,
+            lock_name: "gate".to_owned(),
+            children: vec![
+                crate::LogicNode::Sample { id: 10 },
+                crate::LogicNode::Sample { id: 11 },
+            ],
+        })
+        .expect("logic program");
+        let group = ThreadGroupPlan::new_logic(NodeId::new(20), "critical", 2, program, packages)
+            .expect("group");
+        let mut plan = EnginePlan::new();
+        plan.push_group(group).expect("group");
+
+        let coordinator_events = Arc::new(Mutex::new(Vec::new()));
+        let coordinator = Arc::new(RecordingCriticalCoordinator {
+            inner: crate::DeterministicCriticalSectionCoordinator::new(1),
+            events: Arc::clone(&coordinator_events),
+            cancellations: Arc::new(AtomicUsize::new(0)),
+            fail_release: Arc::new(AtomicBool::new(false)),
+        });
+        let capabilities = RuntimeCapabilities::default()
+            .with_critical_section_coordinator(coordinator)
+            .with_random(Arc::new(crate::ZeroRandom));
+        let mut engine = trace_engine(plan, capabilities, "run", "host");
+        block_on(engine.run()).expect("critical-section run");
+
+        let trace = lock(&trace).clone();
+        assert_eq!(trace.len(), 4);
+        let users = trace
+            .iter()
+            .map(|entry| entry.split(':').next().unwrap_or_default().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(users[0], "critical-1");
+        assert_eq!(users[0], users[1]);
+        assert_eq!(users[2], "critical-2");
+        assert_eq!(users[2], users[3]);
+        assert_ne!(users[1], users[2]);
+        assert_eq!(
+            lock(&coordinator_events)
+                .iter()
+                .filter(|event| event.starts_with("acquire:"))
+                .count(),
+            2
+        );
+        assert_eq!(
+            lock(&coordinator_events)
+                .iter()
+                .filter(|event| event.starts_with("release:"))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn critical_section_releases_when_group_duration_ends() {
+        let nanos = Arc::new(AtomicU64::new(0));
+        let invocations = Arc::new(AtomicUsize::new(0));
+        let package = SamplePackage::builder(
+            NodeId::new(10),
+            Arc::new(AdvanceClockSampler {
+                nanos: Arc::clone(&nanos),
+                invocations: Arc::clone(&invocations),
+            }),
+        )
+        .sampler_factory(Arc::new(AdvanceClockSamplerFactory {
+            nanos: Arc::clone(&nanos),
+            invocations: Arc::clone(&invocations),
+        }))
+        .build();
+        let packages = CompiledPackages::from_packages([package]).expect("packages");
+        let program = LogicProgram::compile(crate::LogicNode::Loop {
+            id: 1,
+            count: crate::LoopCount::finite(2),
+            children: vec![crate::LogicNode::CriticalSection {
+                id: 100,
+                lock_name: "gate".to_owned(),
+                children: vec![crate::LogicNode::Sample { id: 10 }],
+            }],
+        })
+        .expect("logic program");
+        let group = ThreadGroupPlan::new_logic(NodeId::new(20), "critical", 1, program, packages)
+            .expect("group")
+            .with_schedule(GroupSchedule {
+                delay: Duration::ZERO,
+                ramp_up: Duration::ZERO,
+                duration: Some(Duration::from_millis(5)),
+            });
+        let mut plan = EnginePlan::new();
+        plan.push_group(group).expect("group");
+        let coordinator_events = Arc::new(Mutex::new(Vec::new()));
+        let capabilities = RuntimeCapabilities::default()
+            .with_clock(Arc::new(AdvancingClock { nanos }))
+            .with_critical_section_coordinator(Arc::new(RecordingCriticalCoordinator {
+                inner: crate::DeterministicCriticalSectionCoordinator::new(1),
+                events: Arc::clone(&coordinator_events),
+                cancellations: Arc::new(AtomicUsize::new(0)),
+                fail_release: Arc::new(AtomicBool::new(false)),
+            }));
+        let mut engine = trace_engine(plan, capabilities, "run", "host");
+
+        block_on(engine.run()).expect("duration run");
+
+        assert_eq!(invocations.load(Ordering::Acquire), 1);
+        let events = lock(&coordinator_events);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.starts_with("acquire:"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.starts_with("release:"))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn queued_critical_section_cancellation_calls_cancel_once() {
+        let cancellations = Arc::new(AtomicUsize::new(0));
+        let coordinator = Arc::new(RecordingCriticalCoordinator {
+            inner: crate::DeterministicCriticalSectionCoordinator::new(1),
+            events: Arc::new(Mutex::new(Vec::new())),
+            cancellations: Arc::clone(&cancellations),
+            fail_release: Arc::new(AtomicBool::new(false)),
+        });
+        coordinator.try_acquire("gate", 1).expect("first owner");
+        let cancellation = CancellationToken::new();
+        let mut future = Box::pin(poll_critical_section_acquire(
+            coordinator,
+            NodeId::new(20),
+            "gate".to_owned(),
+            2,
+            cancellation.clone(),
+        ));
+        let waker = Waker::noop();
+        let mut context = Context::from_waker(waker);
+        assert!(matches!(future.as_mut().poll(&mut context), Poll::Pending));
+        cancellation.request(ControlSignal::StopThread);
+        assert!(matches!(
+            future.as_mut().poll(&mut context),
+            Poll::Ready(Ok(CriticalSectionSyncOutcome::Cancelled(
+                ControlSignal::StopThread
+            )))
+        ));
+        assert_eq!(cancellations.load(Ordering::Acquire), 1);
+    }
+
+    #[test]
+    fn pipeline_failure_and_release_failure_preserve_primary_error() {
+        let package = SamplePackage::builder(NodeId::new(10), Arc::new(FailingScopeSampler))
+            .sampler_factory(Arc::new(FailingScopeSamplerFactory))
+            .build();
+        let packages = CompiledPackages::from_packages([package]).expect("packages");
+        let program = LogicProgram::compile(crate::LogicNode::CriticalSection {
+            id: 100,
+            lock_name: "gate".to_owned(),
+            children: vec![crate::LogicNode::Sample { id: 10 }],
+        })
+        .expect("logic program");
+        let group = ThreadGroupPlan::new_logic(NodeId::new(20), "critical", 1, program, packages)
+            .expect("group");
+        let mut plan = EnginePlan::new();
+        plan.push_group(group).expect("group");
+        let fail_release = Arc::new(AtomicBool::new(true));
+        let capabilities = RuntimeCapabilities::default().with_critical_section_coordinator(
+            Arc::new(RecordingCriticalCoordinator {
+                inner: crate::DeterministicCriticalSectionCoordinator::new(1),
+                events: Arc::new(Mutex::new(Vec::new())),
+                cancellations: Arc::new(AtomicUsize::new(0)),
+                fail_release,
+            }),
+        );
+        let mut engine = trace_engine(plan, capabilities, "run", "host");
+        let error = block_on(engine.run()).expect_err("pipeline failure");
+        assert!(matches!(
+            error,
+            EngineError::Combined { primary, secondary }
+                if primary.code() == "runtime.engine.pipeline"
+                    && secondary.code() == "runtime.engine.critical-section"
+        ));
+    }
+
+    #[test]
+    fn adjacent_same_name_nested_and_iteration_scopes_are_not_collapsed() {
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let package = |id| {
+            SamplePackage::builder(
+                NodeId::new(id),
+                Arc::new(ScopeTraceSampler {
+                    trace: Arc::clone(&trace),
+                }),
+            )
+            .sampler_factory(Arc::new(ScopeTraceSamplerFactory {
+                trace: Arc::clone(&trace),
+            }))
+            .build()
+        };
+        let packages = CompiledPackages::from_packages([package(10), package(11), package(12)])
+            .expect("packages");
+        let program = LogicProgram::compile(crate::LogicNode::Loop {
+            id: 1,
+            count: crate::LoopCount::finite(2),
+            children: vec![crate::LogicNode::Sequence {
+                id: 2,
+                children: vec![
+                    crate::LogicNode::CriticalSection {
+                        id: 100,
+                        lock_name: "gate".to_owned(),
+                        children: vec![
+                            crate::LogicNode::Sample { id: 10 },
+                            crate::LogicNode::CriticalSection {
+                                id: 101,
+                                lock_name: "inner".to_owned(),
+                                children: vec![crate::LogicNode::Sample { id: 11 }],
+                            },
+                        ],
+                    },
+                    crate::LogicNode::CriticalSection {
+                        id: 102,
+                        lock_name: "gate".to_owned(),
+                        children: vec![crate::LogicNode::Sample { id: 12 }],
+                    },
+                ],
+            }],
+        })
+        .expect("logic program");
+        let group = ThreadGroupPlan::new_logic(NodeId::new(20), "critical", 1, program, packages)
+            .expect("group");
+        let mut plan = EnginePlan::new();
+        plan.push_group(group).expect("group");
+        let coordinator_events = Arc::new(Mutex::new(Vec::new()));
+        let coordinator = Arc::new(RecordingCriticalCoordinator {
+            inner: crate::DeterministicCriticalSectionCoordinator::new(2),
+            events: Arc::clone(&coordinator_events),
+            cancellations: Arc::new(AtomicUsize::new(0)),
+            fail_release: Arc::new(AtomicBool::new(false)),
+        });
+        let capabilities =
+            RuntimeCapabilities::default().with_critical_section_coordinator(coordinator);
+        let mut engine = trace_engine(plan, capabilities, "run", "host");
+        block_on(engine.run()).expect("critical-section run");
+
+        let events = lock(&coordinator_events).clone();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.starts_with("acquire:"))
+                .count(),
+            6
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.starts_with("release:"))
+                .count(),
+            6
+        );
+        let trace = lock(&trace).clone();
+        assert_eq!(trace.len(), 6);
+        // The two adjacent `gate` controllers have different IDs and must
+        // each acquire/release; otherwise the inner same-name section would
+        // be silently collapsed into its parent.
+        assert!(events.windows(4).any(|window| {
+            window[0].starts_with("acquire:gate:")
+                && window[1].starts_with("acquire:inner:")
+                && window[2].starts_with("release:inner:")
+                && window[3].starts_with("release:gate:")
+        }));
+    }
+
+    #[test]
     fn concurrent_task_bound_is_typed_and_test_finished_is_emitted() {
         let group = ThreadGroupPlan::new(
             NodeId::new(1),
@@ -2954,7 +5153,7 @@ mod tests {
         .expect("group");
         let mut plan = EnginePlan::new();
         plan.push_group(group).expect("group");
-        let mut engine = RuntimeEngine::new(plan, RuntimeCapabilities::default(), "run", "host");
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
         let error = block_on(engine.run()).expect_err("task bound");
         assert_eq!(error.code(), "runtime.engine.resource-limit");
         assert!(
@@ -2997,7 +5196,7 @@ mod tests {
         plan.push_group(setup).expect("push");
         plan.push_group(base).expect("push");
         plan.push_group(teardown).expect("push");
-        let mut engine = RuntimeEngine::new(plan, RuntimeCapabilities::default(), "run", "host");
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
         let report = block_on(engine.run()).expect("run");
         assert!(report.events.iter().any(|event| {
             matches!(
@@ -3021,6 +5220,163 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        deprecated,
+        reason = "RuntimeEngine currently exercises the legacy result-router bridge; typed runtime routing is a separate migration"
+    )]
+    fn ignored_sample_is_retained_for_diagnostics_but_not_routed() {
+        let mut ignored = SampleResult::new("ignored");
+        ignored.set_ignored(true);
+        let outputs = Arc::new(Mutex::new(vec![SamplerOutput::result(ignored)]));
+        let package = SamplePackage::builder(
+            NodeId::new(1),
+            Arc::new(SequenceSampler {
+                outputs: Arc::clone(&outputs),
+            }),
+        )
+        .sampler_factory(Arc::new(SequenceSamplerFactory {
+            outputs: Arc::clone(&outputs),
+        }))
+        .build();
+        let packages = CompiledPackages::from_packages([package]).expect("packages");
+        let controller =
+            ControllerProgram::compile(crate::ControllerNode::sample(1)).expect("controller");
+        let group = ThreadGroupPlan::new(NodeId::new(10), "ignored", 1, controller, packages)
+            .expect("group");
+        let mut plan = EnginePlan::new();
+        plan.push_group(group).expect("group");
+
+        let state = Arc::new(Mutex::new(RoutedEvents::default()));
+        let router = ResultRouter::new(
+            "run",
+            [ResultSinkSpec::new(
+                SinkId::new(1),
+                SinkLimits::new(4, 100_000),
+                Arc::new(RecordingResultSink {
+                    state: Arc::clone(&state),
+                }),
+            )],
+        )
+        .expect("router");
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host")
+            .with_result_router(router);
+
+        let report = block_on(engine.run()).expect("ignored run");
+
+        assert!(lock(&state).events.is_empty());
+        assert!(Arc::ptr_eq(&report.trace, &report.events));
+        assert!(report.events.iter().any(|event| {
+            matches!(
+                event,
+                EngineEvent::Sample {
+                    result: Some(result),
+                    ..
+                } if result.is_ignored()
+            )
+        }));
+    }
+
+    #[test]
+    fn typed_router_is_engine_owned_and_preserves_original_snapshot() {
+        let package = SamplePackage::builder(NodeId::new(1), Arc::new(Sampler))
+            .sampler_factory(Arc::new(SamplerFactoryImpl))
+            .build();
+        let packages = CompiledPackages::from_packages([package]).expect("packages");
+        let controller =
+            ControllerProgram::compile(crate::ControllerNode::sample(1)).expect("controller");
+        let group =
+            ThreadGroupPlan::new(NodeId::new(10), "typed", 2, controller, packages).expect("group");
+        let mut plan = EnginePlan::new();
+        plan.push_group(group).expect("group");
+
+        let typed_run =
+            TypedRunId::from_run_identity(&RunIdentity::from("run")).expect("typed run");
+        let generation = RunGeneration::new(1).expect("generation");
+        let domain = PlanDomain::from_canonical_plan_and_profile_text(
+            b"typed-engine-plan",
+            b"local-import",
+            "jmeter-5.6.3",
+            "5.6.3",
+            Vec::new(),
+        )
+        .expect("plan domain");
+        let worker = WorkerId::new(1).expect("worker");
+        let worker_generation = WorkerGeneration::new(1).expect("worker generation");
+        let collector = crate::result_router::PlanNodeRef::from_u64(domain, 99).expect("collector");
+        let sink_id = QualifiedSinkId::from_parts(
+            typed_run,
+            SinkPlanGeneration::new(1).expect("sink generation"),
+            collector,
+        );
+        let sink_plan = TypedSinkPlan::new(
+            sink_id,
+            SinkLimits::with_finalization(64, 1024 * 1024, 256),
+            FullPolicy::FailRun,
+        );
+        let router =
+            TypedResultRouter::new(typed_run, generation, RetryBudget::new(32), [sink_plan])
+                .expect("typed router");
+        let envelopes = Arc::new(Mutex::new(Vec::new()));
+        let cancellation = Arc::new(crate::CancellationToken::new());
+        let budget = ResultDeliveryBudget::from_parts(
+            ResultOperationScope::sink_set(typed_run, sink_id.sink_plan_generation()),
+            Arc::new(TestResultClock),
+            cancellation,
+            ResultOperationWindows::uniform(Duration::from_secs(1), Duration::from_secs(1)),
+            32,
+            None,
+        )
+        .expect("result budget");
+        let wait_registrar = Arc::new(crate::WaitRegistry::default());
+        let adapter = TypedResultRouterAdapter::new_with_liveness(
+            router,
+            TypedRouterIdentity::new(domain, typed_run, generation, worker, worker_generation),
+            [(
+                sink_id,
+                Arc::new(RecordingTypedSink {
+                    envelopes: Arc::clone(&envelopes),
+                }) as Arc<dyn TypedSinkAdapter>,
+            )],
+            budget,
+            wait_registrar,
+        )
+        .expect("typed adapter");
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host")
+            .with_typed_result_router(adapter);
+
+        let report = block_on(engine.run()).expect("typed run");
+
+        let envelopes = lock(&envelopes);
+        assert_eq!(envelopes.len(), 2);
+        let envelope = &envelopes[0];
+        assert_eq!(envelope.event().result().label(), "sample");
+        assert_eq!(envelope.source().node_id(), NodeId::new(1));
+        assert!(matches!(
+            envelope.origin(),
+            TypedResultOrigin::Sampler { sampler, parent: None }
+                if sampler.node_id() == NodeId::new(1)
+        ));
+        assert_eq!(envelope.plan_path().len(), 2);
+        assert!(
+            envelopes
+                .iter()
+                .all(|envelope| envelope.user().thread_number() > 0)
+        );
+        assert_eq!(
+            report
+                .events
+                .iter()
+                .filter(|event| matches!(event, EngineEvent::Sample { .. }))
+                .count(),
+            2
+        );
+        assert_eq!(
+            engine.typed_result_router().expect("adapter").phase(),
+            TypedRouterPhase::Finished
+        );
+    }
+
+    #[test]
     fn logic_controller_state_survives_root_iterations_per_user() {
         let package = SamplePackage::builder(NodeId::new(10), Arc::new(Sampler))
             .sampler_factory(Arc::new(SamplerFactoryImpl))
@@ -3036,7 +5392,7 @@ mod tests {
             .with_iterations(Some(2));
         let mut plan = EnginePlan::new();
         plan.push_group(group).expect("group");
-        let mut engine = RuntimeEngine::new(plan, RuntimeCapabilities::default(), "run", "host");
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
         let report = block_on(engine.run()).expect("run");
         let samples = report
             .events
@@ -3094,7 +5450,7 @@ mod tests {
             .expect("logic group");
         let mut plan = EnginePlan::new();
         plan.push_group(group).expect("group");
-        let mut engine = RuntimeEngine::new(plan, RuntimeCapabilities::default(), "run", "host");
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
         let report = block_on(engine.run()).expect("run");
         let samples = report
             .events
@@ -3138,7 +5494,7 @@ mod tests {
                 lifecycle_ids: Arc::clone(&cleanup_ids),
             },
         ));
-        let mut engine = RuntimeEngine::new(plan, capabilities, "run", "host");
+        let mut engine = trace_engine(plan, capabilities, "run", "host");
         block_on(engine.run()).expect("run");
         let ids = lock(&lifecycle_ids).clone();
         assert_eq!(ids.len(), 2);
@@ -3169,7 +5525,7 @@ mod tests {
             .expect("logic group");
         let mut plan = EnginePlan::new();
         plan.push_group(group).expect("group");
-        let mut engine = RuntimeEngine::new(plan, RuntimeCapabilities::default(), "run", "host");
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
         let report = block_on(engine.run()).expect("run");
         let transaction = report.events.iter().find_map(|event| match event {
             EngineEvent::Sample {
@@ -3186,6 +5542,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        deprecated,
+        reason = "RuntimeEngine currently exercises the legacy result-router bridge; typed runtime routing is a separate migration"
+    )]
     fn result_router_receives_original_sampler_and_transaction_snapshots() {
         let package = SamplePackage::builder(NodeId::new(10), Arc::new(Sampler))
             .sampler_factory(Arc::new(SamplerFactoryImpl))
@@ -3215,7 +5575,7 @@ mod tests {
             )],
         )
         .expect("router");
-        let mut engine = RuntimeEngine::new(plan, RuntimeCapabilities::default(), "run", "host")
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host")
             .with_result_router(router.clone());
         let report = block_on(engine.run()).expect("run");
 
@@ -3293,7 +5653,7 @@ mod tests {
             .expect("logic group");
         let mut plan = EnginePlan::new();
         plan.push_group(group).expect("group");
-        let mut engine = RuntimeEngine::new(plan, RuntimeCapabilities::default(), "run", "host");
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
         let report = block_on(engine.run()).expect("run");
         let inner = report.events.iter().find_map(|event| match event {
             EngineEvent::Sample {
@@ -3343,7 +5703,7 @@ mod tests {
             .expect("logic group");
         let mut plan = EnginePlan::new();
         plan.push_group(group).expect("group");
-        let mut engine = RuntimeEngine::new(plan, RuntimeCapabilities::default(), "run", "host");
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
         let report = block_on(engine.run()).expect("run");
         let transaction = report.events.iter().find_map(|event| match event {
             EngineEvent::Sample {
@@ -3389,7 +5749,7 @@ mod tests {
         let mut plan = EnginePlan::new();
         plan.push_group(failing).expect("setup");
         plan.push_group(teardown).expect("teardown");
-        let mut engine = RuntimeEngine::new(plan, RuntimeCapabilities::default(), "run", "host");
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
         assert!(block_on(engine.run()).is_err());
         let events = engine.events();
         assert!(events.iter().any(|event| {
@@ -3421,7 +5781,7 @@ mod tests {
         .expect("group");
         let mut plan = EnginePlan::new();
         plan.push_group(group).expect("group");
-        let mut engine = RuntimeEngine::new(plan, RuntimeCapabilities::default(), "run", "host");
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
         let report = block_on(engine.run()).expect("concurrent users");
         assert_eq!(report.users_started, 2);
         assert_eq!(report.users_finished, 2);
@@ -3440,5 +5800,358 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, EngineEvent::TestFinished { .. }))
         );
+    }
+
+    #[test]
+    fn zero_thread_group_emits_group_boundaries_without_users() {
+        let package = SamplePackage::builder(NodeId::new(1), Arc::new(Sampler))
+            .sampler_factory(Arc::new(SamplerFactoryImpl))
+            .build();
+        let packages = CompiledPackages::from_packages([package]).expect("packages");
+        let controller =
+            ControllerProgram::compile(crate::ControllerNode::sample(1)).expect("controller");
+        let group =
+            ThreadGroupPlan::new(NodeId::new(10), "empty", 0, controller, packages).expect("group");
+        let mut plan = EnginePlan::new();
+        plan.push_group(group).expect("group");
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
+
+        let report = block_on(engine.run()).expect("zero-thread run");
+
+        assert_eq!(report.users_started, 0);
+        assert_eq!(report.users_finished, 0);
+        assert!(report.events.iter().any(
+            |event| matches!(event, EngineEvent::GroupStarted { id, .. } if *id == NodeId::new(10))
+        ));
+        assert!(report.events.iter().any(
+            |event| matches!(event, EngineEvent::GroupFinished { id, .. } if *id == NodeId::new(10))
+        ));
+        assert!(!report.events.iter().any(|event| matches!(
+            event,
+            EngineEvent::UserStarted { .. } | EngineEvent::Sample { .. }
+        )));
+    }
+
+    #[test]
+    fn zero_iterations_starts_and_finishes_user_without_iteration_or_sample() {
+        let package = SamplePackage::builder(NodeId::new(1), Arc::new(Sampler))
+            .sampler_factory(Arc::new(SamplerFactoryImpl))
+            .build();
+        let packages = CompiledPackages::from_packages([package]).expect("packages");
+        let controller =
+            ControllerProgram::compile(crate::ControllerNode::sample(1)).expect("controller");
+        let group = ThreadGroupPlan::new(NodeId::new(10), "zero-loops", 1, controller, packages)
+            .expect("group")
+            .with_iterations(Some(0));
+        let mut plan = EnginePlan::new();
+        plan.push_group(group).expect("group");
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
+
+        let report = block_on(engine.run()).expect("zero-iteration run");
+
+        assert_eq!(report.users_started, 1);
+        assert_eq!(report.users_finished, 1);
+        assert!(!report.events.iter().any(|event| matches!(
+            event,
+            EngineEvent::Sample { .. } | EngineEvent::Iteration { .. }
+        )));
+    }
+
+    #[test]
+    fn graceful_stop_skips_remaining_main_groups() {
+        let first = Arc::new(AtomicBool::new(true));
+        let stopping_package = SamplePackage::builder(
+            NodeId::new(1),
+            Arc::new(StopFirstSampler {
+                first: Arc::clone(&first),
+                signal: ControlSignal::StopTestGraceful,
+            }),
+        )
+        .sampler_factory(Arc::new(StopFirstSamplerFactory {
+            first,
+            signal: ControlSignal::StopTestGraceful,
+        }))
+        .build();
+        let normal_package = SamplePackage::builder(NodeId::new(1), Arc::new(Sampler))
+            .sampler_factory(Arc::new(SamplerFactoryImpl))
+            .build();
+        let stopping_packages =
+            CompiledPackages::from_packages([stopping_package]).expect("stopping packages");
+        let normal_packages =
+            CompiledPackages::from_packages([normal_package]).expect("normal packages");
+        let controller =
+            ControllerProgram::compile(crate::ControllerNode::sample(1)).expect("controller");
+        let setup = ThreadGroupPlan::new(
+            NodeId::new(1),
+            "setup",
+            1,
+            controller.clone(),
+            normal_packages.clone(),
+        )
+        .expect("setup")
+        .with_kind(GroupKind::Setup);
+        let main = ThreadGroupPlan::new(
+            NodeId::new(2),
+            "main-stop",
+            1,
+            controller.clone(),
+            stopping_packages,
+        )
+        .expect("main");
+        let remaining_main = ThreadGroupPlan::new(
+            NodeId::new(3),
+            "main-remaining",
+            1,
+            controller.clone(),
+            normal_packages.clone(),
+        )
+        .expect("main");
+        let teardown =
+            ThreadGroupPlan::new(NodeId::new(4), "teardown", 1, controller, normal_packages)
+                .expect("teardown")
+                .with_kind(GroupKind::Teardown);
+        let mut plan = EnginePlan::new();
+        plan.serialize_thread_groups = true;
+        for group in [setup, main, remaining_main, teardown] {
+            plan.push_group(group).expect("group");
+        }
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
+
+        let report = block_on(engine.run()).expect("graceful stop is a report");
+
+        assert_eq!(report.signal, ControlSignal::StopTestGraceful);
+        let started = report
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                EngineEvent::GroupStarted { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            started,
+            vec![NodeId::new(1), NodeId::new(2), NodeId::new(4)]
+        );
+    }
+
+    #[test]
+    fn teardown_policy_does_not_block_graceful_teardown() {
+        let first = Arc::new(AtomicBool::new(true));
+        let stopping_package = SamplePackage::builder(
+            NodeId::new(1),
+            Arc::new(StopFirstSampler {
+                first: Arc::clone(&first),
+                signal: ControlSignal::StopTestGraceful,
+            }),
+        )
+        .sampler_factory(Arc::new(StopFirstSamplerFactory {
+            first,
+            signal: ControlSignal::StopTestGraceful,
+        }))
+        .build();
+        let packages = CompiledPackages::from_packages([stopping_package]).expect("packages");
+        let controller =
+            ControllerProgram::compile(crate::ControllerNode::sample(1)).expect("controller");
+        let main = ThreadGroupPlan::new(
+            NodeId::new(1),
+            "main",
+            1,
+            controller.clone(),
+            packages.clone(),
+        )
+        .expect("main");
+        let mut teardown =
+            ThreadGroupPlan::new(NodeId::new(2), "teardown", 1, controller, packages)
+                .expect("teardown")
+                .with_kind(GroupKind::Teardown);
+        teardown.teardown_on_shutdown = false;
+        let mut plan = EnginePlan::new();
+        plan.push_group(main).expect("main");
+        plan.push_group(teardown).expect("teardown");
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
+
+        let report = block_on(engine.run()).expect("graceful stop is a report");
+
+        assert_eq!(report.signal, ControlSignal::StopTestGraceful);
+        assert!(report.events.iter().any(|event| {
+            matches!(event, EngineEvent::GroupStarted { id, kind: GroupKind::Teardown } if *id == NodeId::new(2))
+        }));
+    }
+
+    #[test]
+    fn run_wrapper_exposes_one_fresh_read_only_handle_per_run() {
+        let mut engine = trace_engine(
+            EnginePlan::new(),
+            RuntimeCapabilities::default(),
+            "run",
+            "host",
+        );
+
+        let first = engine.run();
+        let first_handle = first.progress_handle();
+        assert_eq!(
+            first_handle.snapshot().terminal,
+            crate::ProgressTerminalState::Running
+        );
+        let first_report = block_on(first).expect("first run");
+        assert_eq!(
+            first_handle.snapshot().terminal,
+            crate::ProgressTerminalState::Completed
+        );
+
+        let second = engine.run();
+        let second_handle = second.progress_handle();
+        assert_eq!(
+            second_handle.snapshot().terminal,
+            crate::ProgressTerminalState::Running
+        );
+        assert_eq!(
+            first_handle.snapshot().terminal,
+            crate::ProgressTerminalState::Completed
+        );
+        let second_report = block_on(second).expect("second run");
+        assert_eq!(
+            second_handle.snapshot().terminal,
+            crate::ProgressTerminalState::Completed
+        );
+        assert_eq!(
+            first_handle.generation(),
+            first_report
+                .events
+                .len()
+                .checked_add(2)
+                .and_then(|value| std::num::NonZeroU64::new(value as u64))
+                .expect("first generation")
+        );
+        assert_eq!(
+            second_handle.generation(),
+            second_report
+                .events
+                .len()
+                .checked_add(2)
+                .and_then(|value| std::num::NonZeroU64::new(value as u64))
+                .expect("second generation")
+        );
+    }
+
+    #[test]
+    fn lifecycle_and_sample_observations_share_one_checked_progress_owner() {
+        let package = SamplePackage::builder(NodeId::new(1), Arc::new(Sampler))
+            .sampler_factory(Arc::new(SamplerFactoryImpl))
+            .build();
+        let packages = CompiledPackages::from_packages([package]).expect("packages");
+        let controller =
+            ControllerProgram::compile(crate::ControllerNode::sample(1)).expect("controller");
+        let group =
+            ThreadGroupPlan::new(NodeId::new(1), "main", 1, controller, packages).expect("group");
+        let mut plan = EnginePlan::new();
+        plan.push_group(group).expect("group");
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
+
+        let run = engine.run();
+        let handle = run.progress_handle();
+        let report = block_on(run).expect("sample run");
+
+        let expected = report
+            .events
+            .len()
+            .checked_add(2)
+            .and_then(|value| u64::try_from(value).ok())
+            .and_then(std::num::NonZeroU64::new)
+            .expect("bounded progress generation");
+        assert_eq!(
+            handle.snapshot().terminal,
+            crate::ProgressTerminalState::Completed
+        );
+        assert_eq!(handle.generation(), expected);
+        assert!(
+            report
+                .events
+                .iter()
+                .any(|event| matches!(event, EngineEvent::Sample { .. }))
+        );
+    }
+
+    #[test]
+    fn failed_and_dropped_runs_have_distinct_terminal_progress_states() {
+        let controller =
+            ControllerProgram::compile(crate::ControllerNode::sample(1)).expect("controller");
+        let group = ThreadGroupPlan::new(
+            NodeId::new(1),
+            "missing-package",
+            1,
+            controller,
+            CompiledPackages::default(),
+        )
+        .expect("group");
+        let mut plan = EnginePlan::new();
+        plan.push_group(group).expect("group");
+        let mut engine = trace_engine(plan, RuntimeCapabilities::default(), "run", "host");
+
+        let failed = engine.run();
+        let failed_handle = failed.progress_handle();
+        assert!(block_on(failed).is_err());
+        assert_eq!(
+            failed_handle.snapshot().terminal,
+            crate::ProgressTerminalState::Failed
+        );
+
+        struct SelfWakingPendingSleeper {
+            wakes: Arc<AtomicUsize>,
+        }
+
+        impl Sleeper for SelfWakingPendingSleeper {
+            fn sleep<'a>(&'a self, _duration: Duration) -> CapabilityFuture<'a, ()> {
+                let wakes = Arc::clone(&self.wakes);
+                Box::pin(std::future::poll_fn(move |context| {
+                    wakes.fetch_add(1, Ordering::AcqRel);
+                    context.waker().wake_by_ref();
+                    Poll::Pending
+                }))
+            }
+        }
+
+        let controller =
+            ControllerProgram::compile(crate::ControllerNode::sample(1)).expect("controller");
+        let group = ThreadGroupPlan::new(
+            NodeId::new(2),
+            "pending",
+            1,
+            controller,
+            CompiledPackages::default(),
+        )
+        .expect("group")
+        .with_schedule(GroupSchedule {
+            delay: Duration::from_secs(1),
+            ..GroupSchedule::default()
+        });
+        let mut pending_plan = EnginePlan::new();
+        pending_plan.push_group(group).expect("group");
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let capabilities = RuntimeCapabilities::default()
+            .with_clock(Arc::new(StaticClock))
+            .with_sleeper(Arc::new(SelfWakingPendingSleeper {
+                wakes: Arc::clone(&wakes),
+            }));
+        let mut pending_engine = trace_engine(pending_plan, capabilities, "run", "host");
+        let mut pending = pending_engine.run();
+        let pending_handle = pending.progress_handle();
+        let waker = Waker::noop();
+        let mut context = Context::from_waker(waker);
+        assert!(Pin::new(&mut pending).poll(&mut context).is_pending());
+        let after_first_poll = pending_handle.snapshot();
+        assert!(Pin::new(&mut pending).poll(&mut context).is_pending());
+        assert_eq!(pending_handle.snapshot(), after_first_poll);
+        assert!(wakes.load(Ordering::Acquire) >= 2);
+        drop(pending);
+        assert_eq!(
+            pending_handle.snapshot().terminal,
+            crate::ProgressTerminalState::Cancelled
+        );
+        assert_eq!(
+            pending_engine.cancellation().signal(),
+            ControlSignal::StopTestImmediate
+        );
+        assert_eq!(pending_engine.last_progress_error(), None);
     }
 }

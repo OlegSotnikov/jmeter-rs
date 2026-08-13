@@ -1,6 +1,6 @@
 # Decision 0008: processors, extractors, and atomic mutation boundaries
 
-Status: accepted architecture, revision 2; implementation and oracle evidence pending  
+Status: accepted architecture, revision 3; implementation and oracle evidence pending
 Date: 2026-08-13  
 Compatibility feature: `ELEM-008`  
 Related features: `ELEM-003`, `ELEM-005`, `JTL-001`, `JTL-002`  
@@ -39,11 +39,13 @@ JSONPath, JMESPath, BeanShell/JSR223/BSF, JDBC processors, and unknown/plugin
 processors unless a separately named, versioned native provider earns its own
 evidence. Provider/parser identity is part of the capability and fixture tuple.
 
-The pipeline remains:
+The result-dependent pipeline follows Decision 0016:
 
 ```text
 configuration -> preprocessors -> summed timers -> sampler
-              -> postprocessors -> assertions -> immutable listener event
+              -> postprocessors -> assertions
+              -> source-ordered listener effects/observer snapshots
+              -> control consumption
 ```
 
 A null sampler result skips result-dependent downstream phases. Exact same-
@@ -52,30 +54,89 @@ identities rather than inferred from labels or class names.
 
 ## Response and request views
 
-Runtime owns and exposes an executor-neutral `ResponseResolver` capability. A processor
-never reads response bytes ad hoc or opens `SampleResult.result_file_name`.
-`ResponseView` preserves:
+Runtime owns an executor-neutral, scope-aware `ResponseResolver`. A processor
+never reads response fields ad hoc or opens `SampleResult.result_file_name`.
+Missing and present-empty remain distinct at every boundary.
+
+The exact response scopes are:
 
 ```text
-body: Missing | Present(BoundedBytes)
-raw_headers: Missing | Present(BoundedBytes)
-source: Body | Headers | AllowlistedFile(FileCapability)
-encoding/data-type/media-type and bounded response metadata
+ResponseScope::Current       # JMX wire value parent/default
+ResponseScope::Subresults    # children
+ResponseScope::All
+ResponseScope::Variable { name }
 ```
 
-Missing and present-empty are distinct. `useHeaders` selects raw headers; body
-processors do not substitute headers. No lossy UTF-8 conversion, ambient path
-read, or network fetch is allowed. File input is an application-authorized,
-length/digest-bound handle. The required negotiated JVM bridge projection must
-preserve the same presence and capability distinctions before that path is
+For sample scopes, `All` returns the current sample first and then descendants
+in pinned depth-first order. The profile must oracle-pin JMeter 5.6.3's finite
+recursive edge rather than replacing it with unbounded traversal. Variable
+scope reads exactly the named variable and bypasses sample target selection;
+a missing variable and a present-empty variable are different outcomes.
+
+The closed response targets are:
+
+```text
+Body
+ResponseHeaders
+RequestHeaders
+Url
+ResponseCode
+ResponseMessage
+BodyUnescapedHtml4
+BodyAsDocumentText
+AllowlistedFile(FileCapability)
+```
+
+A bounded response record retains raw body bytes, response headers, request
+headers, URL, response code/message, encoding, data type, media type, and
+opaque result-file metadata with independent `Missing | Present` presence.
+Raw source text uses a bounded type that preserves CR, LF, controls, and
+malformed source bytes; the generic control-rejecting configuration-text type
+is not reused. URL, code, message, and request headers come from the captured
+sample result, not the outgoing request builder.
+
+Conceptually, resolution is:
+
+```text
+resolve(snapshot, scope, target, response_limits)
+  -> NoCurrentResult
+   | Variable(Missing | Present(BoundedSourceText))
+   | Samples { ordered bounded records/projections }
+```
+
+No-current-result is distinct from an empty response. Body processors never
+substitute headers or metadata. Raw bytes are retained unchanged. Text body
+decoding uses the declared encoding when present/nonempty, otherwise the
+explicit profile default; malformed sequences use replacement semantics.
+Unknown encodings use an explicitly selected provider or pinned fallback and
+never inherit the native host default. HTML4 unescaping, Tika document text,
+XPath/XML/Tidy, Jayway JSONPath, JMESPath, and Jsoup/Jodd behavior remain
+versioned provider capabilities until independently evidenced native
+implementations exist.
+
+`result_file_name` remains opaque metadata. `AllowlistedFile` is opt-in per
+compiled processor and fixture; no processor infers it from that metadata or
+reads an ambient path. The authorized capability binds a declared length and
+digest, is rejected against the configured file limit before resolution, and
+is verified again afterward. JTL `responseFile` resolution belongs to
+`JTL-002` and does not create a processor input capability.
+
+Response limits are separate from scalar mutation limits. They independently
+bound body bytes, request/response headers, URL/code/message, decoded text,
+variable bytes, scope item count/depth, file input, document provider
+input/output, regex steps/groups/matches, JSON expressions/results, parser
+nodes, and provider output. Bounds reject before allocation or incrementally;
+there is no silent truncation.
+
+The negotiated bridge projection must round-trip scope, target, ordered sample
+origin, every raw field and presence discriminant, decode policy, provider
+identity, limits, file capability generation/length/digest, and no-current-
+result versus empty-result outcomes before an external extractor path is
 available.
 
-`AllowlistedFile` is opt-in per compiled processor and fixture; no processor
-may infer it from a nonempty result filename or read an ambient path. JTL
-`responseFile` resolution and fallback belong to `JTL-002` and do not create a
-processor input capability. Claiming file-backed processor behavior adds the
-`EXT-OS-001` profile boundary and platform evidence; without that declaration,
-the only legal source is an already-authorized injected handle.
+Claiming filesystem-backed processor behavior adds `EXT-OS-001` and platform
+evidence; an already-authorized in-memory/file handle alone does not authorize
+ambient path access.
 
 Runtime also owns a neutral, bounded, ordered `RequestPatch`, so it does not
 depend on the HTTP crate:
@@ -126,15 +187,24 @@ InvocationDelta {
 ```
 
 Validation constructs a complete candidate context in separate bounded
-storage. It checks identities, generations, unique mutation keys, ordered
-operations, count/value/result-tree/request/diagnostic/output limits, handles,
-and generation overflow. Commit replaces one versioned context record exactly
-once. A parse/provider/argument error, missing/present-empty mismatch,
-unsupported syntax, no-match outcome where the configured element treats it
-as failure, limit, deadline, cancellation, stale generation, or bridge/worker failure
-leaves the invocation state unchanged. Earlier successfully committed
-processors remain visible to later processors; this is not whole-chain
-rollback.
+storage. It checks identities, generations, ordered mutation semantics,
+count/value/result-tree/request/diagnostic/output limits, handles, and
+generation overflow. Source-order duplicate variable operations may be
+visible inside an expression session and collapse only to their proven final
+state; they cannot be rejected or sorted merely because a map key repeats.
+Commit replaces one versioned context record exactly once.
+
+Processor outcomes distinguish `Commit`, `CommitWithDiagnostic`, and `Abort`.
+If pinned JMeter behavior initializes a default, match count, assertion, or
+other state before catching malformed input, the native/provider result stages
+that complete observable final state as `CommitWithDiagnostic`; Rust does not
+erase it by applying a generic rollback rule. Infrastructure uncertainty,
+unsupported provider/syntax, stale generation, resource limit, deadline,
+cancellation, or untrusted bridge/worker failure is `Abort`, leaves Rust state
+unchanged, and may poison the authority when external effects are uncertain.
+The distinction is component- and profile-proven, never inferred by treating
+every error as no-match. Earlier successfully committed processors remain
+visible to later processors; this is not whole-chain rollback.
 
 JVM projection composes the `jvm-capability/2` prepare/execute/propose/commit
 contract in Decision 0005. Arbitrary JVM effects are not roll-backable; an
@@ -150,31 +220,22 @@ no-match and never receive the configured default.
 
 ## Result actions
 
-An enabled `ResultAction` is registered as a postprocessor, never a listener.
-It runs after the sampler result exists, after earlier applicable
-postprocessors in proven scope order, and before assertions and immutable event
-snapshot. The existing disabled root-level static fixture is preservation-only
-and is not an executable placement oracle. Native immutable-event listeners
-observe the mutated result and cannot mutate it or initiate control; a generic
-runtime listener adapter that can return an error is not thereby an
-`ELEM-008` control surface. Exact live Java/plugin listener mutation remains
-inside Decision 0005's authority region. The controller consumes the action
-only after event/result routing accounts for the event.
+ResultAction follows
+[`Decision 0016`](0016-source-ordered-listener-effects.md). Pinned JMeter
+implements it as a `SampleListener`; it is registered in the source-ordered
+listener program and never as a postprocessor. Assertions therefore run first,
+and a collector before versus after the action may capture different immutable
+revisions of the same sample.
 
-Control is typed:
-
-- `NextLoop` skips the remainder of the innermost active iteration and begins
-  its next iteration;
-- `BreakCurrentLoop` exits the innermost active loop and resumes after it.
-
-They are distinct result/wire/controller values. `BreakCurrentLoop` is a
-loop-local directive, not another severity-ordered runtime `ControlSignal`;
-`ELEM-003` owns its interpretation, nested-loop precedence, reset behavior,
-and interaction with sampler/result actions. The current JVM boolean projection
-is insufficient to prove the runtime, result, remote, or RMI contracts. Nested
-and no-active-loop behavior, action visibility in listeners/JTL, and exact
-consumption timing remain pinned-oracle questions; no implementation may encode
-break as next-loop or guess the no-loop case.
+For an unsuccessful result, its closed precedence is `StopTestNow`,
+`StopTest`, `StopThread`, `StartNextThreadLoop`,
+`StartNextIterationOfCurrentLoop`, then `BreakCurrentLoop`. Stop fields and
+loop-local actions remain separate typed result/control values.
+`BreakCurrentLoop` is not another severity-ordered runtime `ControlSignal`;
+`ELEM-003` owns nested-loop interpretation, reset, and the no-active-loop case.
+The controller consumes final action state only after the complete listener
+program and every observer admission. The current JVM boolean projection is
+insufficient until it round-trips every action and listener revision.
 
 ## Bounds, errors, and identity
 

@@ -16,8 +16,12 @@ mod coordination;
 mod execution;
 mod lifecycle;
 mod logic;
+mod mutation;
+mod observation;
 mod plan_compiler;
+mod progress;
 mod result_router;
+mod sample_monitor;
 mod scheduler;
 mod scope;
 mod timers;
@@ -31,7 +35,9 @@ pub use controllers::{
 };
 
 pub use coordination::{
-    CriticalSectionCoordinator, CriticalSectionError, DeterministicCriticalSectionCoordinator,
+    CoordinationGeneration, CriticalSectionCoordinator, CriticalSectionError,
+    DeterministicBarrierCoordinator, DeterministicCriticalSectionCoordinator,
+    DeterministicSynchronizingCoordinator, DeterministicThroughputCoordinator,
 };
 
 pub use execution::{
@@ -39,7 +45,9 @@ pub use execution::{
     CompiledPackages, ComponentError, ComponentFuture, Configuration, ConfigurationFactory,
     EmptyEnvironment, EmptyFileSystem, Environment, EpochClock, ExecutionContext,
     ExecutionPipeline, ExecutionReport, ExecutionTraceEvent, ExpressionStateCleanup, FileSystem,
-    ImmediateSleeper, Listener, ListenerFactory, PackageCompileError, PackageCompiler,
+    ImmediateSleeper, InitialVariables, InitialVariablesError, Listener, ListenerFactory,
+    MAX_INITIAL_VARIABLE_NAME_BYTES, MAX_INITIAL_VARIABLE_TOTAL_BYTES,
+    MAX_INITIAL_VARIABLE_VALUE_BYTES, MAX_INITIAL_VARIABLES, PackageCompileError, PackageCompiler,
     PackageLifecycle, PackageLifecycleFactory, Phase, PhaseTrace, PipelineError, PipelineFuture,
     Postprocessor, PostprocessorFactory, Preprocessor, PreprocessorFactory, RandomSource,
     RuntimeCapabilities, SampleContext, SampleFailure, SamplePackage, SamplePackageBuilder,
@@ -47,9 +55,13 @@ pub use execution::{
 };
 
 pub use adapters::{
-    CapturingListener, ContainsAssertion, ExpressionConfiguration, ExpressionPreprocessor,
-    LiteralExtractor, UnsupportedAssertion, UnsupportedConfiguration, UnsupportedExtractor,
-    UnsupportedListener, UnsupportedProcessor, UnsupportedSampler,
+    ADAPTER_CAPABILITIES, AdapterCapability, AdapterCapabilityRecord, AdapterConfigurationError,
+    AdapterImplementationPath, AdapterUnavailable, AdapterUnavailableReason, BoundedFakeSampler,
+    BoundedFakeTimer, CapturingListener, ContainsAssertion, ExpressionConfiguration,
+    ExpressionPreprocessor, LiteralExtractor, MAX_ADAPTER_TEXT_BYTES, MAX_CAPTURED_EVENTS,
+    MAX_FAKE_INVOCATIONS, MAX_LITERAL_CAPTURE_BYTES, UnsupportedAssertion,
+    UnsupportedConfiguration, UnsupportedExtractor, UnsupportedListener, UnsupportedProcessor,
+    UnsupportedSampler, adapter_capabilities,
 };
 pub use assertions::{
     AssertionLimits, DurationAssertion, MD5HexAssertion, Md5HexAssertion, PatternMode,
@@ -58,11 +70,11 @@ pub use assertions::{
     XPathAssertion, XPathOptions, XmlAssertion,
 };
 pub use capabilities::{
-    AdmissionMode, CapabilityIdentityError, CapabilityIdentityErrorCode,
-    Digest32, ImplementationPath, ImplementationPathFamily, ImplementationPathIdentity,
+    AdmissionMode, CapabilityIdentityError, CapabilityIdentityErrorCode, Digest32,
+    ImplementationPath, ImplementationPathFamily, ImplementationPathIdentity,
     ImplementationPathManifest, ManifestError, NegotiatedCapability, PlanAdmission,
-    PlanAdmissionError, ProfileIdentity, ProviderIdentity, RuntimeCapabilitySet,
-    SourceIdentity, UnavailableReason, UnavailableReasonCode, VersionedCapability,
+    PlanAdmissionError, ProfileIdentity, ProviderIdentity, RuntimeCapabilitySet, SourceIdentity,
+    UnavailableReason, UnavailableReasonCode, VersionedCapability,
 };
 pub use lifecycle::{
     EngineError, EngineEvent, EngineMode, EnginePlan, EngineReport, GroupKind, GroupSchedule,
@@ -74,26 +86,81 @@ pub use logic::{
     LogicProgram, LogicRunner, LogicSelection, LogicSharedState, LogicStep, SwitchSelection,
     ThroughputMode, TransactionInfo,
 };
+pub use mutation::{
+    AllowlistedFileResolver, BoundedBytes, BoundedText, ContextGeneration, ControlPatch,
+    DEFAULT_MAX_DIAGNOSTIC_BYTES, DEFAULT_MAX_DIAGNOSTICS, DEFAULT_MAX_MUTATIONS,
+    DEFAULT_MAX_OUTPUT_BYTES, DEFAULT_MAX_OUTPUTS, DEFAULT_MAX_REQUEST_BYTES,
+    DEFAULT_MAX_REQUEST_HEADERS, DEFAULT_MAX_REQUEST_PATH_SEGMENTS,
+    DEFAULT_MAX_REQUEST_QUERY_FIELDS, DEFAULT_MAX_RESPONSE_BYTES,
+    DEFAULT_MAX_RESPONSE_METADATA_BYTES, DEFAULT_MAX_RESULT_DEPTH, DEFAULT_MAX_RESULT_NODES,
+    DEFAULT_MAX_VALUE_BYTES, EncodedField, FileCapability, HeaderOperation, InvocationCommit,
+    InvocationDelta, InvocationGeneration, InvocationSnapshot, MutationDiagnostic, MutationError,
+    MutationErrorCode, MutationLimits, MutationLimitsParts, Presence, PropertyMutation, QueryField,
+    RequestAuthority, RequestDigest, RequestGeneration, RequestHeader, RequestPatch,
+    RequestPatchError, RequestState, RequestStateError, RequestStateParts, ResponseMetadata,
+    ResponseResolveError, ResponseResolver, ResponseSource, ResponseView, ResultPatch,
+    SampleResultResponseResolver, StagedInvocation, VariableMutation,
+};
+pub use observation::{
+    ObservationError, RunObservationPolicyV1, RunObservationSummaryV1, RunObservationTerminalState,
+    RunObservationTraceV1,
+};
 pub use plan_compiler::{
     CompiledPlanDraft, CompiledThreadGroupDraft, IndexedCategory, IndexedNode, PlanCompileError,
-    PlanCompileLimits, PlanCompiler, PlanIndex, PlanSourceView, SemanticSource, SourceRef,
+    PlanCompileLimits, PlanCompiler, PlanIndex, PlanLimitKind, PlanPathContext, PlanPathManifest,
+    PlanSourceView, SemanticSource, SourceRef,
+};
+pub use progress::{
+    DEFAULT_WAIT_ITEM_DIAGNOSTIC_BYTES, DEFAULT_WAIT_REGISTRATION_CAPACITY,
+    DEFAULT_WAIT_TOTAL_DIAGNOSTIC_BYTES, MAX_OPAQUE_WAIT_IDENTITY_BYTES, OpaqueWaitIdentity,
+    ProgressError, ProgressHandle, ProgressOwner, ProgressSnapshot, ProgressTerminalState,
+    WaitIdentityError, WaitNotification, WaitNotificationCallback, WaitNotificationKind,
+    WaitNotifier, WaitOwnerClass, WaitRegistration, WaitRegistrationId, WaitRegistrationSpec,
+    WaitRegistry, WaitRegistryConfig, WaitRegistryError, WaitRegistryHandle, WaitSnapshot,
 };
 pub use result_router::{
-    AdmissionOutcome, ResultEnvelope, ResultEventMetadata, ResultOrigin, ResultRouter,
-    ResultRouterError, ResultRouterFuture, ResultSink, ResultSinkFuture, ResultSinkSpec,
-    RouterPhase, RouterStats, RunSequence, SampleIdentity, SinkError, SinkId, SinkLimits,
-    SinkQueueStats, UserIdentity,
+    AdmissionOutcome, AttemptOrdinal, BoundedDiagnostic, BudgetError, DeliveryKey, DeliveryLease,
+    DurabilityAck, DurabilityBoundary, FailureReason, FullPolicy, LegacyResultEnvelope,
+    LegacyResultRouter, LegacySinkId, MonotonicClock, NotAdmittedReason, PlanDomain,
+    QualifiedSinkId, ResultClockError, ResultDeliveryBudget, ResultDeliveryBudgetConfig,
+    ResultEnvelope, ResultEventMetadata, ResultFinalizationLease, ResultMonotonicClock,
+    ResultOperationId, ResultOperationKind, ResultOperationLease, ResultOperationScope,
+    ResultOperationWindows, ResultOrigin, ResultRouter, ResultRouterError, ResultRouterFuture,
+    ResultRouterV3, ResultSink, ResultSinkFuture, ResultSinkSpec, ResultWaitError,
+    ResultWaitRegistrar, ResultWaitRegistration, ResultWaitRegistrationHandle, ResultWaitSpec,
+    RetryBudget, RouterPhase, RouterStats, RunGeneration, RunOperationBudget, RunSequence,
+    SampleIdentity, SinkError, SinkId, SinkLimits, SinkPlanGeneration, SinkQueueStats,
+    TypedAdmissionOutcome, TypedResultEnvelope, TypedResultOrigin, TypedResultRouter,
+    TypedResultRouterAdapter, TypedRouterError, TypedRouterIdentity, TypedRouterPhase, TypedRunId,
+    TypedRunSequence, TypedSampleId, TypedSinkAdapter, TypedSinkError, TypedSinkFuture,
+    TypedSinkPlan, UnavailableResultWaitRegistrar, UserIdentity, WorkerGeneration, WorkerId,
+};
+pub use sample_monitor::{
+    DEFAULT_MAX_SAMPLE_DIAGNOSTIC_BYTES, DEFAULT_MAX_SAMPLE_DIAGNOSTICS,
+    DEFAULT_MAX_SAMPLE_MONITORS, DEFAULT_MAX_SAMPLE_REGISTRATIONS, InterruptActivationError,
+    InterruptEndOutcome, InterruptOutcome, InterruptReason, InterruptRequest,
+    MAX_SAMPLE_MONITOR_CLASS_BYTES, MAX_SAMPLE_MONITOR_DETAIL_BYTES, MAX_SAMPLE_MONITOR_PATH_NODES,
+    MonitorEndStatus, RegistrationError, RegistrationId, RegistrationRetireOutcome,
+    RegistrationRetirer, SampleInvocationIdentity, SampleMonitor, SampleMonitorAccounting,
+    SampleMonitorCleanup, SampleMonitorCleanupFailure, SampleMonitorCleanupPhase,
+    SampleMonitorDiagnostic, SampleMonitorEndReport, SampleMonitorError, SampleMonitorFactory,
+    SampleMonitorFactorySpec, SampleMonitorFuture, SampleMonitorHookContext,
+    SampleMonitorIdentityError, SampleMonitorInstances, SampleMonitorLifecycleError,
+    SampleMonitorLimits, SampleMonitorMetadata, SampleMonitorPlan, SampleMonitorRegistration,
+    SampleMonitorRegistrationRegistrar, SampleMonitorRegistrationRequest, SampleMonitorStart,
+    SampleMonitorStartReport, SamplerInterrupt, SamplerInterruptCapability, SamplerInterruptError,
+    SamplerInterruptFactory, SamplerInterruptFuture, SamplerInterruptHandle,
 };
 pub use scheduler::{
     CancellationToken, Deadline, DeadlineFuture, DeterministicScheduler, ImmediateScheduler,
-    MonotonicInstant, ScheduledWake, Scheduler, SchedulerError, SchedulerFuture, WakeRegistration,
-    ready,
+    MonotonicInstant, ScheduleWindow, ScheduledWake, Scheduler, SchedulerError, SchedulerFuture,
+    WakeRegistration, ready,
 };
 pub use scope::{
-    CompiledScopePlan, ComponentBinding, ComponentCategory, ComponentRegistry, ResultCollectorKind,
-    ScopeCompileError, ScopeCompiler, ScopeComponent, ScopeFactoryError, ScopeLimits, ScopeNode,
-    ScopePackageAssembler, ScopePlan, TimerAlias, TimerBinding, UnsupportedComponent,
-    builtin_timer_aliases,
+    CompiledScopePlan, ComponentAvailability, ComponentBinding, ComponentCategory,
+    ComponentRegistry, ResultCollectorKind, ScopeCompileError, ScopeCompiler, ScopeComponent,
+    ScopeFactoryError, ScopeLimits, ScopeNode, ScopePackageAssembler, ScopePlan, TimerAlias,
+    TimerBinding, UnsupportedComponent, builtin_timer_aliases,
 };
 pub use timers::{
     ConstantThroughputCalculationMode, ConstantThroughputMode, ConstantThroughputTimer,

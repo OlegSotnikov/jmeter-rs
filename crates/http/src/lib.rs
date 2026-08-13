@@ -25,23 +25,69 @@ mod url;
 pub use client::{ClientConfig, ClientLimits, HttpClient};
 pub use clock::{Clock, ClockError, ClockReading, Deadline, EpochClock, ManualClock, SystemClock};
 pub use config::{
-    AuthConfiguration, CacheConfiguration, ConfigScope, CookieConfiguration, DnsConfiguration,
-    HttpImplementation, HttpRequestDefaults, MAX_AUTH_ENTRIES, MAX_CONFIG_BYTES, MAX_CONFIG_FIELDS,
-    MAX_DNS_SERVERS, MAX_STATIC_DNS_HOSTS, OpaqueField, OptionalBool, OptionalString, Scoped,
-    StaticDnsHost, WireConfig, merge_request_defaults,
+    AuthConfiguration, CacheConfiguration, ConfigScope, CookieConfiguration,
+    DEFAULT_CACHE_MAX_SIZE, DEFAULT_CONCURRENT_POOL, DEFAULT_COOKIE_IMPLEMENTATION,
+    DEFAULT_COOKIE_POLICY, DEFAULT_HTTP_AUTO_REDIRECTS, DEFAULT_HTTP_CONCURRENT_DOWNLOADS,
+    DEFAULT_HTTP_CONTENT_ENCODING, DEFAULT_HTTP_FOLLOW_REDIRECTS, DEFAULT_HTTP_KEEPALIVE,
+    DEFAULT_HTTP_METHOD, DEFAULT_HTTP_PROTOCOL, DnsConfiguration, EffectiveHttpRequestConfig,
+    HttpCapabilityPath, HttpImplementation, HttpProxyConfiguration, HttpRequestDefaults,
+    JMX_AUTH_CLEAR_EACH_ITERATION, JMX_AUTH_CONTROLLED_BY_THREAD_GROUP, JMX_AUTH_ENTRIES,
+    JMX_CACHE_CLEAR_EACH_ITERATION, JMX_CACHE_CONTROLLED_BY_THREAD, JMX_CACHE_MAX_SIZE,
+    JMX_CACHE_USE_EXPIRES, JMX_COOKIE_CHECK_COOKIES, JMX_COOKIE_CLEAR_EACH_ITERATION,
+    JMX_COOKIE_CONTROLLED_BY_THREAD_GROUP, JMX_COOKIE_DELETE_NULL_COOKIES, JMX_COOKIE_ENTRIES,
+    JMX_COOKIE_IMPLEMENTATION, JMX_COOKIE_POLICY, JMX_COOKIE_SAVE_COOKIES,
+    JMX_DNS_CLEAR_EACH_ITERATION, JMX_DNS_CUSTOM_RESOLVER, JMX_DNS_HOSTS, JMX_DNS_SERVERS,
+    JMX_HTTP_AUTO_REDIRECTS, JMX_HTTP_CONCURRENT_DOWNLOADS, JMX_HTTP_CONCURRENT_POOL,
+    JMX_HTTP_CONNECT_TIMEOUT, JMX_HTTP_CONTENT_ENCODING, JMX_HTTP_DOMAIN,
+    JMX_HTTP_EMBEDDED_URL_EXCLUDE_REGEX, JMX_HTTP_EMBEDDED_URL_REGEX, JMX_HTTP_FOLLOW_REDIRECTS,
+    JMX_HTTP_IMPLEMENTATION, JMX_HTTP_KEEPALIVE, JMX_HTTP_METHOD, JMX_HTTP_PATH, JMX_HTTP_PORT,
+    JMX_HTTP_PROTOCOL, JMX_HTTP_PROXY_HOST, JMX_HTTP_PROXY_PASSWORD, JMX_HTTP_PROXY_PORT,
+    JMX_HTTP_PROXY_SCHEME, JMX_HTTP_PROXY_USER, JMX_HTTP_RESPONSE_TIMEOUT, MAX_AUTH_ENTRIES,
+    MAX_CACHE_ENTRIES, MAX_CONCURRENT_POOL, MAX_CONFIG_BYTES, MAX_CONFIG_FIELDS, MAX_DNS_SERVERS,
+    MAX_HTTP_TIMEOUT_MS, MAX_INITIAL_COOKIES, MAX_STATIC_DNS_HOSTS, OpaqueField, OptionalBool,
+    OptionalString, ProxyConfiguration, Scoped, StaticDnsHost, WireConfig, merge_request_defaults,
+    merge_request_defaults_in_ancestry_order,
 };
-pub use error::{HttpError, TimeoutPhase, TransportError};
+pub use error::{
+    HttpDiagnostic, HttpDiagnosticCode, HttpDiagnostics, HttpError, HttpLimitCode,
+    MAX_ERROR_DIAGNOSTIC_AGGREGATE_BYTES, MAX_ERROR_DIAGNOSTIC_BYTES, MAX_ERROR_DIAGNOSTICS,
+    MAX_HTTP_ERROR_CONTEXT_DEPTH, Retryability, StableHttpErrorCode, TimeoutPhase, TransportError,
+};
 pub use header::{Header, HeaderName, HeaderValue, Headers};
 pub use policy::{
-    ClientIdentity, HARD_MAX_REDIRECTS, NoProxy, Proxy, ProxyPolicy, ProxyScheme, RedirectPolicy,
-    Route, TimeoutConfig, TlsConfig, TlsVerification, TlsVersion,
+    ClientIdentity, CompressionCodec, DecompressionPolicy, HARD_MAX_AUTH_CHALLENGES,
+    HARD_MAX_DECOMPRESSED_BYTES, HARD_MAX_DECOMPRESSION_CODECS, HARD_MAX_DECOMPRESSION_RATIO,
+    HARD_MAX_DECOMPRESSION_STATE_BYTES, HARD_MAX_NO_PROXY_PATTERN_BYTES,
+    HARD_MAX_NO_PROXY_PATTERNS, HARD_MAX_PROXY_CREDENTIAL_BYTES, HARD_MAX_REDIRECT_RETAINED_BYTES,
+    HARD_MAX_REDIRECTS, HARD_MAX_RESPONSE_BODY_BYTES, HARD_MAX_TIMEOUT,
+    HARD_MAX_TLS_IDENTITY_BYTES, HARD_MAX_TLS_MATERIAL_BYTES, HARD_MAX_TLS_ROOT_BYTES,
+    HARD_MAX_TLS_ROOTS, HARD_MAX_TRANSPARENT_RETRIES, HttpVersionPolicy, NoProxy, Proxy,
+    ProxyPolicy, ProxyScheme, RedirectPolicy, RetryPolicy, Route, TimeoutConfig, TlsConfig,
+    TlsTrustSource, TlsVerification, TlsVersion, validate_decompression_limits,
+    validate_response_body_limit,
 };
 pub use protocol_v1::*;
-pub use request::{Body, Method, Request, RequestBuilder, form_encode};
-pub use response::{ByteAccounting, HttpResult, Response, ResponseTiming};
+pub use request::{
+    Body, CHUNKED_WIRE_CHUNK_BYTES, FormField, HttpArgument, HttpRequestSpec, HttpSamplerRequest,
+    MAX_CONTENT_ENCODING_BYTES, MAX_FORM_BYTES, MAX_FORM_FIELDS, MAX_MULTIPART_BOUNDARY_BYTES,
+    MAX_MULTIPART_PART_BODY_BYTES, MAX_MULTIPART_PART_HEADER_BYTES, MAX_MULTIPART_PARTS,
+    MAX_REQUEST_BODY_BYTES, MAX_REQUEST_HEADER_BYTES, MAX_REQUEST_HEADER_FIELDS, Method,
+    MultipartPart, Request, RequestBodySource, RequestBuilder, RequestCharset, RequestFraming,
+    RequestReplayability, SamplerArgument, form_encode, form_encode_with_encoding,
+};
+pub use response::{
+    ByteAccounting, DecompressionObservation, HttpResult, MAX_DECOMPRESSED_RESPONSE_BYTES,
+    MAX_DECOMPRESSION_RATIO, MAX_INFORMATIONAL_RESPONSE_BYTES, MAX_REDIRECT_HISTORY,
+    MAX_REDIRECT_HISTORY_BYTES, MAX_RESPONSE_REASON_BYTES, MAX_RESPONSE_TRAILER_BYTES,
+    MAX_RESPONSE_TRAILERS, MAX_SAMPLE_LABEL_BYTES, MAX_WIRE_RESPONSE_BYTES, RequestContext,
+    Response, ResponseBodyCompletion, ResponseBodyPresence, ResponseHeadObservation,
+    ResponsePresence, ResponseTiming, SampleResultProjectionOptions, TransportResponseObservation,
+};
 pub use state::{
     AuthEntry, AuthMechanism, AuthStore, CacheDecision, CacheStore, Cookie, CookieJar, DnsCache,
-    DnsRecord, HeaderManager, PublicSuffixPolicy, SessionLimits, StateLifecycle, UserHttpState,
+    DnsRecord, HeaderManager, HttpStateSnapshot, ManagerPresence, PublicSuffixPolicy,
+    SessionLimits, StateCommitError, StateCommitMode, StateLifecycle, StateTransaction,
+    UserHttpState,
 };
 pub use transport::{
     CancellationRegistration, CancellationToken, ResponseBody, Transport, TransportAdapter,
@@ -755,6 +801,9 @@ mod tests {
             bytes: ByteAccounting::default(),
             timing: ResponseTiming::default(),
             url: None,
+            protocol: None,
+            framing: None,
+            decompression: None,
         };
         assert!(matches!(
             response.collect(2),
@@ -843,6 +892,9 @@ mod tests {
             bytes: ByteAccounting::default(),
             timing: ResponseTiming::default(),
             url: None,
+            protocol: None,
+            framing: None,
+            decompression: None,
         };
         let clock = ManualClock::epoch();
         let error = response
@@ -1022,6 +1074,9 @@ mod tests {
                 at: Duration::from_secs(2),
             }),
             tls: TlsConfig::default(),
+            http_version: HttpVersionPolicy::default(),
+            decompression: DecompressionPolicy::default(),
+            retries: RetryPolicy::default(),
             dns: DnsCache::default(),
             attempt: 0,
             started_at: ClockReading::new(0, Duration::ZERO),
@@ -1181,6 +1236,9 @@ mod tests {
             bytes: ByteAccounting::default(),
             timing: ResponseTiming::default(),
             url: None,
+            protocol: None,
+            framing: None,
+            decompression: None,
         };
         assert_eq!(
             response
@@ -1239,6 +1297,9 @@ mod tests {
             bytes: ByteAccounting::default(),
             timing: ResponseTiming::default(),
             url: None,
+            protocol: None,
+            framing: None,
+            decompression: None,
         };
         assert_eq!(
             response
@@ -1715,6 +1776,9 @@ mod tests {
             bytes: ByteAccounting::default(),
             timing: ResponseTiming::default(),
             url: None,
+            protocol: None,
+            framing: None,
+            decompression: None,
         };
         let deadline = Deadline::after(clock.now(), Duration::from_secs(1)).expect("deadline");
         assert_eq!(

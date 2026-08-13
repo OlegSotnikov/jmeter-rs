@@ -15,8 +15,10 @@ workspace = true
 [dependencies]
 # Local bounded wire contract; no async runtime, JVM bindings, or native ABI.
 jmeter-rs-bridge-protocol = { version = "0.1.0", path = "../bridge-protocol" }
-# nix 0.31.3 (MIT, MSRV 1.69); use only its safe process-group signal wrapper.
-nix = { version = "=0.31.3", default-features = false, features = ["process", "signal"] }
+# All process ownership is delegated to the private, process-global supervisor.
+# The bridge currently uses only its pure capability/ID validation surface and
+# remains fail-closed until the typed launch capability is exposed to callers.
+jmeter-rs-process-supervision = { version = "0.1.0", path = "../process-supervision" }
 
 [[bin]]
 name = "jmeter-rs-java-bridge-fake-worker"

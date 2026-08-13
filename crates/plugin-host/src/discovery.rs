@@ -159,6 +159,16 @@ impl PluginDescriptor {
                 "plugin descriptor paths must be absolute",
             ));
         }
+        if path_bytes(&self.manifest_path) > DEFAULT_MAX_DISCOVERY_PATH_BYTES
+            || path_bytes(&self.executable_path) > DEFAULT_MAX_DISCOVERY_PATH_BYTES
+        {
+            return Err(PluginError::new(
+                PluginErrorCode::DiscoveryPathLimit,
+                format!(
+                    "plugin descriptor paths exceed the {DEFAULT_MAX_DISCOVERY_PATH_BYTES}-byte path budget"
+                ),
+            ));
+        }
         if self.manifest.executable != self.executable_path {
             return Err(PluginError::new(
                 PluginErrorCode::ManifestInvalid,
@@ -189,7 +199,8 @@ impl PluginDescriptor {
                 "plugin descriptor executable path is not canonical",
             ));
         }
-        let bytes = read_bounded(&self.manifest_path, HARD_MAX_MESSAGE_BYTES)?;
+        let bytes = read_bounded(&self.manifest_path, HARD_MAX_MESSAGE_BYTES)
+            .map_err(|error| error.with_path(&self.manifest_path))?;
         crate::protocol::preflight_json(&bytes, HARD_MAX_MESSAGE_BYTES).map_err(|error| {
             let code = if error.code() == PluginErrorCode::WorkerMessageLimit {
                 PluginErrorCode::ManifestTooLarge
@@ -224,6 +235,16 @@ impl PluginDescriptor {
                 PluginErrorCode::ManifestInvalid,
                 "plugin descriptor manifest changed after discovery",
             ));
+        }
+        if self.manifest.identity().is_some() {
+            let identity = capture_executable_identity(&self.executable_path)
+                .map_err(|error| error.with_path(&self.executable_path))?;
+            self.manifest
+                .validate_executable_identity(
+                    identity.length,
+                    crate::manifest::Sha256Digest::from_bytes(identity.content_digest),
+                )
+                .map_err(|error| error.with_path(&self.executable_path))?;
         }
         Ok(())
     }
@@ -597,42 +618,24 @@ fn scan(config: &DiscoveryConfig) -> DiscoveryReport {
         return report;
     }
 
+    // `read_dir` deliberately does not promise an order.  Retain only the
+    // bounded set of entries that will be considered, sort that set by its
+    // wire-visible filename, and apply path accounting after sorting.  Doing
+    // accounting in the iterator loop would make a tight path budget depend
+    // on the host filesystem's enumeration order.
     let mut entries = Vec::new();
     let mut inspected_entries = 0usize;
+    let mut entry_limit_hit = false;
     match fs::read_dir(&root) {
         Ok(read_dir) => {
             for entry in read_dir {
                 if inspected_entries >= DEFAULT_MAX_DISCOVERY_ENTRIES {
-                    report.push_diagnostic(PluginError::new(
-                        PluginErrorCode::DiscoveryEntryLimit,
-                        format!(
-                            "plugin discovery exceeded the {} entry budget",
-                            DEFAULT_MAX_DISCOVERY_ENTRIES
-                        ),
-                    ));
+                    entry_limit_hit = true;
                     break;
                 }
                 inspected_entries = inspected_entries.saturating_add(1);
                 match entry {
-                    Ok(entry) => {
-                        let path = entry.path();
-                        if path_bytes(&path) > DEFAULT_MAX_DISCOVERY_PATH_BYTES
-                            || !accounting.reserve_path(&path, config.max_total_path_bytes)
-                        {
-                            report.push_diagnostic(
-                                PluginError::new(
-                                    PluginErrorCode::DiscoveryPathLimit,
-                                    format!(
-                                        "plugin discovery path exceeds {} bytes",
-                                        DEFAULT_MAX_DISCOVERY_PATH_BYTES
-                                    ),
-                                )
-                                .with_path(path),
-                            );
-                        } else {
-                            entries.push(entry);
-                        }
-                    }
+                    Ok(entry) => entries.push(entry),
                     Err(error) => report.push_diagnostic(PluginError::new(
                         PluginErrorCode::DiscoveryIo,
                         format!("cannot read plugin directory entry: {error}"),
@@ -651,10 +654,43 @@ fn scan(config: &DiscoveryConfig) -> DiscoveryReport {
             return report;
         }
     }
-    entries.sort_by_key(|entry| entry.file_name());
+    if entry_limit_hit {
+        // A directory larger than the inspection budget cannot be reduced to
+        // a deterministic prefix: filesystem iteration order is unspecified.
+        // Reject the whole scan instead of admitting whichever entries the
+        // host happened to enumerate first.
+        report.push_diagnostic(PluginError::new(
+            PluginErrorCode::DiscoveryEntryLimit,
+            format!(
+                "plugin discovery exceeded the {} entry budget",
+                DEFAULT_MAX_DISCOVERY_ENTRIES
+            ),
+        ));
+        return report;
+    }
+    entries.sort_by(|left, right| {
+        left.file_name()
+            .cmp(&right.file_name())
+            .then_with(|| left.path().cmp(&right.path()))
+    });
 
     for entry in entries {
         let path = entry.path();
+        if path_bytes(&path) > DEFAULT_MAX_DISCOVERY_PATH_BYTES
+            || !accounting.reserve_path(&path, config.max_total_path_bytes)
+        {
+            report.push_diagnostic(
+                PluginError::new(
+                    PluginErrorCode::DiscoveryPathLimit,
+                    format!(
+                        "plugin discovery path exceeds {} bytes",
+                        DEFAULT_MAX_DISCOVERY_PATH_BYTES
+                    ),
+                )
+                .with_path(path),
+            );
+            continue;
+        }
         if !is_manifest_path(&path) {
             continue;
         }
@@ -918,6 +954,22 @@ fn scan(config: &DiscoveryConfig) -> DiscoveryReport {
             );
             continue;
         }
+        if manifest.identity().is_some() {
+            let identity = match capture_executable_identity(&executable) {
+                Ok(identity) => identity,
+                Err(error) => {
+                    report.push_diagnostic(error.with_path(&executable));
+                    continue;
+                }
+            };
+            if let Err(error) = manifest.validate_executable_identity(
+                identity.length,
+                crate::manifest::Sha256Digest::from_bytes(identity.content_digest),
+            ) {
+                report.push_diagnostic(error.with_path(&executable));
+                continue;
+            }
+        }
         manifest.executable = executable.clone();
         accounting.descriptors = accounting.descriptors.saturating_add(1);
         accounting.capabilities = total_capabilities;
@@ -947,8 +999,17 @@ fn read_bounded(path: &Path, maximum: usize) -> Result<Vec<u8>, PluginError> {
             format!("cannot open plugin manifest: {error}"),
         )
     })?;
+    let read_limit = maximum
+        .checked_add(1)
+        .and_then(|limit| u64::try_from(limit).ok())
+        .ok_or_else(|| {
+            PluginError::new(
+                PluginErrorCode::ManifestTooLarge,
+                "manifest byte limit cannot be represented by the bounded reader",
+            )
+        })?;
     let mut bytes = Vec::new();
-    let mut limited = file.take(maximum as u64 + 1);
+    let mut limited = file.take(read_limit);
     limited.read_to_end(&mut bytes).map_err(|error| {
         PluginError::new(
             PluginErrorCode::ManifestIo,
@@ -1138,6 +1199,11 @@ pub(crate) fn capture_executable_identity(path: &Path) -> Result<ExecutableIdent
             format!("cannot revalidate opened executable: {error}"),
         )
     })?;
+    // The opened handle proves which regular file was hashed, but launch
+    // policy also includes executable permission.  Recheck it after the
+    // bounded read so a concurrent chmod cannot turn a validated descriptor
+    // into a non-executable worker between identity capture and verification.
+    validate_executable_metadata(&after)?;
     if after.len() > MAX_EXECUTABLE_IDENTITY_BYTES as u64 {
         return Err(PluginError::new(
             PluginErrorCode::ExecutableTooLarge,
@@ -1176,6 +1242,10 @@ fn validate_executable_launch_support() -> Result<(), PluginError> {
 /// remains on platforms where stable Rust cannot spawn from the opened handle.
 /// Unsupported identity platforms fail with
 /// [`PluginErrorCode::ExecutableLaunchUnsupported`] during capture.
+#[allow(
+    dead_code,
+    reason = "the shared supervisor invokes this at its launch boundary; the migration stub is not wired yet"
+)]
 pub(crate) fn verify_executable_identity(
     path: &Path,
     expected: &ExecutableIdentity,
@@ -1261,6 +1331,18 @@ fn digest_reader<R: Read>(
     maximum_reads: usize,
 ) -> Result<[u8; 32], PluginError> {
     const CHUNK_BYTES: usize = 64 * 1024;
+    if maximum_bytes == 0 {
+        return Err(PluginError::new(
+            PluginErrorCode::ExecutableTooLarge,
+            "executable identity byte budget must be non-zero",
+        ));
+    }
+    if maximum_reads == 0 {
+        return Err(PluginError::new(
+            PluginErrorCode::ExecutableReadLimit,
+            "executable identity read budget must be non-zero",
+        ));
+    }
     let mut hasher = Sha256::new();
     let mut chunk = [0u8; CHUNK_BYTES];
     let mut total_bytes = 0usize;
@@ -1312,7 +1394,7 @@ fn add_conflict_diagnostics(descriptors: &[PluginDescriptor], report: &mut Disco
     let mut names = BTreeMap::<(CapabilityKind, String), (String, PathBuf)>::new();
     for descriptor in descriptors {
         let id = descriptor.manifest.id.as_str().to_owned();
-        if let Some(first) = ids.insert(id.clone(), descriptor.manifest_path.clone()) {
+        if let Some(first) = ids.get(&id).cloned() {
             report.push_diagnostic(
                 PluginError::new(
                     PluginErrorCode::DuplicatePluginId,
@@ -1320,15 +1402,15 @@ fn add_conflict_diagnostics(descriptors: &[PluginDescriptor], report: &mut Disco
                 )
                 .with_path(first),
             );
+        } else {
+            ids.insert(id.clone(), descriptor.manifest_path.clone());
         }
         for (kind, declaration) in descriptor.manifest.capabilities.iter() {
             for name in std::iter::once(declaration.id.as_str())
                 .chain(declaration.aliases.iter().map(String::as_str))
             {
                 let key = (kind, name.to_owned());
-                if let Some((first_id, first_path)) =
-                    names.insert(key, (id.clone(), descriptor.manifest_path.clone()))
-                {
+                if let Some((first_id, first_path)) = names.get(&key).cloned() {
                     report.push_diagnostic(
                         PluginError::new(
                             PluginErrorCode::DuplicateCapabilityAlias,
@@ -1339,6 +1421,8 @@ fn add_conflict_diagnostics(descriptors: &[PluginDescriptor], report: &mut Disco
                         )
                         .with_path(first_path),
                     );
+                } else {
+                    names.insert(key, (id.clone(), descriptor.manifest_path.clone()));
                 }
             }
         }
@@ -1355,8 +1439,8 @@ fn add_conflict_diagnostics(descriptors: &[PluginDescriptor], report: &mut Disco
 mod tests {
     use super::*;
     use crate::manifest::{
-        CapabilityDeclaration, CapabilityDeclarations, PluginId, PluginVersion, ProtocolRange,
-        ResourceLimits,
+        CapabilityDeclaration, CapabilityDeclarations, LicenseNoticeStatus, PluginArtifact,
+        PluginId, PluginVersion, ProtocolRange, ResourceLimits, Sha256Digest,
     };
     use std::{
         fs::{self, OpenOptions},
@@ -1431,6 +1515,21 @@ mod tests {
         path
     }
 
+    fn artifact_identity(path: &Path) -> PluginArtifact {
+        let observed = capture_executable_identity(path).expect("capture artifact identity");
+        PluginArtifact {
+            sha256: Sha256Digest::from_bytes(observed.content_digest),
+            byte_length: observed.length,
+            version: "1.2.3".to_owned(),
+            provenance: "original-test-fixture".to_owned(),
+            license: "Apache-2.0".to_owned(),
+            notice: "NOTICE.fixture".to_owned(),
+            license_notice: LicenseNoticeStatus::Declared,
+            dependencies: Vec::new(),
+            extensions: BTreeMap::new(),
+        }
+    }
+
     #[test]
     fn discovery_is_sorted_by_manifest_filename() {
         let directory = TempDirectory::new();
@@ -1451,6 +1550,27 @@ mod tests {
             .expect("discovery succeeds");
         assert_eq!(registry.plugins()[0].manifest.id.as_str(), "plug.a");
         assert_eq!(registry.plugins()[1].manifest.id.as_str(), "plug.z");
+    }
+
+    #[test]
+    fn declared_artifact_identity_is_hashed_and_verified_during_discovery() {
+        let directory = TempDirectory::new();
+        let helper = executable(&directory.0, "helper");
+        let mut source = manifest(&helper, "plug.identity", "identity.element");
+        source.identity = Some(artifact_identity(&helper));
+        write_manifest(&directory.0, "identity.json", &source);
+
+        let registry = PluginRegistry::discover(&DiscoveryConfig::new(&directory.0))
+            .expect("matching artifact identity discovers");
+        assert_eq!(registry.plugins()[0].manifest.id.as_str(), "plug.identity");
+
+        fs::write(&helper, b"changed").expect("replace executable");
+        let report = PluginRegistry::scan(&DiscoveryConfig::new(&directory.0));
+        assert!(report.plugins.is_empty());
+        assert!(report.diagnostics.iter().any(|error| {
+            error.code() == PluginErrorCode::ManifestInvalid
+                || error.code() == PluginErrorCode::ExecutableChanged
+        }));
     }
 
     #[test]
@@ -1485,6 +1605,18 @@ mod tests {
                 .iter()
                 .any(|error| error.code() == PluginErrorCode::DuplicateCapabilityAlias)
         );
+        for error in report.diagnostics.iter().filter(|error| {
+            matches!(
+                error.code(),
+                PluginErrorCode::DuplicatePluginId | PluginErrorCode::DuplicateCapabilityAlias
+            )
+        }) {
+            assert_eq!(
+                error.path().and_then(Path::file_name),
+                Some(std::ffi::OsStr::new("a.json")),
+                "duplicate diagnostics retain the first sorted declaration"
+            );
+        }
     }
 
     #[test]
@@ -1585,6 +1717,42 @@ mod tests {
     }
 
     #[test]
+    fn oversized_directories_are_rejected_without_an_enumeration_prefix() {
+        let directory = TempDirectory::new();
+        for index in 0..=DEFAULT_MAX_DISCOVERY_ENTRIES {
+            fs::write(directory.0.join(format!("{index:05}.json")), b"{}").expect("entry");
+        }
+
+        let report = PluginRegistry::scan(&DiscoveryConfig::new(&directory.0));
+        assert!(report.plugins.is_empty());
+        assert_eq!(
+            report.diagnostics[0].code(),
+            PluginErrorCode::DiscoveryEntryLimit
+        );
+    }
+
+    #[test]
+    fn relative_discovery_roots_are_rejected_without_ambient_resolution() {
+        let report = PluginRegistry::scan(&DiscoveryConfig::new("plugins"));
+        assert!(report.plugins.is_empty());
+        assert_eq!(
+            report.diagnostics[0].code(),
+            PluginErrorCode::DiscoveryDirectory
+        );
+    }
+
+    #[test]
+    fn containment_is_component_based_not_string_prefix_based() {
+        let root = Path::new("/var/lib/jmeter-rs/plugins");
+        assert!(is_contained(root, &root.join("worker")));
+        assert!(!is_contained(
+            root,
+            Path::new("/var/lib/jmeter-rs/plugins-other/worker")
+        ));
+        assert!(!is_contained(root, Path::new("/var/lib/jmeter-rs")));
+    }
+
+    #[test]
     fn executable_content_digest_detects_same_identity_replacement() {
         let directory = TempDirectory::new();
         let path = executable(&directory.0, "helper");
@@ -1592,6 +1760,23 @@ mod tests {
         fs::write(&path, b"changed").expect("replace same-length executable");
         let error = verify_executable_identity(&path, &identity)
             .expect_err("content digest must reject changed executable");
+        assert_eq!(error.code(), PluginErrorCode::ExecutableChanged);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn executable_permission_change_is_rejected_before_spawn() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = TempDirectory::new();
+        let path = executable(&directory.0, "helper");
+        let identity = capture_executable_identity(&path).expect("capture identity");
+        let mut permissions = fs::metadata(&path).expect("metadata").permissions();
+        permissions.set_mode(0o644);
+        fs::set_permissions(&path, permissions).expect("remove execute permission");
+
+        let error = verify_executable_identity(&path, &identity)
+            .expect_err("permission drift must reject the executable");
         assert_eq!(error.code(), PluginErrorCode::ExecutableChanged);
     }
 
@@ -1668,6 +1853,21 @@ mod tests {
             .expect_err("digest must stop after its byte budget");
         assert_eq!(error.code(), PluginErrorCode::ExecutableTooLarge);
 
+        let mut empty = Cursor::new(Vec::<u8>::new());
+        assert_eq!(
+            digest_reader(&mut empty, 0, 4)
+                .expect_err("zero byte budget must fail before reading")
+                .code(),
+            PluginErrorCode::ExecutableTooLarge
+        );
+        let mut empty = Cursor::new(Vec::<u8>::new());
+        assert_eq!(
+            digest_reader(&mut empty, 1, 0)
+                .expect_err("zero read budget must fail before reading")
+                .code(),
+            PluginErrorCode::ExecutableReadLimit
+        );
+
         let mut short_read_budget = Cursor::new(vec![0u8; 8]);
         let error = digest_reader(&mut short_read_budget, 64, 1)
             .expect_err("digest must stop before an unbounded EOF probe");
@@ -1690,6 +1890,27 @@ mod tests {
                 .diagnostics
                 .iter()
                 .any(|error| error.code() == PluginErrorCode::SymlinkNotAllowed)
+        );
+    }
+
+    #[test]
+    fn executable_target_outside_root_is_rejected_even_for_regular_manifests() {
+        let directory = TempDirectory::new();
+        let outside = TempDirectory::new();
+        let helper = executable(&outside.0, "outside-helper");
+        write_manifest(
+            &directory.0,
+            "outside.json",
+            &manifest(&helper, "outside.target", "outside.element"),
+        );
+
+        let report = PluginRegistry::scan(&DiscoveryConfig::new(&directory.0));
+        assert!(report.plugins.is_empty());
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|error| { error.code() == PluginErrorCode::PathOutsideRoot })
         );
     }
 }

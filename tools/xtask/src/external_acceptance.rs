@@ -22,6 +22,46 @@ const MAX_NODES: usize = 100_000;
 const SHA256_LEN: usize = 64;
 const SHA512_LEN: usize = 128;
 
+// These are identity roles, rather than free-form labels.  A declaration
+// which calls an artifact a "service" or "driver" must give us enough
+// structure to bind the dependency before a worker is admitted.  Keeping the
+// vocabulary closed is important: a typo must not turn an unpinned external
+// dependency into a successful-looking declaration.
+const ARTIFACT_ROLES: [&str; 11] = [
+    "adapter",
+    "helper",
+    "schema",
+    "classpath",
+    "class-loader",
+    "provider",
+    "driver",
+    "service",
+    "plugin",
+    "license",
+    "notice",
+];
+const DEPENDENCY_ROLES: [&str; 4] = ["driver", "provider", "service", "plugin"];
+const FORBIDDEN_STATIC_MARKERS: [&str; 8] = [
+    "observed",
+    "observed_run",
+    "oracle_evidence_materialized",
+    "release_claim_eligible",
+    "release_eligible",
+    "verified",
+    "materialized",
+    "evidence",
+];
+const FORBIDDEN_PROCESS_FIELDS: [&str; 8] = [
+    "argv",
+    "command",
+    "shell",
+    "pid",
+    "pgid",
+    "process_group",
+    "raw_pid",
+    "raw_handle",
+];
+
 const REQUIRED_CATEGORIES: [&str; 11] = [
     "positive",
     "unavailable",
@@ -83,6 +123,8 @@ pub(crate) fn check(
     let mut nodes = 0;
     check_limits(&manifest, &path, 0, &mut nodes, &mut diagnostics);
     check_secret_keys(&manifest, &path, &mut diagnostics);
+    check_static_markers(&manifest, &path, &mut diagnostics);
+    check_process_fields(&manifest, &path, &mut diagnostics);
 
     exact_string(object, "schema_id", &path, SCHEMA_ID, &mut diagnostics);
     exact_u64(
@@ -132,6 +174,7 @@ struct ActiveProfile {
     keys_url: String,
     artifact_sha512: String,
     signature_verified: bool,
+    signature_fingerprint: Option<String>,
 }
 
 fn active_profile(
@@ -192,6 +235,15 @@ fn active_profile(
         .and_then(Value::as_object)
         .and_then(|value| value.get("signature_verified"))
         .and_then(Value::as_bool);
+    let signature_fingerprint = artifact
+        .get("verification")
+        .and_then(Value::as_object)
+        .and_then(|value| {
+            value
+                .get("signature_fingerprint")
+                .or_else(|| value.get("accepted_key_fingerprint"))
+        })
+        .and_then(Value::as_str);
     let fields = (
         object.get("profile_id").and_then(Value::as_str),
         object.get("profile_version").and_then(Value::as_u64),
@@ -206,6 +258,7 @@ fn active_profile(
         artifact.get("keys_url").and_then(Value::as_str),
         artifact.get("digest").and_then(Value::as_str),
         signature,
+        signature_fingerprint,
     );
     let (
         Some(id),
@@ -221,6 +274,7 @@ fn active_profile(
         Some(keys_url),
         Some(artifact_sha512),
         Some(signature_verified),
+        signature_fingerprint,
     ) = fields
     else {
         diagnostics.push(error(
@@ -230,6 +284,46 @@ fn active_profile(
         ));
         return None;
     };
+    if signature_verified && signature_fingerprint.is_none_or(|value| !is_fingerprint(value)) {
+        diagnostics.push(error(
+            "EXTERNAL-ACCEPTANCE-IDENTITY",
+            format!("{path}.upstream.artifact.verification.signature_fingerprint"),
+            "active profile signature fingerprint must be a nonzero 40-character hexadecimal key ID",
+        ));
+    }
+    if !is_digest(artifact_sha512, SHA512_LEN) {
+        diagnostics.push(error(
+            "EXTERNAL-ACCEPTANCE-IDENTITY",
+            format!("{path}.upstream.artifact.digest"),
+            "active profile artifact digest must be a nonzero lowercase SHA-512 value",
+        ));
+    }
+    if source_commit.len() != 40
+        || !source_commit
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        diagnostics.push(error(
+            "EXTERNAL-ACCEPTANCE-IDENTITY",
+            format!("{path}.upstream.source_commit"),
+            "active profile source commit must be a lowercase 40-character hexadecimal ID",
+        ));
+    }
+    for (field, value) in [
+        ("url", artifact_url),
+        ("digest_url", digest_url),
+        ("signature_url", signature_url),
+        ("keys_url", keys_url),
+        ("source_tree", source_tree),
+    ] {
+        if !value.starts_with("https://") {
+            diagnostics.push(error(
+                "EXTERNAL-ACCEPTANCE-IDENTITY",
+                format!("{path}.upstream.artifact.{field}"),
+                "active profile oracle endpoints must use HTTPS",
+            ));
+        }
+    }
     Some(ActiveProfile {
         id: id.to_owned(),
         version,
@@ -245,6 +339,7 @@ fn active_profile(
         keys_url: keys_url.to_owned(),
         artifact_sha512: artifact_sha512.to_owned(),
         signature_verified,
+        signature_fingerprint: signature_fingerprint.map(str::to_owned),
     })
 }
 
@@ -618,6 +713,23 @@ fn check_identity(
         &active.artifact_sha512,
         diagnostics,
     );
+    if active.signature_verified {
+        if let Some(fingerprint) = active.signature_fingerprint.as_deref() {
+            exact_string(
+                oracle,
+                "signature_fingerprint",
+                &oracle_path,
+                fingerprint,
+                diagnostics,
+            );
+        } else {
+            diagnostics.push(error(
+                "EXTERNAL-ACCEPTANCE-IDENTITY",
+                format!("{oracle_path}.signature_fingerprint"),
+                "active profile has no accepted signing-key fingerprint",
+            ));
+        }
+    }
     if oracle.get("signature_verified") != Some(&Value::Bool(true)) {
         diagnostics.push(error(
             "EXTERNAL-ACCEPTANCE-PROVENANCE",
@@ -659,6 +771,8 @@ fn check_identity(
             "at least one helper/schema/provider/classpath artifact is required",
         ));
     }
+    let mut artifact_roles = BTreeSet::new();
+    let mut artifact_keys = BTreeSet::new();
     for (index, value) in artifacts.iter().enumerate() {
         let item_path = format!("{path}.identity.artifacts[{index}]");
         let Some(artifact) = value.as_object() else {
@@ -672,7 +786,58 @@ fn check_identity(
         for field in ["role", "id", "version", "license", "provenance"] {
             let _ = nonempty(artifact, field, &item_path, diagnostics);
         }
+        if let Some(role) = artifact.get("role").and_then(Value::as_str) {
+            if !ARTIFACT_ROLES.contains(&role) {
+                diagnostics.push(error(
+                    "EXTERNAL-ACCEPTANCE-IDENTITY",
+                    format!("{item_path}.role"),
+                    format!("artifact role must be one of {ARTIFACT_ROLES:?}"),
+                ));
+            } else {
+                artifact_roles.insert(role.to_owned());
+            }
+            let id = artifact.get("id").and_then(Value::as_str).unwrap_or("");
+            if !artifact_keys.insert((role.to_owned(), id.to_owned())) {
+                diagnostics.push(error(
+                    "EXTERNAL-ACCEPTANCE-DUPLICATE",
+                    format!("{item_path}.id"),
+                    "artifact role and ID are duplicated",
+                ));
+            }
+            if DEPENDENCY_ROLES.contains(&role) {
+                for field in ["kind", "identity"] {
+                    let _ = nonempty(artifact, field, &item_path, diagnostics);
+                }
+                if role == "service" {
+                    let _ = nonempty(artifact, "endpoint", &item_path, diagnostics);
+                }
+            }
+        }
         nonzero_hex(artifact, "sha256", &item_path, SHA256_LEN, diagnostics);
+    }
+    if !artifact_roles.contains("adapter") {
+        diagnostics.push(error(
+            "EXTERNAL-ACCEPTANCE-IDENTITY",
+            format!("{path}.identity.artifacts"),
+            "adapter artifact role is required",
+        ));
+    }
+    if !artifact_roles.contains("schema") {
+        diagnostics.push(error(
+            "EXTERNAL-ACCEPTANCE-IDENTITY",
+            format!("{path}.identity.artifacts"),
+            "protocol schema artifact role is required",
+        ));
+    }
+    if !artifact_roles
+        .iter()
+        .any(|role| DEPENDENCY_ROLES.contains(&role.as_str()))
+    {
+        diagnostics.push(error(
+            "EXTERNAL-ACCEPTANCE-IDENTITY",
+            format!("{path}.identity.artifacts"),
+            "at least one exact service, driver, provider, or plugin identity is required",
+        ));
     }
 
     let Some(policies) = object(identity, "policies", path, diagnostics) else {
@@ -691,6 +856,37 @@ fn check_identity(
             "EXTERNAL-ACCEPTANCE-SECURITY",
             format!("{policy_path}.network"),
             "network policy cannot permit public or ambient access",
+        ));
+    }
+    if policies
+        .get("filesystem")
+        .and_then(Value::as_str)
+        .is_some_and(|value| {
+            let value = value.to_ascii_lowercase();
+            value.contains("ambient")
+                || value.contains("unrestricted")
+                || value.contains("public")
+                || value == "any"
+        })
+    {
+        diagnostics.push(error(
+            "EXTERNAL-ACCEPTANCE-SECURITY",
+            format!("{policy_path}.filesystem"),
+            "filesystem policy cannot permit ambient, public, or unrestricted access",
+        ));
+    }
+    if policies.get("secret").and_then(Value::as_str) != Some("protected-channel") {
+        diagnostics.push(error(
+            "EXTERNAL-ACCEPTANCE-SECURITY",
+            format!("{policy_path}.secret"),
+            "secret policy must use the protected-channel reference contract",
+        ));
+    }
+    if policies.get("supervisor").and_then(Value::as_str) != Some("decision-0001") {
+        diagnostics.push(error(
+            "EXTERNAL-ACCEPTANCE-SECURITY",
+            format!("{policy_path}.supervisor"),
+            "external adapters must use the activated Decision 0001 supervisor",
         ));
     }
 
@@ -718,6 +914,30 @@ fn check_identity(
             format!("{concurrency_path}.max_parallel"),
             "BoundedParallel requires a nonzero max_parallel",
         ));
+    }
+    if kind != "BoundedParallel" && max_parallel != 1 {
+        diagnostics.push(error(
+            "EXTERNAL-ACCEPTANCE-IDENTITY",
+            format!("{concurrency_path}.max_parallel"),
+            "RunSerial and PerUserSerial must declare max_parallel=1",
+        ));
+    }
+
+    let Some(lifecycle) = object(identity, "lifecycle", path, diagnostics) else {
+        return;
+    };
+    let lifecycle_path = format!("{path}.identity.lifecycle");
+    for field in ["setup", "sample", "teardown", "cancellation", "dispatch"] {
+        let Some(value) = nonempty(lifecycle, field, &lifecycle_path, diagnostics) else {
+            continue;
+        };
+        if is_placeholder(value) {
+            diagnostics.push(error(
+                "EXTERNAL-ACCEPTANCE-IDENTITY",
+                format!("{lifecycle_path}.{field}"),
+                "lifecycle boundary must be an explicit declared identity",
+            ));
+        }
     }
 }
 
@@ -867,6 +1087,12 @@ fn check_case_file(
         ));
         return;
     };
+    let case_path = format!("{path}.case_path");
+    let mut nodes = 0;
+    check_limits(&value, &case_path, 0, &mut nodes, diagnostics);
+    check_secret_keys(&value, &case_path, diagnostics);
+    check_static_markers(&value, &case_path, diagnostics);
+    check_process_fields(&value, &case_path, diagnostics);
     if object.get("fixture_family_id").and_then(Value::as_str) != Some(family) {
         diagnostics.push(error(
             "EXTERNAL-ACCEPTANCE-CASE",
@@ -1208,6 +1434,12 @@ fn is_digest(value: &str, length: usize) -> bool {
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
+fn is_fingerprint(value: &str) -> bool {
+    value.len() == 40
+        && !value.bytes().all(|byte| byte == b'0')
+        && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 fn digest(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
@@ -1289,6 +1521,79 @@ fn check_secret_keys(value: &Value, path: &str, diagnostics: &mut Diagnostics) {
     }
 }
 
+/// Static declarations may describe an unavailable or planned run, but they
+/// must never carry a successful observation marker.  Apply this recursively
+/// to referenced case descriptors as well as to the top-level manifest.
+fn check_static_markers(value: &Value, path: &str, diagnostics: &mut Diagnostics) {
+    match value {
+        Value::Object(object) => {
+            for (key, child) in object {
+                let key_lower = key.to_ascii_lowercase();
+                let child_path = format!("{path}.{key}");
+                if FORBIDDEN_STATIC_MARKERS.contains(&key_lower.as_str()) {
+                    let forbidden = match child {
+                        Value::Bool(true) => true,
+                        Value::String(value) => matches!(
+                            value.to_ascii_lowercase().as_str(),
+                            "observed" | "verified" | "eligible" | "materialized" | "completed"
+                        ),
+                        _ => false,
+                    };
+                    if forbidden {
+                        diagnostics.push(error(
+                            "EXTERNAL-ACCEPTANCE-EVIDENCE",
+                            child_path.clone(),
+                            "static declarations cannot contain observed, verified, eligible, or materialized evidence",
+                        ));
+                    }
+                }
+                check_static_markers(child, &child_path, diagnostics);
+            }
+        }
+        Value::Array(values) => {
+            for (index, child) in values.iter().enumerate() {
+                check_static_markers(child, &format!("{path}[{index}]"), diagnostics);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+/// Raw process handles, shell text, and argument vectors are not manifest
+/// identities.  Rejecting them keeps future runners on the typed Decision
+/// 0001 supervisor path instead of allowing an adapter-local escape hatch.
+fn check_process_fields(value: &Value, path: &str, diagnostics: &mut Diagnostics) {
+    match value {
+        Value::Object(object) => {
+            for (key, child) in object {
+                let key_lower = key.to_ascii_lowercase();
+                let child_path = format!("{path}.{key}");
+                if FORBIDDEN_PROCESS_FIELDS.contains(&key_lower.as_str()) {
+                    diagnostics.push(error(
+                        "EXTERNAL-ACCEPTANCE-SECURITY",
+                        child_path.clone(),
+                        "raw process/command fields are forbidden; use the typed Decision 0001 supervisor policy",
+                    ));
+                }
+                check_process_fields(child, &child_path, diagnostics);
+            }
+        }
+        Value::Array(values) => {
+            for (index, child) in values.iter().enumerate() {
+                check_process_fields(child, &format!("{path}[{index}]"), diagnostics);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+fn is_placeholder(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "unknown" | "unspecified" | "unavailable" | "not-pinned" | "not-provisioned" | "null"
+    )
+}
+
 fn error(code: &str, path: impl Into<String>, message: impl Into<String>) -> Diagnostic {
     Diagnostic::new(code, path, message)
 }
@@ -1360,7 +1665,10 @@ mod tests {
                     "signature_url": "https://example.invalid/jmeter/apache-jmeter-5.6.3.zip.asc",
                     "keys_url": "https://example.invalid/jmeter/KEYS",
                     "digest": "aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabb",
-                    "verification": {"signature_verified": true}
+                    "verification": {
+                        "signature_verified": true,
+                        "signature_fingerprint": "C4923F9ABFB2F1A06F08E88BAC214CAA0612B399"
+                    }
                 }
             }
         })
@@ -1424,12 +1732,18 @@ mod tests {
                             "keys_url": "https://example.invalid/jmeter/KEYS",
                             "source_commit": "0123456789abcdef0123456789abcdef01234567",
                             "artifact_sha512": "aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabb",
+                            "signature_fingerprint": "C4923F9ABFB2F1A06F08E88BAC214CAA0612B399",
                             "signature_verified": true
                         },
                         "source_hashes": {"source": digest},
-                        "artifacts": [{"role": "adapter", "id": "demo", "version": "1", "sha256": digest, "license": "Apache-2.0", "provenance": "source"}],
+                        "artifacts": [
+                            {"role": "adapter", "id": "demo", "version": "1", "sha256": digest, "license": "Apache-2.0", "provenance": "source"},
+                            {"role": "schema", "id": "external-capability/1", "version": "1", "sha256": digest, "license": "Apache-2.0", "provenance": "source"},
+                            {"role": "service", "id": "demo-service", "version": "1", "kind": "loopback-fixture", "endpoint": "endpoint://demo-service", "identity": "service://demo-service/1", "sha256": digest, "license": "Apache-2.0", "provenance": "source"}
+                        ],
                         "policies": {"network": "loopback-only", "filesystem": "allowlisted", "secret": "protected-channel", "supervisor": "decision-0001"},
-                        "concurrency": {"kind": "RunSerial", "max_parallel": 1}
+                        "concurrency": {"kind": "RunSerial", "max_parallel": 1},
+                        "lifecycle": {"setup": "run-setup/1", "sample": "sample-dispatch/1", "teardown": "run-teardown/1", "cancellation": "cancel-after-dispatch/1", "dispatch": "adapter-boundary/1"}
                     },
                     "cases": cases
                 }]
@@ -1575,6 +1889,134 @@ mod tests {
             diagnostics
                 .iter()
                 .any(|item| item.code == "EXTERNAL-ACCEPTANCE-ARTIFACT")
+        );
+    }
+
+    #[test]
+    fn nested_evidence_and_raw_process_fields_fail_closed() {
+        let Some((_tree, profile_path, manifest_path, profile_sha256)) = tree_with_manifest()
+        else {
+            return;
+        };
+        let mut value = manifest(&profile_sha256);
+        value["runner"] = json!({"command": "must-not-be-a-manifest-field"});
+        assert!(
+            fs::write(
+                manifest_path.parent().unwrap_or_else(|| std::path::Path::new("."))
+                    .join("cases/case.json"),
+                br#"{"fixture_family_id":"FX-EXT-001","execution":{"status":"unavailable","observed_run":true}}"#,
+            )
+            .is_ok()
+        );
+        assert!(
+            fs::write(
+                &manifest_path,
+                serde_json::to_vec(&value).unwrap_or_default()
+            )
+            .is_ok()
+        );
+        let diagnostics = check(
+            manifest_path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new(".")),
+            &manifest_path,
+            &profile_path,
+            &index(),
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .any(|item| item.code == "EXTERNAL-ACCEPTANCE-EVIDENCE")
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .any(|item| item.code == "EXTERNAL-ACCEPTANCE-SECURITY")
+        );
+    }
+
+    #[test]
+    fn protected_secret_and_supervisor_policies_are_required() {
+        let Some((_tree, profile_path, manifest_path, profile_sha256)) = tree_with_manifest()
+        else {
+            return;
+        };
+        let mut value = manifest(&profile_sha256);
+        value["families"][0]["paths"][0]["identity"]["policies"]["secret"] =
+            Value::String("environment".to_owned());
+        value["families"][0]["paths"][0]["identity"]["policies"]["supervisor"] =
+            Value::String("direct-child".to_owned());
+        assert!(
+            fs::write(
+                &manifest_path,
+                serde_json::to_vec(&value).unwrap_or_default()
+            )
+            .is_ok()
+        );
+        let diagnostics = check(
+            manifest_path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new(".")),
+            &manifest_path,
+            &profile_path,
+            &index(),
+        );
+        assert_eq!(
+            diagnostics
+                .iter()
+                .filter(|item| item.code == "EXTERNAL-ACCEPTANCE-SECURITY")
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn dependency_identity_and_lifecycle_boundaries_are_required() {
+        let Some((_tree, profile_path, manifest_path, profile_sha256)) = tree_with_manifest()
+        else {
+            return;
+        };
+        let mut value = manifest(&profile_sha256);
+        let identity = &mut value["families"][0]["paths"][0]["identity"];
+        let Some(artifacts) = identity["artifacts"].as_array_mut() else {
+            return;
+        };
+        let Some(service) = artifacts
+            .iter_mut()
+            .find(|artifact| artifact.get("role").and_then(Value::as_str) == Some("service"))
+        else {
+            return;
+        };
+        let _ = service
+            .as_object_mut()
+            .and_then(|object| object.remove("endpoint"));
+        let _ = identity["lifecycle"]
+            .as_object_mut()
+            .and_then(|object| object.remove("dispatch"));
+        assert!(
+            fs::write(
+                &manifest_path,
+                serde_json::to_vec(&value).unwrap_or_default()
+            )
+            .is_ok()
+        );
+        let diagnostics = check(
+            manifest_path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new(".")),
+            &manifest_path,
+            &profile_path,
+            &index(),
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .any(|item| item.code == "EXTERNAL-ACCEPTANCE-IDENTITY")
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .any(|item| item.code == "EXTERNAL-ACCEPTANCE-SCHEMA")
         );
     }
 }

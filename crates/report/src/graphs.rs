@@ -27,6 +27,17 @@ const MISSING_BYTES: &str = "graph.bytes.missing_request_or_response_bytes";
 const MISSING_RESPONSE_CODE: &str = "graph.response_codes.missing_response_code";
 const MISSING_LABEL: &str = "graph.labels.missing_label";
 const MISSING_ELAPSED: &str = "graph.distribution.missing_elapsed";
+const MISSING_SUCCESS: &str = "graph.response_time.missing_success";
+
+// The report-generator.properties entry for ResponseTimeDistribution uses a
+// separate 100 ms elapsed-time granularity.  It is intentionally not the
+// overall time-series granularity (normally 60 seconds).
+const RESPONSE_TIME_DISTRIBUTION_GRANULARITY_MILLIS: u64 = 100;
+
+// The versus-request consumers use AbstractVersusRequestsGraphConsumer's
+// fixed one-second request-count window.  This is independent of the
+// dashboard's overall over-time granularity.
+const VERSUS_REQUEST_GRANULARITY_MILLIS: i64 = 1_000;
 
 /// Common fixed-width bucket identity exposed by field-specific graph points.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -406,7 +417,12 @@ impl ResponseTimeDistributionPoint {
     }
 }
 
-/// Synthetic response-time distribution category counts.
+/// One synthetic response-time distribution category.
+///
+/// JMeter's consumer uses four fixed x-axis keys (0 = satisfied, 1 =
+/// tolerated, 2 = untolerated, 3 = failed) and status-specific series. The
+/// category key is retained in `elapsed_millis` for wire-shape continuity;
+/// [`Self::category`] is the clearer accessor for new callers.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SyntheticResponseTimePoint {
     elapsed_millis: u64,
@@ -416,9 +432,14 @@ pub struct SyntheticResponseTimePoint {
 }
 
 impl SyntheticResponseTimePoint {
-    /// Returns elapsed value.
+    /// Returns the synthetic category key (0..=3).
     pub const fn elapsed_millis(self) -> u64 {
         self.elapsed_millis
+    }
+    /// Returns the synthetic category key (0 = satisfied, 1 = tolerated,
+    /// 2 = untolerated, 3 = failed).
+    pub const fn category(self) -> u8 {
+        self.elapsed_millis as u8
     }
     /// Returns satisfied count.
     pub const fn satisfied(self) -> u64 {
@@ -435,10 +456,11 @@ impl SyntheticResponseTimePoint {
 }
 
 /// A response-time-versus-request scatter point.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ResponseTimeRequestPoint {
     timestamp: WallTimestamp,
-    elapsed_millis: u64,
+    requests_per_second: u64,
+    elapsed_millis: f64,
     successful: Option<bool>,
 }
 
@@ -447,8 +469,13 @@ impl ResponseTimeRequestPoint {
     pub const fn timestamp(self) -> WallTimestamp {
         self.timestamp
     }
+    /// Returns the request-rate x-axis value used by JMeter's versus-request
+    /// consumer for this one-second window.
+    pub const fn requests_per_second(self) -> u64 {
+        self.requests_per_second
+    }
     /// Returns elapsed response time.
-    pub const fn elapsed_millis(self) -> u64 {
+    pub const fn elapsed_millis(self) -> f64 {
         self.elapsed_millis
     }
     /// Returns the wire success flag.
@@ -458,10 +485,12 @@ impl ResponseTimeRequestPoint {
 }
 
 /// A latency-versus-request scatter point.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LatencyRequestPoint {
     timestamp: WallTimestamp,
-    latency_millis: u64,
+    requests_per_second: u64,
+    latency_millis: f64,
+    successful: Option<bool>,
 }
 
 impl LatencyRequestPoint {
@@ -469,9 +498,20 @@ impl LatencyRequestPoint {
     pub const fn timestamp(self) -> WallTimestamp {
         self.timestamp
     }
+    /// Returns the request-rate x-axis value used by JMeter's versus-request
+    /// consumer for this one-second window.
+    pub const fn requests_per_second(self) -> u64 {
+        self.requests_per_second
+    }
     /// Returns latency.
-    pub const fn latency_millis(self) -> u64 {
+    pub const fn latency_millis(self) -> f64 {
         self.latency_millis
+    }
+
+    /// Returns the wire success flag used to keep successful and failed
+    /// request series separate.
+    pub const fn successful(self) -> Option<bool> {
+        self.successful
     }
 }
 
@@ -502,6 +542,7 @@ impl HitsPerSecondPoint {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TotalTpsPoint {
     bucket: GraphBucket,
+    successful: bool,
     transaction_count: u64,
     per_second: f64,
 }
@@ -514,6 +555,10 @@ impl TotalTpsPoint {
     /// Returns transaction count.
     pub const fn transaction_count(self) -> u64 {
         self.transaction_count
+    }
+    /// Returns whether this series represents successful transactions.
+    pub const fn successful(self) -> bool {
+        self.successful
     }
     /// Returns TPS.
     pub const fn per_second(self) -> f64 {
@@ -590,6 +635,42 @@ impl CalculatorStats {
         // separately identifies the per-observation value for min/max.
         let sum = self.sum + value_f * weight_f;
         let sum_of_squares = self.sum_of_squares + value_f * value_f * weight_f;
+        if !sum.is_finite() || !sum_of_squares.is_finite() {
+            return Err(ReportError::Overflow {
+                field: ReportField::Variance,
+            });
+        }
+        self.count = count;
+        self.sum = sum;
+        self.sum_of_squares = sum_of_squares;
+        self.min = Some(self.min.map_or(effective, |current| current.min(effective)));
+        self.max = Some(self.max.map_or(effective, |current| current.max(effective)));
+        Ok(())
+    }
+
+    /// Adds a statistical row whose elapsed value is a total for `weight`
+    /// represented observations. JTL aggregate rows retain the total elapsed
+    /// time, so reconstructing it from an integer-divided value would lose a
+    /// remainder (for example, 5 ms over 2 samples).
+    fn add_total_with_effective(
+        &mut self,
+        total: u128,
+        weight: u64,
+        effective: u64,
+    ) -> Result<(), ReportError> {
+        if weight == 0 {
+            return Ok(());
+        }
+        let count = self
+            .count
+            .checked_add(weight)
+            .ok_or(ReportError::Overflow {
+                field: ReportField::ElapsedCount,
+            })?;
+        let total_f = total as f64;
+        let weight_f = weight as f64;
+        let sum = self.sum + total_f;
+        let sum_of_squares = self.sum_of_squares + total_f * total_f / weight_f;
         if !sum.is_finite() || !sum_of_squares.is_finite() {
             return Err(ReportError::Overflow {
                 field: ReportField::Variance,
@@ -986,7 +1067,11 @@ pub fn aggregate_response_code_graph_samples(
     validate_graph_input(samples)?;
     validate_max_points(max_points)?;
     let width = validate_width(granularity_millis)?;
-    let mut buckets = BTreeMap::<(i64, String, String), (GraphBucket, u64, u64)>::new();
+    // CodesPerSecondGraphConsumer uses CodeSeriesSelector, whose key is the
+    // response code alone.  Response messages are not a series dimension;
+    // retain the first wire message only as diagnostic metadata on the typed
+    // point.
+    let mut buckets = BTreeMap::<(i64, String), (GraphBucket, String, u64, u64)>::new();
     for sample in samples {
         if !in_interval(sample, interval) || excluded(sample, options) {
             continue;
@@ -997,16 +1082,19 @@ pub fn aggregate_response_code_graph_samples(
         })?;
         let message = sample.response_message().unwrap_or_default();
         let bucket = bucket_for(sample.timestamp(), width)?;
-        let key = (
-            bucket.start().as_millis(),
-            code.to_owned(),
-            message.to_owned(),
-        );
+        let key = (bucket.start().as_millis(), code.to_owned());
         if !buckets.contains_key(&key) {
             check_new_bucket(&buckets, max_points)?;
-            buckets.insert(key.clone(), (bucket, 0, 0));
+            buckets.insert(key.clone(), (bucket, message.to_owned(), 0, 0));
         }
-        let (_, count, errors) = buckets.get_mut(&key).ok_or(ReportError::Serialization)?;
+        let (_, response_message_slot, count, errors) =
+            buckets.get_mut(&key).ok_or(ReportError::Serialization)?;
+        // Response messages are not a CodeSeriesSelector dimension. Keep a
+        // deterministic diagnostic representative rather than making the
+        // payload depend on source-row arrival order.
+        if message < response_message_slot.as_str() {
+            *response_message_slot = message.to_owned();
+        }
         *count = count
             .checked_add(sample.sample_count())
             .ok_or(ReportError::Overflow {
@@ -1027,7 +1115,7 @@ pub fn aggregate_response_code_graph_samples(
     Ok(buckets
         .into_iter()
         .map(
-            |((_, response_code, response_message), (bucket, sample_count, error_count))| {
+            |((_, response_code), (bucket, response_message, sample_count, error_count))| {
                 ResponseCodeGraphPoint {
                     bucket,
                     response_code,
@@ -1134,7 +1222,11 @@ pub fn aggregate_response_time_graph_samples(
             .ok_or(ReportError::Overflow {
                 field: ReportField::SampleCount,
             })?;
-        stats.add_effective(elapsed, sample.sample_count())?;
+        if let Some(total) = sample.elapsed_total_millis() {
+            stats.add_total_with_effective(total, sample.sample_count(), elapsed)?;
+        } else {
+            stats.add_effective(elapsed, sample.sample_count())?;
+        }
     }
     Ok(buckets
         .into_values()
@@ -1162,6 +1254,7 @@ fn add_elapsed_values(
         .ok_or(ReportError::Unsupported {
             capability: MISSING_ELAPSED,
         })?;
+    let elapsed = elapsed - elapsed % RESPONSE_TIME_DISTRIBUTION_GRANULARITY_MILLIS;
     let current = values.get(&elapsed).copied().unwrap_or(0);
     let updated = current
         .checked_add(sample.sample_count())
@@ -1196,8 +1289,10 @@ fn add_elapsed_values(
     Ok(())
 }
 
-/// Aggregates the exact response-time distribution, retaining sorted elapsed
-/// values and represented counts.
+/// Aggregates the response-time distribution using JMeter's dedicated 100 ms
+/// elapsed-time buckets, retaining sorted bucket starts and represented
+/// counts. This elapsed-value granularity is distinct from the overall
+/// over-time granularity.
 pub fn aggregate_response_time_distribution_graph_samples(
     samples: &[GraphSample],
     interval: ReportInterval,
@@ -1238,7 +1333,8 @@ pub fn aggregate_response_time_distribution_graph_samples(
         .collect())
 }
 
-/// Aggregates synthetic APDEX response-time categories by elapsed value.
+/// Aggregates synthetic APDEX response-time categories using JMeter's four
+/// fixed category keys rather than one point per elapsed value.
 pub fn aggregate_synthetic_response_time_graph_samples(
     samples: &[GraphSample],
     interval: ReportInterval,
@@ -1254,7 +1350,7 @@ pub fn aggregate_synthetic_response_time_graph_samples(
         });
     }
     validate_max_points(max_points)?;
-    let mut values = BTreeMap::<u64, (u64, u64, u64)>::new();
+    let mut values = BTreeMap::<u64, u64>::new();
     for sample in samples {
         if !in_interval(sample, interval) || excluded(sample, options) {
             continue;
@@ -1265,7 +1361,19 @@ pub fn aggregate_synthetic_response_time_graph_samples(
             .ok_or(ReportError::Unsupported {
                 capability: MISSING_ELAPSED,
             })?;
-        if !values.contains_key(&elapsed) {
+        let successful = sample.successful().ok_or(ReportError::Unsupported {
+            capability: MISSING_SUCCESS,
+        })?;
+        let category = if !successful {
+            3
+        } else if elapsed <= satisfied_millis {
+            0
+        } else if elapsed <= tolerated_millis {
+            1
+        } else {
+            2
+        };
+        if !values.contains_key(&category) {
             if values.len() >= max_points {
                 return Err(ReportError::LimitExceeded {
                     resource: ReportLimit::GraphPoints,
@@ -1273,65 +1381,37 @@ pub fn aggregate_synthetic_response_time_graph_samples(
                     maximum: max_points,
                 });
             }
-            values.insert(elapsed, (0, 0, 0));
+            values.insert(category, 0);
         }
-        let (satisfied, tolerated, frustrated) =
-            values.get_mut(&elapsed).ok_or(ReportError::Serialization)?;
-        let successful = sample.successful().ok_or(ReportError::Unsupported {
-            capability: "graph.synthetic_response_time.missing_success",
-        })?;
-        if !successful {
-            *frustrated =
-                frustrated
-                    .checked_add(sample.error_count())
-                    .ok_or(ReportError::Overflow {
-                        field: ReportField::ErrorCount,
-                    })?;
-            let successful_count = sample
-                .sample_count()
-                .checked_sub(sample.error_count())
-                .ok_or(ReportError::InvalidSample {
-                    field: SampleField::ErrorCount,
-                })?;
-            *frustrated =
-                frustrated
-                    .checked_add(successful_count)
-                    .ok_or(ReportError::Overflow {
-                        field: ReportField::ErrorCount,
-                    })?;
-        } else if elapsed <= satisfied_millis {
-            *satisfied =
-                satisfied
-                    .checked_add(sample.sample_count())
-                    .ok_or(ReportError::Overflow {
-                        field: ReportField::SampleCount,
-                    })?;
-        } else if elapsed <= tolerated_millis {
-            *tolerated =
-                tolerated
-                    .checked_add(sample.sample_count())
-                    .ok_or(ReportError::Overflow {
-                        field: ReportField::SampleCount,
-                    })?;
-        } else {
-            *frustrated =
-                frustrated
-                    .checked_add(sample.sample_count())
-                    .ok_or(ReportError::Overflow {
-                        field: ReportField::SampleCount,
-                    })?;
-        }
+        let count = values
+            .get_mut(&category)
+            .ok_or(ReportError::Serialization)?;
+        *count = count
+            .checked_add(sample.sample_count())
+            .ok_or(ReportError::Overflow {
+                field: if category == 3 {
+                    ReportField::ErrorCount
+                } else {
+                    ReportField::SampleCount
+                },
+            })?;
     }
     Ok(values
         .into_iter()
-        .map(
-            |(elapsed_millis, (satisfied, tolerated, frustrated))| SyntheticResponseTimePoint {
+        .map(|(elapsed_millis, count)| {
+            let (satisfied, tolerated, frustrated) = match elapsed_millis {
+                0 => (count, 0, 0),
+                1 => (0, count, 0),
+                2 | 3 => (0, 0, count),
+                _ => (0, 0, 0),
+            };
+            SyntheticResponseTimePoint {
                 elapsed_millis,
                 satisfied,
                 tolerated,
                 frustrated,
-            },
-        )
+            }
+        })
         .collect())
 }
 
@@ -1498,30 +1578,87 @@ fn aggregate_scatter_response_time(
     options: GraphAggregationOptions,
 ) -> Result<Vec<ResponseTimeRequestPoint>, ReportError> {
     validate_max_points(max_points)?;
-    let mut output = Vec::new();
+    // AbstractVersusRequestsGraphConsumer first tags rows with the number of
+    // requests in a one-second end-time bucket, then MedianAggregatorFactory
+    // computes one point per success-status series and bucket.
+    let mut rows = Vec::<(i64, bool, u64)>::new();
+    let mut request_counts = BTreeMap::<i64, u64>::new();
     for sample in samples {
         if !in_interval(sample, interval) || excluded(sample, options) {
             continue;
         }
         validate_sample_counts(sample)?;
-        if output.len() >= max_points {
-            return Err(ReportError::LimitExceeded {
-                resource: ReportLimit::GraphSamples,
-                actual: output.len().saturating_add(1),
-                maximum: max_points,
-            });
-        }
-        output.push(ResponseTimeRequestPoint {
-            timestamp: sample.timestamp(),
-            elapsed_millis: sample
-                .elapsed_wire_millis()
-                .ok_or(ReportError::Unsupported {
-                    capability: MISSING_ELAPSED,
-                })?,
-            successful: sample.successful(),
-        });
+        let elapsed = sample
+            .elapsed_wire_millis()
+            .ok_or(ReportError::Unsupported {
+                capability: MISSING_ELAPSED,
+            })?;
+        let successful = sample.successful().ok_or(ReportError::Unsupported {
+            capability: MISSING_SUCCESS,
+        })?;
+        let bucket_start = sample
+            .timestamp()
+            .as_millis()
+            .div_euclid(VERSUS_REQUEST_GRANULARITY_MILLIS)
+            .checked_mul(VERSUS_REQUEST_GRANULARITY_MILLIS)
+            .ok_or(ReportError::Overflow {
+                field: ReportField::Timestamp,
+            })?;
+        let request_count = request_counts.entry(bucket_start).or_insert(0);
+        *request_count =
+            request_count
+                .checked_add(sample.sample_count())
+                .ok_or(ReportError::Overflow {
+                    field: ReportField::SampleCount,
+                })?;
+        rows.push((bucket_start, successful, elapsed));
     }
-    Ok(output)
+    let mut values_by_rate = BTreeMap::<(u64, bool), Vec<u64>>::new();
+    for (bucket_start, successful, elapsed) in rows {
+        let request_rate = request_counts.get(&bucket_start).copied().unwrap_or(0);
+        let key = (request_rate, successful);
+        if !values_by_rate.contains_key(&key) {
+            if values_by_rate.len() >= max_points {
+                return Err(ReportError::LimitExceeded {
+                    resource: ReportLimit::GraphSamples,
+                    actual: values_by_rate.len().saturating_add(1),
+                    maximum: max_points,
+                });
+            }
+            values_by_rate.insert(key, Vec::new());
+        }
+        values_by_rate
+            .get_mut(&key)
+            .ok_or(ReportError::Serialization)?
+            .push(elapsed);
+    }
+    values_by_rate
+        .into_iter()
+        .map(|((request_rate, successful), mut values)| -> Result<
+            ResponseTimeRequestPoint,
+            ReportError,
+        > {
+            values.sort_unstable();
+            Ok(ResponseTimeRequestPoint {
+                // JMeter's x-axis is request rate, not wall time. Keep a
+                // deterministic projection for legacy timestamp callers;
+                // `requests_per_second` is the compatibility field.
+                timestamp: WallTimestamp::from_millis(i64::try_from(request_rate).map_err(
+                    |_| ReportError::Overflow {
+                        field: ReportField::Interval,
+                    },
+                )?),
+                requests_per_second: request_rate,
+                elapsed_millis: percentile_value(
+                    &values,
+                    50.0,
+                    DashboardPercentileEstimator::Legacy,
+                )
+                .unwrap_or(0.0),
+                successful: Some(successful),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()
 }
 
 /// Materializes latency-versus-request scatter points.
@@ -1533,27 +1670,78 @@ pub fn aggregate_latency_vs_request_graph_samples(
 ) -> Result<Vec<LatencyRequestPoint>, ReportError> {
     validate_graph_input(samples)?;
     validate_max_points(max_points)?;
-    let mut output = Vec::new();
+    let mut rows = Vec::<(i64, bool, u64)>::new();
+    let mut request_counts = BTreeMap::<i64, u64>::new();
     for sample in samples {
         if !in_interval(sample, interval) || excluded(sample, options) {
             continue;
         }
         validate_sample_counts(sample)?;
-        if output.len() >= max_points {
-            return Err(ReportError::LimitExceeded {
-                resource: ReportLimit::GraphSamples,
-                actual: output.len().saturating_add(1),
-                maximum: max_points,
-            });
-        }
-        output.push(LatencyRequestPoint {
-            timestamp: sample.timestamp(),
-            latency_millis: sample.latency_millis().ok_or(ReportError::Unsupported {
-                capability: MISSING_LATENCY,
-            })?,
-        });
+        let latency = sample.latency_millis().ok_or(ReportError::Unsupported {
+            capability: MISSING_LATENCY,
+        })?;
+        let successful = sample.successful().ok_or(ReportError::Unsupported {
+            capability: MISSING_SUCCESS,
+        })?;
+        let bucket_start = sample
+            .timestamp()
+            .as_millis()
+            .div_euclid(VERSUS_REQUEST_GRANULARITY_MILLIS)
+            .checked_mul(VERSUS_REQUEST_GRANULARITY_MILLIS)
+            .ok_or(ReportError::Overflow {
+                field: ReportField::Timestamp,
+            })?;
+        let request_count = request_counts.entry(bucket_start).or_insert(0);
+        *request_count =
+            request_count
+                .checked_add(sample.sample_count())
+                .ok_or(ReportError::Overflow {
+                    field: ReportField::SampleCount,
+                })?;
+        rows.push((bucket_start, successful, latency));
     }
-    Ok(output)
+    let mut values_by_rate = BTreeMap::<(u64, bool), Vec<u64>>::new();
+    for (bucket_start, successful, latency) in rows {
+        let request_rate = request_counts.get(&bucket_start).copied().unwrap_or(0);
+        let key = (request_rate, successful);
+        if !values_by_rate.contains_key(&key) {
+            if values_by_rate.len() >= max_points {
+                return Err(ReportError::LimitExceeded {
+                    resource: ReportLimit::GraphSamples,
+                    actual: values_by_rate.len().saturating_add(1),
+                    maximum: max_points,
+                });
+            }
+            values_by_rate.insert(key, Vec::new());
+        }
+        values_by_rate
+            .get_mut(&key)
+            .ok_or(ReportError::Serialization)?
+            .push(latency);
+    }
+    values_by_rate
+        .into_iter()
+        .map(
+            |((request_rate, successful), mut values)| -> Result<LatencyRequestPoint, ReportError> {
+                values.sort_unstable();
+                Ok(LatencyRequestPoint {
+                    timestamp: WallTimestamp::from_millis(i64::try_from(request_rate).map_err(
+                        |_| ReportError::Overflow {
+                            field: ReportField::Interval,
+                        },
+                    )?),
+                    requests_per_second: request_rate,
+                    latency_millis: percentile_value(
+                        &values,
+                        50.0,
+                        DashboardPercentileEstimator::Legacy,
+                    )
+                    .unwrap_or(0.0),
+                    successful: Some(successful),
+                })
+            },
+        )
+        .collect::<Result<Vec<_>, _>>()
 }
 
 /// Materializes hits per second using represented sample counts.
@@ -1606,20 +1794,44 @@ pub fn aggregate_total_tps_graph_samples(
     max_points: usize,
     options: GraphAggregationOptions,
 ) -> Result<Vec<TotalTpsPoint>, ReportError> {
-    let hits = aggregate_hits_per_second_graph_samples(
-        samples,
-        interval,
-        granularity_millis,
-        max_points,
-        options,
-    )?;
-    Ok(hits
+    validate_graph_input(samples)?;
+    validate_max_points(max_points)?;
+    let width = validate_width(granularity_millis)?;
+    // TotalTPS is a status-split consumer and includes controller results.
+    // It therefore cannot be an alias for Hits Per Second.
+    let mut buckets = BTreeMap::<(i64, bool), (GraphBucket, u64)>::new();
+    for sample in samples {
+        if !in_interval(sample, interval) || excluded(sample, options) {
+            continue;
+        }
+        validate_sample_counts(sample)?;
+        let successful = sample.successful().ok_or(ReportError::Unsupported {
+            capability: MISSING_SUCCESS,
+        })?;
+        let bucket = bucket_for(sample.timestamp(), width)?;
+        let key = (bucket.start().as_millis(), successful);
+        if !buckets.contains_key(&key) {
+            check_new_bucket(&buckets, max_points)?;
+            buckets.insert(key, (bucket, 0));
+        }
+        let (_, count) = buckets.get_mut(&key).ok_or(ReportError::Serialization)?;
+        *count = count
+            .checked_add(sample.sample_count())
+            .ok_or(ReportError::Overflow {
+                field: ReportField::SampleCount,
+            })?;
+    }
+    let seconds = granularity_millis as f64 / 1_000.0;
+    Ok(buckets
         .into_iter()
-        .map(|point| TotalTpsPoint {
-            bucket: point.bucket,
-            transaction_count: point.sample_count,
-            per_second: point.per_second,
-        })
+        .map(
+            |((_, successful), (bucket, transaction_count))| TotalTpsPoint {
+                successful,
+                bucket,
+                transaction_count,
+                per_second: transaction_count as f64 / seconds,
+            },
+        )
         .collect())
 }
 
@@ -1631,16 +1843,53 @@ pub fn aggregate_transactions_per_second_graph_samples(
     max_points: usize,
     options: GraphAggregationOptions,
 ) -> Result<Vec<TransactionTpsPoint>, ReportError> {
-    let labels =
-        aggregate_label_graph_samples(samples, interval, granularity_millis, max_points, options)?;
-    Ok(labels
+    validate_graph_input(samples)?;
+    validate_max_points(max_points)?;
+    let width = validate_width(granularity_millis)?;
+    // TransactionsPerSecondGraphConsumer uses one series per sampler label
+    // and success status (`<label>-success` / `<label>-failure`). It is not a
+    // rename of the label-count graph: merging status rows would change the
+    // dashboard series topology.
+    let mut buckets = BTreeMap::<(i64, String, bool), (GraphBucket, u64)>::new();
+    for sample in samples {
+        if !in_interval(sample, interval) || excluded(sample, options) {
+            continue;
+        }
+        validate_sample_counts(sample)?;
+        let label = sample.label().ok_or(ReportError::Unsupported {
+            capability: MISSING_LABEL,
+        })?;
+        let successful = sample.successful().ok_or(ReportError::Unsupported {
+            capability: MISSING_SUCCESS,
+        })?;
+        let bucket = bucket_for(sample.timestamp(), width)?;
+        let key = (bucket.start().as_millis(), label.to_owned(), successful);
+        if !buckets.contains_key(&key) {
+            check_new_bucket(&buckets, max_points)?;
+            buckets.insert(key.clone(), (bucket, 0));
+        }
+        let (_, count) = buckets.get_mut(&key).ok_or(ReportError::Serialization)?;
+        *count = count
+            .checked_add(sample.sample_count())
+            .ok_or(ReportError::Overflow {
+                field: ReportField::SampleCount,
+            })?;
+    }
+    let seconds = granularity_millis as f64 / 1_000.0;
+    Ok(buckets
         .into_iter()
-        .map(|point| TransactionTpsPoint {
-            bucket: point.bucket,
-            label: point.label,
-            transaction_count: point.sample_count,
-            per_second: point.per_second,
-        })
+        .map(
+            |((_, label, successful), (bucket, transaction_count))| TransactionTpsPoint {
+                bucket,
+                label: format!(
+                    "{}-{}",
+                    label,
+                    if successful { "success" } else { "failure" }
+                ),
+                transaction_count,
+                per_second: transaction_count as f64 / seconds,
+            },
+        )
         .collect())
 }
 
@@ -1750,8 +1999,9 @@ mod tests {
             options,
         )
         .unwrap();
-        assert_eq!(synthetic[0].satisfied(), 1);
-        assert_eq!(synthetic[1].satisfied(), 1);
+        assert_eq!(synthetic.len(), 1);
+        assert_eq!(synthetic[0].category(), 0);
+        assert_eq!(synthetic[0].satisfied(), 2);
         let percentiles = aggregate_response_time_percentile_graph_samples(
             &samples,
             interval(),
@@ -1916,5 +2166,190 @@ mod tests {
         assert_eq!(points[0].elapsed_mean_millis(), Some(300.0));
         assert_eq!(points[0].elapsed_min_millis(), Some(300));
         assert_eq!(points[0].elapsed_max_millis(), Some(300));
+    }
+
+    #[test]
+    fn response_code_series_merge_messages_but_retain_first_message_metadata() {
+        let first = complete_sample(100, 100).with_response_message("first");
+        let second = complete_sample(200, 100).with_response_message("second");
+        let points = aggregate_response_code_graph_samples(
+            &[first, second],
+            interval(),
+            2_000,
+            8,
+            GraphAggregationOptions::include_controllers(),
+        )
+        .unwrap();
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0].response_code(), "200");
+        assert_eq!(points[0].response_message(), "first");
+        assert_eq!(points[0].sample_count(), 2);
+    }
+
+    #[test]
+    fn response_time_distribution_uses_100_millisecond_elapsed_buckets() {
+        let samples = [
+            complete_sample(100, 105),
+            complete_sample(200, 199),
+            complete_sample(300, 201),
+        ];
+        let points = aggregate_response_time_distribution_graph_samples(
+            &samples,
+            interval(),
+            8,
+            8,
+            GraphAggregationOptions::include_controllers(),
+        )
+        .unwrap();
+        assert_eq!(
+            points
+                .iter()
+                .map(|point| (point.elapsed_millis(), point.sample_count()))
+                .collect::<Vec<_>>(),
+            vec![(100, 2), (200, 1)]
+        );
+    }
+
+    #[test]
+    fn versus_request_graphs_emit_one_status_specific_median_per_second() {
+        let samples = [
+            complete_sample(100, 100).with_latency(Some(10)),
+            complete_sample(900, 300).with_latency(Some(30)),
+            complete_sample(1_100, 500).with_latency(Some(50)),
+            complete_sample(2_100, 700).with_latency(Some(70)),
+        ];
+        let response = aggregate_response_time_vs_request_graph_samples(
+            &samples,
+            interval(),
+            8,
+            GraphAggregationOptions::include_controllers(),
+        )
+        .unwrap();
+        assert_eq!(response.len(), 2);
+        assert_eq!(response[0].requests_per_second(), 1);
+        assert_eq!(response[0].timestamp().as_millis(), 1);
+        assert_eq!(response[0].elapsed_millis(), 600.0);
+        assert_eq!(response[1].requests_per_second(), 2);
+        assert_eq!(response[1].timestamp().as_millis(), 2);
+        // JMeter's MedianAggregatorFactory averages the two values in this
+        // request-rate series (100 and 300), so the median is 200 ms.
+        assert_eq!(response[1].elapsed_millis(), 200.0);
+
+        let latency = aggregate_latency_vs_request_graph_samples(
+            &samples,
+            interval(),
+            8,
+            GraphAggregationOptions::include_controllers(),
+        )
+        .unwrap();
+        assert_eq!(latency.len(), 2);
+        assert_eq!(latency[0].requests_per_second(), 1);
+        assert_eq!(latency[0].latency_millis(), 60.0);
+        assert_eq!(latency[1].requests_per_second(), 2);
+        assert_eq!(latency[1].latency_millis(), 20.0);
+        assert_eq!(latency[0].successful(), Some(true));
+    }
+
+    #[test]
+    fn versus_request_medians_keep_success_and_failure_series_separate() {
+        let samples = [
+            complete_sample(400, 700)
+                .with_success(Some(false))
+                .with_counts(1, 1),
+            complete_sample(100, 100),
+            complete_sample(300, 500)
+                .with_success(Some(false))
+                .with_counts(1, 1),
+            complete_sample(200, 300),
+        ];
+        let points = aggregate_response_time_vs_request_graph_samples(
+            &samples,
+            interval(),
+            8,
+            GraphAggregationOptions::include_controllers(),
+        )
+        .unwrap();
+
+        assert_eq!(points.len(), 2);
+        let successful = match points.iter().find(|point| point.successful() == Some(true)) {
+            Some(point) => point,
+            None => panic!("successful versus-request series"),
+        };
+        assert_eq!(successful.requests_per_second(), 4);
+        assert_eq!(successful.elapsed_millis(), 200.0);
+        let failed = match points
+            .iter()
+            .find(|point| point.successful() == Some(false))
+        {
+            Some(point) => point,
+            None => panic!("failed versus-request series"),
+        };
+        assert_eq!(failed.requests_per_second(), 4);
+        assert_eq!(failed.elapsed_millis(), 600.0);
+    }
+
+    #[test]
+    fn tps_consumers_keep_success_and_failure_series_separate() {
+        let success = complete_sample(100, 100).with_label("GET");
+        let failure = complete_sample(200, 100)
+            .with_label("GET")
+            .with_success(Some(false))
+            .with_counts(1, 1);
+        let total = aggregate_total_tps_graph_samples(
+            &[success.clone(), failure.clone()],
+            interval(),
+            2_000,
+            8,
+            GraphAggregationOptions::include_controllers(),
+        )
+        .unwrap();
+        assert_eq!(total.len(), 2);
+        assert!(!total[0].successful());
+        assert_eq!(total[0].transaction_count(), 1);
+        assert!(total[1].successful());
+        assert_eq!(total[1].transaction_count(), 1);
+
+        let transactions = aggregate_transactions_per_second_graph_samples(
+            &[success, failure],
+            interval(),
+            2_000,
+            8,
+            GraphAggregationOptions::include_controllers(),
+        )
+        .unwrap();
+        assert_eq!(transactions.len(), 2);
+        assert_eq!(transactions[0].label(), "GET-failure");
+        assert_eq!(transactions[1].label(), "GET-success");
+    }
+
+    #[test]
+    fn synthetic_distribution_uses_four_fixed_categories() {
+        let samples = [
+            complete_sample(100, 100),
+            complete_sample(200, 600),
+            complete_sample(300, 1_600),
+            complete_sample(400, 1_600).with_success(Some(false)),
+        ];
+        let points = aggregate_synthetic_response_time_graph_samples(
+            &samples,
+            interval(),
+            500,
+            1_500,
+            8,
+            GraphAggregationOptions::include_controllers(),
+        )
+        .unwrap();
+        assert_eq!(
+            points
+                .iter()
+                .map(|point| (
+                    point.category(),
+                    point.satisfied(),
+                    point.tolerated(),
+                    point.frustrated()
+                ))
+                .collect::<Vec<_>>(),
+            vec![(0, 1, 0, 0), (1, 0, 1, 0), (2, 0, 0, 1), (3, 0, 0, 1)]
+        );
     }
 }

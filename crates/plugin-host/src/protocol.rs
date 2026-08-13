@@ -8,9 +8,11 @@ use crate::{
     },
 };
 use jmeter_rs_bridge_protocol::{
-    Cancellation, DecodeError, Frame, FrameCodec, MessageKind, PROTOCOL_VERSION, RemoteErrorCode,
+    Cancellation, DecodeError, EncodeError, Frame, FrameCodec, MessageKind, PROTOCOL_VERSION,
+    RemoteErrorCode,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 const MAX_PROTOCOL_JSON_DEPTH: usize = 32;
 const MAX_PROTOCOL_JSON_FIELDS: usize = 16 * 1024;
@@ -473,6 +475,38 @@ fn preflight_serialized_json<T: Serialize>(value: &T, maximum: usize) -> Result<
     }
 }
 
+fn map_encode_error(error: EncodeError, context: &str) -> PluginError {
+    let code = match &error {
+        EncodeError::PayloadTooLarge { .. }
+        | EncodeError::MetadataTooLarge { .. }
+        | EncodeError::ProfileTooLong { .. }
+        | EncodeError::TooManyCapabilities { .. }
+        | EncodeError::CapabilityTooLong { .. }
+        | EncodeError::ErrorMessageTooLong { .. }
+        | EncodeError::FrameTooLarge { .. }
+        | EncodeError::CapabilityBytesTooLarge { .. }
+        | EncodeError::InvalidLimits(_) => PluginErrorCode::WorkerMessageLimit,
+        EncodeError::EmptyProfile
+        | EncodeError::EmptyCapability { .. }
+        | EncodeError::InvalidFrame(_)
+        | EncodeError::LengthOverflow
+        | EncodeError::ReservedRemoteErrorCode { .. }
+        | EncodeError::DuplicateCapability { .. }
+        | EncodeError::Handshake(_) => PluginErrorCode::WorkerProtocol,
+    };
+    PluginError::new(code, format!("{context}: {error}"))
+}
+
+fn validate_operation_request_id(request_id: u64) -> Result<(), PluginError> {
+    if request_id == 0 {
+        return Err(PluginError::new(
+            PluginErrorCode::WorkerRequestMismatch,
+            "plugin operation request ID must be non-zero",
+        ));
+    }
+    Ok(())
+}
+
 /// Handshake identity and capabilities exchanged by a plugin worker.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -502,6 +536,20 @@ impl HandshakeInfo {
                 "worker handshake declares no compatibility profiles",
             ));
         }
+        let mut profiles = BTreeSet::new();
+        for profile in &self.profiles {
+            // Profile IDs share the host's bounded ASCII identifier grammar;
+            // rejecting malformed or repeated entries keeps selection
+            // deterministic and prevents an identity handshake from
+            // advertising ambiguous aliases.
+            PluginId::parse(profile.clone())?;
+            if !profiles.insert(profile) {
+                return Err(PluginError::new(
+                    PluginErrorCode::ProtocolMismatch,
+                    "worker handshake declares a duplicate compatibility profile",
+                ));
+            }
+        }
         self.capabilities.validate()?;
         self.preservation.validate()
     }
@@ -529,14 +577,20 @@ pub fn encode_handshake(
         .iter()
         .map(|(_, declaration)| declaration.id.clone())
         .collect();
+    let mut capability_ids = BTreeSet::new();
+    for capability in &capabilities {
+        if !capability_ids.insert(capability) {
+            return Err(PluginError::new(
+                PluginErrorCode::ManifestInvalid,
+                "element and function capability IDs must be unique in handshake metadata",
+            ));
+        }
+    }
     let frame = Frame::handshake(0, profile, capabilities).with_profile(info.profiles[0].clone());
     let frame = Frame { payload, ..frame };
-    codec.encode(&frame).map_err(|error| {
-        PluginError::new(
-            PluginErrorCode::WorkerMessageLimit,
-            format!("plugin handshake exceeds message limit: {error}"),
-        )
-    })
+    codec
+        .encode(&frame)
+        .map_err(|error| map_encode_error(error, "could not encode plugin handshake"))
 }
 
 /// Decodes a complete bridge handshake frame for a worker implementation or
@@ -567,6 +621,18 @@ fn decode_handshake_frame_with_limit(
             "worker handshake request ID must be zero",
         ));
     }
+    if frame.cancellation != Cancellation::None {
+        return Err(PluginError::new(
+            PluginErrorCode::WorkerProtocol,
+            "worker handshake carries an invalid cancellation state",
+        ));
+    }
+    let Some(frame_profile) = frame.profile.as_ref() else {
+        return Err(PluginError::new(
+            PluginErrorCode::WorkerProtocol,
+            "worker handshake is missing profile metadata",
+        ));
+    };
     preflight_json(&frame.payload, maximum)?;
     let info: HandshakeInfo = serde_json::from_slice(&frame.payload).map_err(|error| {
         PluginError::new(
@@ -575,27 +641,31 @@ fn decode_handshake_frame_with_limit(
         )
     })?;
     info.validate()?;
-    if let Some(profile) = frame.profile.as_ref()
-        && !info.profiles.iter().any(|item| item == profile)
-    {
+    if !info.profiles.iter().any(|item| item == frame_profile) {
         return Err(PluginError::new(
             PluginErrorCode::WorkerProtocol,
             "worker handshake profile metadata disagrees with payload",
         ));
     }
-    for capability in &frame.capabilities {
-        let found = info
-            .capabilities
-            .elements
-            .iter()
-            .chain(info.capabilities.functions.iter())
-            .any(|item| item.id == *capability);
-        if !found {
+    let advertised_capabilities = info
+        .capabilities
+        .iter()
+        .map(|(_, declaration)| declaration.id.clone())
+        .collect::<Vec<_>>();
+    let mut capability_ids = BTreeSet::new();
+    for capability in &advertised_capabilities {
+        if !capability_ids.insert(capability) {
             return Err(PluginError::new(
                 PluginErrorCode::WorkerProtocol,
-                "worker handshake capability metadata disagrees with payload",
+                "worker handshake has duplicate capability IDs in frame metadata",
             ));
         }
+    }
+    if frame.capabilities != advertised_capabilities {
+        return Err(PluginError::new(
+            PluginErrorCode::WorkerProtocol,
+            "worker handshake capability metadata disagrees with payload",
+        ));
     }
     Ok(info)
 }
@@ -692,6 +762,7 @@ pub fn encode_response(
     request_id: u64,
     response: &PluginResponse,
 ) -> Result<Vec<u8>, PluginError> {
+    validate_operation_request_id(request_id)?;
     preflight_serialized_json(response, codec.limits().max_payload_len)?;
     let payload = serde_json::to_vec(response).map_err(|error| {
         PluginError::new(
@@ -700,12 +771,9 @@ pub fn encode_response(
         )
     })?;
     let frame = Frame::new(MessageKind::Response, request_id, payload);
-    codec.encode(&frame).map_err(|error| {
-        PluginError::new(
-            PluginErrorCode::WorkerMessageLimit,
-            format!("plugin response exceeds message limit: {error}"),
-        )
-    })
+    codec
+        .encode(&frame)
+        .map_err(|error| map_encode_error(error, "could not encode plugin response"))
 }
 
 /// Decodes a successful plugin response frame.
@@ -714,6 +782,7 @@ pub(crate) fn decode_response(
     frame: &Frame,
     request_id: u64,
 ) -> Result<PluginResponse, PluginError> {
+    validate_operation_request_id(request_id)?;
     if frame.request_id != request_id {
         return Err(PluginError::new(
             PluginErrorCode::WorkerRequestMismatch,
@@ -721,6 +790,17 @@ pub(crate) fn decode_response(
                 "expected response for request {request_id}, got {}",
                 frame.request_id
             ),
+        ));
+    }
+    let invalid_cancellation = match frame.kind {
+        MessageKind::Response => frame.cancellation == Cancellation::Requested,
+        MessageKind::Error => frame.cancellation != Cancellation::None,
+        _ => false,
+    };
+    if frame.profile.is_some() || !frame.capabilities.is_empty() || invalid_cancellation {
+        return Err(PluginError::new(
+            PluginErrorCode::WorkerProtocol,
+            "worker response carries metadata or cancellation not allowed for responses",
         ));
     }
     match frame.kind {
@@ -811,14 +891,12 @@ pub(crate) fn cancellation_frame(
     codec: &FrameCodec,
     request_id: u64,
 ) -> Result<Vec<u8>, PluginError> {
+    validate_operation_request_id(request_id)?;
     let frame = Frame::new(MessageKind::Cancel, request_id, Vec::new())
         .with_cancellation(Cancellation::Requested);
-    codec.encode(&frame).map_err(|error| {
-        PluginError::new(
-            PluginErrorCode::WorkerProtocol,
-            format!("could not encode cancellation frame: {error}"),
-        )
-    })
+    codec
+        .encode(&frame)
+        .map_err(|error| map_encode_error(error, "could not encode cancellation frame"))
 }
 
 #[cfg(test)]
@@ -910,15 +988,18 @@ mod tests {
 
     #[test]
     fn handshake_rejects_ambiguous_capability_inventory_before_advertising() {
-        let mut manifest = manifest();
-        manifest.capabilities.elements.push(CapabilityDeclaration {
-            id: "example.other".to_owned(),
-            aliases: vec!["example.element".to_owned()],
-            extensions: BTreeMap::new(),
-        });
-        let codec = FrameCodec::new(manifest.limits.max_message_bytes);
+        let mut ambiguous_manifest = manifest();
+        ambiguous_manifest
+            .capabilities
+            .elements
+            .push(CapabilityDeclaration {
+                id: "example.other".to_owned(),
+                aliases: vec!["example.element".to_owned()],
+                extensions: BTreeMap::new(),
+            });
+        let codec = FrameCodec::new(ambiguous_manifest.limits.max_message_bytes);
         assert_eq!(
-            encode_handshake(&codec, &manifest)
+            encode_handshake(&codec, &ambiguous_manifest)
                 .expect_err("ambiguous manifest must not be advertised")
                 .code(),
             PluginErrorCode::ManifestInvalid
@@ -939,6 +1020,52 @@ mod tests {
         assert_eq!(
             decode_handshake(&codec, &bytes)
                 .expect_err("worker ambiguity must fail during handshake validation")
+                .code(),
+            PluginErrorCode::ManifestInvalid
+        );
+    }
+
+    #[test]
+    fn handshake_wire_metadata_is_required_and_matches_the_payload_exactly() {
+        let manifest = manifest();
+        let codec = FrameCodec::new(manifest.limits.max_message_bytes);
+        let info = manifest.handshake_info();
+        let payload = serde_json::to_vec(&info).expect("handshake payload");
+
+        let missing_profile = Frame {
+            payload: payload.clone(),
+            ..Frame::new(MessageKind::Handshake, 0, payload.clone())
+        };
+        assert_eq!(
+            decode_handshake_frame_with_limit(&missing_profile, codec.limits().max_payload_len)
+                .expect_err("handshake profile is mandatory")
+                .code(),
+            PluginErrorCode::WorkerProtocol
+        );
+
+        let wrong_capabilities = Frame {
+            payload,
+            ..Frame::handshake(0, "jmeter-5.6.3", vec!["other.capability".to_owned()])
+        };
+        assert_eq!(
+            decode_handshake_frame_with_limit(&wrong_capabilities, codec.limits().max_payload_len,)
+                .expect_err("metadata must enumerate the payload declarations")
+                .code(),
+            PluginErrorCode::WorkerProtocol
+        );
+    }
+
+    #[test]
+    fn capability_ids_are_unique_across_wire_namespaces() {
+        let mut manifest = manifest();
+        manifest
+            .capabilities
+            .functions
+            .push(CapabilityDeclaration::new("example.element"));
+        let codec = FrameCodec::new(manifest.limits.max_message_bytes);
+        assert_eq!(
+            encode_handshake(&codec, &manifest)
+                .expect_err("wire metadata cannot represent cross-kind duplicate IDs")
                 .code(),
             PluginErrorCode::ManifestInvalid
         );
@@ -1168,6 +1295,53 @@ mod tests {
         );
         assert_eq!(error.code(), PluginErrorCode::PluginUnavailable);
         assert!(!error.detail().contains("secret worker environment"));
+    }
+
+    #[test]
+    fn operation_frames_reject_zero_ids_and_preserve_mismatch_codes() {
+        let codec = FrameCodec::new(1024);
+        assert_eq!(
+            encode_response(
+                &codec,
+                0,
+                &PluginResponse {
+                    output: Vec::new(),
+                    metadata: BTreeMap::new(),
+                },
+            )
+            .expect_err("response IDs are never reserved for operations")
+            .code(),
+            PluginErrorCode::WorkerRequestMismatch
+        );
+        assert_eq!(
+            cancellation_frame(&codec, 0)
+                .expect_err("cancellation IDs are never reserved for operations")
+                .code(),
+            PluginErrorCode::WorkerRequestMismatch
+        );
+        let frame = Frame::new(MessageKind::Response, 2, br#"{"output":[]}"#.to_vec());
+        assert_eq!(
+            decode_response(&codec, &frame, 1)
+                .expect_err("a response for another request is a correlation failure")
+                .code(),
+            PluginErrorCode::WorkerRequestMismatch
+        );
+        let metadata_frame = Frame::new(MessageKind::Response, 1, br#"{"output":[]}"#.to_vec())
+            .with_profile("unexpected-profile");
+        assert_eq!(
+            decode_response(&codec, &metadata_frame, 1)
+                .expect_err("response metadata must be rejected")
+                .code(),
+            PluginErrorCode::WorkerProtocol
+        );
+        let cancelled_error = Frame::new(MessageKind::Error, 1, vec![0; 5])
+            .with_cancellation(Cancellation::Cancelled);
+        assert_eq!(
+            decode_response(&codec, &cancelled_error, 1)
+                .expect_err("error cancellation metadata must be rejected")
+                .code(),
+            PluginErrorCode::WorkerProtocol
+        );
     }
 
     #[test]

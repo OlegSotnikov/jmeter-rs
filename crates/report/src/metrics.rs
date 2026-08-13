@@ -442,7 +442,7 @@ impl SummaryMetrics {
         self.elapsed.stddev()
     }
 
-    /// Returns population variance from JMeter Calculator's raw accumulator.
+    /// Returns population variance using JMeter Calculator's arithmetic.
     /// Keeping this as a derived read avoids exposing the mutable accumulator
     /// while preserving the exact report field.
     pub fn elapsed_variance(&self) -> Option<f64> {
@@ -861,6 +861,19 @@ pub(crate) fn represented_counts(
     result: &SampleResult,
     mode: CountMode,
 ) -> Result<RepresentedCounts, ReportError> {
+    // JMeter's ordinary SampleResult starts with one represented sample and
+    // StatisticalSampleResult only becomes observable after its first add.
+    // A serialized `sc=0` row therefore cannot contribute coherent count,
+    // error, APDEX, or byte-rate metrics.  Reject it instead of counting its
+    // bytes while silently leaving the denominator at zero.
+    if result
+        .sample_count()
+        .is_some_and(|value| value.as_u64() == 0)
+    {
+        return Err(ReportError::InvalidSample {
+            field: SampleField::SampleCount,
+        });
+    }
     let samples = match mode {
         CountMode::Weighted => result.sample_count().map_or(1, |value| value.as_u64()),
         CountMode::Unweighted => 1,
@@ -907,13 +920,19 @@ pub(crate) fn represented_counts(
 /// by `SampleCount` for min/max, and adds `total² / SampleCount` to the sum of
 /// squares. Keeping both sums lets a statistical sample retain its fractional
 /// mean while exposing the same integer effective observations to percentiles.
+///
+/// The variance expression is deliberately kept in the same operation order
+/// as JMeter 5.6.3 (`sum_of_squares / count - mean²`).  Rewriting that as
+/// `(sum_of_squares - sum² / count) / count` is algebraically equivalent but
+/// not bit-equivalent for large or nearly equal values, and can turn a
+/// source-compatible standard deviation into a different report value.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct RunningStats {
     count: u64,
     sum: f64,
     sum_of_squares: f64,
     mean: f64,
-    m2: f64,
+    variance: f64,
     min: Option<u64>,
     max: Option<u64>,
 }
@@ -935,15 +954,15 @@ impl RunningStats {
         let sum_of_squares = self.sum_of_squares + total * total / weight_f;
         let mean = sum / new_count as f64;
         // This is the arithmetic used by Apache JMeter 5.6.3's Calculator:
-        // sumOfSquares - sum * sum / count.  It is intentionally not
+        // sumOfSquares / count - mean * mean.  It is intentionally not
         // replaced by a centered/Welford accumulator; its floating-point
         // behavior is part of the report compatibility surface.
-        let variance_numerator = sum_of_squares - sum * sum / new_count as f64;
+        let variance = sum_of_squares / new_count as f64 - mean * mean;
         let effective = value / weight;
         if !sum.is_finite()
             || !sum_of_squares.is_finite()
             || !mean.is_finite()
-            || !variance_numerator.is_finite()
+            || !variance.is_finite()
         {
             return Err(ReportError::Overflow {
                 field: ReportField::Variance,
@@ -952,8 +971,8 @@ impl RunningStats {
         self.sum = sum;
         self.sum_of_squares = sum_of_squares;
         self.mean = mean;
-        self.m2 = variance_numerator;
-        if !self.mean.is_finite() || !self.m2.is_finite() {
+        self.variance = variance;
+        if !self.mean.is_finite() || !self.variance.is_finite() {
             return Err(ReportError::Overflow {
                 field: ReportField::Variance,
             });
@@ -981,11 +1000,11 @@ impl RunningStats {
         let sum = self.sum + other.sum;
         let sum_of_squares = self.sum_of_squares + other.sum_of_squares;
         let mean = sum / total as f64;
-        let variance_numerator = sum_of_squares - sum * sum / total as f64;
+        let variance = sum_of_squares / total as f64 - mean * mean;
         if !sum.is_finite()
             || !sum_of_squares.is_finite()
             || !mean.is_finite()
-            || !variance_numerator.is_finite()
+            || !variance.is_finite()
         {
             return Err(ReportError::Overflow {
                 field: ReportField::Variance,
@@ -994,7 +1013,7 @@ impl RunningStats {
         self.sum = sum;
         self.sum_of_squares = sum_of_squares;
         self.mean = mean;
-        self.m2 = variance_numerator;
+        self.variance = variance;
         self.count = total;
         self.min = Some(match (self.min, other.min) {
             (Some(left), Some(right)) => left.min(right),
@@ -1029,7 +1048,7 @@ impl RunningStats {
         if self.count == 0 {
             None
         } else {
-            Some(self.m2 / self.count as f64)
+            Some(self.variance)
         }
     }
 
@@ -1037,7 +1056,7 @@ impl RunningStats {
         if self.count == 0 {
             None
         } else {
-            Some((self.m2 / self.count as f64).sqrt())
+            Some(self.variance.sqrt())
         }
     }
 }
@@ -1049,7 +1068,7 @@ impl Default for RunningStats {
             sum: 0.0,
             sum_of_squares: 0.0,
             mean: 0.0,
-            m2: 0.0,
+            variance: 0.0,
             min: None,
             max: None,
         }
@@ -1118,4 +1137,157 @@ pub(crate) fn append_window_observation(
         values.push_back(elapsed);
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::panic, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use jmeter_rs_results::{ElapsedTime, SampleCount};
+
+    fn thresholds() -> ApdexThresholds {
+        ApdexThresholds::new(500, 1_500).unwrap_or_else(|_| panic!("fixed thresholds"))
+    }
+
+    #[test]
+    fn running_stats_match_jmeter_operation_order_for_weighted_rows() {
+        let mut stats = RunningStats::default();
+        stats.update(100, 1).unwrap_or_else(|_| panic!("first row"));
+        stats
+            .update(1_000_000_000_001, 2)
+            .unwrap_or_else(|_| panic!("weighted row"));
+
+        let sum = 100.0 + 1_000_000_000_001.0;
+        let sum_of_squares = 100.0 * 100.0 + (1_000_000_000_001.0 * 1_000_000_000_001.0) / 2.0;
+        let mean = sum / 3.0;
+        // This order is the one used by org.apache.jmeter.util.Calculator.
+        let variance = sum_of_squares / 3.0 - mean * mean;
+
+        assert_eq!(stats.count, 3);
+        assert_eq!(stats.sum, sum);
+        assert_eq!(stats.sum_of_squares, sum_of_squares);
+        assert_eq!(stats.mean, mean);
+        assert_eq!(stats.variance, variance);
+        assert_eq!(stats.min, Some(100));
+        assert_eq!(stats.max, Some(500_000_000_000));
+        assert_eq!(stats.stddev(), Some(variance.sqrt()));
+    }
+
+    #[test]
+    fn represented_counts_reject_an_explicit_zero_sample_row() {
+        let mut result = SampleResult::new("zero");
+        result.set_sample_count(Some(SampleCount::from_u64(0)));
+        assert!(
+            result
+                .set_elapsed(Some(ElapsedTime::from_millis(10)))
+                .is_ok()
+        );
+
+        for mode in [CountMode::Weighted, CountMode::Unweighted] {
+            assert_eq!(
+                represented_counts(&result, mode),
+                Err(ReportError::InvalidSample {
+                    field: SampleField::SampleCount,
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn apdex_uses_inclusive_thresholds_and_failed_rows_are_frustrated() {
+        let mut counts = ApdexCounts::empty();
+        counts
+            .add(1, 0, Some(500), thresholds())
+            .unwrap_or_else(|_| panic!("satisfied boundary"));
+        counts
+            .add(1, 0, Some(1_500), thresholds())
+            .unwrap_or_else(|_| panic!("tolerated boundary"));
+        counts
+            .add(1, 1, Some(1), thresholds())
+            .unwrap_or_else(|_| panic!("failed row"));
+
+        assert_eq!(counts.satisfied(), 1);
+        assert_eq!(counts.tolerated(), 1);
+        assert_eq!(counts.frustrated(), 1);
+        assert_eq!(counts.total(), 3);
+        assert_eq!(counts.score(), Some(0.5));
+    }
+
+    #[test]
+    fn exact_observation_append_is_bounded_and_atomic() {
+        let mut values = vec![7, 8];
+        let before = values.clone();
+        let result = append_exact_observation(
+            &mut values,
+            PreparedObservation {
+                elapsed: Some(9),
+                sample_count: 2,
+            },
+            3,
+        );
+        assert_eq!(
+            result,
+            Err(ReportError::LimitExceeded {
+                resource: ReportLimit::PercentileSamples,
+                actual: 4,
+                maximum: 3,
+            })
+        );
+        assert_eq!(values, before);
+    }
+
+    #[test]
+    fn running_stats_count_overflow_is_checked_before_mutation() {
+        let mut stats = RunningStats {
+            count: u64::MAX,
+            sum: 4.0,
+            sum_of_squares: 16.0,
+            mean: 4.0,
+            variance: 0.0,
+            min: Some(4),
+            max: Some(4),
+        };
+        let before = stats;
+        assert_eq!(
+            stats.update(4, 1),
+            Err(ReportError::Overflow {
+                field: ReportField::ElapsedCount,
+            })
+        );
+        assert_eq!(stats, before);
+    }
+
+    #[test]
+    fn summary_sample_count_overflow_is_checked_before_mutation() {
+        let mut summary = SummaryMetrics::empty();
+        summary.sample_count = u64::MAX;
+        let before = summary.clone();
+        let mut result = SampleResult::new("overflow");
+        result.set_successful(true);
+
+        assert_eq!(
+            summary.add_result(&result, thresholds(), AggregateLimits::default()),
+            Err(ReportError::Overflow {
+                field: ReportField::SampleCount,
+            })
+        );
+        assert_eq!(summary, before);
+    }
+
+    #[test]
+    fn apdex_count_overflow_is_checked_before_mutation() {
+        let mut counts = ApdexCounts {
+            satisfied: u64::MAX,
+            tolerated: 0,
+            frustrated: 0,
+        };
+        let before = counts;
+        assert_eq!(
+            counts.add(1, 0, Some(0), thresholds()),
+            Err(ReportError::Overflow {
+                field: ReportField::SampleCount,
+            })
+        );
+        assert_eq!(counts, before);
+    }
 }

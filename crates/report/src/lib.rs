@@ -36,17 +36,30 @@ pub use backend::{
     graphite_metric_lines, influx_points, sanitize_graphite_context,
 };
 pub use config::{
-    AggregateLimits, ApdexThresholds, DashboardConfig, DashboardPercentileEstimator, LabelGrouping,
-    ListenerConfig, PercentileConfiguration, PercentileLevel, ReportInterval,
+    AGGREGATE_RPT_PCT1, AGGREGATE_RPT_PCT2, AGGREGATE_RPT_PCT3, AggregateLimits, ApdexThresholds,
+    DEFAULT_REPORT_OVERALL_GRANULARITY_MILLIS, DEFAULT_REPORT_PERCENTILES,
+    DEFAULT_REPORT_STATISTIC_WINDOW, DEFAULT_RESPONSE_TIME_DISTRIBUTION_GRANULARITY_MILLIS,
+    DashboardConfig, DashboardPercentileEstimator, LabelGrouping, ListenerConfig,
+    MAX_REPORT_PROPERTIES, MAX_REPORT_PROPERTY_BYTES, MIN_REPORT_OVERALL_GRANULARITY_MILLIS,
+    PercentileConfiguration, PercentileLevel, REPORTGENERATOR_APDEX_SATISFIED_THRESHOLD,
+    REPORTGENERATOR_APDEX_TOLERATED_THRESHOLD, REPORTGENERATOR_DATE_FORMAT,
+    REPORTGENERATOR_END_DATE, REPORTGENERATOR_EXCLUDE_TC_FROM_TOP5_ERRORS_BY_SAMPLER,
+    REPORTGENERATOR_OVERALL_GRANULARITY, REPORTGENERATOR_REPORT_TITLE,
+    REPORTGENERATOR_RESPONSE_TIME_DISTRIBUTION_GRANULARITY, REPORTGENERATOR_SAMPLE_FILTER,
+    REPORTGENERATOR_START_DATE, REPORTGENERATOR_STATISTIC_WINDOW, ReportGeneratorProperties,
+    ReportInterval, ReportProperty,
 };
 pub use dashboard::{
     DASHBOARD_GRAPH_INVENTORY, DASHBOARD_SECTIONS, Dashboard, DashboardGraphDefinition,
     DashboardGraphPayload, DashboardGraphSection, DashboardGraphSections, DashboardGraphStatus,
     DashboardMetrics, DashboardReport,
 };
-pub use error::{ConfigField, ReportError, ReportField, ReportLimit, SampleField};
+pub use error::{
+    ConfigField, MAX_REPORT_DIAGNOSTIC_BYTES, ReportError, ReportErrorCode, ReportField,
+    ReportLimit, SampleField,
+};
 pub use graph::{
-    GraphAggregationOptions, GraphPoint, GraphSample, GraphTimestampPolicy,
+    GraphAggregationOptions, GraphPoint, GraphSample, GraphSampleCountMode, GraphTimestampPolicy,
     aggregate_graph_samples, aggregate_graph_samples_with_options,
 };
 pub use graphs::{

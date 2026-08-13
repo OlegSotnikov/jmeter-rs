@@ -15,6 +15,12 @@ use crate::url::Url;
 pub struct HeaderManager {
     headers: Headers,
     maximum: usize,
+    // A bounded, non-secret mutation marker.  The aggregate state digest
+    // deliberately does not hash header values, so shape-only metadata cannot
+    // distinguish two same-sized replacements.  Successful value-changing
+    // operations advance this marker and therefore still participate in CAS
+    // conflict detection without putting credentials in the digest.
+    revision: u64,
 }
 
 impl HeaderManager {
@@ -29,6 +35,7 @@ impl HeaderManager {
         Ok(Self {
             headers: Headers::new(),
             maximum,
+            revision: 0,
         })
     }
 
@@ -38,7 +45,16 @@ impl HeaderManager {
         Self {
             headers: Headers::new(),
             maximum: 128,
+            revision: 0,
         }
+    }
+
+    fn bump_revision(&mut self) -> Result<(), HttpError> {
+        self.revision = self
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| HttpError::resource_limit("header manager generation"))?;
+        Ok(())
     }
 
     /// Returns the manager's capacity.
@@ -73,6 +89,7 @@ impl HeaderManager {
         if proposed > Self::MAX_BYTES {
             return Err(HttpError::resource_limit("header manager bytes"));
         }
+        self.bump_revision()?;
         self.headers.append(field);
         Ok(())
     }
@@ -112,6 +129,9 @@ impl HeaderManager {
         }
         if merged.len() > self.maximum || merged.checked_wire_len()? > Self::MAX_BYTES {
             return Err(HttpError::resource_limit("header manager merge"));
+        }
+        if merged != self.headers {
+            self.bump_revision()?;
         }
         self.headers = merged;
         Ok(())
@@ -333,6 +353,10 @@ pub struct DnsCache {
     maximum: usize,
     custom_resolver: bool,
     resolver_servers: Vec<String>,
+    // Values are intentionally absent from the aggregate digest.  This
+    // marker detects same-shape address/server replacements without deriving
+    // a digest from resolver data.
+    revision: u64,
 }
 
 impl Default for DnsCache {
@@ -342,6 +366,7 @@ impl Default for DnsCache {
             maximum: 256,
             custom_resolver: false,
             resolver_servers: Vec::new(),
+            revision: 0,
         }
     }
 }
@@ -359,7 +384,16 @@ impl DnsCache {
             maximum,
             custom_resolver: false,
             resolver_servers: Vec::new(),
+            revision: 0,
         })
+    }
+
+    fn bump_revision(&mut self) -> Result<(), HttpError> {
+        self.revision = self
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| HttpError::resource_limit("DNS cache generation"))?;
+        Ok(())
     }
 
     /// Returns whether the descriptor requests a custom resolver.
@@ -404,7 +438,10 @@ impl DnsCache {
             }
             values.push(server);
         }
-        self.resolver_servers = values;
+        if self.resolver_servers != values {
+            self.bump_revision()?;
+            self.resolver_servers = values;
+        }
         Ok(())
     }
 
@@ -425,43 +462,49 @@ impl DnsCache {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        let host = host.into().to_ascii_lowercase();
-        if host.is_empty()
-            || host.len() > 255
-            || (!valid_cookie_domain(&host)
-                && !host
-                    .bytes()
-                    .all(|byte| byte.is_ascii_hexdigit() || matches!(byte, b':' | b'.' | b'%')))
-        {
+        let host = host.into();
+        if host.is_empty() || host.len() > 255 {
             return Err(HttpError::InvalidUrl("invalid DNS host".to_owned()));
         }
-        let addresses = addresses.into_iter().map(Into::into).collect::<Vec<_>>();
-        if addresses.is_empty() || addresses.len() > 64 {
-            return Err(HttpError::resource_limit("DNS address count"));
+        let host = host.to_ascii_lowercase();
+        if !valid_dns_cache_host(&host) {
+            return Err(HttpError::InvalidUrl("invalid DNS host".to_owned()));
         }
-        if addresses.iter().any(|address| {
-            address.is_empty()
+        let mut validated_addresses = Vec::new();
+        for address in addresses {
+            if validated_addresses.len() >= 64 {
+                return Err(HttpError::resource_limit("DNS address count"));
+            }
+            let address = address.into();
+            if address.is_empty()
                 || address.len() > 128
                 || address.bytes().any(|byte| byte <= 0x20 || byte == 0x7f)
-        }) {
-            return Err(HttpError::InvalidUrl("invalid DNS address".to_owned()));
+            {
+                return Err(HttpError::InvalidUrl("invalid DNS address".to_owned()));
+            }
+            validated_addresses.push(address);
+        }
+        if validated_addresses.is_empty() {
+            return Err(HttpError::resource_limit("DNS address count"));
         }
         let record = DnsRecord {
             host: host.clone(),
-            addresses,
+            addresses: validated_addresses,
             expires_at,
         };
-        if let Some(existing) = self
+        if let Some(index) = self
             .records
-            .iter_mut()
-            .find(|existing| existing.host == host)
+            .iter()
+            .position(|existing| existing.host == host)
         {
-            *existing = record;
+            self.bump_revision()?;
+            self.records[index] = record;
             return Ok(());
         }
         if self.records.len() >= self.maximum {
             return Err(HttpError::resource_limit("DNS cache capacity"));
         }
+        self.bump_revision()?;
         self.records.push(record);
         Ok(())
     }
@@ -469,10 +512,14 @@ impl DnsCache {
     /// Returns a cloned address set so callers cannot retain mutable cache
     /// references across cleanup or replacement.
     pub fn lookup(&mut self, host: &str, now: ClockReading) -> Option<Vec<String>> {
+        if host.is_empty() || host.len() > 255 {
+            return None;
+        }
         self.remove_expired(now);
+        let host = host.to_ascii_lowercase();
         self.records
             .iter()
-            .find(|record| record.host == host.to_ascii_lowercase())
+            .find(|record| record.host == host)
             .map(|record| record.addresses.clone())
     }
 
@@ -481,6 +528,9 @@ impl DnsCache {
     /// shared reference; the next client attempt performs expiry cleanup.
     #[must_use]
     pub fn lookup_ref(&self, host: &str, now: ClockReading) -> Option<Vec<String>> {
+        if host.is_empty() || host.len() > 255 {
+            return None;
+        }
         let host = host.to_ascii_lowercase();
         self.records
             .iter()
@@ -595,6 +645,10 @@ pub struct CookieJar {
     initial: Vec<Cookie>,
     maximum: usize,
     next_creation: u64,
+    // A non-secret mutation marker for replacements and lifecycle restores
+    // that can leave collection shape unchanged. Cookie values never enter
+    // the aggregate digest.
+    revision: u64,
     public_suffix_policy: PublicSuffixPolicy,
     check_cookies: bool,
     delete_null_cookies: bool,
@@ -608,6 +662,7 @@ impl Default for CookieJar {
             initial: Vec::new(),
             maximum: 512,
             next_creation: 0,
+            revision: 0,
             public_suffix_policy: PublicSuffixPolicy::default(),
             check_cookies: true,
             delete_null_cookies: true,
@@ -621,6 +676,24 @@ impl CookieJar {
     const MAX_COOKIE_VALUE_BYTES: usize = 16 * 1024;
     const MAX_COOKIE_HEADER_BYTES: usize = 64 * 1024;
 
+    fn bump_revision(&mut self) -> Result<(), HttpError> {
+        self.revision = self
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| HttpError::resource_limit("cookie jar generation"))?;
+        Ok(())
+    }
+
+    fn mark_lifecycle_change(&mut self) {
+        // These legacy lifecycle helpers intentionally retain their `()`
+        // return type for callers that already use them as boundary hooks.
+        // Keep the marker monotonic without wrapping if an adversarial test
+        // constructs the internal counter at its maximum.
+        if let Some(next) = self.revision.checked_add(1) {
+            self.revision = next;
+        }
+    }
+
     /// Creates an empty jar with a finite capacity.
     pub fn new(maximum: usize) -> Result<Self, HttpError> {
         if maximum == 0 {
@@ -633,6 +706,7 @@ impl CookieJar {
             initial: Vec::new(),
             maximum,
             next_creation: 0,
+            revision: 0,
             public_suffix_policy: PublicSuffixPolicy::default(),
             check_cookies: true,
             delete_null_cookies: true,
@@ -704,7 +778,17 @@ impl CookieJar {
     }
 
     /// Adds or replaces one cookie.
-    pub fn add(&mut self, mut cookie: Cookie, now: ClockReading) -> Result<(), HttpError> {
+    pub fn add(&mut self, cookie: Cookie, now: ClockReading) -> Result<(), HttpError> {
+        // Expiry cleanup, domain policy, replacement, and bounded capacity
+        // form one manager delta. A rejected cookie must not consume the
+        // cleanup/eviction side effect of an otherwise valid prior state.
+        let mut candidate = self.clone();
+        candidate.add_in_place(cookie, now)?;
+        *self = candidate;
+        Ok(())
+    }
+
+    fn add_in_place(&mut self, mut cookie: Cookie, now: ClockReading) -> Result<(), HttpError> {
         self.remove_expired(now);
         if !cookie.host_only && cookie.domain.is_empty() {
             return Err(HttpError::Cookie(
@@ -720,7 +804,7 @@ impl CookieJar {
                 "cookie Domain is a public suffix".to_owned(),
             ));
         }
-        if let Some(existing) = self.cookies.iter_mut().find(|existing| {
+        if let Some(index) = self.cookies.iter().position(|existing| {
             existing.name == cookie.name
                 && existing.domain == cookie.domain
                 && existing.path == cookie.path
@@ -730,8 +814,9 @@ impl CookieJar {
             // creation sequence is therefore not consumed by a replacement;
             // this also lets a replacement succeed when no new sequence value
             // can be allocated, without changing the jar's generation.
-            cookie.creation = existing.creation;
-            *existing = cookie;
+            cookie.creation = self.cookies[index].creation;
+            self.bump_revision()?;
+            self.cookies[index] = cookie;
             return Ok(());
         }
         let creation = self.next_creation;
@@ -740,17 +825,13 @@ impl CookieJar {
             .checked_add(1)
             .ok_or_else(|| HttpError::resource_limit("cookie creation sequence"))?;
         if self.cookies.len() >= self.maximum {
-            let Some(index) = self
-                .cookies
-                .iter()
-                .enumerate()
-                .min_by_key(|(_, value)| value.creation)
-                .map(|(index, _)| index)
-            else {
-                return Err(HttpError::resource_limit("cookie jar eviction"));
-            };
-            self.cookies.remove(index);
+            // CookieManager has no eviction policy equivalent to
+            // CacheManager's bounded entry eviction. Dropping an older
+            // cookie would silently change the wire request, so reject the
+            // delta and let the execution layer record a resource error.
+            return Err(HttpError::resource_limit("cookie jar capacity"));
         }
+        self.bump_revision()?;
         cookie.creation = creation;
         self.next_creation = next_creation;
         self.cookies.push(cookie);
@@ -779,20 +860,27 @@ impl CookieJar {
     /// iteration boundary.  Keeping the snapshot explicit avoids conflating
     /// a deliberate `clear` with lifecycle reset.
     pub fn capture_initial(&mut self) {
-        self.initial = self.cookies.clone();
+        if self.initial != self.cookies {
+            self.mark_lifecycle_change();
+            self.initial = self.cookies.clone();
+        }
     }
 
     /// Restores the captured initial collection and preserves deterministic
-    /// creation ordering for subsequent replacement/eviction.
+    /// creation ordering for subsequent replacement/capacity checks.
     pub fn restore_initial(&mut self) {
-        self.cookies = self.initial.clone();
-        self.next_creation = self
-            .cookies
+        let next_creation = self
+            .initial
             .iter()
             .map(|cookie| cookie.creation)
             .max()
             .and_then(|value| value.checked_add(1))
             .unwrap_or(0);
+        if self.cookies != self.initial || self.next_creation != next_creation {
+            self.mark_lifecycle_change();
+        }
+        self.cookies = self.initial.clone();
+        self.next_creation = next_creation;
     }
 
     /// Applies the configured iteration lifecycle policy.
@@ -804,6 +892,21 @@ impl CookieJar {
 
     /// Parses and stores all `Set-Cookie` response fields.
     pub fn store_set_cookie_headers(
+        &mut self,
+        url: &Url,
+        headers: &Headers,
+        now: ClockReading,
+    ) -> Result<usize, HttpError> {
+        // Applying all Set-Cookie fields is one state transition.  If a
+        // later field is malformed, discard the already parsed prefix rather
+        // than leaving a partial response delta in the jar.
+        let mut candidate = self.clone();
+        let count = candidate.store_set_cookie_headers_in_place(url, headers, now)?;
+        *self = candidate;
+        Ok(count)
+    }
+
+    fn store_set_cookie_headers_in_place(
         &mut self,
         url: &Url,
         headers: &Headers,
@@ -1197,6 +1300,39 @@ fn valid_cookie_domain(value: &str) -> bool {
         && !value.ends_with('.')
 }
 
+/// Validates the canonical host key used by the per-user DNS cache.
+///
+/// Cookie domains intentionally have a separate validator because their
+/// historical compatibility policy permits a small set of legacy spellings.
+/// DNS cache keys, however, must match URL host syntax: underscore labels and
+/// arbitrary punctuation would create entries that no resolver can select.
+fn valid_dns_cache_host(value: &str) -> bool {
+    if value.parse::<std::net::IpAddr>().is_ok() {
+        return true;
+    }
+    if let Some((address, zone)) = value.split_once("%25") {
+        return !address.is_empty()
+            && !zone.is_empty()
+            && zone.len() <= 64
+            && zone
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+            && address.parse::<std::net::Ipv6Addr>().is_ok();
+    }
+    if value.is_empty() || value.len() > 255 || value.ends_with('.') {
+        return false;
+    }
+    value.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= 63
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    })
+}
+
 fn is_ip_literal(value: &str) -> bool {
     value.parse::<std::net::Ipv4Addr>().is_ok() || value.parse::<std::net::Ipv6Addr>().is_ok()
 }
@@ -1397,6 +1533,13 @@ impl CacheStore {
     /// Changes the maximum number of retained entries, evicting the oldest
     /// entries first when the new bound is smaller than the current size.
     pub fn set_maximum(&mut self, maximum: usize) -> Result<(), HttpError> {
+        let mut candidate = self.clone();
+        candidate.set_maximum_in_place(maximum)?;
+        *self = candidate;
+        Ok(())
+    }
+
+    fn set_maximum_in_place(&mut self, maximum: usize) -> Result<(), HttpError> {
         if maximum == 0 {
             return Err(HttpError::resource_limit("cache capacity must be non-zero"));
         }
@@ -1453,9 +1596,13 @@ impl CacheStore {
         }
     }
 
-    /// Looks up a GET/HEAD request.
+    /// Looks up a cache-eligible GET request.
+    ///
+    /// JMeter 5.6.3's generic CacheManager defaults `cacheableMethods` to
+    /// `GET`; HEAD is deliberately not promoted to that set by this pure
+    /// manager because no method configuration is represented here.
     pub fn lookup(&self, request: &Request, now: ClockReading) -> CacheDecision {
-        if !matches!(request.method(), Method::Get | Method::Head) {
+        if *request.method() != Method::Get {
             return CacheDecision::Miss;
         }
         let Some(entry) = self
@@ -1501,14 +1648,131 @@ impl CacheStore {
         }
     }
 
-    /// Invalidates every representation for a GET/HEAD target.
+    /// Atomically applies a successful `304 Not Modified` revalidation.
+    ///
+    /// The cached representation is selected with the complete cache key,
+    /// including the request's `Vary` projection.  The 304 metadata is merged
+    /// into that exact representation and the resulting entry is replaced in
+    /// one transactional cache update.  A missing base, validator mismatch,
+    /// body-bearing 304, or metadata/size failure leaves the cache unchanged.
+    pub fn revalidate(
+        &mut self,
+        request: &Request,
+        not_modified: &Response,
+        now: ClockReading,
+    ) -> Result<Response, HttpError> {
+        if *request.method() != Method::Get {
+            return Err(HttpError::Cache("304 revalidation requires GET".to_owned()));
+        }
+        if not_modified.status() != 304 {
+            return Err(HttpError::Cache(
+                "304 revalidation requires a 304 response".to_owned(),
+            ));
+        }
+        if not_modified.body_present() {
+            return Err(HttpError::Cache(
+                "304 response must not contain an entity body".to_owned(),
+            ));
+        }
+        // Select and clone the exact stale entry before mutating anything.
+        // Revalidation must remember its original Vary projection: storing
+        // the merged response under only the new Vary key would leave the
+        // old representation reachable and would not be an atomic upsert.
+        let Some(base) = self
+            .entries
+            .iter()
+            .filter(|entry| {
+                entry.url_key == request.url().cache_key()
+                    && entry.method == *request.method()
+                    && vary_matches(entry, request)
+            })
+            .max_by_key(|entry| entry.sequence)
+            .cloned()
+        else {
+            return Err(HttpError::Cache(
+                "304 response has no matching cache base".to_owned(),
+            ));
+        };
+        if !base.requires_revalidation
+            && base.expires_at.is_some_and(|expiry| expiry > now.monotonic)
+        {
+            return Err(HttpError::Cache(
+                "304 response has no stale cache base".to_owned(),
+            ));
+        }
+        if base.etag.is_none() && base.last_modified.is_none() {
+            return Err(HttpError::Cache(
+                "304 response has no validator-bearing cache base".to_owned(),
+            ));
+        }
+        let cached = base.response.clone();
+        if let (Some(cached_etag), Some(response_etag)) = (
+            cached.headers().get("etag"),
+            not_modified.headers().get("etag"),
+        ) && cached_etag != response_etag
+        {
+            return Err(HttpError::Cache(
+                "304 validator does not match cached representation".to_owned(),
+            ));
+        }
+        if let (Some(cached_last_modified), Some(response_last_modified)) = (
+            cached.headers().get("last-modified"),
+            not_modified.headers().get("last-modified"),
+        ) && cached_last_modified != response_last_modified
+        {
+            return Err(HttpError::Cache(
+                "304 last-modified does not match cached representation".to_owned(),
+            ));
+        }
+        let merged = Response::merge_not_modified(&cached, not_modified);
+        // Revalidation is one aggregate cache delta. Stage the replacement
+        // explicitly because direct `store` preserves its legacy
+        // non-cacheable/error invalidation behavior.
+        let mut candidate = self.clone();
+        let Some(base_index) = candidate.entries.iter().position(|entry| {
+            entry.sequence == base.sequence
+                && entry.url_key == base.url_key
+                && entry.method == base.method
+                && entry.vary == base.vary
+        }) else {
+            // The source is immutable during this call, but keep the
+            // invariant explicit in case the representation model changes.
+            return Err(HttpError::Cache(
+                "304 cache base disappeared during staging".to_owned(),
+            ));
+        };
+        let removed = candidate.entries.remove(base_index);
+        candidate.current_bytes = candidate
+            .current_bytes
+            .checked_sub(removed.size_bytes)
+            .ok_or_else(|| HttpError::Cache("cache byte accounting underflow".to_owned()))?;
+        if !candidate.store_in_place(request, &merged, now)? {
+            return Err(HttpError::Cache(
+                "304 response did not produce a cacheable representation".to_owned(),
+            ));
+        }
+        *self = candidate;
+        Ok(merged)
+    }
+
+    /// Invalidates every representation for a GET target.
     ///
     /// A response that cannot safely become a cache entry must also retire an
     /// older stale representation. Keeping that representation would allow a
     /// later request to replay data that the peer explicitly marked private,
     /// no-store, malformed, or otherwise non-cacheable.
     pub fn invalidate(&mut self, request: &Request) -> Result<usize, HttpError> {
-        if !matches!(request.method(), Method::Get | Method::Head) {
+        // Invalidation is itself a state delta.  Build it against a clone so
+        // an accounting failure cannot leave the live cache partially
+        // mutated.
+        let mut candidate = self.clone();
+        let removed = candidate.invalidate_in_place(request)?;
+        *self = candidate;
+        Ok(removed)
+    }
+
+    fn invalidate_in_place(&mut self, request: &Request) -> Result<usize, HttpError> {
+        if *request.method() != Method::Get {
             return Ok(0);
         }
         let url_key = request.url().cache_key();
@@ -1537,37 +1801,51 @@ impl CacheStore {
         Ok(removed)
     }
 
-    /// Stores a cacheable successful GET/HEAD response.
+    /// Stores a cacheable successful GET response.
     pub fn store(
         &mut self,
         request: &Request,
         response: &Response,
         now: ClockReading,
     ) -> Result<bool, HttpError> {
+        // Direct manager updates retain the established invalidation behavior:
+        // a malformed or explicitly non-cacheable replacement retires the
+        // stale representation. Stage the whole operation so accounting or
+        // validation errors cannot expose an intermediate replacement; the
+        // candidate includes the deliberate invalidation before an error.
+        let mut candidate = self.clone();
+        let result = candidate.store_in_place(request, response, now);
+        *self = candidate;
+        result
+    }
+
+    fn store_in_place(
+        &mut self,
+        request: &Request,
+        response: &Response,
+        now: ClockReading,
+    ) -> Result<bool, HttpError> {
         if let Err(error) = crate::response::validate_status_code(response.status()) {
-            self.invalidate(request)?;
+            self.invalidate_in_place(request)?;
             return Err(error);
         }
         // Redirects stay on the sampler's redirect state machine.  Caching a
         // 3xx and returning it as a terminal cache hit would skip Location
         // resolution and could turn an old cross-origin redirect into a
         // credential-bearing replay.
-        if !matches!(request.method(), Method::Get | Method::Head)
-            || !(200..300).contains(&response.status())
-            || response.status() == 204
-        {
-            self.invalidate(request)?;
+        if *request.method() != Method::Get || !(200..300).contains(&response.status()) {
+            self.invalidate_in_place(request)?;
             return Ok(false);
         }
         let vary = match vary_values(response, request) {
             Ok(vary) => vary,
             Err(error) => {
-                self.invalidate(request)?;
+                self.invalidate_in_place(request)?;
                 return Err(error);
             }
         };
         if vary.iter().any(|(name, _)| name == "*") {
-            self.invalidate(request)?;
+            self.invalidate_in_place(request)?;
             return Ok(false);
         }
         if request.headers().contains("authorization")
@@ -1576,19 +1854,19 @@ impl CacheStore {
                 .values("cache-control")
                 .any(cache_control_is_public)
         {
-            self.invalidate(request)?;
+            self.invalidate_in_place(request)?;
             return Ok(false);
         }
         let entry_url_key = request.url().cache_key();
         let metadata = match cache_metadata(response, now, self.use_expires) {
             Ok(metadata) => metadata,
             Err(error) => {
-                self.invalidate(request)?;
+                self.invalidate_in_place(request)?;
                 return Err(error);
             }
         };
         let Some(metadata) = metadata else {
-            self.invalidate(request)?;
+            self.invalidate_in_place(request)?;
             return Ok(false);
         };
         let entry = CacheEntry {
@@ -1612,12 +1890,12 @@ impl CacheStore {
         entry.size_bytes = match cache_entry_size(&entry) {
             Ok(size) => size,
             Err(error) => {
-                self.invalidate(request)?;
+                self.invalidate_in_place(request)?;
                 return Err(error);
             }
         };
         if entry.size_bytes > self.maximum_bytes {
-            self.invalidate(request)?;
+            self.invalidate_in_place(request)?;
             return Ok(false);
         }
         self.next_sequence = self
@@ -1709,6 +1987,9 @@ impl CacheStore {
     /// accessor as a convenient URL-only fallback.
     #[must_use]
     pub fn cached_response(&self, request: &Request) -> Option<&Response> {
+        if *request.method() != Method::Get {
+            return None;
+        }
         self.entries
             .iter()
             .filter(|entry| {
@@ -1814,6 +2095,11 @@ fn cache_entry_size(entry: &CacheEntry) -> Result<usize, HttpError> {
     size = size
         .checked_add(entry.response.headers().checked_wire_len()?)
         .ok_or_else(|| HttpError::resource_limit("cache representation bytes"))?;
+    if let Some(trailers) = entry.response.trailers() {
+        size = size
+            .checked_add(trailers.checked_wire_len()?)
+            .ok_or_else(|| HttpError::resource_limit("cache representation bytes"))?;
+    }
     for (name, value) in &entry.vary {
         size = size
             .checked_add(name.len())
@@ -1987,6 +2273,13 @@ impl AuthEntry {
         {
             return Err(HttpError::resource_limit("authentication entry bytes"));
         }
+        if username.bytes().any(|byte| byte < 0x20 || byte == 0x7f)
+            || password.bytes().any(|byte| byte < 0x20 || byte == 0x7f)
+        {
+            return Err(HttpError::Authentication(
+                "authentication credentials contain a control byte".to_owned(),
+            ));
+        }
         let parsed = Url::parse(url_prefix.clone())?;
         let url_prefix = format!(
             "{}://{}{}",
@@ -2121,6 +2414,9 @@ impl AuthEntry {
 pub struct AuthStore {
     entries: Vec<AuthEntry>,
     maximum: usize,
+    // Credential material is intentionally absent from aggregate digests.
+    // This marker still detects same-shape replacement/eviction attempts.
+    revision: u64,
 }
 
 impl Default for AuthStore {
@@ -2128,6 +2424,7 @@ impl Default for AuthStore {
         Self {
             entries: Vec::new(),
             maximum: 128,
+            revision: 0,
         }
     }
 }
@@ -2141,7 +2438,16 @@ impl AuthStore {
         Ok(Self {
             entries: Vec::new(),
             maximum,
+            revision: 0,
         })
+    }
+
+    fn bump_revision(&mut self) -> Result<(), HttpError> {
+        self.revision = self
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| HttpError::resource_limit("authentication generation"))?;
+        Ok(())
     }
 
     /// Adds one entry, ignoring an exact duplicate URL prefix.
@@ -2165,8 +2471,13 @@ impl AuthStore {
             return Ok(());
         }
         if self.entries.len() >= self.maximum {
-            self.entries.remove(0);
+            // Unlike CacheManager, AuthManager has no specified eviction
+            // order. Dropping a configured credential would silently alter
+            // preemption and challenge behavior, so preserve the candidate
+            // unchanged and report a bounded-state error.
+            return Err(HttpError::resource_limit("authentication capacity"));
         }
+        self.bump_revision()?;
         self.entries.push(entry);
         Ok(())
     }
@@ -2216,24 +2527,51 @@ impl AuthStore {
         url: &Url,
         challenge: &str,
     ) -> Result<Option<String>, HttpError> {
-        let Some(challenge_realm) = basic_challenge_realm(challenge) else {
-            return Ok(None);
-        };
+        if let Some(challenge_realm) = basic_challenge_realm(challenge) {
+            let Some(entry) = self.first_matching(url) else {
+                return Ok(None);
+            };
+            if !realm_matches(entry, challenge_realm.as_deref()) {
+                return Ok(None);
+            }
+            if entry.mechanism != AuthMechanism::Basic {
+                return Err(HttpError::Unsupported(
+                    "non-Basic challenge authentication requires a protocol adapter".to_owned(),
+                ));
+            }
+            return Ok(Some(format!(
+                "Basic {}",
+                base64_encode(format!("{}:{}", entry.username, entry.password).as_bytes())
+            )));
+        }
+
         let Some(entry) = self.first_matching(url) else {
             return Ok(None);
         };
-        if !realm_matches(entry, challenge_realm.as_deref()) {
+        let Some(scheme) = challenge_scheme(challenge) else {
             return Ok(None);
+        };
+        if scheme.eq_ignore_ascii_case("bearer") && entry.mechanism == AuthMechanism::Bearer {
+            return Ok(Some(format!("Bearer {}", entry.password)));
         }
-        if entry.mechanism != AuthMechanism::Basic {
+        if scheme.eq_ignore_ascii_case("digest") && entry.mechanism == AuthMechanism::Digest {
             return Err(HttpError::Unsupported(
-                "non-Basic challenge authentication requires a protocol adapter".to_owned(),
+                "digest authentication requires a protocol adapter".to_owned(),
             ));
         }
-        Ok(Some(format!(
-            "Basic {}",
-            base64_encode(format!("{}:{}", entry.username, entry.password).as_bytes())
-        )))
+        if (scheme.eq_ignore_ascii_case("negotiate")
+            || scheme.eq_ignore_ascii_case("kerberos")
+            || scheme.eq_ignore_ascii_case("ntlm"))
+            && matches!(
+                entry.mechanism,
+                AuthMechanism::Kerberos | AuthMechanism::Digest
+            )
+        {
+            return Err(HttpError::Unsupported(
+                "provider authentication requires a protocol adapter".to_owned(),
+            ));
+        }
+        Ok(None)
     }
 }
 
@@ -2266,6 +2604,13 @@ fn basic_challenge_realm(challenge: &str) -> Option<Option<String>> {
         return Some(Some(realm));
     }
     None
+}
+
+fn challenge_scheme(challenge: &str) -> Option<&str> {
+    challenge
+        .split(',')
+        .next()
+        .and_then(|segment| segment.split_ascii_whitespace().next())
 }
 
 fn split_quoted_commas(value: &str) -> Vec<&str> {
@@ -2375,9 +2720,180 @@ fn base64_encode(value: &[u8]) -> String {
     output
 }
 
+/// The point at which a staged state transition becomes visible.
+///
+/// A caller selects this before dispatching an attempt.  The pure state crate
+/// does not choose between the modes; the execution layer records the chosen
+/// mode in its attempt trace and invokes the corresponding transaction
+/// boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StateCommitMode {
+    /// Drop all staged manager changes.
+    NoCommit,
+    /// Commit before dispatching the next semantic attempt (for example, a
+    /// redirect hop whose state is explicitly allowed to carry forward).
+    CommitBeforeNextAttempt,
+    /// Commit only after the selected final response succeeds.
+    CommitOnFinalSuccess,
+    /// Commit a validated deterministic merge selected by a schema identity.
+    DeterministicMerge {
+        /// Non-secret digest of the merge reducer/schema.
+        schema_digest: [u8; 32],
+    },
+}
+
+/// A stable state transaction failure.  The conflict case is deliberately
+/// distinct from manager validation failures so an execution layer can
+/// decide whether to retry, serialize, or fail the sample.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum StateCommitError {
+    /// The live state no longer matches the transaction's base generation and
+    /// digest, or the generation cannot be advanced.
+    Conflict,
+    /// The candidate manager state failed a bounded validation operation.
+    InvalidCandidate(Box<HttpError>),
+}
+
+impl StateCommitError {
+    /// Returns the stable machine-readable category.
+    #[must_use]
+    pub fn stable_code(&self) -> &'static str {
+        match self {
+            Self::Conflict => "http.state-conflict",
+            Self::InvalidCandidate(error) => error.stable_code(),
+        }
+    }
+}
+
+impl std::fmt::Display for StateCommitError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Conflict => formatter.write_str("http.state-conflict"),
+            Self::InvalidCandidate(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for StateCommitError {}
+
+impl From<HttpError> for StateCommitError {
+    fn from(error: HttpError) -> Self {
+        Self::InvalidCandidate(Box::new(error))
+    }
+}
+
+/// Whether each special HTTP manager was explicitly present in the effective
+/// configuration. An empty manager and an absent manager are observably
+/// different in JMeter: the former participates in scope/precedence, while
+/// the latter must not synthesize protocol state.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ManagerPresence {
+    /// Cookie Manager was present in the effective scope.
+    pub cookies: bool,
+    /// Cache Manager was present in the effective scope.
+    pub cache: bool,
+    /// Auth Manager was present in the effective scope.
+    pub auth: bool,
+    /// Header Manager was present in the effective scope.
+    pub headers: bool,
+    /// DNS Cache Manager was present in the effective scope.
+    pub dns: bool,
+}
+
+impl ManagerPresence {
+    /// Returns a presence set with every manager absent.
+    #[must_use]
+    pub const fn absent() -> Self {
+        Self {
+            cookies: false,
+            cache: false,
+            auth: false,
+            headers: false,
+            dns: false,
+        }
+    }
+}
+
+/// An immutable view of one aggregate per-user HTTP state generation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HttpStateSnapshot {
+    generation: u64,
+    digest: [u8; 32],
+    state: UserHttpState,
+}
+
+impl HttpStateSnapshot {
+    /// Returns the generation captured by this snapshot.
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Returns the opaque state digest captured by this snapshot.
+    #[must_use]
+    pub const fn digest(&self) -> [u8; 32] {
+        self.digest
+    }
+
+    /// Returns the immutable manager view captured by this snapshot.
+    #[must_use]
+    pub const fn state(&self) -> &UserHttpState {
+        &self.state
+    }
+}
+
+/// A candidate aggregate state based on one immutable snapshot.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StateTransaction {
+    base_generation: u64,
+    base_digest: [u8; 32],
+    candidate: UserHttpState,
+}
+
+impl StateTransaction {
+    /// Returns the transaction base generation.
+    #[must_use]
+    pub const fn base_generation(&self) -> u64 {
+        self.base_generation
+    }
+
+    /// Returns the transaction base digest.
+    #[must_use]
+    pub const fn base_digest(&self) -> [u8; 32] {
+        self.base_digest
+    }
+
+    /// Returns the candidate manager state.
+    #[must_use]
+    pub const fn state(&self) -> &UserHttpState {
+        &self.candidate
+    }
+
+    /// Mutates only the private candidate.  The live state is untouched until
+    /// [`UserHttpState::compare_and_swap`] succeeds.
+    #[must_use]
+    pub const fn state_mut(&mut self) -> &mut UserHttpState {
+        &mut self.candidate
+    }
+
+    /// Returns the candidate digest used by diagnostics and commit records.
+    #[must_use]
+    pub fn candidate_digest(&self) -> [u8; 32] {
+        self.candidate.candidate_digest()
+    }
+}
+
 /// The combined cookie/cache/auth/header state owned by one virtual user.
 #[derive(Clone, Default, Eq, PartialEq)]
 pub struct UserHttpState {
+    /// Aggregate commit generation. Prefer [`Self::generation`] for reads;
+    /// callers constructing a compatibility literal should retain the
+    /// default value of zero.
+    pub generation: u64,
+    /// Explicit manager-presence flags resolved from the effective plan
+    /// scope. Prefer [`Self::manager_presence`] and
+    /// [`Self::set_manager_presence`] for normal access.
+    pub presence: ManagerPresence,
     /// Per-user DNS metadata cache.
     pub dns: DnsCache,
     /// Cookie state.
@@ -2394,6 +2910,8 @@ impl std::fmt::Debug for UserHttpState {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("UserHttpState")
+            .field("generation", &self.generation)
+            .field("presence", &self.presence)
             .field("dns", &self.dns)
             .field("cookies", &self.cookies)
             .field("cache", &self.cache)
@@ -2424,12 +2942,124 @@ impl UserHttpState {
     /// Creates all managers with explicit finite capacities.
     pub fn new(limits: SessionLimits) -> Result<Self, HttpError> {
         Ok(Self {
+            generation: 0,
+            presence: ManagerPresence::absent(),
             dns: DnsCache::new(limits.max_dns_entries)?,
             cookies: CookieJar::new(limits.max_cookies)?,
             cache: CacheStore::with_limits(limits.max_cache_entries, limits.max_cache_bytes)?,
             auth: AuthStore::new(limits.max_auth_entries)?,
             headers: HeaderManager::new(limits.max_headers)?,
         })
+    }
+
+    /// Returns the aggregate state generation.  Generation zero is the
+    /// initial state; every successful aggregate commit advances it exactly
+    /// once.
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Returns which special managers were explicitly installed by the
+    /// effective configuration scope.
+    #[must_use]
+    pub const fn manager_presence(&self) -> ManagerPresence {
+        self.presence
+    }
+
+    /// Sets manager presence after configuration scope/precedence has been
+    /// resolved. This does not fabricate manager entries or mutate values.
+    pub const fn set_manager_presence(&mut self, presence: ManagerPresence) {
+        self.presence = presence;
+    }
+
+    /// Returns an opaque, non-secret digest of this aggregate state.
+    ///
+    /// Manager keys and values contribute bounded shape/length metadata only;
+    /// raw URLs, paths, hosts, cookie values, credentials, and header values
+    /// never enter this digest. The versioned canonical SHA-256 evidence
+    /// digest remains the `http.state-*` protocol contract.
+    #[must_use]
+    pub fn digest(&self) -> [u8; 32] {
+        state_digest(self)
+    }
+
+    /// Returns the candidate-domain digest used when this state is emitted as
+    /// the result of a staged delta.  The base and candidate domains are
+    /// intentionally distinct even when manager contents are identical.
+    #[must_use]
+    pub fn candidate_digest(&self) -> [u8; 32] {
+        state_digest_with_domain(self, b"http.state-candidate/1\0")
+    }
+
+    /// Captures one immutable aggregate view.
+    #[must_use]
+    pub fn snapshot(&self) -> HttpStateSnapshot {
+        HttpStateSnapshot {
+            generation: self.generation,
+            digest: self.digest(),
+            state: self.clone(),
+        }
+    }
+
+    /// Starts a staged candidate from the current aggregate state.
+    #[must_use]
+    pub fn begin_transaction(&self) -> StateTransaction {
+        StateTransaction {
+            base_generation: self.generation,
+            base_digest: self.digest(),
+            candidate: self.clone(),
+        }
+    }
+
+    /// Atomically replaces the aggregate with a validated candidate.
+    ///
+    /// The generation and digest are checked before any live field changes;
+    /// conflicts and generation overflow leave this value untouched.
+    pub fn compare_and_swap(
+        &mut self,
+        transaction: StateTransaction,
+    ) -> Result<(), StateCommitError> {
+        if self.generation != transaction.base_generation
+            || self.digest() != transaction.base_digest
+        {
+            return Err(StateCommitError::Conflict);
+        }
+        if transaction.candidate.generation != transaction.base_generation {
+            return Err(StateCommitError::Conflict);
+        }
+        validate_state_candidate(&transaction.candidate)?;
+        let next_generation = self
+            .generation
+            .checked_add(1)
+            .ok_or(StateCommitError::Conflict)?;
+        let mut candidate = transaction.candidate;
+        candidate.generation = next_generation;
+        *self = candidate;
+        Ok(())
+    }
+
+    /// Applies a transaction under the explicitly selected commit mode.
+    /// `NoCommit` consumes the candidate without changing the live state;
+    /// other modes use the same aggregate CAS boundary.
+    pub fn commit(
+        &mut self,
+        mode: StateCommitMode,
+        transaction: StateTransaction,
+    ) -> Result<(), StateCommitError> {
+        if matches!(mode, StateCommitMode::NoCommit) {
+            return Ok(());
+        }
+        if let StateCommitMode::DeterministicMerge { schema_digest } = mode
+            && schema_digest == [0; 32]
+        {
+            return Err(StateCommitError::InvalidCandidate(Box::new(
+                HttpError::Unsupported(
+                    "deterministic state merge requires a schema identity".to_owned(),
+                ),
+            )));
+        }
+        self.compare_and_swap(transaction)
     }
 
     /// Applies one explicit iteration lifecycle boundary.
@@ -2477,6 +3107,332 @@ impl Default for SessionLimits {
     }
 }
 
+fn validate_state_candidate(state: &UserHttpState) -> Result<(), StateCommitError> {
+    if state.dns.maximum == 0
+        || state.cookies.maximum == 0
+        || state.cache.maximum == 0
+        || state.cache.maximum_bytes == 0
+        || state.auth.maximum == 0
+        || state.headers.maximum == 0
+        || state.dns.records.len() > state.dns.maximum
+        || state.cookies.cookies.len() > state.cookies.maximum
+        || state.cookies.initial.len() > state.cookies.maximum
+        || state.cache.entries.len() > state.cache.maximum
+        || state.cache.current_bytes > state.cache.maximum_bytes
+        || state.auth.entries.len() > state.auth.maximum
+        || state.headers.headers.len() > state.headers.maximum
+    {
+        return Err(StateCommitError::InvalidCandidate(Box::new(
+            HttpError::resource_limit("HTTP aggregate state capacity"),
+        )));
+    }
+
+    if state.dns.resolver_servers.len() > 32 {
+        return Err(StateCommitError::InvalidCandidate(Box::new(
+            HttpError::resource_limit("DNS resolver server count"),
+        )));
+    }
+    for server in &state.dns.resolver_servers {
+        if server.is_empty()
+            || server.len() > 128
+            || server
+                .bytes()
+                .any(|byte| byte.is_ascii_whitespace() || byte == 0x7f)
+        {
+            return Err(StateCommitError::InvalidCandidate(Box::new(
+                HttpError::InvalidUrl("invalid DNS resolver server".to_owned()),
+            )));
+        }
+    }
+    for record in &state.dns.records {
+        if record.host.is_empty()
+            || record.host.len() > 255
+            || !valid_dns_cache_host(&record.host)
+            || record.addresses.is_empty()
+            || record.addresses.len() > 64
+            || record.addresses.iter().any(|address| {
+                address.is_empty()
+                    || address.len() > 128
+                    || address.bytes().any(|byte| byte <= 0x20 || byte == 0x7f)
+            })
+        {
+            return Err(StateCommitError::InvalidCandidate(Box::new(
+                HttpError::InvalidUrl("invalid DNS cache record".to_owned()),
+            )));
+        }
+    }
+
+    for cookie in state.cookies.cookies.iter().chain(&state.cookies.initial) {
+        if validate_cookie_pair(&cookie.name, &cookie.value).is_err()
+            || cookie.domain.is_empty()
+            || cookie.domain.len() > 255
+            || !valid_cookie_domain(&cookie.domain)
+            || cookie.path.is_empty()
+            || cookie.path.len() > 4 * 1024
+            || cookie.path.bytes().any(|byte| byte < 0x20 || byte == 0x7f)
+            || (!cookie.host_only
+                && state.cookies.check_cookies
+                && (is_ip_literal(&cookie.domain)
+                    || state
+                        .cookies
+                        .public_suffix_policy
+                        .is_public_suffix(&cookie.domain)))
+            || (state.cookies.next_creation != u64::MAX
+                && cookie.creation >= state.cookies.next_creation)
+        {
+            return Err(StateCommitError::InvalidCandidate(Box::new(
+                HttpError::Cookie("invalid cookie state candidate".to_owned()),
+            )));
+        }
+    }
+
+    let mut cache_bytes = 0usize;
+    let mut cache_sequences = Vec::new();
+    for entry in &state.cache.entries {
+        if entry.method != Method::Get
+            || !(200..300).contains(&entry.response.status())
+            || entry.url_key.len() > crate::MAX_URL_BYTES
+            || Url::parse(entry.url_key.clone()).is_err()
+            || !entry.vary.iter().all(|(name, _)| {
+                name != "*" && is_header_token(name) && *name == name.to_ascii_lowercase()
+            })
+            || cache_sequences.contains(&entry.sequence)
+        {
+            return Err(StateCommitError::InvalidCandidate(Box::new(
+                HttpError::Cache("invalid cache entry candidate".to_owned()),
+            )));
+        }
+        entry
+            .response
+            .headers()
+            .validate()
+            .map_err(|error| StateCommitError::InvalidCandidate(Box::new(error)))?;
+        if let Some(trailers) = entry.response.trailers() {
+            trailers
+                .validate()
+                .map_err(|error| StateCommitError::InvalidCandidate(Box::new(error)))?;
+        }
+        let computed_size = cache_entry_size(entry)
+            .map_err(|error| StateCommitError::InvalidCandidate(Box::new(error)))?;
+        if computed_size != entry.size_bytes {
+            return Err(StateCommitError::InvalidCandidate(Box::new(
+                HttpError::Cache("cache byte accounting mismatch".to_owned()),
+            )));
+        }
+        cache_bytes = cache_bytes.checked_add(computed_size).ok_or_else(|| {
+            StateCommitError::InvalidCandidate(Box::new(HttpError::resource_limit(
+                "cache byte accounting",
+            )))
+        })?;
+        if state.cache.next_sequence != u64::MAX && entry.sequence >= state.cache.next_sequence {
+            return Err(StateCommitError::InvalidCandidate(Box::new(
+                HttpError::Cache("cache sequence is outside candidate generation".to_owned()),
+            )));
+        }
+        cache_sequences.push(entry.sequence);
+    }
+    if cache_bytes != state.cache.current_bytes {
+        return Err(StateCommitError::InvalidCandidate(Box::new(
+            HttpError::Cache("cache byte accounting mismatch".to_owned()),
+        )));
+    }
+
+    let mut auth_scopes = Vec::new();
+    for entry in &state.auth.entries {
+        if entry.url_prefix.len() > crate::MAX_URL_BYTES
+            || entry.username.len() > 16 * 1024
+            || entry.password.len() > 16 * 1024
+            || entry
+                .username
+                .bytes()
+                .any(|byte| byte < 0x20 || byte == 0x7f)
+            || entry
+                .password
+                .bytes()
+                .any(|byte| byte < 0x20 || byte == 0x7f)
+            || !entry.realm_valid
+            || !entry.domain_valid
+            || entry
+                .realm
+                .as_ref()
+                .is_some_and(|realm| realm.len() > AuthEntry::MAX_REALM_BYTES)
+            || entry
+                .domain
+                .as_ref()
+                .is_some_and(|domain| domain.len() > AuthEntry::MAX_DOMAIN_BYTES)
+            || auth_scopes
+                .iter()
+                .any(|(origin, path): &(crate::Origin, String)| {
+                    origin == &entry.origin && path == &entry.path_prefix
+                })
+        {
+            return Err(StateCommitError::InvalidCandidate(Box::new(
+                HttpError::Authentication("invalid authentication state candidate".to_owned()),
+            )));
+        }
+        auth_scopes.push((entry.origin.clone(), entry.path_prefix.clone()));
+    }
+    state
+        .headers
+        .headers
+        .validate_with_limits(state.headers.maximum, HeaderManager::MAX_BYTES)
+        .map_err(|error| StateCommitError::InvalidCandidate(Box::new(error)))?;
+    Ok(())
+}
+
+fn state_digest(state: &UserHttpState) -> [u8; 32] {
+    state_digest_with_domain(state, b"http.state-base/1\0")
+}
+
+fn state_digest_with_domain(state: &UserHttpState, domain: &[u8]) -> [u8; 32] {
+    // This is a deterministic local digest domain. It is deliberately not a
+    // content hash for any manager value: all entries contribute only bounded
+    // shape/length metadata and non-secret mutation markers.
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(domain);
+    bytes.push(u8::from(state.presence.cookies));
+    bytes.push(u8::from(state.presence.cache));
+    bytes.push(u8::from(state.presence.auth));
+    bytes.push(u8::from(state.presence.headers));
+    bytes.push(u8::from(state.presence.dns));
+    append_digest_u64(&mut bytes, state.dns.maximum as u64);
+    bytes.push(u8::from(state.dns.custom_resolver));
+    append_digest_u64(&mut bytes, state.dns.revision);
+    append_digest_u64(&mut bytes, state.dns.resolver_servers.len() as u64);
+    for server in &state.dns.resolver_servers {
+        append_digest_u64(&mut bytes, server.len() as u64);
+    }
+    append_digest_u64(&mut bytes, state.dns.records.len() as u64);
+    for record in &state.dns.records {
+        append_digest_u64(&mut bytes, record.host.len() as u64);
+        append_digest_u64(&mut bytes, record.addresses.len() as u64);
+        for address in &record.addresses {
+            append_digest_u64(&mut bytes, address.len() as u64);
+        }
+        append_digest_duration(&mut bytes, record.expires_at);
+    }
+    append_digest_u64(&mut bytes, state.cookies.maximum as u64);
+    append_digest_u64(&mut bytes, state.cookies.initial.len() as u64);
+    append_digest_u64(&mut bytes, state.cookies.next_creation);
+    append_digest_u64(&mut bytes, state.cookies.revision);
+    append_digest_u64(
+        &mut bytes,
+        state.cookies.public_suffix_policy.suffixes.len() as u64,
+    );
+    bytes.push(u8::from(
+        state.cookies.public_suffix_policy.reject_single_label,
+    ));
+    for suffix in &state.cookies.public_suffix_policy.suffixes {
+        append_digest_u64(&mut bytes, suffix.len() as u64);
+    }
+    bytes.push(u8::from(state.cookies.check_cookies));
+    bytes.push(u8::from(state.cookies.delete_null_cookies));
+    bytes.push(u8::from(state.cookies.save_cookies));
+    append_digest_u64(&mut bytes, state.cookies.cookies.len() as u64);
+    for cookie in &state.cookies.cookies {
+        append_digest_u64(&mut bytes, cookie.name.len() as u64);
+        append_digest_u64(&mut bytes, cookie.domain.len() as u64);
+        append_digest_u64(&mut bytes, cookie.path.len() as u64);
+        append_digest_u64(&mut bytes, cookie.value.len() as u64);
+        bytes.push(u8::from(cookie.secure));
+        bytes.push(u8::from(cookie.host_only));
+        append_digest_duration_opt(&mut bytes, cookie.expires_at);
+        append_digest_u64(&mut bytes, cookie.creation);
+    }
+    append_digest_u64(&mut bytes, state.cache.entries.len() as u64);
+    for entry in &state.cache.entries {
+        append_digest_u64(&mut bytes, entry.url_key.len() as u64);
+        append_digest_u64(&mut bytes, entry.method.as_str().len() as u64);
+        append_digest_u64(&mut bytes, entry.response.status().into());
+        bytes.push(u8::from(entry.response.reason_present()));
+        append_digest_u64(&mut bytes, entry.response.body().len() as u64);
+        bytes.push(u8::from(entry.response.body_present()));
+        append_digest_u64(&mut bytes, entry.response.headers().len() as u64);
+        for header in entry.response.headers() {
+            append_digest_u64(&mut bytes, header.name().as_str().len() as u64);
+            append_digest_u64(&mut bytes, header.value().as_str().len() as u64);
+        }
+        bytes.push(u8::from(entry.response.trailers().is_some()));
+        append_digest_u64(&mut bytes, entry.sequence);
+        append_digest_u64(&mut bytes, entry.size_bytes as u64);
+    }
+    append_digest_u64(&mut bytes, state.cache.maximum as u64);
+    append_digest_u64(&mut bytes, state.cache.maximum_bytes as u64);
+    append_digest_u64(&mut bytes, state.cache.current_bytes as u64);
+    append_digest_u64(&mut bytes, state.cache.next_sequence);
+    bytes.push(u8::from(state.cache.use_expires));
+    append_digest_u64(&mut bytes, state.auth.maximum as u64);
+    append_digest_u64(&mut bytes, state.auth.revision);
+    append_digest_u64(&mut bytes, state.auth.entries.len() as u64);
+    for entry in &state.auth.entries {
+        append_digest_u64(&mut bytes, entry.url_prefix.len() as u64);
+        append_digest_u64(&mut bytes, entry.username.len() as u64);
+        append_digest_u64(&mut bytes, entry.password.len() as u64);
+        append_digest_u64(
+            &mut bytes,
+            entry.domain.as_ref().map_or(0, String::len) as u64,
+        );
+        append_digest_u64(
+            &mut bytes,
+            entry.realm.as_ref().map_or(0, String::len) as u64,
+        );
+        bytes.push(u8::from(entry.domain_valid));
+        bytes.push(u8::from(entry.realm_valid));
+        bytes.push(entry.mechanism as u8);
+    }
+    append_digest_u64(&mut bytes, state.headers.maximum as u64);
+    append_digest_u64(&mut bytes, state.headers.revision);
+    append_digest_u64(&mut bytes, state.headers.headers.len() as u64);
+    for header in &state.headers.headers {
+        append_digest_u64(&mut bytes, header.name().as_str().len() as u64);
+        append_digest_u64(&mut bytes, header.value().as_str().len() as u64);
+    }
+    digest32(&bytes)
+}
+
+fn append_digest_u64(output: &mut Vec<u8>, value: u64) {
+    output.extend_from_slice(&value.to_be_bytes());
+}
+
+fn append_digest_duration(output: &mut Vec<u8>, value: Duration) {
+    append_digest_u64(output, value.as_secs());
+    append_digest_u64(output, u64::from(value.subsec_nanos()));
+}
+
+fn append_digest_duration_opt(output: &mut Vec<u8>, value: Option<Duration>) {
+    match value {
+        Some(value) => {
+            output.push(1);
+            append_digest_duration(output, value);
+        }
+        None => output.push(0),
+    }
+}
+
+/// Small dependency-free digest used only for local state CAS identity.  It
+/// is not advertised as a cryptographic content hash; protocol evidence uses
+/// `http.state-*` canonical SHA-256 in `protocol_v1`.
+fn digest32(value: &[u8]) -> [u8; 32] {
+    let mut output = [0_u8; 32];
+    let mut lanes = [
+        0x243f_6a88_85a3_08d3_u64,
+        0x1319_8a2e_0370_7344_u64,
+        0xa409_3822_299f_31d0_u64,
+        0x082e_fa98_ec4e_6c89_u64,
+    ];
+    for (index, byte) in value.iter().copied().enumerate() {
+        let lane = index & 3;
+        lanes[lane] = lanes[lane]
+            .rotate_left(13)
+            .wrapping_add(u64::from(byte) + 0x9e37_79b9)
+            .wrapping_mul(0x1000_0000_01b3);
+    }
+    for (index, lane) in lanes.into_iter().enumerate() {
+        output[index * 8..(index + 1) * 8].copy_from_slice(&lane.to_be_bytes());
+    }
+    output
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(
@@ -2484,7 +3440,11 @@ mod tests {
         reason = "tests use expect at assertion boundaries for fixed state fixtures"
     )]
 
-    use super::{CacheDecision, CacheStore, Cookie, CookieJar, DnsCache};
+    use super::{
+        AuthEntry, AuthMechanism, AuthStore, CacheDecision, CacheStore, Cookie, CookieJar,
+        DnsCache, ManagerPresence, StateCommitError, StateCommitMode, StateLifecycle,
+        UserHttpState,
+    };
     use crate::{ClockReading, DnsConfiguration, HttpError, Request, Response, StaticDnsHost};
     use std::time::Duration;
 
@@ -2632,5 +3592,460 @@ mod tests {
             .expect_err("static mapping capacity must reject");
         assert!(matches!(error, HttpError::ResourceLimit(_)));
         assert_eq!(dns, before);
+    }
+
+    #[test]
+    fn set_cookie_response_is_atomic_when_a_later_field_is_malformed() {
+        let url = crate::Url::parse("http://example.test/").expect("URL");
+        let mut jar = CookieJar::new(4).expect("cookie jar");
+        let mut headers = crate::Headers::new();
+        headers
+            .insert("Set-Cookie", "existing=one; Path=/")
+            .expect("header");
+        jar.store_set_cookie_headers(&url, &headers, now())
+            .expect("initial cookie");
+        let before = jar.clone();
+
+        let mut malformed = crate::Headers::new();
+        malformed
+            .insert("Set-Cookie", "new=two; Path=/")
+            .expect("header");
+        malformed
+            .insert("Set-Cookie", "broken=three; Max-Age=not-a-number")
+            .expect("header");
+        assert!(
+            jar.store_set_cookie_headers(&url, &malformed, now())
+                .is_err()
+        );
+        assert_eq!(jar, before);
+    }
+
+    #[test]
+    fn cache_revalidation_requires_the_exact_stale_base_and_is_atomic() {
+        let request = Request::get("http://example.test/cache").expect("request");
+        let mut cache = CacheStore::new(4).expect("cache");
+        let stale = Response::with_body(200, b"old".to_vec())
+            .expect("response")
+            .with_header("Cache-Control", "max-age=0")
+            .expect("header")
+            .with_header("ETag", "\"v1\"")
+            .expect("header");
+        assert!(cache.store(&request, &stale, now()).expect("store"));
+
+        let not_modified = Response::new(304)
+            .with_header("Cache-Control", "max-age=30")
+            .expect("header")
+            .with_header("ETag", "\"v1\"")
+            .expect("header");
+        let merged = cache
+            .revalidate(&request, &not_modified, now())
+            .expect("revalidation");
+        assert_eq!(merged.body(), b"old");
+
+        let invalid = Response::with_body(304, b"body".to_vec()).expect("304 response");
+        let before = cache.clone();
+        assert!(cache.revalidate(&request, &invalid, now()).is_err());
+        assert_eq!(cache, before);
+    }
+
+    #[test]
+    fn cache_no_cache_forces_revalidation_even_with_positive_max_age() {
+        let request = Request::get("http://example.test/cache").expect("request");
+        let response = Response::with_body(200, b"cached".to_vec())
+            .expect("response")
+            .with_header("Cache-Control", "max-age=60, no-cache")
+            .expect("cache header")
+            .with_header("ETag", "\"v1\"")
+            .expect("etag");
+        let mut cache = CacheStore::new(4).expect("cache");
+        assert!(cache.store(&request, &response, now()).expect("store"));
+        assert!(matches!(
+            cache.lookup(&request, now()),
+            CacheDecision::Revalidate { headers, .. }
+                if headers.get("if-none-match") == Some("\"v1\"")
+        ));
+    }
+
+    #[test]
+    fn state_snapshot_cas_advances_once_and_rejects_stale_candidates() {
+        let mut state = UserHttpState::new(super::SessionLimits::default()).expect("state");
+        assert_eq!(state.manager_presence(), ManagerPresence::absent());
+        let mut transaction = state.begin_transaction();
+        transaction
+            .state_mut()
+            .set_manager_presence(ManagerPresence {
+                cookies: true,
+                ..ManagerPresence::absent()
+            });
+        state
+            .commit(StateCommitMode::CommitOnFinalSuccess, transaction)
+            .expect("commit");
+        assert_eq!(state.generation(), 1);
+        assert!(state.manager_presence().cookies);
+
+        let stale = state.begin_transaction();
+        let mut newer = state.begin_transaction();
+        newer
+            .state_mut()
+            .headers
+            .add("X-State", "one")
+            .expect("header");
+        state.compare_and_swap(newer).expect("newer transaction");
+        let before = state.clone();
+        assert_eq!(
+            state.compare_and_swap(stale),
+            Err(StateCommitError::Conflict)
+        );
+        assert_eq!(state, before);
+
+        let no_commit = state.begin_transaction();
+        state
+            .commit(StateCommitMode::NoCommit, no_commit)
+            .expect("discard candidate");
+        assert_eq!(state.generation(), before.generation());
+
+        let redirect_hop = state.begin_transaction();
+        state
+            .commit(StateCommitMode::CommitBeforeNextAttempt, redirect_hop)
+            .expect("redirect-hop commit");
+        let merged = state.begin_transaction();
+        state
+            .commit(
+                StateCommitMode::DeterministicMerge {
+                    schema_digest: [1; 32],
+                },
+                merged,
+            )
+            .expect("deterministic merge commit");
+        assert_eq!(state.generation(), before.generation() + 2);
+    }
+
+    #[test]
+    fn dns_cache_rejects_non_url_host_spellings() {
+        let mut dns = DnsCache::new(2).expect("DNS cache");
+        assert!(
+            dns.insert("fixture_test", ["192.0.2.1"], Duration::from_secs(30))
+                .is_err()
+        );
+        assert!(
+            dns.insert("-fixture.test", ["192.0.2.1"], Duration::from_secs(30))
+                .is_err()
+        );
+        assert!(
+            dns.insert("fixture.test.", ["192.0.2.1"], Duration::from_secs(30))
+                .is_err()
+        );
+        assert!(
+            dns.insert("x".repeat(256), ["192.0.2.1"], Duration::from_secs(30))
+                .is_err()
+        );
+        dns.insert("fe80::1%25eth0", ["fe80::1"], Duration::from_secs(30))
+            .expect("RFC 6874 scoped IPv6 host");
+    }
+
+    #[test]
+    fn state_digest_detects_same_shape_manager_mutation() {
+        let mut state = UserHttpState::new(super::SessionLimits::default()).expect("state");
+        assert_ne!(state.digest(), state.candidate_digest());
+        let stale = state.begin_transaction();
+        state.headers.add("X-Token", "aa").expect("header mutation");
+        assert_eq!(state.generation(), 0);
+        assert_eq!(
+            state.compare_and_swap(stale),
+            Err(StateCommitError::Conflict)
+        );
+
+        let stale = state.begin_transaction();
+        state
+            .cookies
+            .add(
+                Cookie::new("session", "bb", "example.test", "/").expect("cookie"),
+                now(),
+            )
+            .expect("cookie");
+        // A same-length cookie replacement changes no shape metadata, but it
+        // still advances the non-secret manager revision used by the digest.
+        state
+            .cookies
+            .add(
+                Cookie::new("session", "cc", "example.test", "/").expect("cookie"),
+                now(),
+            )
+            .expect("replacement");
+        assert_eq!(
+            state.compare_and_swap(stale),
+            Err(StateCommitError::Conflict)
+        );
+    }
+
+    #[test]
+    fn cloned_user_state_keeps_manager_ledgers_isolated() {
+        let mut first = UserHttpState::new(super::SessionLimits::default()).expect("state");
+        let mut second = first.clone();
+        first
+            .cookies
+            .add(
+                Cookie::new("user", "one", "example.test", "/").expect("cookie"),
+                now(),
+            )
+            .expect("cookie");
+        first.headers.add("X-User", "one").expect("header");
+        assert_eq!(second.cookies.cookies().len(), 0);
+        assert_eq!(second.headers.headers().len(), 0);
+        assert_ne!(first.digest(), second.digest());
+
+        second
+            .cookies
+            .add(
+                Cookie::new("user", "two", "example.test", "/").expect("cookie"),
+                now(),
+            )
+            .expect("cookie");
+        assert_eq!(
+            first.cookies.request_header(
+                &crate::Url::parse("http://example.test/").expect("URL"),
+                now()
+            ),
+            Ok(Some("user=one".to_owned()))
+        );
+        assert_eq!(
+            second.cookies.request_header(
+                &crate::Url::parse("http://example.test/").expect("URL"),
+                now()
+            ),
+            Ok(Some("user=two".to_owned()))
+        );
+    }
+
+    #[test]
+    fn cookie_and_auth_capacity_reject_without_eviction() {
+        let mut jar = CookieJar::new(1).expect("cookie jar");
+        jar.add(
+            Cookie::new("first", "one", "example.test", "/").expect("cookie"),
+            now(),
+        )
+        .expect("first cookie");
+        let before = jar.clone();
+        assert!(matches!(
+            jar.add(
+                Cookie::new("second", "two", "example.test", "/").expect("cookie"),
+                now()
+            ),
+            Err(HttpError::ResourceLimit(_))
+        ));
+        assert_eq!(jar, before);
+
+        let mut auth = AuthStore::new(1).expect("auth store");
+        auth.add(
+            AuthEntry::new(
+                "http://example.test/first",
+                "one",
+                "secret",
+                AuthMechanism::Basic,
+            )
+            .expect("auth entry"),
+        )
+        .expect("first auth");
+        let before = auth.clone();
+        assert!(matches!(
+            auth.add(
+                AuthEntry::new(
+                    "http://example.test/second",
+                    "two",
+                    "secret",
+                    AuthMechanism::Basic,
+                )
+                .expect("auth entry")
+            ),
+            Err(HttpError::ResourceLimit(_))
+        ));
+        assert_eq!(auth, before);
+    }
+
+    #[test]
+    fn cache_method_and_status_rules_are_explicit() {
+        let mut cache = CacheStore::new(4).expect("cache");
+        let head = Request::head("http://example.test/head").expect("HEAD request");
+        let head_response = Response::with_body(200, b"head".to_vec())
+            .expect("response")
+            .with_header("Cache-Control", "max-age=60")
+            .expect("metadata");
+        assert!(!cache.store(&head, &head_response, now()).expect("store"));
+        assert!(matches!(cache.lookup(&head, now()), CacheDecision::Miss));
+
+        let get = Request::get("http://example.test/empty").expect("GET request");
+        let empty = Response::new(204)
+            .with_header("Cache-Control", "max-age=60")
+            .expect("metadata");
+        assert!(cache.store(&get, &empty, now()).expect("204 store"));
+        assert!(matches!(cache.lookup(&get, now()), CacheDecision::Fresh(_)));
+    }
+
+    #[test]
+    fn revalidation_replaces_the_exact_vary_base() {
+        let request = Request::get("http://example.test/vary").expect("request");
+        let mut cached = Response::with_body(200, b"old".to_vec()).expect("response");
+        cached
+            .add_header("Cache-Control", "max-age=0")
+            .expect("metadata");
+        cached.add_header("ETag", "\"v1\"").expect("etag");
+        cached.add_header("Vary", "X-Mode").expect("vary");
+        let mut cache = CacheStore::new(4).expect("cache");
+        assert!(cache.store(&request, &cached, now()).expect("store"));
+
+        let not_modified = Response::new(304)
+            .with_header("Cache-Control", "max-age=30")
+            .expect("metadata")
+            .with_header("ETag", "\"v1\"")
+            .expect("etag")
+            .with_header("Vary", "X-Other")
+            .expect("vary");
+        cache
+            .revalidate(&request, &not_modified, now())
+            .expect("revalidation");
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn candidate_validation_rejects_inexact_cache_accounting_atomically() {
+        let mut state = UserHttpState::new(super::SessionLimits::default()).expect("state");
+        let mut tx = state.begin_transaction();
+        tx.state_mut().cache.current_bytes = 1;
+        let before = state.clone();
+        assert!(matches!(
+            state.compare_and_swap(tx),
+            Err(StateCommitError::InvalidCandidate(_))
+        ));
+        assert_eq!(state, before);
+    }
+
+    #[test]
+    fn state_generation_overflow_rejects_without_mutation() {
+        let mut state = UserHttpState::new(super::SessionLimits::default()).expect("state");
+        state.generation = u64::MAX;
+        let mut tx = state.begin_transaction();
+        tx.state_mut()
+            .headers
+            .add("X-State", "candidate")
+            .expect("header");
+        let before = state.clone();
+        assert_eq!(state.compare_and_swap(tx), Err(StateCommitError::Conflict));
+        assert_eq!(state, before);
+    }
+
+    #[test]
+    fn lifecycle_reset_clears_only_selected_manager_state() {
+        let mut state = UserHttpState::new(super::SessionLimits::default()).expect("state");
+        state
+            .dns
+            .insert("fixture.example", ["192.0.2.1"], Duration::from_secs(30))
+            .expect("DNS");
+        state.reset_for_iteration(StateLifecycle {
+            clear_dns_each_iteration: true,
+            ..StateLifecycle::default()
+        });
+        assert_eq!(state.generation(), 0);
+        assert_eq!(state.dns.len(now()), 0);
+        state.reset_for_iteration(StateLifecycle::default());
+        assert_eq!(state.generation(), 0);
+    }
+
+    #[test]
+    fn iteration_reset_isolated_switches_restore_or_clear_each_manager() {
+        let mut state = UserHttpState::new(super::SessionLimits::default()).expect("state");
+        state
+            .cookies
+            .add(
+                Cookie::new("initial", "one", "example.test", "/").expect("cookie"),
+                now(),
+            )
+            .expect("cookie");
+        state.cookies.capture_initial();
+        state
+            .cookies
+            .add(
+                Cookie::new("extra", "two", "example.test", "/").expect("cookie"),
+                now(),
+            )
+            .expect("cookie");
+        let request = Request::get("http://example.test/cache").expect("request");
+        let response = cacheable_response("cached");
+        state
+            .cache
+            .store(&request, &response, now())
+            .expect("cache");
+        state
+            .auth
+            .add(
+                AuthEntry::new(
+                    "http://example.test/",
+                    "user",
+                    "secret",
+                    AuthMechanism::Basic,
+                )
+                .expect("auth"),
+            )
+            .expect("auth");
+
+        state.reset_for_iteration(StateLifecycle {
+            clear_cookies_each_iteration: true,
+            clear_cache_each_iteration: true,
+            clear_auth_each_iteration: true,
+            ..StateLifecycle::default()
+        });
+        assert_eq!(state.cookies.cookies().len(), 1);
+        assert_eq!(state.cookies.cookies()[0].name(), "initial");
+        assert!(state.cache.is_empty());
+        assert!(state.auth.entries().is_empty());
+    }
+
+    #[test]
+    fn auth_and_cookie_debug_never_echo_secret_values() {
+        let mut auth = AuthStore::new(2).expect("auth store");
+        auth.add(
+            AuthEntry::new(
+                "http://example.test/",
+                "user",
+                "password-secret",
+                AuthMechanism::Bearer,
+            )
+            .expect("auth entry")
+            .domain("realm-secret"),
+        )
+        .expect("auth entry");
+        let mut jar = CookieJar::new(2).expect("cookie jar");
+        jar.add(
+            Cookie::new("sid", "cookie-secret", "example.test", "/").expect("cookie"),
+            now(),
+        )
+        .expect("cookie");
+        let debug = format!("{auth:?} {jar:?}");
+        assert!(!debug.contains("password-secret"));
+        assert!(!debug.contains("realm-secret"));
+        assert!(!debug.contains("cookie-secret"));
+    }
+
+    #[test]
+    fn provider_challenge_never_falls_back_to_basic() {
+        let mut auth = AuthStore::new(2).expect("auth store");
+        auth.add(
+            AuthEntry::new(
+                "http://example.test/",
+                "user",
+                "secret",
+                AuthMechanism::Digest,
+            )
+            .expect("auth entry"),
+        )
+        .expect("auth entry");
+        let url = crate::Url::parse("http://example.test/").expect("URL");
+        assert!(matches!(
+            auth.authorization_for_challenge(&url, "Digest realm=fixture, nonce=opaque"),
+            Err(HttpError::Unsupported(_))
+        ));
+        assert!(matches!(
+            auth.authorization_for_challenge(&url, "Basic realm=fixture"),
+            Err(HttpError::Unsupported(_))
+        ));
     }
 }

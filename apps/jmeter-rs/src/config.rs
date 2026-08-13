@@ -808,11 +808,15 @@ impl fmt::Debug for ResolvedProperty {
 #[derive(Clone, Eq, PartialEq, Default)]
 pub struct PropertyMap {
     /// A deterministic Rust-string projection of final values.  This field is
-    /// retained for callers that need the historical map shape; use
-    /// [`Self::as_java_map`] for lossless keys because an unpaired surrogate's
-    /// escaped projection can collide with a literal backslash sequence.
+    /// retained for callers that need the historical map shape.  When two
+    /// exact Java keys have the same escaped projection (for example an
+    /// unpaired surrogate and a literal `\\uXXXX` sequence), the latter
+    /// projection receives a deterministic suffix so no unknown property is
+    /// silently dropped.  Use [`Self::as_java_map`] when exact UTF-16 keys are
+    /// required.
     pub entries: BTreeMap<String, ResolvedProperty>,
     java_entries: BTreeMap<JavaString, ResolvedProperty>,
+    projection_keys: BTreeMap<JavaString, String>,
 }
 
 impl PropertyMap {
@@ -894,12 +898,14 @@ impl PropertyMap {
     ) {
         if let Some(previous) = self.java_entries.get_mut(&java_key) {
             let prior = previous.provenance.clone();
+            let projection = self.projection_keys.get(&java_key).cloned().unwrap_or(key);
             previous.overridden.insert(0, prior);
             previous.value = value;
             previous.java_key = java_key;
             previous.provenance = provenance;
-            self.entries.insert(key, previous.clone());
+            self.entries.insert(projection, previous.clone());
         } else {
+            let projection = self.unique_projection(&key, &java_key);
             let property = ResolvedProperty {
                 key: key.clone(),
                 java_key: java_key.clone(),
@@ -907,26 +913,42 @@ impl PropertyMap {
                 provenance,
                 overridden: Vec::new(),
             };
+            self.projection_keys
+                .insert(java_key.clone(), projection.clone());
             self.java_entries.insert(java_key, property.clone());
-            self.entries.insert(key, property);
+            self.entries.insert(projection, property);
         }
     }
 
     fn remove(&mut self, key: &str) {
         let java_key = JavaString::from_str(key);
         self.java_entries.remove(&java_key);
-        self.entries.remove(key);
-        // A lossless key with an unpaired surrogate can share the escaped
-        // projection with a literal `\\uXXXX` key.  Restore that projection
-        // after removing whichever exact key the caller selected.
-        if let Some(property) = self
-            .java_entries
-            .values()
-            .find(|property| property.key == key)
-            .cloned()
-        {
-            self.entries.insert(key.to_owned(), property);
+        if let Some(projection) = self.projection_keys.remove(&java_key) {
+            self.entries.remove(&projection);
         }
+    }
+
+    fn unique_projection(&self, key: &str, java_key: &JavaString) -> String {
+        if !self.entries.contains_key(key) {
+            return key.to_owned();
+        }
+
+        // Keep the ordinary projection for the first key and make a stable,
+        // inspectable projection for a colliding exact key.  The UTF-16
+        // spelling is deliberately not derived from `String::from_utf16`,
+        // which would reject an unpaired surrogate and lose the key.
+        let mut suffix = String::from("#java-utf16=");
+        for unit in java_key.units() {
+            use std::fmt::Write as _;
+            let _ = write!(suffix, "{unit:04X}");
+        }
+        let mut projection = format!("{key}{suffix}");
+        let mut disambiguator = 0_usize;
+        while self.entries.contains_key(&projection) {
+            disambiguator = disambiguator.saturating_add(1);
+            projection = format!("{key}{suffix}#{disambiguator}");
+        }
+        projection
     }
 
     /// Returns exact-key iteration without projecting surrogate code units.
@@ -1556,639 +1578,6 @@ impl ConfigPlan {
     }
 }
 
-/// Ordered, executor-neutral configuration startup phases.
-///
-/// The phase names intentionally mirror the pinned JMeter startup boundary:
-/// primary properties are available before the run log is selected, logging
-/// is initialized before the implicit user/system files are read, and only
-/// then are the remaining command-line operations applied.  This type does
-/// not read files, create logs, inspect the process environment, or start a
-/// process.  An adapter owns those capabilities and acknowledges each typed
-/// request with a [`ConfigPhaseEvent`].
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub enum ConfigPhase {
-    /// The CLI has been parsed, but no configuration request was completed.
-    Parsed,
-    /// The selected primary properties source was loaded.
-    PrimaryLoaded,
-    /// The run-log target was selected.
-    LogSelected,
-    /// The logging adapter acknowledged initialization.
-    LoggingReady,
-    /// The implicit user properties source was handled.
-    User,
-    /// The implicit system properties source was handled.
-    System,
-    /// Remaining command-line operations are being applied in order.
-    RemainingCli,
-    /// Test and result input paths were selected.
-    Inputs,
-    /// All configuration phases completed successfully.
-    Ready,
-    /// A reducer or adapter failure made the machine terminal.
-    Failed,
-}
-
-impl ConfigPhase {
-    /// Returns whether no further request may be accepted.
-    #[must_use]
-    pub const fn is_terminal(self) -> bool {
-        matches!(self, Self::Ready | Self::Failed)
-    }
-}
-
-/// The selected test/result inputs carried by the final startup request.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ConfigPhaseInputs {
-    /// Test plan path, if this mode runs a test plan.
-    pub testfile: Option<super::PathArgument>,
-    /// Result log path, if this mode writes one.
-    pub logfile: Option<super::PathArgument>,
-    /// Input JTL for report-only mode.
-    pub report_only_file: Option<String>,
-    /// Dashboard output directory.
-    pub report_output_folder: Option<String>,
-}
-
-/// A side-effect-free request made by [`ConfigPhaseMachine`].
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ConfigPhaseRequest {
-    /// Load the selected primary properties source.
-    LoadPrimary { source: ConfigSource },
-    /// Select the run-log target without creating or opening it.
-    SelectJmeterLog { target: super::LogTarget },
-    /// Ask the logging adapter to initialize against the selected target.
-    InitializeLogging {
-        /// Optional Log4j configuration path selected by `-i`.
-        config_file: Option<String>,
-        /// The target selected by the preceding request.
-        target: super::LogTarget,
-    },
-    /// Load the dynamic/default user properties source.
-    LoadUserProperties { source: ConfigSource },
-    /// A primary property explicitly disabled the user source.
-    SkipUserProperties,
-    /// Load the dynamic/default Java system properties source.
-    LoadSystemProperties { source: ConfigSource },
-    /// A primary property explicitly disabled the system source.
-    SkipSystemProperties,
-    /// Apply one remaining CLI operation, retaining its namespace and
-    /// original occurrence index in the embedded [`PropertyOperation`].
-    ApplyCli { operation: PropertyOperation },
-    /// Select paths and report inputs after all property operations finish.
-    SelectInputs { inputs: ConfigPhaseInputs },
-}
-
-impl ConfigPhaseRequest {
-    const fn expected_event(&self) -> ConfigPhaseEventKind {
-        match self {
-            Self::LoadPrimary { .. } => ConfigPhaseEventKind::PrimaryLoaded,
-            Self::SelectJmeterLog { .. } => ConfigPhaseEventKind::LogSelected,
-            Self::InitializeLogging { .. } => ConfigPhaseEventKind::LoggingReady,
-            Self::LoadUserProperties { .. } => ConfigPhaseEventKind::UserPropertiesLoaded,
-            Self::SkipUserProperties => ConfigPhaseEventKind::UserPropertiesSkipped,
-            Self::LoadSystemProperties { .. } => ConfigPhaseEventKind::SystemPropertiesLoaded,
-            Self::SkipSystemProperties => ConfigPhaseEventKind::SystemPropertiesSkipped,
-            Self::ApplyCli { .. } => ConfigPhaseEventKind::CliApplied,
-            Self::SelectInputs { .. } => ConfigPhaseEventKind::InputsSelected,
-        }
-    }
-}
-
-/// A reducer acknowledgement or explicit failure for a configuration request.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ConfigPhaseEvent {
-    /// The primary source was loaded and decoded in memory.
-    PrimaryLoaded {
-        /// The source acknowledged by the reducer.
-        source: ConfigSource,
-        /// The decoded primary map used only for selector derivation.
-        properties: PropertyMap,
-    },
-    /// The run-log target was selected.
-    LogSelected { target: super::LogTarget },
-    /// The logging adapter is ready for subsequent property loads.
-    LoggingReady {
-        /// The Log4j configuration path acknowledged by the adapter.
-        config_file: Option<String>,
-        /// The run-log target acknowledged by the adapter.
-        target: super::LogTarget,
-    },
-    /// The user properties source was loaded.
-    UserPropertiesLoaded { source: ConfigSource },
-    /// The user properties source was intentionally disabled.
-    UserPropertiesSkipped,
-    /// The Java system properties source was loaded.
-    SystemPropertiesLoaded { source: ConfigSource },
-    /// The Java system properties source was intentionally disabled.
-    SystemPropertiesSkipped,
-    /// One deferred CLI operation was applied.
-    CliApplied { operation: PropertyOperation },
-    /// The final input selection was acknowledged.
-    InputsSelected { inputs: ConfigPhaseInputs },
-    /// A capability adapter failed.  The machine becomes terminal and will
-    /// reject every later event.
-    Failed { code: &'static str },
-}
-
-impl ConfigPhaseEvent {
-    const fn kind(&self) -> Option<ConfigPhaseEventKind> {
-        Some(match self {
-            Self::PrimaryLoaded { .. } => ConfigPhaseEventKind::PrimaryLoaded,
-            Self::LogSelected { .. } => ConfigPhaseEventKind::LogSelected,
-            Self::LoggingReady { .. } => ConfigPhaseEventKind::LoggingReady,
-            Self::UserPropertiesLoaded { .. } => ConfigPhaseEventKind::UserPropertiesLoaded,
-            Self::UserPropertiesSkipped => ConfigPhaseEventKind::UserPropertiesSkipped,
-            Self::SystemPropertiesLoaded { .. } => ConfigPhaseEventKind::SystemPropertiesLoaded,
-            Self::SystemPropertiesSkipped => ConfigPhaseEventKind::SystemPropertiesSkipped,
-            Self::CliApplied { .. } => ConfigPhaseEventKind::CliApplied,
-            Self::InputsSelected { .. } => ConfigPhaseEventKind::InputsSelected,
-            Self::Failed { .. } => return None,
-        })
-    }
-}
-
-/// Stable event labels used by phase-transition errors.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ConfigPhaseEventKind {
-    /// [`ConfigPhaseEvent::PrimaryLoaded`].
-    PrimaryLoaded,
-    /// [`ConfigPhaseEvent::LogSelected`].
-    LogSelected,
-    /// [`ConfigPhaseEvent::LoggingReady`].
-    LoggingReady,
-    /// [`ConfigPhaseEvent::UserPropertiesLoaded`].
-    UserPropertiesLoaded,
-    /// [`ConfigPhaseEvent::UserPropertiesSkipped`].
-    UserPropertiesSkipped,
-    /// [`ConfigPhaseEvent::SystemPropertiesLoaded`].
-    SystemPropertiesLoaded,
-    /// [`ConfigPhaseEvent::SystemPropertiesSkipped`].
-    SystemPropertiesSkipped,
-    /// [`ConfigPhaseEvent::CliApplied`].
-    CliApplied,
-    /// [`ConfigPhaseEvent::InputsSelected`].
-    InputsSelected,
-}
-
-/// Fail-closed errors from the executor-neutral phase reducer.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ConfigPhaseError {
-    /// The event kind does not belong to the current request.
-    UnexpectedEvent {
-        /// Phase in which the event was rejected.
-        phase: ConfigPhase,
-        /// Event required by the current request, if one exists.
-        expected: Option<ConfigPhaseEventKind>,
-        /// Event supplied by the reducer.
-        actual: Option<ConfigPhaseEventKind>,
-    },
-    /// The event kind was correct but its source, target, or operation did
-    /// not exactly match the request.  Payload values are deliberately not
-    /// retained in this diagnostic.
-    PayloadMismatch {
-        /// Phase in which the payload was rejected.
-        phase: ConfigPhase,
-        /// Event whose payload did not match.
-        event: ConfigPhaseEventKind,
-    },
-    /// A capability adapter reported a stable failure code.
-    ReducerFailure {
-        /// Phase at which the capability failed.
-        phase: ConfigPhase,
-        /// Stable adapter code; no user value is embedded.
-        code: &'static str,
-    },
-    /// An event was submitted after the machine had reached a terminal phase.
-    Terminal {
-        /// The terminal phase (`Failed`).
-        phase: ConfigPhase,
-    },
-}
-
-impl ConfigPhaseError {
-    /// Returns the stable diagnostic code.
-    #[must_use]
-    pub const fn code(&self) -> &'static str {
-        match self {
-            Self::UnexpectedEvent { .. } => "config.phase-unexpected-event",
-            Self::PayloadMismatch { .. } => "config.phase-payload-mismatch",
-            Self::ReducerFailure { code, .. } => code,
-            Self::Terminal { .. } => "config.phase-terminal",
-        }
-    }
-
-    /// Returns the phase at which the error was produced.
-    #[must_use]
-    pub const fn phase(&self) -> ConfigPhase {
-        match self {
-            Self::UnexpectedEvent { phase, .. }
-            | Self::PayloadMismatch { phase, .. }
-            | Self::ReducerFailure { phase, .. }
-            | Self::Terminal { phase } => *phase,
-        }
-    }
-}
-
-impl fmt::Display for ConfigPhaseError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnexpectedEvent {
-                phase,
-                expected,
-                actual,
-            } => write!(
-                formatter,
-                "{}: unexpected event in {phase:?} (expected={expected:?}, actual={actual:?})",
-                self.code()
-            ),
-            Self::PayloadMismatch { phase, event } => {
-                write!(
-                    formatter,
-                    "{}: payload mismatch in {phase:?} ({event:?})",
-                    self.code()
-                )
-            }
-            Self::ReducerFailure { phase, code } => {
-                write!(formatter, "{code}: capability failed in {phase:?}")
-            }
-            Self::Terminal { phase } => write!(formatter, "{}: phase={phase:?}", self.code()),
-        }
-    }
-}
-
-impl Error for ConfigPhaseError {}
-
-/// Pure startup reducer for the pinned primary/logging/user/system/CLI order.
-///
-/// Constructing this machine only copies parsed CLI data into requests.  The
-/// caller supplies decoded property maps and capability acknowledgements via
-/// [`Self::advance`], making the ordering testable without filesystem,
-/// process, logger, locale, timezone, or environment side effects.
-#[derive(Clone, Debug)]
-pub struct ConfigPhaseMachine {
-    phase: ConfigPhase,
-    request: Option<ConfigPhaseRequest>,
-    terminal_error: Option<ConfigPhaseError>,
-    primary_properties: Option<PropertyMap>,
-    deferred_operations: Vec<PropertyOperation>,
-    deferred_index: usize,
-    file_names: ConfigFileNames,
-    log_config_file: Option<String>,
-    log_target: super::LogTarget,
-    inputs: ConfigPhaseInputs,
-}
-
-impl ConfigPhaseMachine {
-    /// Creates a machine using the standard implicit property filenames.
-    #[must_use]
-    pub fn from_options(options: &CliOptions) -> Self {
-        Self::from_options_with_file_names(options, ConfigFileNames::standard())
-    }
-
-    /// Creates a machine using explicit names for implicit property sources.
-    #[must_use]
-    pub fn from_options_with_file_names(options: &CliOptions, file_names: ConfigFileNames) -> Self {
-        let inputs = ConfigPhaseInputs {
-            testfile: options.testfile.clone(),
-            logfile: options.logfile.clone(),
-            report_only_file: options.report_only_file.clone(),
-            report_output_folder: options.report_output_folder.clone(),
-        };
-        let log_target = options
-            .jmeterlogfile
-            .clone()
-            .map_or(super::LogTarget::Default, super::LogTarget::Selected);
-        if !matches!(options.action, Action::Execute) {
-            return Self {
-                phase: ConfigPhase::Ready,
-                request: None,
-                terminal_error: None,
-                primary_properties: None,
-                deferred_operations: Vec::new(),
-                deferred_index: 0,
-                file_names,
-                log_config_file: options.jmeterlogconf.clone(),
-                log_target,
-                inputs,
-            };
-        }
-
-        let primary = options.propfile.as_deref().map_or_else(
-            || ConfigSource::DefaultPrimary {
-                path: PathBuf::from(&file_names.jmeter),
-            },
-            |path| ConfigSource::ExplicitPrimary {
-                path: PathBuf::from(path),
-            },
-        );
-        let deferred_operations = ConfigPlan::from_options(options)
-            .operations
-            .into_iter()
-            .filter(|operation| {
-                !matches!(
-                    operation.source,
-                    ConfigSource::DefaultPrimary { .. }
-                        | ConfigSource::ExplicitPrimary { .. }
-                        | ConfigSource::DefaultUser { .. }
-                        | ConfigSource::DefaultSystem { .. }
-                )
-            })
-            .collect();
-
-        Self {
-            phase: ConfigPhase::Parsed,
-            request: Some(ConfigPhaseRequest::LoadPrimary { source: primary }),
-            terminal_error: None,
-            primary_properties: None,
-            deferred_operations,
-            deferred_index: 0,
-            file_names,
-            log_config_file: options.jmeterlogconf.clone(),
-            log_target,
-            inputs,
-        }
-    }
-
-    /// Creates a machine from a complete parsed invocation.
-    #[must_use]
-    pub fn from_invocation(invocation: &CliInvocation) -> Self {
-        Self::from_options(&invocation.options)
-    }
-
-    /// Returns the current phase.
-    #[must_use]
-    pub const fn phase(&self) -> ConfigPhase {
-        self.phase
-    }
-
-    /// Returns the request currently awaiting an acknowledgement.
-    #[must_use]
-    pub const fn current_request(&self) -> Option<&ConfigPhaseRequest> {
-        self.request.as_ref()
-    }
-
-    /// Alias for [`Self::current_request`].
-    #[must_use]
-    pub const fn next_request(&self) -> Option<&ConfigPhaseRequest> {
-        self.current_request()
-    }
-
-    /// Returns all deferred CLI operations in their original plan order.
-    #[must_use]
-    pub fn deferred_operations(&self) -> &[PropertyOperation] {
-        &self.deferred_operations
-    }
-
-    /// Returns the first reducer error, if this machine failed closed.
-    #[must_use]
-    pub const fn terminal_error(&self) -> Option<&ConfigPhaseError> {
-        self.terminal_error.as_ref()
-    }
-
-    /// Acknowledges one request and returns the next pure request.
-    ///
-    /// Any wrong event, mismatched payload, or explicit reducer failure moves
-    /// the machine to [`ConfigPhase::Failed`].  Calls after that point return
-    /// [`ConfigPhaseError::Terminal`] and never advance.
-    pub fn advance(
-        &mut self,
-        event: ConfigPhaseEvent,
-    ) -> Result<Option<ConfigPhaseRequest>, ConfigPhaseError> {
-        if self.phase.is_terminal() {
-            return Err(ConfigPhaseError::Terminal { phase: self.phase });
-        }
-        if let ConfigPhaseEvent::Failed { code } = event {
-            return Err(self.fail(ConfigPhaseError::ReducerFailure {
-                phase: self.phase,
-                code,
-            }));
-        }
-
-        let actual = event.kind();
-        let Some(request) = self.request.clone() else {
-            return Err(self.fail(ConfigPhaseError::UnexpectedEvent {
-                phase: self.phase,
-                expected: None,
-                actual,
-            }));
-        };
-        let expected_event = request.expected_event();
-        if Some(expected_event) != actual {
-            return Err(self.fail(ConfigPhaseError::UnexpectedEvent {
-                phase: self.phase,
-                expected: Some(expected_event),
-                actual,
-            }));
-        }
-
-        match (request, event) {
-            (
-                ConfigPhaseRequest::LoadPrimary { source: expected },
-                ConfigPhaseEvent::PrimaryLoaded { source, properties },
-            ) => {
-                if source != expected {
-                    return Err(self.fail(ConfigPhaseError::PayloadMismatch {
-                        phase: self.phase,
-                        event: ConfigPhaseEventKind::PrimaryLoaded,
-                    }));
-                }
-                self.primary_properties = Some(properties);
-                self.phase = ConfigPhase::PrimaryLoaded;
-                self.request = Some(ConfigPhaseRequest::SelectJmeterLog {
-                    target: self.log_target.clone(),
-                });
-            }
-            (
-                ConfigPhaseRequest::SelectJmeterLog { target: expected },
-                ConfigPhaseEvent::LogSelected { target },
-            ) => {
-                if target != expected {
-                    return Err(self.fail(ConfigPhaseError::PayloadMismatch {
-                        phase: self.phase,
-                        event: ConfigPhaseEventKind::LogSelected,
-                    }));
-                }
-                self.phase = ConfigPhase::LogSelected;
-                self.request = Some(ConfigPhaseRequest::InitializeLogging {
-                    config_file: self.log_config_file.clone(),
-                    target: expected,
-                });
-            }
-            (
-                ConfigPhaseRequest::InitializeLogging {
-                    config_file: expected_config,
-                    target: expected_target,
-                },
-                ConfigPhaseEvent::LoggingReady {
-                    config_file,
-                    target,
-                },
-            ) => {
-                if config_file != expected_config || target != expected_target {
-                    return Err(self.fail(ConfigPhaseError::PayloadMismatch {
-                        phase: self.phase,
-                        event: ConfigPhaseEventKind::LoggingReady,
-                    }));
-                }
-                self.phase = ConfigPhase::LoggingReady;
-                self.request = Some(self.user_request());
-            }
-            (
-                ConfigPhaseRequest::LoadUserProperties { source: expected },
-                ConfigPhaseEvent::UserPropertiesLoaded { source },
-            ) => {
-                if source != expected {
-                    return Err(self.fail(ConfigPhaseError::PayloadMismatch {
-                        phase: self.phase,
-                        event: ConfigPhaseEventKind::UserPropertiesLoaded,
-                    }));
-                }
-                self.phase = ConfigPhase::User;
-                self.request = Some(self.system_request());
-            }
-            (ConfigPhaseRequest::SkipUserProperties, ConfigPhaseEvent::UserPropertiesSkipped) => {
-                self.phase = ConfigPhase::User;
-                self.request = Some(self.system_request());
-            }
-            (
-                ConfigPhaseRequest::LoadSystemProperties { source: expected },
-                ConfigPhaseEvent::SystemPropertiesLoaded { source },
-            ) => {
-                if source != expected {
-                    return Err(self.fail(ConfigPhaseError::PayloadMismatch {
-                        phase: self.phase,
-                        event: ConfigPhaseEventKind::SystemPropertiesLoaded,
-                    }));
-                }
-                self.begin_remaining_cli();
-            }
-            (
-                ConfigPhaseRequest::SkipSystemProperties,
-                ConfigPhaseEvent::SystemPropertiesSkipped,
-            ) => self.begin_remaining_cli(),
-            (
-                ConfigPhaseRequest::ApplyCli {
-                    operation: expected,
-                },
-                ConfigPhaseEvent::CliApplied { operation },
-            ) => {
-                if operation != expected
-                    || self.deferred_operations.get(self.deferred_index) != Some(&expected)
-                {
-                    return Err(self.fail(ConfigPhaseError::PayloadMismatch {
-                        phase: self.phase,
-                        event: ConfigPhaseEventKind::CliApplied,
-                    }));
-                }
-                if self.phase == ConfigPhase::System {
-                    self.phase = ConfigPhase::RemainingCli;
-                }
-                self.deferred_index += 1;
-                self.request = self
-                    .deferred_operations
-                    .get(self.deferred_index)
-                    .cloned()
-                    .map(|operation| ConfigPhaseRequest::ApplyCli { operation });
-                if self.request.is_none() {
-                    self.phase = ConfigPhase::Inputs;
-                    self.request = Some(ConfigPhaseRequest::SelectInputs {
-                        inputs: self.inputs.clone(),
-                    });
-                }
-            }
-            (
-                ConfigPhaseRequest::SelectInputs { inputs: expected },
-                ConfigPhaseEvent::InputsSelected { inputs },
-            ) => {
-                if inputs != expected {
-                    return Err(self.fail(ConfigPhaseError::PayloadMismatch {
-                        phase: self.phase,
-                        event: ConfigPhaseEventKind::InputsSelected,
-                    }));
-                }
-                self.phase = ConfigPhase::Ready;
-                self.request = None;
-            }
-            _ => {
-                return Err(self.fail(ConfigPhaseError::UnexpectedEvent {
-                    phase: self.phase,
-                    expected: Some(expected_event),
-                    actual,
-                }));
-            }
-        }
-        Ok(self.request.clone())
-    }
-
-    fn user_request(&self) -> ConfigPhaseRequest {
-        match self.primary_properties.as_ref().and_then(|properties| {
-            selected_dynamic_source(
-                properties,
-                "user.properties",
-                &self.file_names.user,
-                |path| ConfigSource::DefaultUser { path },
-            )
-        }) {
-            Some(source) => ConfigPhaseRequest::LoadUserProperties { source },
-            None => ConfigPhaseRequest::SkipUserProperties,
-        }
-    }
-
-    fn system_request(&self) -> ConfigPhaseRequest {
-        match self.primary_properties.as_ref().and_then(|properties| {
-            selected_dynamic_source(
-                properties,
-                "system.properties",
-                &self.file_names.system,
-                |path| ConfigSource::DefaultSystem { path },
-            )
-        }) {
-            Some(source) => ConfigPhaseRequest::LoadSystemProperties { source },
-            None => ConfigPhaseRequest::SkipSystemProperties,
-        }
-    }
-
-    fn begin_remaining_cli(&mut self) {
-        self.phase = ConfigPhase::System;
-        self.request = self
-            .deferred_operations
-            .first()
-            .cloned()
-            .map(|operation| ConfigPhaseRequest::ApplyCli { operation });
-        if self.request.is_none() {
-            self.phase = ConfigPhase::Inputs;
-            self.request = Some(ConfigPhaseRequest::SelectInputs {
-                inputs: self.inputs.clone(),
-            });
-        }
-    }
-
-    fn fail(&mut self, error: ConfigPhaseError) -> ConfigPhaseError {
-        self.phase = ConfigPhase::Failed;
-        self.request = None;
-        self.terminal_error = Some(error.clone());
-        error
-    }
-}
-
-/// Selects an implicit user/system source from the primary map without
-/// resolving the path or opening it.  Empty selector values disable the
-/// corresponding source, matching JMeter's startup property semantics.
-fn selected_dynamic_source(
-    primary: &PropertyMap,
-    selector: &str,
-    default_name: &str,
-    constructor: fn(PathBuf) -> ConfigSource,
-) -> Option<ConfigSource> {
-    let selected = primary.get_value(selector).unwrap_or(default_name);
-    if selected.is_empty() {
-        None
-    } else {
-        Some(constructor(PathBuf::from(selected)))
-    }
-}
-
 fn source_to_config_source(source: &PropertySource) -> ConfigSource {
     match source {
         PropertySource::ExplicitPrimary { path } => ConfigSource::ExplicitPrimary {
@@ -2216,6 +1605,13 @@ fn source_to_config_source(source: &PropertySource) -> ConfigSource {
             occurrence: *occurrence,
         },
     }
+}
+
+/// Applies Java `String.trim()` semantics to a value used as a dynamic
+/// properties-file path.  Rust's `str::trim` also removes Unicode whitespace,
+/// while Java 5.6.3 removes only code points at or below U+0020.
+fn trim_java_string(value: &str) -> &str {
+    value.trim_matches(|character| character <= '\u{0020}')
 }
 
 fn logging_from_level(level: &LogLevel, occurrence: usize) -> LoggingDirective {
@@ -2694,6 +2090,19 @@ impl ConfigLoader {
                 limit: self.limits.max_operations,
             });
         }
+        // `ConfigPlan` keeps its operation vector public for inspection and
+        // for adapters that construct a plan incrementally.  Validate the
+        // audit order before applying anything so a caller cannot create two
+        // operations with the same ordinal (or silently skip an ordinal) and
+        // then receive misleading provenance.
+        for (index, operation) in plan.operations.iter().enumerate() {
+            if operation.order != index {
+                return Err(ConfigError::InvalidOperation {
+                    order: operation.order,
+                    reason: "non-contiguous-operation-order",
+                });
+            }
+        }
         if plan.logging.directives.len() > self.limits.max_operations {
             return Err(ConfigError::LimitExceeded {
                 path: PathBuf::from("<plan>"),
@@ -2701,6 +2110,7 @@ impl ConfigLoader {
                 limit: self.limits.max_operations,
             });
         }
+        self.validate_plan_paths(plan)?;
         let mut resolved = ResolvedConfig::new();
         let mut total_properties = 0_usize;
         let mut total_provenance = 0_usize;
@@ -2723,45 +2133,58 @@ impl ConfigLoader {
                         resolved.operations.push(effective_operation);
                         continue;
                     };
+                    // Keep the selected dynamic path in the ordered audit
+                    // trail even when lookup later reports an absent
+                    // optional source.  JMeter derives the user/system path
+                    // from the primary map before attempting the read; the
+                    // original conventional placeholder is not the source
+                    // that was actually considered.
+                    effective_operation.source = source.clone();
                     let path = if dynamic_path {
                         source_path.clone()
                     } else {
                         self.source_path(&source, &source_path)
                     };
-                    let resolved_path =
-                        match self.resolve_file_path(plan, working_dir, &source, &path) {
-                            Ok(value) => value,
-                            Err(error @ ConfigError::MissingSource { .. })
-                                if matches!(source, ConfigSource::ExplicitPrimary { .. }) =>
-                            {
-                                // JMeter's explicit primary load falls back to
-                                // its ordinary jmeter.properties source.  Keep
-                                // the fallback visible in operation/provenance
-                                // instead of labeling the bytes as the missing
-                                // `-p` path.
-                                let fallback = ConfigSource::DefaultPrimary {
-                                    path: PathBuf::from(&self.file_names.jmeter),
-                                };
-                                let fallback_path =
-                                    self.source_path(&fallback, Path::new(&self.file_names.jmeter));
-                                match self.resolve_file_path(
-                                    plan,
-                                    working_dir,
-                                    &fallback,
-                                    &fallback_path,
-                                ) {
-                                    Ok(Some(value)) => {
-                                        source = fallback;
-                                        Some(value)
-                                    }
-                                    Ok(None) | Err(ConfigError::MissingSource { .. }) => {
-                                        return Err(error);
-                                    }
-                                    Err(other) => return Err(other),
+                    let resolved_path = match self.resolve_file_path(
+                        plan,
+                        working_dir,
+                        &source,
+                        &path,
+                        dynamic_path,
+                    ) {
+                        Ok(value) => value,
+                        Err(error @ ConfigError::MissingSource { .. })
+                            if matches!(source, ConfigSource::ExplicitPrimary { .. }) =>
+                        {
+                            // Keep the standalone loader's documented
+                            // default-primary fallback.  The fallback is
+                            // visible in operation/provenance rather than
+                            // labeling the bytes as the missing `-p`
+                            // source.
+                            let fallback = ConfigSource::DefaultPrimary {
+                                path: PathBuf::from(&self.file_names.jmeter),
+                            };
+                            let fallback_path =
+                                self.source_path(&fallback, Path::new(&self.file_names.jmeter));
+                            match self.resolve_file_path(
+                                plan,
+                                working_dir,
+                                &fallback,
+                                &fallback_path,
+                                false,
+                            ) {
+                                Ok(Some(value)) => {
+                                    source = fallback;
+                                    Some(value)
                                 }
+                                Ok(None) | Err(ConfigError::MissingSource { .. }) => {
+                                    return Err(error);
+                                }
+                                Err(other) => return Err(other),
                             }
-                            Err(error) => return Err(error),
-                        };
+                        }
+                        Err(error) => return Err(error),
+                    };
                     let Some(path) = resolved_path else {
                         self.record_missing_warning(&mut resolved, &source, &path);
                         resolved.operations.push(effective_operation);
@@ -2895,6 +2318,83 @@ impl ConfigLoader {
         Ok(resolved)
     }
 
+    /// Validates the bounded, structural part of a plan before any source is
+    /// opened. This keeps malformed plans fail-closed even when an optional
+    /// default source would otherwise be skipped without touching the
+    /// filesystem.
+    fn validate_plan_paths(&self, plan: &ConfigPlan) -> Result<(), ConfigError> {
+        let base_dir = plan.base_dir.as_deref().or(self.working_dir.as_deref());
+        if plan
+            .operations
+            .iter()
+            .any(|operation| matches!(operation.kind, PropertyOperationKind::LoadFile))
+            && let Some(home) = plan.jmeter_home.as_deref()
+            && home.is_relative()
+            && base_dir.is_none()
+            && self.fs_policy.root.is_none()
+        {
+            return Err(ConfigError::UnrootedPath {
+                path: home.to_owned(),
+            });
+        }
+        for operation in &plan.operations {
+            if operation.namespace != operation.source.namespace() {
+                return Err(ConfigError::InvalidOperation {
+                    order: operation.order,
+                    reason: "source-namespace-mismatch",
+                });
+            }
+            match operation.kind {
+                PropertyOperationKind::LoadFile => {
+                    let Some(path) = operation.source.path() else {
+                        return Err(ConfigError::InvalidOperation {
+                            order: operation.order,
+                            reason: "file-load-without-path",
+                        });
+                    };
+                    let display_path = if path.is_relative() {
+                        base_dir.map_or_else(|| path.to_owned(), |base| base.join(path))
+                    } else {
+                        path.to_owned()
+                    };
+                    if display_path.as_os_str().len() > self.limits.max_path_bytes {
+                        return Err(ConfigError::PathTooLong {
+                            path: display_path,
+                            limit: self.limits.max_path_bytes,
+                        });
+                    }
+                }
+                PropertyOperationKind::Remove => {
+                    let Some(key) = operation.key.as_deref() else {
+                        return Err(ConfigError::InvalidOperation {
+                            order: operation.order,
+                            reason: "remove-without-key",
+                        });
+                    };
+                    self.validate_inline_key(key)?;
+                }
+                PropertyOperationKind::Assignment | PropertyOperationKind::Proxy => {
+                    let Some(key) = operation.key.as_deref() else {
+                        return Err(ConfigError::InvalidOperation {
+                            order: operation.order,
+                            reason: "assignment-without-key",
+                        });
+                    };
+                    let Some(value) = operation.value.as_ref() else {
+                        return Err(ConfigError::InvalidOperation {
+                            order: operation.order,
+                            reason: "assignment-without-value",
+                        });
+                    };
+                    self.validate_inline_key(key)?;
+                    self.validate_inline_value(value)?;
+                }
+                PropertyOperationKind::Logging => {}
+            }
+        }
+        Ok(())
+    }
+
     /// Alias for [`ConfigLoader::resolve`].
     pub fn load(&self, plan: &ConfigPlan) -> Result<ResolvedConfig, ConfigError> {
         self.resolve(plan)
@@ -2919,7 +2419,7 @@ impl ConfigLoader {
         };
         let base = self.working_dir.as_deref();
         let resolved = self
-            .resolve_path(base, &source, &requested)?
+            .resolve_path(base, &source, &requested, false)?
             .ok_or_else(|| ConfigError::MissingSource {
                 source: source.clone(),
                 path: requested.clone(),
@@ -3129,6 +2629,15 @@ impl ConfigLoader {
             message: error.to_string(),
         })?;
         if !metadata.is_file() {
+            // JMeter treats implicit user/system files and repeatable
+            // command-line file forms as best-effort sources.  A directory
+            // (or another non-regular entry) is readable enough to pass its
+            // existence check but fails when Java opens a FileInputStream;
+            // that failure is logged and startup continues.  Keep explicit
+            // primary/read_file requests fail-closed.
+            if source.is_optional_default() || source.is_warning_source() {
+                return Ok(None);
+            }
             return Err(ConfigError::Io {
                 path: path.to_owned(),
                 message: "source is not a regular file".to_owned(),
@@ -3216,11 +2725,17 @@ impl ConfigLoader {
         match source {
             ConfigSource::DefaultUser { .. } => {
                 let property_name = "user.properties";
-                let default_path = path.to_owned();
-                let selected = resolved
-                    .jmeter
-                    .get_value(property_name)
-                    .map_or(default_path, PathBuf::from);
+                let default_path = self.source_path(source, path);
+                let Some(configured) = resolved.jmeter.get_value(property_name) else {
+                    return Some((
+                        ConfigSource::DefaultUser {
+                            path: default_path.clone(),
+                        },
+                        default_path,
+                        false,
+                    ));
+                };
+                let selected = PathBuf::from(trim_java_string(configured));
                 if selected.as_os_str().is_empty() {
                     None
                 } else {
@@ -3235,11 +2750,17 @@ impl ConfigLoader {
             }
             ConfigSource::DefaultSystem { .. } => {
                 let property_name = "system.properties";
-                let default_path = path.to_owned();
-                let selected = resolved
-                    .jmeter
-                    .get_value(property_name)
-                    .map_or(default_path, PathBuf::from);
+                let default_path = self.source_path(source, path);
+                let Some(configured) = resolved.jmeter.get_value(property_name) else {
+                    return Some((
+                        ConfigSource::DefaultSystem {
+                            path: default_path.clone(),
+                        },
+                        default_path,
+                        false,
+                    ));
+                };
+                let selected = PathBuf::from(trim_java_string(configured));
                 if selected.as_os_str().is_empty() {
                     None
                 } else {
@@ -3267,6 +2788,7 @@ impl ConfigLoader {
         working_dir: Option<&Path>,
         source: &ConfigSource,
         path: &Path,
+        dynamic_path: bool,
     ) -> Result<Option<PathBuf>, ConfigError> {
         let mut candidates = Vec::new();
         if matches!(source, ConfigSource::DefaultPrimary { .. })
@@ -3284,7 +2806,7 @@ impl ConfigLoader {
         }
 
         for candidate in candidates {
-            match self.resolve_path(working_dir, source, &candidate)? {
+            match self.resolve_path(working_dir, source, &candidate, !dynamic_path)? {
                 Some(resolved) => return Ok(Some(resolved)),
                 None => continue,
             }
@@ -3311,15 +2833,17 @@ impl ConfigLoader {
         base_dir: Option<&Path>,
         source: &ConfigSource,
         path: &Path,
+        allow_unrooted_optional: bool,
     ) -> Result<Option<PathBuf>, ConfigError> {
+        self.validate_capability_paths(base_dir)?;
         // A file source must have an explicit base/root capability.  In
         // particular, do not let fs::canonicalize below reinterpret a
         // caller's path against the process CWD.  Optional conventional
         // defaults can be absent when no filesystem capability was supplied;
-        // explicit or warning sources fail closed with a stable error
-        // instead.
+        // configured dynamic paths, explicit sources, and warning sources
+        // fail closed with a stable error instead.
         if base_dir.is_none() && self.fs_policy.root.is_none() {
-            if path.is_relative() && source.is_optional_default() {
+            if path.is_relative() && source.is_optional_default() && allow_unrooted_optional {
                 return Ok(None);
             }
             return Err(ConfigError::UnrootedPath {
@@ -3421,6 +2945,29 @@ impl ConfigLoader {
             }
         }
         Ok(Some(canonical))
+    }
+
+    fn validate_capability_paths(&self, base_dir: Option<&Path>) -> Result<(), ConfigError> {
+        if let Some(base_dir) = base_dir
+            && base_dir.is_relative()
+        {
+            return Err(ConfigError::UnrootedPath {
+                path: base_dir.to_owned(),
+            });
+        }
+        if let Some(root) = self.fs_policy.root.as_deref()
+            && root.is_relative()
+        {
+            return Err(ConfigError::UnrootedPath {
+                path: root.to_owned(),
+            });
+        }
+        for root in &self.fs_policy.additional_roots {
+            if root.is_relative() {
+                return Err(ConfigError::UnrootedPath { path: root.clone() });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -4062,7 +3609,11 @@ fn split_physical_lines(
             _ => line.push(character),
         }
     }
-    if !line.is_empty() || lines.is_empty() {
+    // An empty byte stream has no physical line.  Treating it as one blank
+    // line would make a legitimate empty optional source exceed a zero-line
+    // limit before the Java parser has a chance to observe that it contains
+    // no entries.
+    if !line.is_empty() {
         if lines.len() >= max_lines {
             return Err(ConfigError::LimitExceeded {
                 path: path.to_owned(),
@@ -4254,274 +3805,6 @@ mod tests {
         }
     }
 
-    fn reducer_event(request: ConfigPhaseRequest, primary: &PropertyMap) -> ConfigPhaseEvent {
-        match request {
-            ConfigPhaseRequest::LoadPrimary { source } => ConfigPhaseEvent::PrimaryLoaded {
-                source,
-                properties: primary.clone(),
-            },
-            ConfigPhaseRequest::SelectJmeterLog { target } => {
-                ConfigPhaseEvent::LogSelected { target }
-            }
-            ConfigPhaseRequest::InitializeLogging {
-                config_file,
-                target,
-            } => ConfigPhaseEvent::LoggingReady {
-                config_file,
-                target,
-            },
-            ConfigPhaseRequest::LoadUserProperties { source } => {
-                ConfigPhaseEvent::UserPropertiesLoaded { source }
-            }
-            ConfigPhaseRequest::SkipUserProperties => ConfigPhaseEvent::UserPropertiesSkipped,
-            ConfigPhaseRequest::LoadSystemProperties { source } => {
-                ConfigPhaseEvent::SystemPropertiesLoaded { source }
-            }
-            ConfigPhaseRequest::SkipSystemProperties => ConfigPhaseEvent::SystemPropertiesSkipped,
-            ConfigPhaseRequest::ApplyCli { operation } => {
-                ConfigPhaseEvent::CliApplied { operation }
-            }
-            ConfigPhaseRequest::SelectInputs { inputs } => {
-                ConfigPhaseEvent::InputsSelected { inputs }
-            }
-        }
-    }
-
-    #[test]
-    fn phase_machine_preserves_pinned_order_and_cli_occurrences_without_io() {
-        let invocation = crate::parse([
-            "-n",
-            "-t",
-            "plan.jmx",
-            "-l",
-            "result.jtl",
-            "-p",
-            "primary.properties",
-            "-i",
-            "log4j.xml",
-            "-j",
-            "run.log",
-            "-q",
-            "first.properties",
-            "-S",
-            "system-extra.properties",
-            "-J",
-            "jmeter.key=one",
-            "-G",
-            "remote.key=global",
-            "-D",
-            "system.key=one",
-            "-L",
-            "org.apache.jmeter=DEBUG",
-            "-q",
-            "later.properties",
-            "-J",
-            "jmeter.key=",
-        ])
-        .expect("arguments parse");
-        let mut machine = ConfigPhaseMachine::from_invocation(&invocation);
-        assert_eq!(machine.phase(), ConfigPhase::Parsed);
-        let primary = PropertyMap::new();
-        let mut phase_trace = vec![machine.phase()];
-        let mut applied = Vec::new();
-        while let Some(request) = machine.next_request().cloned() {
-            let event = reducer_event(request, &primary);
-            if let ConfigPhaseEvent::CliApplied { operation } = &event {
-                applied.push(operation.clone());
-            }
-            machine
-                .advance(event)
-                .expect("fake reducer acknowledgement");
-            if phase_trace.last() != Some(&machine.phase()) {
-                phase_trace.push(machine.phase());
-            }
-        }
-
-        assert_eq!(
-            phase_trace,
-            [
-                ConfigPhase::Parsed,
-                ConfigPhase::PrimaryLoaded,
-                ConfigPhase::LogSelected,
-                ConfigPhase::LoggingReady,
-                ConfigPhase::User,
-                ConfigPhase::System,
-                ConfigPhase::RemainingCli,
-                ConfigPhase::Inputs,
-                ConfigPhase::Ready,
-            ]
-        );
-        assert_eq!(machine.phase(), ConfigPhase::Ready);
-        assert!(machine.terminal_error().is_none());
-        assert_eq!(applied, machine.deferred_operations());
-        assert_eq!(
-            applied
-                .iter()
-                .map(|operation| operation.kind)
-                .collect::<Vec<_>>(),
-            [
-                PropertyOperationKind::LoadFile,
-                PropertyOperationKind::LoadFile,
-                PropertyOperationKind::Assignment,
-                PropertyOperationKind::Assignment,
-                PropertyOperationKind::Assignment,
-                PropertyOperationKind::Logging,
-                PropertyOperationKind::LoadFile,
-                PropertyOperationKind::Remove,
-            ]
-        );
-        assert_eq!(
-            applied
-                .iter()
-                .map(|operation| operation.namespace)
-                .collect::<Vec<_>>(),
-            [
-                ConfigNamespace::Jmeter,
-                ConfigNamespace::System,
-                ConfigNamespace::Jmeter,
-                ConfigNamespace::Global,
-                ConfigNamespace::System,
-                ConfigNamespace::System,
-                ConfigNamespace::Jmeter,
-                ConfigNamespace::Jmeter,
-            ]
-        );
-        let expected_occurrences = invocation
-            .options
-            .occurrences
-            .iter()
-            .filter(|occurrence| {
-                matches!(
-                    occurrence.id,
-                    OptionId::Addprop
-                        | OptionId::SystemPropertyFile
-                        | OptionId::Jmeterproperty
-                        | OptionId::Globalproperty
-                        | OptionId::Systemproperty
-                        | OptionId::Loglevel
-                )
-            })
-            .map(|occurrence| occurrence.index)
-            .collect::<Vec<_>>();
-        let actual_occurrences = applied
-            .iter()
-            .map(|operation| match &operation.source {
-                ConfigSource::AdditionalJmeter { occurrence, .. }
-                | ConfigSource::AdditionalSystem { occurrence, .. }
-                | ConfigSource::Global { occurrence, .. }
-                | ConfigSource::CommandLine { occurrence, .. } => *occurrence,
-                source => panic!("deferred source was not occurrence-bearing: {source:?}"),
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(actual_occurrences, expected_occurrences);
-    }
-
-    #[test]
-    fn phase_machine_derives_dynamic_sources_after_logging() {
-        let invocation =
-            crate::parse(["-n", "-t", "plan.jmx", "-J", "key=value"]).expect("arguments parse");
-        let mut machine = ConfigPhaseMachine::from_invocation(&invocation);
-        let primary = ConfigLoader::new()
-            .parse_bytes(
-                b"user.properties=selected-user.properties\nsystem.properties=selected-system.properties\n",
-                ConfigSource::ExplicitPrimary {
-                    path: PathBuf::from("memory-primary.properties"),
-                },
-            )
-            .expect("primary properties decode");
-
-        let request = machine.next_request().cloned().expect("primary request");
-        machine
-            .advance(ConfigPhaseEvent::PrimaryLoaded {
-                source: match request {
-                    ConfigPhaseRequest::LoadPrimary { source } => source,
-                    other => panic!("unexpected request: {other:?}"),
-                },
-                properties: primary,
-            })
-            .expect("primary acknowledgement");
-        let target = match machine.next_request().cloned().expect("log request") {
-            ConfigPhaseRequest::SelectJmeterLog { target } => target,
-            other => panic!("unexpected request: {other:?}"),
-        };
-        machine
-            .advance(ConfigPhaseEvent::LogSelected {
-                target: target.clone(),
-            })
-            .expect("log selection acknowledgement");
-        let (config_file, target) = match machine.next_request().cloned().expect("logging request")
-        {
-            ConfigPhaseRequest::InitializeLogging {
-                config_file,
-                target,
-            } => (config_file, target),
-            other => panic!("unexpected request: {other:?}"),
-        };
-        machine
-            .advance(ConfigPhaseEvent::LoggingReady {
-                config_file,
-                target,
-            })
-            .expect("logging acknowledgement");
-        assert_eq!(machine.phase(), ConfigPhase::LoggingReady);
-
-        let user_source = match machine.next_request().cloned().expect("user request") {
-            ConfigPhaseRequest::LoadUserProperties { source } => source,
-            other => panic!("unexpected request: {other:?}"),
-        };
-        assert_eq!(
-            user_source.path(),
-            Some(Path::new("selected-user.properties"))
-        );
-        machine
-            .advance(ConfigPhaseEvent::UserPropertiesLoaded {
-                source: user_source,
-            })
-            .expect("user acknowledgement");
-        let system_source = match machine.next_request().cloned().expect("system request") {
-            ConfigPhaseRequest::LoadSystemProperties { source } => source,
-            other => panic!("unexpected request: {other:?}"),
-        };
-        assert_eq!(
-            system_source.path(),
-            Some(Path::new("selected-system.properties"))
-        );
-        assert_eq!(machine.phase(), ConfigPhase::User);
-    }
-
-    #[test]
-    fn phase_machine_fails_closed_on_wrong_or_failed_events() {
-        let invocation = crate::parse(["-n", "-t", "plan.jmx"]).expect("arguments parse");
-        let mut wrong = ConfigPhaseMachine::from_invocation(&invocation);
-        let error = wrong
-            .advance(ConfigPhaseEvent::LoggingReady {
-                config_file: None,
-                target: crate::LogTarget::Default,
-            })
-            .expect_err("wrong event must fail");
-        assert_eq!(error.code(), "config.phase-unexpected-event");
-        assert_eq!(error.phase(), ConfigPhase::Parsed);
-        assert_eq!(wrong.phase(), ConfigPhase::Failed);
-        assert!(wrong.next_request().is_none());
-        assert_eq!(wrong.terminal_error(), Some(&error));
-        let terminal = wrong
-            .advance(ConfigPhaseEvent::Failed {
-                code: "late.failure",
-            })
-            .expect_err("failed machine must remain terminal");
-        assert_eq!(terminal.code(), "config.phase-terminal");
-
-        let mut failed = ConfigPhaseMachine::from_invocation(&invocation);
-        let error = failed
-            .advance(ConfigPhaseEvent::Failed {
-                code: "config.primary-load",
-            })
-            .expect_err("adapter failure must fail closed");
-        assert_eq!(error.code(), "config.primary-load");
-        assert_eq!(failed.phase(), ConfigPhase::Failed);
-        assert!(failed.terminal_error().is_some());
-    }
-
     #[test]
     fn java_properties_decode_comments_escapes_and_continuations() {
         let loader = ConfigLoader::new();
@@ -4549,6 +3832,24 @@ flag
     }
 
     #[test]
+    fn empty_properties_payload_has_zero_physical_lines() {
+        let loader = ConfigLoader::new().with_limits(
+            ConfigLimits::standard()
+                .with_max_lines(0)
+                .with_max_properties(0),
+        );
+        let map = loader
+            .parse_bytes(
+                b"",
+                ConfigSource::ExplicitPrimary {
+                    path: PathBuf::from("empty.properties"),
+                },
+            )
+            .expect("empty source consumes no lines or properties");
+        assert!(map.is_empty());
+    }
+
+    #[test]
     fn java_property_map_keeps_colliding_surrogate_and_literal_keys_distinct() {
         let map = ConfigLoader::new()
             .parse_bytes(
@@ -4570,6 +3871,8 @@ flag
             Some("literal")
         );
         assert_eq!(map.as_java_map().len(), 2);
+        assert_eq!(map.iter().count(), 2);
+        assert!(map.keys().any(|key| key.contains("#java-utf16=")));
     }
 
     #[test]
@@ -4722,6 +4025,51 @@ flag
             .read_file(&path)
             .expect_err("absolute reads also need an explicit filesystem capability");
         assert!(matches!(error, ConfigError::UnrootedPath { path: actual } if actual == path));
+    }
+
+    #[test]
+    fn relative_capability_paths_do_not_fall_back_to_process_cwd() {
+        let error = ConfigLoader::rooted("relative-root")
+            .read_file("relative.properties")
+            .expect_err("relative roots must not use ambient process CWD");
+        assert!(matches!(
+            error,
+            ConfigError::UnrootedPath { path } if path == Path::new("relative-root")
+        ));
+
+        let mut plan = ConfigPlan::new().with_jmeter_home("relative-home");
+        plan.push_file(ConfigSource::DefaultPrimary {
+            path: PathBuf::from("jmeter.properties"),
+        });
+        let error = ConfigLoader::new()
+            .resolve(&plan)
+            .expect_err("relative -d must not use ambient process CWD");
+        assert!(matches!(
+            error,
+            ConfigError::UnrootedPath { path } if path == Path::new("relative-home")
+        ));
+    }
+
+    #[test]
+    fn configured_dynamic_file_requires_an_explicit_filesystem_capability() {
+        let mut plan = ConfigPlan::new();
+        plan.push_assignment(
+            ConfigNamespace::Jmeter,
+            "user.properties",
+            "selected-user.properties",
+            1,
+        );
+        plan.push_file(ConfigSource::DefaultUser {
+            path: PathBuf::from("user.properties"),
+        });
+        let error = ConfigLoader::new()
+            .resolve(&plan)
+            .expect_err("configured dynamic paths must not be silently skipped");
+        assert!(matches!(
+            error,
+            ConfigError::UnrootedPath { path }
+                if path == Path::new("selected-user.properties")
+        ));
     }
 
     #[test]
@@ -4932,6 +4280,117 @@ flag
     }
 
     #[test]
+    fn dynamic_paths_trim_like_java_and_honor_custom_default_file_names() {
+        let root = TempDirectory::new();
+        let cwd = root.path.join("cwd");
+        fs::create_dir_all(&cwd).expect("working directory");
+        fs::write(
+            cwd.join("primary.properties"),
+            b"user.properties=  custom-user.properties\t\nsystem.properties=\x0ccustom-system.properties\x0c\n",
+        )
+        .expect("primary");
+        fs::write(cwd.join("custom-user.properties"), b"custom.user=yes\n").expect("custom user");
+        fs::write(cwd.join("custom-system.properties"), b"custom.system=yes\n")
+            .expect("custom system");
+
+        let mut plan = ConfigPlan::new().with_base_dir(&cwd);
+        plan.push_file(ConfigSource::ExplicitPrimary {
+            path: PathBuf::from("primary.properties"),
+        });
+        plan.push_file(ConfigSource::DefaultUser {
+            path: PathBuf::from("ignored-user.properties"),
+        });
+        plan.push_file(ConfigSource::DefaultSystem {
+            path: PathBuf::from("ignored-system.properties"),
+        });
+        let loader = ConfigLoader::rooted(&root.path).with_file_names(ConfigFileNames::new(
+            "ignored-primary.properties",
+            "custom-user.properties",
+            "custom-system.properties",
+        ));
+        let resolved = loader.resolve(&plan).expect("trimmed dynamic paths");
+        assert_eq!(resolved.jmeter.get_value("custom.user"), Some("yes"));
+        assert_eq!(resolved.system.get_value("custom.system"), Some("yes"));
+        assert_eq!(
+            resolved.operations[1].source.path(),
+            Some(Path::new("custom-user.properties"))
+        );
+        assert_eq!(
+            resolved.operations[2].source.path(),
+            Some(Path::new("custom-system.properties"))
+        );
+    }
+
+    #[test]
+    fn missing_dynamic_path_remains_selected_in_operation_provenance() {
+        let root = TempDirectory::new();
+        let cwd = root.path.join("cwd");
+        fs::create_dir_all(&cwd).expect("working directory");
+        fs::write(
+            cwd.join("primary.properties"),
+            b"user.properties=missing-user.properties\nsystem.properties=missing-system.properties\n",
+        )
+        .expect("primary");
+        let mut plan = ConfigPlan::new().with_base_dir(&cwd);
+        plan.push_file(ConfigSource::ExplicitPrimary {
+            path: PathBuf::from("primary.properties"),
+        });
+        plan.push_file(ConfigSource::DefaultUser {
+            path: PathBuf::from("user.properties"),
+        });
+        plan.push_file(ConfigSource::DefaultSystem {
+            path: PathBuf::from("system.properties"),
+        });
+        let resolved = ConfigLoader::rooted(&root.path)
+            .resolve(&plan)
+            .expect("optional dynamic files remain optional");
+        assert_eq!(
+            resolved.operations[1].source.path(),
+            Some(Path::new("missing-user.properties"))
+        );
+        assert_eq!(
+            resolved.operations[2].source.path(),
+            Some(Path::new("missing-system.properties"))
+        );
+    }
+
+    #[test]
+    fn optional_and_repeatable_directory_sources_warn_but_explicit_directory_fails() {
+        let root = TempDirectory::new();
+        fs::create_dir_all(root.path.join("user-dir")).expect("user directory");
+        fs::create_dir_all(root.path.join("q-dir")).expect("q directory");
+
+        let mut optional = ConfigPlan::new().with_base_dir(&root.path);
+        optional.push_file(ConfigSource::DefaultUser {
+            path: PathBuf::from("user-dir"),
+        });
+        optional.push_file(ConfigSource::AdditionalJmeter {
+            path: PathBuf::from("q-dir"),
+            occurrence: 1,
+        });
+        let resolved = ConfigLoader::rooted(&root.path)
+            .resolve(&optional)
+            .expect("best-effort sources");
+        assert_eq!(resolved.warnings.len(), 1);
+        assert!(matches!(
+            resolved.warnings[0],
+            ConfigWarning::MissingSource {
+                source: ConfigSource::AdditionalJmeter { .. },
+                ..
+            }
+        ));
+
+        let mut explicit = ConfigPlan::new().with_base_dir(&root.path);
+        explicit.push_file(ConfigSource::ExplicitPrimary {
+            path: PathBuf::from("q-dir"),
+        });
+        assert!(matches!(
+            ConfigLoader::rooted(&root.path).resolve(&explicit),
+            Err(ConfigError::Io { .. })
+        ));
+    }
+
+    #[test]
     fn default_user_and_system_sources_use_conventional_names_when_primary_is_silent() {
         let root = TempDirectory::new();
         let cwd = root.path.join("cwd");
@@ -5094,6 +4553,106 @@ flag
         assert_eq!(resolved.jmeter.get_value("http.proxyUser"), Some("user"));
         assert_eq!(resolved.jmeter.get_value("http.proxyPass"), Some("secret"));
         assert!(resolved.system.get_value("http.proxyPass").is_none());
+    }
+
+    #[test]
+    fn malformed_operation_order_is_rejected_before_resolution() {
+        let mut plan = ConfigPlan::new();
+        plan.push_assignment(ConfigNamespace::Jmeter, "key", "value", 1);
+        plan.operations[0].order = 9;
+        let error = ConfigLoader::new()
+            .resolve(&plan)
+            .expect_err("non-contiguous operation order must fail closed");
+        assert!(matches!(
+            error,
+            ConfigError::InvalidOperation {
+                order: 9,
+                reason: "non-contiguous-operation-order"
+            }
+        ));
+    }
+
+    #[test]
+    fn file_operation_namespace_mismatch_is_rejected_before_opening() {
+        let mut plan = ConfigPlan::new();
+        plan.push_file(ConfigSource::AdditionalSystem {
+            path: PathBuf::from("system.properties"),
+            occurrence: 1,
+        });
+        plan.operations[0].namespace = ConfigNamespace::Jmeter;
+        let error = ConfigLoader::new()
+            .resolve(&plan)
+            .expect_err("file namespace mismatch must fail closed");
+        assert!(matches!(
+            error,
+            ConfigError::InvalidOperation {
+                reason: "source-namespace-mismatch",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn inline_operation_namespace_mismatch_is_rejected_before_application() {
+        let mut plan = ConfigPlan::new();
+        plan.push_assignment(ConfigNamespace::Jmeter, "key", "value", 1);
+        plan.operations[0].namespace = ConfigNamespace::System;
+        let error = ConfigLoader::new()
+            .resolve(&plan)
+            .expect_err("inline source namespace mismatch must fail closed");
+        assert!(matches!(
+            error,
+            ConfigError::InvalidOperation {
+                reason: "source-namespace-mismatch",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn malformed_inline_operation_is_rejected_before_any_file_read() {
+        let root = TempDirectory::new();
+        let mut plan = ConfigPlan::new();
+        plan.push_file(ConfigSource::ExplicitPrimary {
+            path: PathBuf::from("missing.properties"),
+        });
+        plan.operations.push(PropertyOperation {
+            kind: PropertyOperationKind::Assignment,
+            namespace: ConfigNamespace::Jmeter,
+            source: ConfigSource::CommandLine {
+                namespace: ConfigNamespace::Jmeter,
+                occurrence: 2,
+            },
+            key: None,
+            value: None,
+            order: 1,
+        });
+        let error = ConfigLoader::rooted(&root.path)
+            .resolve(&plan)
+            .expect_err("malformed operation must win before missing-file I/O");
+        assert!(matches!(
+            error,
+            ConfigError::InvalidOperation {
+                order: 1,
+                reason: "assignment-without-key"
+            }
+        ));
+    }
+
+    #[test]
+    fn optional_source_paths_are_bounded_before_unrooted_defaults_are_skipped() {
+        let mut plan = ConfigPlan::new();
+        plan.push_file(ConfigSource::DefaultPrimary {
+            path: PathBuf::from("a-very-long-default.properties"),
+        });
+        let loader = ConfigLoader::new().with_limits(
+            ConfigLimits::standard()
+                .with_max_path_bytes("a-very-long-default.properties".len() - 1),
+        );
+        let error = loader
+            .resolve(&plan)
+            .expect_err("path bound must apply before optional-source skipping");
+        assert!(matches!(error, ConfigError::PathTooLong { .. }));
     }
 
     #[test]

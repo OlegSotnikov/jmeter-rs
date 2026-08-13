@@ -10,12 +10,27 @@
 
 #![forbid(unsafe_code)]
 
+mod builtin_factories;
 mod config;
+mod current_thread_executor;
+mod http_worker;
+mod jtl_sink;
+mod native_http_plan;
+mod native_http_run;
+mod native_v2_request;
+mod native_v2_sampler;
+mod report_input;
+mod report_policy;
+mod run_transaction;
 mod runner;
+mod time_driver;
 
 use std::ffi::{OsStr, OsString};
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::net::{IpAddr, SocketAddr};
+use std::path::{Component, Path, PathBuf};
+
+use jmeter_rs_runtime::{Digest32, ProfileIdentity, RuntimeCapabilitySet, VersionedCapability};
 
 #[cfg(all(test, unix))]
 use std::os::unix::ffi::OsStringExt;
@@ -25,6 +40,529 @@ pub const JMETER_COMPATIBILITY_VERSION: &str = "5.6.3";
 
 /// The release profile used by the command-line boundary.
 pub const JMETER_COMPATIBILITY_PROFILE: &str = "jmeter-5.6.3";
+
+/// The checked-in Decision 0009 capability projection consumed by the
+/// application-owned standalone admission boundary.
+///
+/// This is deliberately an `include_bytes!` asset.  The standalone binary
+/// must not need a profile sidecar, a build script, a JMeter distribution, or
+/// a Java runtime in order to inspect its native capability set.
+pub const STANDALONE_CAPABILITY_SET_BYTES: &[u8] =
+    include_bytes!("../../../compat/capability-sets/standalone-native.json");
+
+/// Compatibility alias for the standalone preflight projection asset.
+pub const STANDALONE_CAPABILITY_SET: &[u8] = STANDALONE_CAPABILITY_SET_BYTES;
+
+/// The active profile bytes bound to [`STANDALONE_CAPABILITY_SET_BYTES`].
+pub const JMETER_COMPATIBILITY_PROFILE_BYTES: &[u8] =
+    include_bytes!("../../../compat/profiles/jmeter-5.6.3.json");
+
+/// Compatibility alias for the standalone preflight profile asset.
+pub const STANDALONE_PROFILE_BYTES: &[u8] = JMETER_COMPATIBILITY_PROFILE_BYTES;
+
+/// Stable identity of the standalone capability projection.
+pub const STANDALONE_CAPABILITY_SET_ID: &str = "standalone-native";
+
+/// Schema/content version of the standalone capability projection.
+pub const STANDALONE_CAPABILITY_SET_VERSION: u32 = 1;
+
+/// SHA-256 of the embedded standalone capability projection.
+pub const STANDALONE_CAPABILITY_SET_SHA256: [u8; 32] = [
+    0x8d, 0xff, 0x09, 0xd9, 0x13, 0x6c, 0x90, 0xd8, 0x12, 0x63, 0xfa, 0xf3, 0xd9, 0x40, 0x50, 0x84,
+    0x27, 0xd3, 0x3f, 0xef, 0x22, 0x61, 0x35, 0xce, 0x3c, 0x35, 0xe9, 0xff, 0xfc, 0x7a, 0x64, 0xe0,
+];
+
+/// SHA-256 of the embedded Apache JMeter 5.6.3 profile.
+pub const JMETER_COMPATIBILITY_PROFILE_SHA256: [u8; 32] = [
+    0x94, 0x99, 0x03, 0xe1, 0xa4, 0x19, 0x88, 0x06, 0xab, 0x90, 0xfa, 0x61, 0x3e, 0xee, 0x1c, 0xe6,
+    0xe5, 0x50, 0xbf, 0x50, 0xfc, 0x05, 0x77, 0x61, 0x99, 0x65, 0x0f, 0x65, 0x3d, 0x82, 0x64, 0x68,
+];
+
+/// Runtime-selectable native capabilities declared by the standalone
+/// projection.  `native.test-fixtures@1` is intentionally excluded because
+/// it is evidence infrastructure, not an executable application capability.
+pub const STANDALONE_NATIVE_CAPABILITIES: &[(&str, u32)] = &[
+    ("cli.configuration", 1),
+    ("config.properties", 1),
+    ("expression.bounded", 1),
+    ("http.contract", 1),
+    ("jmx.semantic", 1),
+    ("jtl.csv", 1),
+    ("jtl.xml", 1),
+    ("results.reporting", 1),
+    ("runtime.bounded-adapters", 1),
+    ("runtime.local-plan", 1),
+];
+
+/// Projection path IDs paired with their standalone capability IDs.
+pub const STANDALONE_NATIVE_PATHS: &[(&str, &str, u32)] = &[
+    ("native.cli.configuration", "cli.configuration", 1),
+    ("native.config.properties", "config.properties", 1),
+    ("native.expr.bounded", "expression.bounded", 1),
+    ("native.http.contract", "http.contract", 1),
+    ("native.jmx.semantic", "jmx.semantic", 1),
+    ("native.jtl.csv", "jtl.csv", 1),
+    ("native.jtl.xml", "jtl.xml", 1),
+    ("native.results.reporting", "results.reporting", 1),
+    ("native.runtime.adapters", "runtime.bounded-adapters", 1),
+    ("native.runtime.local-plan", "runtime.local-plan", 1),
+];
+
+/// Hexadecimal identity of [`STANDALONE_CAPABILITY_SET_BYTES`].
+pub const STANDALONE_CAPABILITY_SET_SHA256_HEX: &str =
+    "8dff09d9136c90d81263faf3d940508427d33fef226135ce3c35e9fffc7a64e0";
+
+/// Hexadecimal identity of [`JMETER_COMPATIBILITY_PROFILE_BYTES`].
+pub const JMETER_COMPATIBILITY_PROFILE_SHA256_HEX: &str =
+    "949903e1a4198806ab90fa613eee1ce6e550bf50fc05776199650f653d826468";
+
+/// Schema/content version of the embedded active compatibility profile.
+pub const JMETER_COMPATIBILITY_PROFILE_VERSION: u32 = 2;
+
+/// A stable failure while validating the checked-in standalone projection.
+///
+/// The application validates the projection and its parent profile before
+/// handing an identity to the runner or whole-plan preflight.  A malformed,
+/// replaced, or mismatched asset therefore fails closed instead of silently
+/// selecting a different capability set.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum StandaloneManifestError {
+    /// An embedded asset is not valid UTF-8 JSON text.
+    InvalidUtf8 {
+        /// Human-readable embedded asset name.
+        asset: &'static str,
+    },
+    /// An embedded asset does not match its pinned digest.
+    DigestMismatch {
+        /// Human-readable embedded asset name.
+        asset: &'static str,
+    },
+    /// An expected stable projection/profile field is absent.
+    MissingMarker {
+        /// Human-readable embedded asset name.
+        asset: &'static str,
+        /// Stable JSON marker that was expected.
+        marker: &'static str,
+    },
+    /// A native capability declaration is absent from the projection.
+    MissingNativeCapability {
+        /// Capability identifier that was expected.
+        capability: &'static str,
+        /// Capability declaration version that was expected.
+        version: u32,
+    },
+    /// The active profile identity cannot be constructed.
+    ProfileIdentity(jmeter_rs_runtime::CapabilityIdentityError),
+    /// A native capability identity cannot be constructed.
+    CapabilityIdentity {
+        /// Capability identifier being validated.
+        capability: &'static str,
+        /// Underlying bounded runtime identity error.
+        source: jmeter_rs_runtime::CapabilityIdentityError,
+    },
+    /// The complete runtime capability set cannot be constructed.
+    CapabilitySetIdentity(jmeter_rs_runtime::CapabilityIdentityError),
+}
+
+impl StandaloneManifestError {
+    /// Returns a stable machine-readable error code.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::InvalidUtf8 { .. } => "capability.manifest.encoding",
+            Self::DigestMismatch { .. } => "capability.manifest.digest",
+            Self::MissingMarker { .. } | Self::MissingNativeCapability { .. } => {
+                "capability.manifest.invalid"
+            }
+            Self::ProfileIdentity(_) => "capability.profile.invalid",
+            Self::CapabilityIdentity { .. } => "capability.native.invalid",
+            Self::CapabilitySetIdentity(_) => "capability.set.invalid",
+        }
+    }
+
+    /// Returns the process classification for a rejected projection.
+    #[must_use]
+    pub const fn exit_class(&self) -> ExitClass {
+        ExitClass::UnsupportedCapability
+    }
+
+    /// Returns the process status for a rejected projection.
+    #[must_use]
+    pub const fn exit_code(&self) -> u8 {
+        self.exit_class().exit_code()
+    }
+}
+
+impl fmt::Display for StandaloneManifestError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidUtf8 { asset } | Self::DigestMismatch { asset } => {
+                write!(formatter, "{}: {asset}", self.code())
+            }
+            Self::MissingMarker { asset, marker } => {
+                write!(formatter, "{}: {asset} missing {marker}", self.code())
+            }
+            Self::MissingNativeCapability {
+                capability,
+                version,
+            } => write!(formatter, "{}: native.{capability}@{version}", self.code()),
+            Self::ProfileIdentity(error) | Self::CapabilitySetIdentity(error) => {
+                write!(formatter, "{}: {error}", self.code())
+            }
+            Self::CapabilityIdentity { capability, source } => {
+                write!(formatter, "{}: native.{capability}: {source}", self.code())
+            }
+        }
+    }
+}
+
+impl std::error::Error for StandaloneManifestError {}
+
+/// The validated identity consumed by standalone runner/preflight code.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StandaloneManifestIdentity {
+    /// Stable capability-set identifier.
+    pub capability_set_id: &'static str,
+    /// Capability-set schema/content version.
+    pub capability_set_version: u32,
+    /// Exact active compatibility profile identity.
+    pub profile: ProfileIdentity,
+    /// Digest of the checked-in projection bytes.
+    pub capability_set_digest: Digest32,
+}
+
+impl StandaloneManifestIdentity {
+    /// Returns the projection digest as a fixed-size value.
+    #[must_use]
+    pub const fn capability_set_digest(&self) -> Digest32 {
+        self.capability_set_digest
+    }
+
+    /// Returns the exact active profile identity.
+    #[must_use]
+    pub const fn profile(&self) -> &ProfileIdentity {
+        &self.profile
+    }
+}
+
+/// Returns the embedded standalone projection without consulting the
+/// filesystem or environment.
+#[must_use]
+pub const fn standalone_capability_set_bytes() -> &'static [u8] {
+    STANDALONE_CAPABILITY_SET_BYTES
+}
+
+/// Returns the embedded active profile without consulting the filesystem or
+/// environment.
+#[must_use]
+pub const fn compatibility_profile_bytes() -> &'static [u8] {
+    JMETER_COMPATIBILITY_PROFILE_BYTES
+}
+
+/// Returns the digest of the embedded standalone projection bytes.
+#[must_use]
+pub fn standalone_capability_set_digest() -> Digest32 {
+    Digest32::from_bytes(sha256_bytes(STANDALONE_CAPABILITY_SET_BYTES))
+}
+
+/// Returns the digest of the embedded active profile bytes.
+#[must_use]
+pub fn compatibility_profile_digest() -> Digest32 {
+    Digest32::from_bytes(sha256_bytes(JMETER_COMPATIBILITY_PROFILE_BYTES))
+}
+
+/// Validates and returns the checked-in standalone projection identity.
+///
+/// This performs no I/O.  Both assets are compile-time embedded, and their
+/// exact bytes, parent relationship, Decision 0009 constraints, and native
+/// capability declarations are checked before an identity is returned.
+pub fn standalone_manifest_identity() -> Result<StandaloneManifestIdentity, StandaloneManifestError>
+{
+    let projection = std::str::from_utf8(STANDALONE_CAPABILITY_SET_BYTES).map_err(|_| {
+        StandaloneManifestError::InvalidUtf8 {
+            asset: "standalone capability projection",
+        }
+    })?;
+    let profile = std::str::from_utf8(JMETER_COMPATIBILITY_PROFILE_BYTES).map_err(|_| {
+        StandaloneManifestError::InvalidUtf8 {
+            asset: "jmeter compatibility profile",
+        }
+    })?;
+
+    if standalone_capability_set_digest().as_bytes() != STANDALONE_CAPABILITY_SET_SHA256 {
+        return Err(StandaloneManifestError::DigestMismatch {
+            asset: "standalone capability projection",
+        });
+    }
+    if compatibility_profile_digest().as_bytes() != JMETER_COMPATIBILITY_PROFILE_SHA256 {
+        return Err(StandaloneManifestError::DigestMismatch {
+            asset: "jmeter compatibility profile",
+        });
+    }
+
+    for marker in [
+        "\"schema_id\": \"jmeter-rs.capability-set-projection\"",
+        "\"schema_version\": 1",
+        "\"capability_set_id\": \"standalone-native\"",
+        "\"capability_set_version\": 1",
+        "\"id\": \"0009\"",
+        "\"include_bytes_compatible\": true",
+        "\"build_script_required\": false",
+        "\"unknown_fields\": \"reject\"",
+        "\"java_runtime_required\": false",
+        "\"jmeter_distribution_required\": false",
+        "\"helper_executable_required\": false",
+        "\"implicit_java_discovery\": false",
+        "\"implicit_fallback\": false",
+        "\"sha256\": \"949903e1a4198806ab90fa613eee1ce6e550bf50fc05776199650f653d826468\"",
+    ] {
+        if !projection.contains(marker) {
+            return Err(StandaloneManifestError::MissingMarker {
+                asset: "standalone capability projection",
+                marker,
+            });
+        }
+    }
+    for marker in [
+        "\"schema_id\": \"jmeter-rs.compatibility-profile\"",
+        "\"profile_id\": \"jmeter-5.6.3\"",
+        "\"profile_version\": 2",
+        "\"source_commit\": \"34a2785748e9e0b14702595e8682c387869deda3\"",
+    ] {
+        if !profile.contains(marker) {
+            return Err(StandaloneManifestError::MissingMarker {
+                asset: "jmeter compatibility profile",
+                marker,
+            });
+        }
+    }
+    for &(path_id, capability, version) in STANDALONE_NATIVE_PATHS {
+        let path_marker = format!("\"path_id\": \"{path_id}@{version}\"");
+        let id_marker = format!("\"capability_id\": \"{capability}\"");
+        if !projection.contains(path_marker.as_str()) || !projection.contains(id_marker.as_str()) {
+            return Err(StandaloneManifestError::MissingNativeCapability {
+                capability,
+                version,
+            });
+        }
+    }
+
+    let profile_identity = ProfileIdentity::new(
+        JMETER_COMPATIBILITY_PROFILE,
+        JMETER_COMPATIBILITY_PROFILE_VERSION,
+        Digest32::from_bytes(JMETER_COMPATIBILITY_PROFILE_SHA256),
+    )
+    .map_err(StandaloneManifestError::ProfileIdentity)?;
+    Ok(StandaloneManifestIdentity {
+        capability_set_id: STANDALONE_CAPABILITY_SET_ID,
+        capability_set_version: STANDALONE_CAPABILITY_SET_VERSION,
+        profile: profile_identity,
+        capability_set_digest: Digest32::from_bytes(STANDALONE_CAPABILITY_SET_SHA256),
+    })
+}
+
+/// Alias used by callers that phrase validation as an explicit operation.
+pub fn validate_standalone_manifest() -> Result<StandaloneManifestIdentity, StandaloneManifestError>
+{
+    standalone_manifest_identity()
+}
+
+/// Builds the no-Java standalone runtime capability set for one executable
+/// plan digest.  The caller must still classify the complete implementation
+/// path manifest with [`RuntimeCapabilitySet::admit`] before setup.
+pub fn standalone_runtime_capability_set(
+    plan_digest: Digest32,
+) -> Result<RuntimeCapabilitySet, StandaloneManifestError> {
+    let identity = standalone_manifest_identity()?;
+    let capabilities = STANDALONE_NATIVE_CAPABILITIES
+        .iter()
+        .map(|&(capability, version)| {
+            VersionedCapability::new(capability, version).map_err(|source| {
+                StandaloneManifestError::CapabilityIdentity { capability, source }
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    RuntimeCapabilitySet::standalone_native(
+        identity.profile,
+        plan_digest,
+        identity.capability_set_digest,
+        capabilities,
+    )
+    .map_err(StandaloneManifestError::CapabilitySetIdentity)
+}
+
+/// Alias for the explicit native capability-set constructor.
+pub fn standalone_native_capability_set(
+    plan_digest: Digest32,
+) -> Result<RuntimeCapabilitySet, StandaloneManifestError> {
+    standalone_runtime_capability_set(plan_digest)
+}
+
+// SHA-256 is kept local so the standalone application does not acquire a
+// crypto/native dependency solely to authenticate its checked-in assets.
+// This is the FIPS 180-4 padded, big-endian 512-bit block construction.
+fn sha256_bytes(bytes: &[u8]) -> [u8; 32] {
+    let mut state = [
+        0x6a09_e667,
+        0xbb67_ae85,
+        0x3c6e_f372,
+        0xa54f_f53a,
+        0x510e_527f,
+        0x9b05_688c,
+        0x1f83_d9ab,
+        0x5be0_cd19,
+    ];
+    let mut block = [0_u8; 64];
+    let mut used = 0_usize;
+    for byte in bytes {
+        block[used] = *byte;
+        used += 1;
+        if used == block.len() {
+            sha256_compress(&mut state, &block);
+            used = 0;
+        }
+    }
+
+    block[used] = 0x80;
+    used += 1;
+    if used > 56 {
+        block[used..].fill(0);
+        sha256_compress(&mut state, &block);
+        block.fill(0);
+    } else {
+        block[used..56].fill(0);
+    }
+    let bit_len = (bytes.len() as u64).wrapping_mul(8);
+    block[56..].copy_from_slice(&bit_len.to_be_bytes());
+    sha256_compress(&mut state, &block);
+
+    let mut digest = [0_u8; 32];
+    for (index, word) in state.into_iter().enumerate() {
+        digest[index * 4..index * 4 + 4].copy_from_slice(&word.to_be_bytes());
+    }
+    digest
+}
+
+#[allow(
+    clippy::many_single_char_names,
+    reason = "SHA-256 compression notation follows the standard"
+)]
+fn sha256_compress(state: &mut [u32; 8], block: &[u8; 64]) {
+    const ROUND_CONSTANTS: [u32; 64] = [
+        0x428a_2f98,
+        0x7137_4491,
+        0xb5c0_fbcf,
+        0xe9b5_dba5,
+        0x3956_c25b,
+        0x59f1_11f1,
+        0x923f_82a4,
+        0xab1c_5ed5,
+        0xd807_aa98,
+        0x1283_5b01,
+        0x2431_85be,
+        0x550c_7dc3,
+        0x72be_5d74,
+        0x80de_b1fe,
+        0x9bdc_06a7,
+        0xc19b_f174,
+        0xe49b_69c1,
+        0xefbe_4786,
+        0x0fc1_9dc6,
+        0x240c_a1cc,
+        0x2de9_2c6f,
+        0x4a74_84aa,
+        0x5cb0_a9dc,
+        0x76f9_88da,
+        0x983e_5152,
+        0xa831_c66d,
+        0xb003_27c8,
+        0xbf59_7fc7,
+        0xc6e0_0bf3,
+        0xd5a7_9147,
+        0x06ca_6351,
+        0x1429_2967,
+        0x27b7_0a85,
+        0x2e1b_2138,
+        0x4d2c_6dfc,
+        0x5338_0d13,
+        0x650a_7354,
+        0x766a_0abb,
+        0x81c2_c92e,
+        0x9272_2c85,
+        0xa2bf_e8a1,
+        0xa81a_664b,
+        0xc24b_8b70,
+        0xc76c_51a3,
+        0xd192_e819,
+        0xd699_0624,
+        0xf40e_3585,
+        0x106a_a070,
+        0x19a4_c116,
+        0x1e37_6c08,
+        0x2748_774c,
+        0x34b0_bcb5,
+        0x391c_0cb3,
+        0x4ed8_aa4a,
+        0x5b9c_ca4f,
+        0x682e_6ff3,
+        0x748f_82ee,
+        0x78a5_636f,
+        0x84c8_7814,
+        0x8cc7_0208,
+        0x90be_fffa,
+        0xa450_6ceb,
+        0xbef9_a3f7,
+        0xc671_78f2,
+    ];
+    let mut schedule = [0_u32; 64];
+    for (index, word) in schedule.iter_mut().enumerate().take(16) {
+        let offset = index * 4;
+        *word = u32::from_be_bytes([
+            block[offset],
+            block[offset + 1],
+            block[offset + 2],
+            block[offset + 3],
+        ]);
+    }
+    for index in 16..64 {
+        let lower = schedule[index - 15];
+        let upper = schedule[index - 2];
+        let sigma0 = lower.rotate_right(7) ^ lower.rotate_right(18) ^ (lower >> 3);
+        let sigma1 = upper.rotate_right(17) ^ upper.rotate_right(19) ^ (upper >> 10);
+        schedule[index] = schedule[index - 16]
+            .wrapping_add(sigma0)
+            .wrapping_add(schedule[index - 7])
+            .wrapping_add(sigma1);
+    }
+
+    let mut working = *state;
+    for index in 0..64 {
+        let [a, b, c, d, e, f, g, h] = working;
+        let sigma1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+        let choose = (e & f) ^ ((!e) & g);
+        let temporary1 = h
+            .wrapping_add(sigma1)
+            .wrapping_add(choose)
+            .wrapping_add(ROUND_CONSTANTS[index])
+            .wrapping_add(schedule[index]);
+        let sigma0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+        let majority = (a & b) ^ (a & c) ^ (b & c);
+        let temporary2 = sigma0.wrapping_add(majority);
+        working = [
+            temporary1.wrapping_add(temporary2),
+            a,
+            b,
+            c,
+            d.wrapping_add(temporary1),
+            e,
+            f,
+            g,
+        ];
+    }
+    for (state_word, working_word) in state.iter_mut().zip(working) {
+        *state_word = state_word.wrapping_add(working_word);
+    }
+}
 
 pub use config::{
     ConfigError, ConfigFileNames, ConfigFsPolicy, ConfigLimits, ConfigLoader, ConfigNamespace,
@@ -583,7 +1121,7 @@ impl fmt::Display for ExitClass {
 }
 
 /// A parser or semantic-validation error with a stable category.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum CliError {
     /// An option that requires an argument was not followed by one.
     MissingValue {
@@ -753,21 +1291,86 @@ impl CliError {
     }
 }
 
+impl fmt::Debug for CliError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingValue { option, spelling } => formatter
+                .debug_struct("MissingValue")
+                .field("option", option)
+                .field("spelling", &redact_option_spelling(*option, spelling))
+                .finish(),
+            Self::UnknownOption { token } => formatter
+                .debug_struct("UnknownOption")
+                .field("token", &redact_cli_token(token))
+                .finish(),
+            Self::UnexpectedArgument { argument } => formatter
+                .debug_struct("UnexpectedArgument")
+                .field("argument", &redact_cli_token(argument))
+                .finish(),
+            Self::DuplicateOption { option, spelling } => formatter
+                .debug_struct("DuplicateOption")
+                .field("option", option)
+                .field("spelling", &redact_option_spelling(*option, spelling))
+                .finish(),
+            Self::UnexpectedValue { option, spelling } => formatter
+                .debug_struct("UnexpectedValue")
+                .field("option", option)
+                .field("spelling", &redact_option_spelling(*option, spelling))
+                .finish(),
+            Self::InvalidValue {
+                option,
+                value,
+                reason,
+            } => formatter
+                .debug_struct("InvalidValue")
+                .field("option", option)
+                .field("value", &redact_cli_value(*option, value))
+                .field("reason", reason)
+                .finish(),
+            Self::IncompatibleOptions { options, reason } => formatter
+                .debug_struct("IncompatibleOptions")
+                .field("options", options)
+                .field("reason", reason)
+                .finish(),
+            Self::NonUnicodeArgument => formatter.write_str("NonUnicodeArgument"),
+            Self::InvalidOptionTable => formatter.write_str("InvalidOptionTable"),
+        }
+    }
+}
+
 impl fmt::Display for CliError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MissingValue { spelling, .. } => {
-                write!(formatter, "{spelling} requires an argument")
+            Self::MissingValue { option, spelling } => {
+                write!(
+                    formatter,
+                    "{} requires an argument",
+                    redact_option_spelling(*option, spelling)
+                )
             }
-            Self::UnknownOption { token } => write!(formatter, "unknown option {token:?}"),
+            Self::UnknownOption { token } => {
+                write!(formatter, "unknown option {:?}", redact_cli_token(token))
+            }
             Self::UnexpectedArgument { argument } => {
-                write!(formatter, "unexpected argument {argument:?}")
+                write!(
+                    formatter,
+                    "unexpected argument {:?}",
+                    redact_cli_token(argument)
+                )
             }
-            Self::DuplicateOption { spelling, .. } => {
-                write!(formatter, "option {spelling:?} may not be repeated")
+            Self::DuplicateOption { option, spelling } => {
+                write!(
+                    formatter,
+                    "option {:?} may not be repeated",
+                    redact_option_spelling(*option, spelling)
+                )
             }
-            Self::UnexpectedValue { spelling, .. } => {
-                write!(formatter, "option {spelling:?} does not take an argument")
+            Self::UnexpectedValue { option, spelling } => {
+                write!(
+                    formatter,
+                    "option {:?} does not take an argument",
+                    redact_option_spelling(*option, spelling)
+                )
             }
             Self::InvalidValue {
                 option,
@@ -779,7 +1382,8 @@ impl fmt::Display for CliError {
                 } else {
                     write!(
                         formatter,
-                        "invalid value {value:?} for --{} ({reason})",
+                        "invalid value {:?} for --{} ({reason})",
+                        redact_cli_value(*option, value),
                         option.long()
                     )
                 }
@@ -1364,6 +1968,1083 @@ impl CliInvocation {
     pub const fn mode(&self) -> RunMode {
         self.options.mode
     }
+
+    /// Resolves the application-owned standalone HTTP provider selector.
+    ///
+    /// The selector is deliberately separate from JMeter's preserved HTTP
+    /// implementation properties. [`HttpCapabilitySelector::Absent`] means
+    /// that the source/JMeter provider remains authoritative; it never means
+    /// that the native provider was selected implicitly.
+    pub fn resolve_http_capability_selector(
+        &self,
+    ) -> Result<HttpCapabilitySelector, HttpCapabilitySelectorError> {
+        resolve_http_capability_selector(self)
+    }
+
+    /// Resolves the optional, direct-command-line NativeV2 DNS/TLS policy.
+    ///
+    /// This is deliberately an occurrence-only operation. It does not read
+    /// property files, inspect the environment, or touch the filesystem;
+    /// plan admission later decides whether either optional value is needed.
+    pub fn resolve_http_native_v2_properties(
+        &self,
+    ) -> Result<HttpNativeV2Properties, HttpNativeV2PropertyError> {
+        resolve_http_native_v2_properties(self)
+    }
+}
+
+/// Exact application-owned JMeter property key for standalone HTTP provider
+/// selection.
+pub const HTTP_CAPABILITY_SELECTOR_KEY: &str = "jmeter-rs.http.capability";
+
+/// Exact versioned native HTTP capability selected by the standalone
+/// provider property.
+pub const HTTP_NATIVE_V1_CAPABILITY: &str = "http.native/1";
+
+/// Exact versioned native HTTP capability selected by the standalone
+/// provider property.
+pub const HTTP_NATIVE_V2_CAPABILITY: &str = "http.native/2";
+
+/// The application-owned standalone HTTP provider selection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HttpCapabilitySelector {
+    /// No direct selector was supplied. The source/JMeter provider remains
+    /// authoritative and may require the optional compatibility pack.
+    Absent,
+    /// The exact direct `-Jjmeter-rs.http.capability=http.native/1` selector
+    /// requested the independently named native provider.
+    NativeV1,
+    /// The exact direct `-Jjmeter-rs.http.capability=http.native/2` selector
+    /// requested the separately versioned native provider increment.
+    NativeV2,
+}
+
+impl HttpCapabilitySelector {
+    /// Returns the stable selector identity, or `"absent"` when no
+    /// application-owned override was supplied.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Absent => "absent",
+            Self::NativeV1 => HTTP_NATIVE_V1_CAPABILITY,
+            Self::NativeV2 => HTTP_NATIVE_V2_CAPABILITY,
+        }
+    }
+
+    /// Returns whether either explicitly selected native HTTP provider was
+    /// requested.
+    #[must_use]
+    pub const fn is_native(self) -> bool {
+        matches!(self, Self::NativeV1 | Self::NativeV2)
+    }
+
+    /// Returns whether the native HTTP provider was explicitly selected.
+    #[must_use]
+    pub const fn is_native_v1(self) -> bool {
+        matches!(self, Self::NativeV1)
+    }
+
+    /// Returns whether the separately versioned NativeV2 provider was
+    /// explicitly selected.
+    #[must_use]
+    pub const fn is_native_v2(self) -> bool {
+        matches!(self, Self::NativeV2)
+    }
+}
+
+impl fmt::Display for HttpCapabilitySelector {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// Observable command-line source of an HTTP selector attempt.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum HttpCapabilitySelectorSource {
+    /// The direct local JMeter property namespace supplied by `-J`.
+    DirectJmeterProperty,
+    /// A Java system-property assignment supplied by `-D`.
+    SystemProperty,
+    /// A remote/global-property assignment supplied by `-G`.
+    GlobalProperty,
+}
+
+impl HttpCapabilitySelectorSource {
+    /// Returns the stable source label used by diagnostics.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::DirectJmeterProperty => "direct -J JMeter property",
+            Self::SystemProperty => "-D system property",
+            Self::GlobalProperty => "-G global property",
+        }
+    }
+}
+
+impl fmt::Display for HttpCapabilitySelectorSource {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// Stable typed failure while resolving the standalone HTTP selector.
+#[derive(Clone, Eq, PartialEq)]
+pub enum HttpCapabilitySelectorError {
+    /// The direct selector was supplied with an empty value. In the
+    /// configuration plan this is also the explicit property-removal form.
+    Empty {
+        /// Source carrying the empty value.
+        source: HttpCapabilitySelectorSource,
+    },
+    /// More than one direct `-J` assignment attempted to select the provider.
+    Repeated {
+        /// Number of direct selector assignments observed.
+        occurrences: usize,
+    },
+    /// The direct occurrence counter could not be incremented without
+    /// overflowing its bounded integer representation.
+    OccurrenceOverflow {
+        /// Source whose direct occurrence count overflowed.
+        source: HttpCapabilitySelectorSource,
+    },
+    /// A direct selector value is not a known versioned capability identity.
+    UnknownValue {
+        /// Source carrying the unknown value.
+        source: HttpCapabilitySelectorSource,
+        /// Exact value retained for typed callers; diagnostics redact it.
+        value: String,
+    },
+    /// The selector was attempted through a source other than direct `-J`.
+    NonDirectSource {
+        /// Observable non-direct source carrying the value.
+        source: HttpCapabilitySelectorSource,
+        /// Exact value retained for typed callers; diagnostics redact it.
+        value: String,
+    },
+}
+
+impl HttpCapabilitySelectorError {
+    /// Returns the stable machine-readable error code.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::Empty { .. } => "http.selector.empty",
+            Self::Repeated { .. } => "http.selector.repeated",
+            Self::OccurrenceOverflow { .. } => "http.selector.occurrence-overflow",
+            Self::UnknownValue { .. } => "http.selector.unknown",
+            Self::NonDirectSource { .. } => "http.selector.non-direct-source",
+        }
+    }
+
+    /// Returns the CLI usage classification for selector failures.
+    #[must_use]
+    pub const fn exit_class(&self) -> ExitClass {
+        ExitClass::UsageError
+    }
+
+    /// Returns the conventional process status for selector failures.
+    #[must_use]
+    pub const fn exit_code(&self) -> u8 {
+        self.exit_class().exit_code()
+    }
+
+    /// Returns the observable source involved in this failure. Repetition has
+    /// only the direct `-J` source.
+    #[must_use]
+    pub const fn source(&self) -> HttpCapabilitySelectorSource {
+        match self {
+            Self::Empty { source }
+            | Self::UnknownValue { source, .. }
+            | Self::NonDirectSource { source, .. } => *source,
+            Self::Repeated { .. } | Self::OccurrenceOverflow { .. } => {
+                HttpCapabilitySelectorSource::DirectJmeterProperty
+            }
+        }
+    }
+}
+
+impl fmt::Debug for HttpCapabilitySelectorError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty { source } => formatter
+                .debug_struct("Empty")
+                .field("source", source)
+                .finish(),
+            Self::Repeated { occurrences } => formatter
+                .debug_struct("Repeated")
+                .field("occurrences", occurrences)
+                .finish(),
+            Self::OccurrenceOverflow { source } => formatter
+                .debug_struct("OccurrenceOverflow")
+                .field("source", source)
+                .finish(),
+            Self::UnknownValue { source, value } => formatter
+                .debug_struct("UnknownValue")
+                .field("source", source)
+                .field("value", &redact_selector_value(value))
+                .finish(),
+            Self::NonDirectSource { source, value } => formatter
+                .debug_struct("NonDirectSource")
+                .field("source", source)
+                .field("value", &redact_selector_value(value))
+                .finish(),
+        }
+    }
+}
+
+impl fmt::Display for HttpCapabilitySelectorError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty { source } => write!(
+                formatter,
+                "{}: {HTTP_CAPABILITY_SELECTOR_KEY} cannot be empty or removed ({source})",
+                self.code()
+            ),
+            Self::Repeated { occurrences } => write!(
+                formatter,
+                "{}: {HTTP_CAPABILITY_SELECTOR_KEY} supplied {occurrences} times by direct -J",
+                self.code()
+            ),
+            Self::OccurrenceOverflow { source } => write!(
+                formatter,
+                "{}: {HTTP_CAPABILITY_SELECTOR_KEY} occurrence count overflowed ({source})",
+                self.code()
+            ),
+            Self::UnknownValue { source, value } => write!(
+                formatter,
+                "{}: unsupported {HTTP_CAPABILITY_SELECTOR_KEY} value {:?} ({source})",
+                self.code(),
+                redact_selector_value(value)
+            ),
+            Self::NonDirectSource { source, value } => write!(
+                formatter,
+                "{}: {HTTP_CAPABILITY_SELECTOR_KEY} must be supplied only by direct -J; found {:?} ({source})",
+                self.code(),
+                redact_selector_value(value)
+            ),
+        }
+    }
+}
+
+impl std::error::Error for HttpCapabilitySelectorError {}
+
+/// Exact direct JMeter property used to configure NativeV2 DNS.
+pub const HTTP_DNS_NAMESERVERS_KEY: &str = "jmeter-rs.http.dns.nameservers";
+
+/// Exact direct JMeter property used to configure NativeV2 trust roots.
+pub const HTTP_TLS_CA_FILE_KEY: &str = "jmeter-rs.http.tls.ca-file";
+
+/// Maximum number of explicit NativeV2 numeric nameservers.
+pub const MAX_HTTP_NATIVE_V2_NAMESERVERS: usize = 16;
+
+/// Maximum UTF-8 bytes retained for one NativeV2 direct property value.
+///
+/// The parser checks this bound on the borrowed occurrence value before it
+/// allocates any typed nameserver or path representation.  The bound is
+/// intentionally shared by the two properties so admission has one simple,
+/// auditable resource limit.
+pub const MAX_HTTP_NATIVE_V2_PROPERTY_BYTES: usize = 4096;
+
+/// The exact command-line occurrence that supplied a NativeV2 property.
+///
+/// `occurrence` is the zero-based argv token index used by
+/// `ConfigSource::CommandLine`, so a later filesystem-backed reconciliation
+/// can match the typed value to the winning [`ResolvedConfig`] provenance
+/// without retaining the raw property value here.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct HttpNativeV2PropertyOrigin {
+    /// Observable CLI source. Successful values always use direct `-J`.
+    pub source: HttpCapabilitySelectorSource,
+    /// Zero-based option-token index in the original argv.
+    pub occurrence: usize,
+}
+
+impl HttpNativeV2PropertyOrigin {
+    /// Creates a direct `-J` origin for an option-token index.
+    #[must_use]
+    pub const fn direct(occurrence: usize) -> Self {
+        Self {
+            source: HttpCapabilitySelectorSource::DirectJmeterProperty,
+            occurrence,
+        }
+    }
+}
+
+/// A validated, ordered NativeV2 nameserver list and its CLI provenance.
+#[derive(Clone, Eq, PartialEq)]
+pub struct HttpNativeV2Nameservers {
+    /// Numeric UDP socket addresses in the exact user-supplied order.
+    pub nameservers: Vec<SocketAddr>,
+    /// The direct `-J` occurrence that supplied this list.
+    pub origin: HttpNativeV2PropertyOrigin,
+}
+
+impl HttpNativeV2Nameservers {
+    /// Returns the ordered numeric nameserver addresses.
+    #[must_use]
+    pub fn addresses(&self) -> &[SocketAddr] {
+        &self.nameservers
+    }
+
+    /// Returns the argv occurrence that supplied this list.
+    #[must_use]
+    pub const fn origin(&self) -> HttpNativeV2PropertyOrigin {
+        self.origin
+    }
+}
+
+impl fmt::Debug for HttpNativeV2Nameservers {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HttpNativeV2Nameservers")
+            .field("nameservers", &"<redacted>")
+            .field("origin", &self.origin)
+            .finish()
+    }
+}
+
+/// A bounded relative CA-file token retained for later rooted resolution.
+///
+/// This type intentionally performs no filesystem access.  Its private
+/// storage prevents callers from mutating a validated path into an absolute
+/// or parent-containing path between admission and rooted resolution.
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub struct HttpNativeV2CaFilePath(String);
+
+impl HttpNativeV2CaFilePath {
+    /// Returns the original bounded relative path token.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Borrows the path as a platform path without touching the filesystem.
+    #[must_use]
+    pub fn as_path(&self) -> &Path {
+        Path::new(&self.0)
+    }
+
+    fn new(value: &str) -> Self {
+        Self(value.to_owned())
+    }
+}
+
+impl fmt::Debug for HttpNativeV2CaFilePath {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("<redacted>")
+    }
+}
+
+impl fmt::Display for HttpNativeV2CaFilePath {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// A validated NativeV2 CA-file token and its CLI provenance.
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub struct HttpNativeV2CaFile {
+    /// Bounded relative token to resolve beneath a later application root.
+    pub path: HttpNativeV2CaFilePath,
+    /// The direct `-J` occurrence that supplied this token.
+    pub origin: HttpNativeV2PropertyOrigin,
+}
+
+impl HttpNativeV2CaFile {
+    /// Returns the bounded relative path token.
+    #[must_use]
+    pub fn path(&self) -> &HttpNativeV2CaFilePath {
+        &self.path
+    }
+
+    /// Returns the argv occurrence that supplied this token.
+    #[must_use]
+    pub const fn origin(&self) -> HttpNativeV2PropertyOrigin {
+        self.origin
+    }
+}
+
+impl fmt::Debug for HttpNativeV2CaFile {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HttpNativeV2CaFile")
+            .field("path", &self.path)
+            .field("origin", &self.origin)
+            .finish()
+    }
+}
+
+/// Optional direct NativeV2 CLI policy.
+///
+/// Both fields are optional because whether a nameserver or CA file is
+/// required depends on the later plan's hostname/HTTPS admission.  An
+/// explicitly empty, removed, repeated, malformed, or non-direct occurrence
+/// is still rejected by the resolver.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct HttpNativeV2Properties {
+    /// Optional explicit numeric nameserver list.
+    pub dns_nameservers: Option<HttpNativeV2Nameservers>,
+    /// Optional explicit relative CA-file token.
+    pub tls_ca_file: Option<HttpNativeV2CaFile>,
+}
+
+impl HttpNativeV2Properties {
+    /// Returns the optional ordered nameserver list.
+    #[must_use]
+    pub fn nameservers(&self) -> Option<&[SocketAddr]> {
+        self.dns_nameservers
+            .as_ref()
+            .map(HttpNativeV2Nameservers::addresses)
+    }
+
+    /// Returns the optional CA-file selection.
+    #[must_use]
+    pub fn ca_file(&self) -> Option<&HttpNativeV2CaFilePath> {
+        self.tls_ca_file.as_ref().map(HttpNativeV2CaFile::path)
+    }
+
+    /// Returns whether neither optional property was supplied.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.dns_nameservers.is_none() && self.tls_ca_file.is_none()
+    }
+}
+
+/// Reasons a numeric nameserver entry is not accepted by NativeV2.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HttpNativeV2NameserverError {
+    /// The complete value was empty.
+    Empty,
+    /// A comma-separated entry was empty.
+    EmptyEntry,
+    /// Whitespace makes the entry's tokenization ambiguous.
+    Whitespace,
+    /// The entry was not a numeric IP or socket address.
+    NonNumeric,
+    /// An IPv6 socket address supplied a port without brackets.
+    UnbracketedIpv6Port,
+    /// A bracketed socket address was malformed or used a non-IPv6 host.
+    InvalidSocket,
+    /// The explicit socket port was not the required DNS port 53.
+    PortNot53 {
+        /// Parsed explicit port.
+        port: u16,
+    },
+    /// The endpoint used an unspecified/zero IP address or port.
+    Zero,
+    /// The same numeric socket address appeared more than once.
+    Duplicate,
+    /// More than the bounded number of entries was supplied.
+    TooMany {
+        /// Number of comma-separated entries observed.
+        count: usize,
+    },
+}
+
+impl fmt::Display for HttpNativeV2NameserverError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => formatter.write_str("nameserver value is empty (<redacted>)"),
+            Self::EmptyEntry => formatter.write_str("nameserver entry is empty (<redacted>)"),
+            Self::Whitespace => {
+                formatter.write_str("nameserver value contains whitespace (<redacted>)")
+            }
+            Self::NonNumeric => formatter.write_str("nameserver entry is not numeric (<redacted>)"),
+            Self::UnbracketedIpv6Port => {
+                formatter.write_str("IPv6 nameserver ports require brackets (<redacted>)")
+            }
+            Self::InvalidSocket => formatter.write_str("nameserver socket is invalid (<redacted>)"),
+            Self::PortNot53 { port } => {
+                write!(formatter, "nameserver port {port} is not 53 (<redacted>)")
+            }
+            Self::Zero => formatter.write_str("nameserver address or port is zero (<redacted>)"),
+            Self::Duplicate => formatter.write_str("duplicate nameserver (<redacted>)"),
+            Self::TooMany { count } => write!(
+                formatter,
+                "{count} nameservers exceed the maximum of {MAX_HTTP_NATIVE_V2_NAMESERVERS}"
+            ),
+        }
+    }
+}
+
+/// Reasons a NativeV2 CA-file token is rejected before rooted resolution.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HttpNativeV2CaPathError {
+    /// The path token is empty.
+    Empty,
+    /// The path contains a NUL byte.
+    Nul,
+    /// The path is absolute for the current or a recognized foreign platform.
+    Absolute,
+    /// The path contains a parent component.
+    Parent,
+    /// The path contains a root component.
+    Root,
+    /// The path contains a platform prefix or drive/UNC form.
+    Prefix,
+}
+
+impl fmt::Display for HttpNativeV2CaPathError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let reason = match self {
+            Self::Empty => "path is empty",
+            Self::Nul => "path contains NUL",
+            Self::Absolute => "path is absolute",
+            Self::Parent => "path contains a parent component",
+            Self::Root => "path contains a root component",
+            Self::Prefix => "path contains a platform prefix",
+        };
+        write!(formatter, "{reason} (<redacted>)")
+    }
+}
+
+/// Stable typed failure while resolving NativeV2 direct properties.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum HttpNativeV2PropertyError {
+    /// A direct assignment supplied an empty value or explicit removal.
+    Empty {
+        /// Exact property key.
+        property: &'static str,
+        /// Observable source carrying the empty assignment.
+        source: HttpCapabilitySelectorSource,
+        /// Original argv option-token index.
+        occurrence: usize,
+    },
+    /// More than one direct `-J` assignment supplied the same key.
+    Repeated {
+        /// Exact property key.
+        property: &'static str,
+        /// Number of direct assignments observed.
+        occurrences: usize,
+    },
+    /// The direct occurrence counter could not be incremented without
+    /// overflowing its bounded integer representation.
+    OccurrenceOverflow {
+        /// Exact property key whose direct occurrence count overflowed.
+        property: &'static str,
+    },
+    /// A same-key `-D`/`-G` occurrence was observed.
+    NonDirectSource {
+        /// Exact property key.
+        property: &'static str,
+        /// Observable non-direct source.
+        source: HttpCapabilitySelectorSource,
+        /// Original argv option-token index.
+        occurrence: usize,
+    },
+    /// A raw value exceeded the copy/parse bound.
+    ValueTooLong {
+        /// Exact property key.
+        property: &'static str,
+        /// Maximum accepted UTF-8 bytes.
+        limit: usize,
+        /// Observed UTF-8 bytes, retained only as a count.
+        observed: usize,
+        /// Original argv option-token index.
+        occurrence: usize,
+    },
+    /// A nameserver list failed bounded numeric validation.
+    InvalidNameservers {
+        /// Original argv option-token index.
+        occurrence: usize,
+        /// Zero-based comma-separated entry index, where applicable.
+        entry: Option<usize>,
+        /// Typed validation reason.
+        reason: HttpNativeV2NameserverError,
+    },
+    /// A CA-file token failed bounded relative-path validation.
+    InvalidCaFile {
+        /// Original argv option-token index.
+        occurrence: usize,
+        /// Typed validation reason.
+        reason: HttpNativeV2CaPathError,
+    },
+}
+
+impl HttpNativeV2PropertyError {
+    /// Returns the stable machine-readable error code.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::Empty { .. } => "http.native-v2.property.empty",
+            Self::Repeated { .. } => "http.native-v2.property.repeated",
+            Self::OccurrenceOverflow { .. } => "http.native-v2.property.occurrence-overflow",
+            Self::NonDirectSource { .. } => "http.native-v2.property.non-direct-source",
+            Self::ValueTooLong { .. } => "http.native-v2.property.value-limit",
+            Self::InvalidNameservers { reason, .. } => match reason {
+                HttpNativeV2NameserverError::TooMany { .. } => {
+                    "http.native-v2.dns.nameservers.too-many"
+                }
+                _ => "http.native-v2.dns.nameservers.invalid",
+            },
+            Self::InvalidCaFile { reason, .. } => match reason {
+                HttpNativeV2CaPathError::Empty => "http.native-v2.tls.ca-file.empty",
+                HttpNativeV2CaPathError::Absolute => "http.native-v2.tls.ca-file.absolute",
+                HttpNativeV2CaPathError::Parent => "http.native-v2.tls.ca-file.parent",
+                HttpNativeV2CaPathError::Root => "http.native-v2.tls.ca-file.root",
+                HttpNativeV2CaPathError::Prefix => "http.native-v2.tls.ca-file.prefix",
+                HttpNativeV2CaPathError::Nul => "http.native-v2.tls.ca-file.nul",
+            },
+        }
+    }
+
+    /// Returns the CLI usage classification for this pure parser failure.
+    #[must_use]
+    pub const fn exit_class(&self) -> ExitClass {
+        ExitClass::UsageError
+    }
+
+    /// Returns the conventional process status for this failure.
+    #[must_use]
+    pub const fn exit_code(&self) -> u8 {
+        self.exit_class().exit_code()
+    }
+
+    /// Returns the exact key involved when one is available.
+    #[must_use]
+    pub const fn property(&self) -> &'static str {
+        match self {
+            Self::Empty { property, .. }
+            | Self::Repeated { property, .. }
+            | Self::OccurrenceOverflow { property }
+            | Self::NonDirectSource { property, .. }
+            | Self::ValueTooLong { property, .. } => property,
+            Self::InvalidNameservers { .. } => HTTP_DNS_NAMESERVERS_KEY,
+            Self::InvalidCaFile { .. } => HTTP_TLS_CA_FILE_KEY,
+        }
+    }
+
+    /// Returns the original argv option-token index, when one exists.
+    #[must_use]
+    pub const fn occurrence(&self) -> Option<usize> {
+        match self {
+            Self::Empty { occurrence, .. }
+            | Self::InvalidNameservers { occurrence, .. }
+            | Self::InvalidCaFile { occurrence, .. }
+            | Self::NonDirectSource { occurrence, .. }
+            | Self::ValueTooLong { occurrence, .. } => Some(*occurrence),
+            Self::Repeated { .. } | Self::OccurrenceOverflow { .. } => None,
+        }
+    }
+}
+
+impl fmt::Display for HttpNativeV2PropertyError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty {
+                property,
+                source,
+                occurrence,
+            } => write!(
+                formatter,
+                "{}: {property} cannot be empty or removed ({source}, occurrence {occurrence})",
+                self.code()
+            ),
+            Self::Repeated {
+                property,
+                occurrences,
+            } => write!(
+                formatter,
+                "{}: {property} supplied {occurrences} times by direct -J",
+                self.code()
+            ),
+            Self::OccurrenceOverflow { property } => write!(
+                formatter,
+                "{}: {property} direct occurrence count overflowed",
+                self.code()
+            ),
+            Self::NonDirectSource {
+                property,
+                source,
+                occurrence,
+            } => write!(
+                formatter,
+                "{}: {property} must be supplied only by direct -J; found <redacted> ({source}, occurrence {occurrence})",
+                self.code()
+            ),
+            Self::ValueTooLong {
+                property,
+                limit,
+                observed,
+                occurrence,
+            } => write!(
+                formatter,
+                "{}: {property} value is {observed} bytes; maximum is {limit} (occurrence {occurrence}, <redacted>)",
+                self.code()
+            ),
+            Self::InvalidNameservers {
+                occurrence,
+                entry,
+                reason,
+            } => write!(
+                formatter,
+                "{}: {HTTP_DNS_NAMESERVERS_KEY} entry {} is invalid: {reason} (occurrence {occurrence})",
+                self.code(),
+                entry.map_or_else(|| "<list>".to_owned(), |value| value.to_string())
+            ),
+            Self::InvalidCaFile { occurrence, reason } => write!(
+                formatter,
+                "{}: {HTTP_TLS_CA_FILE_KEY} is invalid: {reason} (occurrence {occurrence})",
+                self.code()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for HttpNativeV2PropertyError {}
+
+fn redact_selector_value(value: &str) -> String {
+    if looks_like_sensitive_value(value) {
+        REDACTED_CLI_VALUE.to_owned()
+    } else {
+        redact_cli_token(value)
+    }
+}
+
+/// Resolves the one application-owned HTTP selector visible in a parsed CLI
+/// invocation. File-backed/default/environment sources are intentionally not
+/// read here; their contents are outside this pure parser boundary and cannot
+/// authorize a native provider.
+pub fn resolve_http_capability_selector(
+    invocation: &CliInvocation,
+) -> Result<HttpCapabilitySelector, HttpCapabilitySelectorError> {
+    let mut direct_occurrences = 0usize;
+    let mut direct_value = None;
+    let mut non_direct = None;
+
+    for occurrence in &invocation.options.occurrences {
+        let Some(raw) = occurrence.value() else {
+            continue;
+        };
+        let Some(value) = direct_property_value(raw, HTTP_CAPABILITY_SELECTOR_KEY) else {
+            continue;
+        };
+        match occurrence.id {
+            OptionId::Jmeterproperty => {
+                direct_occurrences = direct_occurrences.checked_add(1).ok_or(
+                    HttpCapabilitySelectorError::OccurrenceOverflow {
+                        source: HttpCapabilitySelectorSource::DirectJmeterProperty,
+                    },
+                )?;
+                if direct_occurrences == 1 {
+                    direct_value = Some(value);
+                }
+            }
+            OptionId::Systemproperty | OptionId::Globalproperty if non_direct.is_none() => {
+                let source = if occurrence.id == OptionId::Systemproperty {
+                    HttpCapabilitySelectorSource::SystemProperty
+                } else {
+                    HttpCapabilitySelectorSource::GlobalProperty
+                };
+                non_direct = Some((source, value));
+            }
+            _ => {}
+        }
+    }
+
+    if direct_occurrences > 1 {
+        return Err(HttpCapabilitySelectorError::Repeated {
+            occurrences: direct_occurrences,
+        });
+    }
+    if let Some((source, value)) = non_direct {
+        return Err(HttpCapabilitySelectorError::NonDirectSource {
+            source,
+            value: value.to_owned(),
+        });
+    }
+    let Some(value) = direct_value else {
+        return Ok(HttpCapabilitySelector::Absent);
+    };
+    if value.is_empty() {
+        return Err(HttpCapabilitySelectorError::Empty {
+            source: HttpCapabilitySelectorSource::DirectJmeterProperty,
+        });
+    }
+    if value == HTTP_NATIVE_V1_CAPABILITY {
+        return Ok(HttpCapabilitySelector::NativeV1);
+    }
+    if value == HTTP_NATIVE_V2_CAPABILITY {
+        return Ok(HttpCapabilitySelector::NativeV2);
+    }
+    Err(HttpCapabilitySelectorError::UnknownValue {
+        source: HttpCapabilitySelectorSource::DirectJmeterProperty,
+        value: value.to_owned(),
+    })
+}
+
+/// Resolves the optional NativeV2 DNS/TLS properties from raw CLI
+/// occurrences.  Only direct `-J` assignments are accepted; property files,
+/// environment values, and `-D`/`-G` assignments are intentionally outside
+/// this pure boundary.
+pub fn resolve_http_native_v2_properties(
+    invocation: &CliInvocation,
+) -> Result<HttpNativeV2Properties, HttpNativeV2PropertyError> {
+    let dns_nameservers = resolve_native_v2_nameservers(invocation)?;
+    let tls_ca_file = resolve_native_v2_ca_file(invocation)?;
+    Ok(HttpNativeV2Properties {
+        dns_nameservers,
+        tls_ca_file,
+    })
+}
+
+fn resolve_native_v2_nameservers(
+    invocation: &CliInvocation,
+) -> Result<Option<HttpNativeV2Nameservers>, HttpNativeV2PropertyError> {
+    let Some((value, origin)) = find_native_v2_assignment(invocation, HTTP_DNS_NAMESERVERS_KEY)?
+    else {
+        return Ok(None);
+    };
+    if value.len() > MAX_HTTP_NATIVE_V2_PROPERTY_BYTES {
+        return Err(HttpNativeV2PropertyError::ValueTooLong {
+            property: HTTP_DNS_NAMESERVERS_KEY,
+            limit: MAX_HTTP_NATIVE_V2_PROPERTY_BYTES,
+            observed: value.len(),
+            occurrence: origin.occurrence,
+        });
+    }
+    let nameservers = parse_native_v2_nameservers(value).map_err(|(entry, reason)| {
+        HttpNativeV2PropertyError::InvalidNameservers {
+            occurrence: origin.occurrence,
+            entry,
+            reason,
+        }
+    })?;
+    Ok(Some(HttpNativeV2Nameservers {
+        nameservers,
+        origin,
+    }))
+}
+
+fn resolve_native_v2_ca_file(
+    invocation: &CliInvocation,
+) -> Result<Option<HttpNativeV2CaFile>, HttpNativeV2PropertyError> {
+    let Some((value, origin)) = find_native_v2_assignment(invocation, HTTP_TLS_CA_FILE_KEY)? else {
+        return Ok(None);
+    };
+    if value.len() > MAX_HTTP_NATIVE_V2_PROPERTY_BYTES {
+        return Err(HttpNativeV2PropertyError::ValueTooLong {
+            property: HTTP_TLS_CA_FILE_KEY,
+            limit: MAX_HTTP_NATIVE_V2_PROPERTY_BYTES,
+            observed: value.len(),
+            occurrence: origin.occurrence,
+        });
+    }
+    let path = parse_native_v2_ca_file(value).map_err(|reason| {
+        HttpNativeV2PropertyError::InvalidCaFile {
+            occurrence: origin.occurrence,
+            reason,
+        }
+    })?;
+    Ok(Some(HttpNativeV2CaFile { path, origin }))
+}
+
+/// Finds exactly one direct assignment for a NativeV2 property while
+/// retaining the original argv token index.  The returned value borrows the
+/// already-parsed occurrence and is copied only after its bound is checked by
+/// the property-specific resolver.
+fn find_native_v2_assignment<'a>(
+    invocation: &'a CliInvocation,
+    property: &'static str,
+) -> Result<Option<(&'a str, HttpNativeV2PropertyOrigin)>, HttpNativeV2PropertyError> {
+    let mut direct_occurrences = 0usize;
+    let mut direct = None;
+    let mut non_direct = None;
+
+    for occurrence in &invocation.options.occurrences {
+        let Some(raw) = occurrence.value() else {
+            continue;
+        };
+        let Some(value) = direct_property_value(raw, property) else {
+            continue;
+        };
+        match occurrence.id {
+            OptionId::Jmeterproperty => {
+                direct_occurrences = direct_occurrences
+                    .checked_add(1)
+                    .ok_or(HttpNativeV2PropertyError::OccurrenceOverflow { property })?;
+                if direct_occurrences == 1 {
+                    direct = Some((value, HttpNativeV2PropertyOrigin::direct(occurrence.index)));
+                }
+            }
+            OptionId::Systemproperty | OptionId::Globalproperty if non_direct.is_none() => {
+                let source = if occurrence.id == OptionId::Systemproperty {
+                    HttpCapabilitySelectorSource::SystemProperty
+                } else {
+                    HttpCapabilitySelectorSource::GlobalProperty
+                };
+                non_direct = Some((source, occurrence.index));
+            }
+            _ => {}
+        }
+    }
+
+    if direct_occurrences > 1 {
+        return Err(HttpNativeV2PropertyError::Repeated {
+            property,
+            occurrences: direct_occurrences,
+        });
+    }
+    if let Some((source, occurrence)) = non_direct {
+        return Err(HttpNativeV2PropertyError::NonDirectSource {
+            property,
+            source,
+            occurrence,
+        });
+    }
+    let Some((value, origin)) = direct else {
+        return Ok(None);
+    };
+    if value.is_empty() {
+        return Err(HttpNativeV2PropertyError::Empty {
+            property,
+            source: origin.source,
+            occurrence: origin.occurrence,
+        });
+    }
+    Ok(Some((value, origin)))
+}
+
+/// Returns the value for an exact property assignment in a parsed command
+/// line occurrence.  A key without `=` is the CLI's explicit removal form
+/// and therefore maps to the empty value; unrelated keys remain absent.
+fn direct_property_value<'a>(raw: &'a str, property: &str) -> Option<&'a str> {
+    match raw.split_once('=') {
+        Some((key, value)) if key == property => Some(value),
+        None if raw == property => Some(""),
+        _ => None,
+    }
+}
+
+/// Parses one bounded comma-separated numeric nameserver list.
+fn parse_native_v2_nameservers(
+    value: &str,
+) -> Result<Vec<SocketAddr>, (Option<usize>, HttpNativeV2NameserverError)> {
+    if value.is_empty() {
+        return Err((None, HttpNativeV2NameserverError::Empty));
+    }
+    if value.chars().any(char::is_whitespace) {
+        return Err((None, HttpNativeV2NameserverError::Whitespace));
+    }
+    // Stop counting once the bounded limit has been exceeded.  The returned
+    // `count` is therefore at most `MAX + 1`, even if a future caller raises
+    // the value-byte bound substantially.
+    let count = value
+        .splitn(MAX_HTTP_NATIVE_V2_NAMESERVERS + 1, ',')
+        .count();
+    if count > MAX_HTTP_NATIVE_V2_NAMESERVERS {
+        return Err((None, HttpNativeV2NameserverError::TooMany { count }));
+    }
+
+    let mut addresses = Vec::with_capacity(count);
+    for (entry_index, entry) in value.split(',').enumerate() {
+        if entry.is_empty() {
+            return Err((Some(entry_index), HttpNativeV2NameserverError::EmptyEntry));
+        }
+        let address = parse_native_v2_nameserver_entry(entry)
+            .map_err(|reason| (Some(entry_index), reason))?;
+        if address.port() == 0 || address.ip().is_unspecified() {
+            return Err((Some(entry_index), HttpNativeV2NameserverError::Zero));
+        }
+        if address.port() != 53 {
+            return Err((
+                Some(entry_index),
+                HttpNativeV2NameserverError::PortNot53 {
+                    port: address.port(),
+                },
+            ));
+        }
+        if addresses.contains(&address) {
+            return Err((Some(entry_index), HttpNativeV2NameserverError::Duplicate));
+        }
+        addresses.push(address);
+    }
+    Ok(addresses)
+}
+
+fn parse_native_v2_nameserver_entry(
+    entry: &str,
+) -> Result<SocketAddr, HttpNativeV2NameserverError> {
+    if entry.starts_with('[') {
+        let Some(close) = entry.find(']') else {
+            return Err(HttpNativeV2NameserverError::InvalidSocket);
+        };
+        let inner = &entry[1..close];
+        let Ok(ip) = inner.parse::<IpAddr>() else {
+            return Err(HttpNativeV2NameserverError::InvalidSocket);
+        };
+        if !ip.is_ipv6()
+            || entry.as_bytes().get(close + 1) != Some(&b':')
+            || close + 2 > entry.len()
+        {
+            return Err(HttpNativeV2NameserverError::InvalidSocket);
+        }
+        let Ok(address) = entry.parse::<SocketAddr>() else {
+            return Err(HttpNativeV2NameserverError::InvalidSocket);
+        };
+        return Ok(address);
+    }
+
+    if let Ok(ip) = entry.parse::<IpAddr>() {
+        if ip.is_ipv6() && looks_like_unbracketed_ipv6_socket(entry) {
+            return Err(HttpNativeV2NameserverError::UnbracketedIpv6Port);
+        }
+        return Ok(SocketAddr::new(ip, 53));
+    }
+
+    entry
+        .parse::<SocketAddr>()
+        .map_err(|_| HttpNativeV2NameserverError::NonNumeric)
+}
+
+/// Detects the ambiguous `2001:db8::1:53` form.  A bare IPv6 address is
+/// accepted when it has no separately parseable IPv6 prefix before a numeric
+/// final field (for example `::1`); an explicit port must use brackets.
+fn looks_like_unbracketed_ipv6_socket(value: &str) -> bool {
+    let Some((prefix, port)) = value.rsplit_once(':') else {
+        return false;
+    };
+    !prefix.is_empty() && port.parse::<u16>().is_ok() && prefix.parse::<IpAddr>().is_ok()
+}
+
+fn parse_native_v2_ca_file(value: &str) -> Result<HttpNativeV2CaFilePath, HttpNativeV2CaPathError> {
+    if value.is_empty() {
+        return Err(HttpNativeV2CaPathError::Empty);
+    }
+    if value.contains('\0') {
+        return Err(HttpNativeV2CaPathError::Nul);
+    }
+    let path = Path::new(value);
+    if path.is_absolute() {
+        return Err(HttpNativeV2CaPathError::Absolute);
+    }
+    if looks_like_native_v2_path_prefix(value) {
+        return Err(HttpNativeV2CaPathError::Prefix);
+    }
+    if value.starts_with('\\') {
+        return Err(HttpNativeV2CaPathError::Root);
+    }
+    if path
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+        || value.split(['/', '\\']).any(|component| component == "..")
+    {
+        return Err(HttpNativeV2CaPathError::Parent);
+    }
+    if path
+        .components()
+        .any(|component| matches!(component, Component::RootDir | Component::Prefix(_)))
+    {
+        return Err(HttpNativeV2CaPathError::Root);
+    }
+    Ok(HttpNativeV2CaFilePath::new(value))
+}
+
+fn looks_like_native_v2_path_prefix(value: &str) -> bool {
+    if value.starts_with("//") || value.starts_with("\\\\") {
+        return true;
+    }
+    value.as_bytes().get(1).is_some_and(|byte| *byte == b':')
 }
 
 /// Compatibility alias for callers that call the parsed value `Cli`.
@@ -1998,6 +3679,87 @@ fn is_sensitive_key(key: &str) -> bool {
         })
 }
 
+const REDACTED_CLI_VALUE: &str = "<redacted>";
+
+fn looks_like_sensitive_name(name: &str) -> bool {
+    let normalized = name.trim_start_matches('-');
+    let lower = normalized.to_ascii_lowercase();
+    is_sensitive_key(&lower)
+        || lower.contains("pass")
+        || lower.contains("secret")
+        || lower.contains("token")
+        || lower.contains("credential")
+}
+
+fn looks_like_sensitive_literal(value: &str) -> bool {
+    matches!(
+        value
+            .trim()
+            .trim_matches(['"', '\''])
+            .to_ascii_lowercase()
+            .as_str(),
+        "password" | "passwd" | "secret" | "token" | "credential" | "credentials"
+    )
+}
+
+fn looks_like_sensitive_value(value: &str) -> bool {
+    let normalized = value.trim().trim_matches(['"', '\'']).to_ascii_lowercase();
+    looks_like_sensitive_literal(&normalized)
+        || normalized.contains("password")
+        || normalized.contains("passwd")
+        || normalized.contains("secret")
+        || normalized.contains("token")
+        || normalized.contains("credential")
+}
+
+fn cli_assignment(token: &str) -> Option<(&str, &str, char)> {
+    let index = token.find(['=', ':'])?;
+    let (prefix, suffix) = token.split_at(index);
+    let delimiter = suffix.chars().next()?;
+    Some((prefix, &suffix[delimiter.len_utf8()..], delimiter))
+}
+
+fn redact_cli_token(token: &str) -> String {
+    if let Some((prefix, value, delimiter)) = cli_assignment(token)
+        && (looks_like_sensitive_name(prefix)
+            || looks_like_sensitive_value(value)
+            || value.to_ascii_lowercase().contains("password=")
+            || value.to_ascii_lowercase().contains("secret=")
+            || value.to_ascii_lowercase().contains("token="))
+    {
+        return format!("{prefix}{delimiter}{REDACTED_CLI_VALUE}");
+    }
+    if looks_like_sensitive_literal(token) {
+        REDACTED_CLI_VALUE.to_owned()
+    } else {
+        token.to_owned()
+    }
+}
+
+fn redact_option_spelling(option: OptionId, spelling: &str) -> String {
+    if option == OptionId::Password && !matches!(spelling, "-a" | "--password") {
+        if spelling.starts_with("--password") {
+            return format!("--password={REDACTED_CLI_VALUE}");
+        }
+        if spelling.starts_with("-a") {
+            return format!("-a={REDACTED_CLI_VALUE}");
+        }
+    }
+    redact_cli_token(spelling)
+}
+
+fn redact_cli_value(option: OptionId, value: &str) -> String {
+    if option == OptionId::Password {
+        return REDACTED_CLI_VALUE.to_owned();
+    }
+    if let Some((key, _, _)) = cli_assignment(value)
+        && looks_like_sensitive_name(key)
+    {
+        return REDACTED_CLI_VALUE.to_owned();
+    }
+    redact_cli_token(value)
+}
+
 fn parse_occurrences(arguments: &[String]) -> Result<Vec<OptionOccurrence>, CliError> {
     let mut occurrences = Vec::new();
     let mut index = 0;
@@ -2443,6 +4205,12 @@ fn validate_combinations(options: &CliOptions) -> Result<(), CliError> {
             reason: CombinationError::ReportOnlyConflict,
         });
     }
+    if options.is_report_only() && options.testfile.is_some() {
+        return Err(CliError::IncompatibleOptions {
+            options: vec![OptionId::Reportonly, OptionId::Testfile],
+            reason: CombinationError::ReportOnlyNeedsOnlyJtl,
+        });
+    }
     if matches!(
         options.action,
         Action::Options | Action::Help | Action::Version
@@ -2555,8 +4323,166 @@ mod tests {
     }
 
     #[test]
+    fn embedded_assets_match_pinned_digests_and_manifest_identity() {
+        assert!(!STANDALONE_CAPABILITY_SET_BYTES.is_empty());
+        assert!(!JMETER_COMPATIBILITY_PROFILE_BYTES.is_empty());
+        assert_eq!(
+            STANDALONE_NATIVE_PATHS.len(),
+            STANDALONE_NATIVE_CAPABILITIES.len()
+        );
+        for ((_, capability, version), (expected_capability, expected_version)) in
+            STANDALONE_NATIVE_PATHS
+                .iter()
+                .zip(STANDALONE_NATIVE_CAPABILITIES.iter())
+        {
+            assert_eq!(capability, expected_capability);
+            assert_eq!(version, expected_version);
+        }
+        assert_eq!(
+            standalone_capability_set_digest().as_bytes(),
+            STANDALONE_CAPABILITY_SET_SHA256
+        );
+        assert_eq!(
+            compatibility_profile_digest().as_bytes(),
+            JMETER_COMPATIBILITY_PROFILE_SHA256
+        );
+
+        let identity = standalone_manifest_identity().expect("embedded manifest validates");
+        assert_eq!(
+            identity.capability_set_digest(),
+            standalone_capability_set_digest()
+        );
+        assert_eq!(identity.capability_set_id, STANDALONE_CAPABILITY_SET_ID);
+        assert_eq!(
+            identity.capability_set_version,
+            STANDALONE_CAPABILITY_SET_VERSION
+        );
+        assert_eq!(identity.profile.id, JMETER_COMPATIBILITY_PROFILE);
+        assert_eq!(
+            identity.profile.version,
+            JMETER_COMPATIBILITY_PROFILE_VERSION
+        );
+        assert_eq!(
+            identity.profile.digest.as_bytes(),
+            JMETER_COMPATIBILITY_PROFILE_SHA256
+        );
+        assert_eq!(
+            identity.capability_set_digest.as_bytes(),
+            STANDALONE_CAPABILITY_SET_SHA256
+        );
+    }
+
+    #[test]
+    fn standalone_runtime_set_is_native_only_and_validates_plan_digest() {
+        let plan_digest = Digest32::from_bytes([0x42; 32]);
+        let set = standalone_runtime_capability_set(plan_digest).expect("native set");
+        assert_eq!(
+            set.mode(),
+            jmeter_rs_runtime::AdmissionMode::StandaloneNative
+        );
+        assert_eq!(set.plan_digest(), plan_digest);
+        assert_eq!(
+            set.capability_set_digest().as_bytes(),
+            STANDALONE_CAPABILITY_SET_SHA256
+        );
+        match set {
+            RuntimeCapabilitySet::StandaloneNative { capabilities, .. } => {
+                assert_eq!(capabilities.len(), STANDALONE_NATIVE_CAPABILITIES.len());
+                assert!(capabilities.iter().all(|capability| {
+                    STANDALONE_NATIVE_CAPABILITIES
+                        .iter()
+                        .any(|&(id, version)| capability.id == id && capability.version == version)
+                }));
+            }
+            RuntimeCapabilitySet::CompatibilityPack { .. } => {
+                panic!("standalone projection selected a compatibility pack")
+            }
+        }
+
+        let error = standalone_runtime_capability_set(Digest32::from_bytes([0; 32]))
+            .expect_err("zero plan digest is rejected");
+        assert_eq!(error.exit_class(), ExitClass::UnsupportedCapability);
+        assert_eq!(error.exit_code(), 78);
+        assert!(matches!(
+            error,
+            StandaloneManifestError::CapabilitySetIdentity(
+                jmeter_rs_runtime::CapabilityIdentityError {
+                    code: jmeter_rs_runtime::CapabilityIdentityErrorCode::ZeroDigest,
+                    field: "plan.digest",
+                    ..
+                }
+            )
+        ));
+    }
+
+    #[test]
+    fn sha256_asset_helper_matches_published_vector() {
+        assert_eq!(
+            sha256_bytes(b"abc"),
+            [
+                0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae,
+                0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61,
+                0xf2, 0x00, 0x15, 0xad,
+            ]
+        );
+    }
+
+    #[test]
     fn option_table_contains_every_documented_option_once() {
         assert_eq!(OPTION_TABLE.len(), 30);
+        let expected = [
+            (OptionId::Help, Some("?"), "?"),
+            (OptionId::HelpLong, Some("h"), "help"),
+            (OptionId::Version, Some("v"), "version"),
+            (OptionId::Propfile, Some("p"), "propfile"),
+            (OptionId::Addprop, Some("q"), "addprop"),
+            (OptionId::Testfile, Some("t"), "testfile"),
+            (OptionId::Logfile, Some("l"), "logfile"),
+            (OptionId::Jmeterlogconf, Some("i"), "jmeterlogconf"),
+            (OptionId::Jmeterlogfile, Some("j"), "jmeterlogfile"),
+            (OptionId::Nongui, Some("n"), "nongui"),
+            (OptionId::Server, Some("s"), "server"),
+            (OptionId::ProxyScheme, Some("E"), "proxyScheme"),
+            (OptionId::ProxyHost, Some("H"), "proxyHost"),
+            (OptionId::ProxyPort, Some("P"), "proxyPort"),
+            (OptionId::NonProxyHosts, Some("N"), "nonProxyHosts"),
+            (OptionId::Username, Some("u"), "username"),
+            (OptionId::Password, Some("a"), "password"),
+            (OptionId::Jmeterproperty, Some("J"), "jmeterproperty"),
+            (OptionId::Globalproperty, Some("G"), "globalproperty"),
+            (OptionId::Systemproperty, Some("D"), "systemproperty"),
+            (
+                OptionId::SystemPropertyFile,
+                Some("S"),
+                "systemPropertyFile",
+            ),
+            (
+                OptionId::ForceDeleteResultFile,
+                Some("f"),
+                "forceDeleteResultFile",
+            ),
+            (OptionId::Loglevel, Some("L"), "loglevel"),
+            (OptionId::Runremote, Some("r"), "runremote"),
+            (OptionId::Remotestart, Some("R"), "remotestart"),
+            (OptionId::Homedir, Some("d"), "homedir"),
+            (OptionId::Remoteexit, Some("X"), "remoteexit"),
+            (OptionId::Reportonly, Some("g"), "reportonly"),
+            (
+                OptionId::Reportatendofloadtests,
+                Some("e"),
+                "reportatendofloadtests",
+            ),
+            (
+                OptionId::Reportoutputfolder,
+                Some("o"),
+                "reportoutputfolder",
+            ),
+        ];
+        let actual = OPTION_TABLE
+            .iter()
+            .map(|spec| (spec.id, spec.short, spec.long))
+            .collect::<Vec<_>>();
+        assert_eq!(actual.as_slice(), expected.as_slice());
         let mut ids = OPTION_TABLE.iter().map(|spec| spec.id).collect::<Vec<_>>();
         ids.sort_by_key(|id| *id as u8);
         ids.dedup();
@@ -2568,6 +4494,35 @@ mod tests {
                 .any(|spec| spec.long == "systemPropertyFile")
         );
         assert!(OPTION_TABLE.iter().any(|spec| spec.short == Some("?")));
+    }
+
+    #[test]
+    fn exit_classification_table_has_stable_codes_and_statuses() {
+        let expected = [
+            (ExitClass::Success, "ok", 0),
+            (ExitClass::SampleFailure, "sample.failure", 0),
+            (ExitClass::UsageError, "cli.usage", 2),
+            (ExitClass::ConfigurationError, "config.invalid", 78),
+            (
+                ExitClass::UnsupportedCapability,
+                "capability.unavailable",
+                78,
+            ),
+            (ExitClass::Fatal, "fatal", 1),
+            (ExitClass::RemoteFailure, "remote.failure", 1),
+            (ExitClass::InternalError, "internal.error", 70),
+        ];
+        for (class, code, status) in expected {
+            assert_eq!(class.code(), code);
+            assert_eq!(class.exit_code(), status);
+        }
+        assert_eq!(RunCategory::Normal.exit_class(), ExitClass::Success);
+        assert_eq!(
+            RunCategory::SampleFailure.exit_class(),
+            ExitClass::SampleFailure
+        );
+        assert_eq!(RunCategory::Fatal.exit_class(), ExitClass::Fatal);
+        assert_eq!(RunCategory::Remote.exit_class(), ExitClass::RemoteFailure);
     }
 
     #[test]
@@ -2684,6 +4639,549 @@ mod tests {
     }
 
     #[test]
+    fn http_selector_accepts_only_direct_native_forms_and_preserves_absent_provider() {
+        let attached = parse_ok(&["-Jjmeter-rs.http.capability=http.native/1"]);
+        assert_eq!(
+            attached.resolve_http_capability_selector(),
+            Ok(HttpCapabilitySelector::NativeV1)
+        );
+        assert_eq!(
+            resolve_http_capability_selector(&attached),
+            Ok(HttpCapabilitySelector::NativeV1)
+        );
+
+        let separate = parse_ok(&["-J", "jmeter-rs.http.capability=http.native/1"]);
+        assert_eq!(
+            separate.resolve_http_capability_selector(),
+            Ok(HttpCapabilitySelector::NativeV1)
+        );
+
+        let attached_v2 = parse_ok(&["-Jjmeter-rs.http.capability=http.native/2"]);
+        assert_eq!(
+            attached_v2.resolve_http_capability_selector(),
+            Ok(HttpCapabilitySelector::NativeV2)
+        );
+        let separate_v2 = parse_ok(&["-J", "jmeter-rs.http.capability=http.native/2"]);
+        assert_eq!(
+            separate_v2.resolve_http_capability_selector(),
+            Ok(HttpCapabilitySelector::NativeV2)
+        );
+        assert!(HttpCapabilitySelector::NativeV1.is_native());
+        assert!(HttpCapabilitySelector::NativeV1.is_native_v1());
+        assert!(!HttpCapabilitySelector::NativeV1.is_native_v2());
+        assert!(HttpCapabilitySelector::NativeV2.is_native());
+        assert!(!HttpCapabilitySelector::NativeV2.is_native_v1());
+        assert!(HttpCapabilitySelector::NativeV2.is_native_v2());
+
+        // The direct selector is order-independent relative to unrelated
+        // repeatable `-J` properties, which must not become conflicts.
+        let selector_last = parse_ok(&[
+            "-J",
+            "ordinary.before=value",
+            "-J",
+            "jmeter-rs.http.capability=http.native/1",
+        ]);
+        let selector_first = parse_ok(&[
+            "-Jjmeter-rs.http.capability=http.native/1",
+            "-Jordinary.after=value",
+        ]);
+        assert_eq!(
+            resolve_http_capability_selector(&selector_last),
+            Ok(HttpCapabilitySelector::NativeV1)
+        );
+        assert_eq!(
+            resolve_http_capability_selector(&selector_first),
+            Ok(HttpCapabilitySelector::NativeV1)
+        );
+
+        let no_selector = parse_ok(&[]);
+        assert_eq!(
+            no_selector.resolve_http_capability_selector(),
+            Ok(HttpCapabilitySelector::Absent)
+        );
+        assert!(!HttpCapabilitySelector::Absent.is_native());
+        assert!(!HttpCapabilitySelector::Absent.is_native_v1());
+        assert!(!HttpCapabilitySelector::Absent.is_native_v2());
+        assert_eq!(HttpCapabilitySelector::Absent.as_str(), "absent");
+
+        let unrelated = parse_ok(&["-J", "ordinary=value"]);
+        assert_eq!(
+            resolve_http_capability_selector(&unrelated),
+            Ok(HttpCapabilitySelector::Absent)
+        );
+
+        // File source contents are intentionally not observable from this
+        // pure API, so selecting a file does not authorize NativeV1 or create
+        // a false selector error.
+        for invocation in [
+            parse_ok(&["-p", "primary.properties"]),
+            parse_ok(&["-q", "additional.properties"]),
+            parse_ok(&["-S", "system.properties"]),
+        ] {
+            assert_eq!(
+                resolve_http_capability_selector(&invocation),
+                Ok(HttpCapabilitySelector::Absent)
+            );
+        }
+    }
+
+    #[test]
+    fn http_selector_rejects_repeated_empty_removed_and_unknown_values() {
+        let repeated = parse_ok(&[
+            "-J",
+            "jmeter-rs.http.capability=http.native/1",
+            "-Jjmeter-rs.http.capability=http.native/2",
+        ])
+        .resolve_http_capability_selector()
+        .expect_err("repeated selector assignments must fail closed");
+        assert!(matches!(
+            repeated,
+            HttpCapabilitySelectorError::Repeated { occurrences: 2 }
+        ));
+        assert_eq!(repeated.code(), "http.selector.repeated");
+        assert_eq!(repeated.exit_class(), ExitClass::UsageError);
+        assert_eq!(repeated.exit_code(), 2);
+
+        for invocation in [
+            parse_ok(&["-Jjmeter-rs.http.capability="]),
+            parse_ok(&["-J", "jmeter-rs.http.capability"]),
+        ] {
+            let error = invocation
+                .resolve_http_capability_selector()
+                .expect_err("empty/removal selector assignments must fail closed");
+            assert!(matches!(
+                error,
+                HttpCapabilitySelectorError::Empty {
+                    source: HttpCapabilitySelectorSource::DirectJmeterProperty,
+                }
+            ));
+            assert_eq!(error.code(), "http.selector.empty");
+        }
+
+        let unknown = parse_ok(&["-J", "jmeter-rs.http.capability=http.native/3"])
+            .resolve_http_capability_selector()
+            .expect_err("unknown capability values must fail closed");
+        assert!(matches!(
+            unknown,
+            HttpCapabilitySelectorError::UnknownValue {
+                source: HttpCapabilitySelectorSource::DirectJmeterProperty,
+                ..
+            }
+        ));
+        assert_eq!(unknown.code(), "http.selector.unknown");
+        assert!(unknown.to_string().contains("http.native/3"));
+
+        for value in ["http.native", "native/1", "HTTP.NATIVE/1"] {
+            let argument = format!("{HTTP_CAPABILITY_SELECTOR_KEY}={value}");
+            let error = parse_ok(&["-J", &argument])
+                .resolve_http_capability_selector()
+                .expect_err("selector aliases must not be accepted");
+            assert!(matches!(
+                error,
+                HttpCapabilitySelectorError::UnknownValue {
+                    source: HttpCapabilitySelectorSource::DirectJmeterProperty,
+                    ..
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn direct_property_removal_forms_fail_closed_even_in_raw_occurrences() {
+        let mut selector = parse_ok(&["-J", "ordinary=value"]);
+        let occurrence = selector
+            .options
+            .occurrences
+            .first_mut()
+            .expect("direct occurrence");
+        occurrence.value = Some(HTTP_CAPABILITY_SELECTOR_KEY.to_owned());
+        let error = selector
+            .resolve_http_capability_selector()
+            .expect_err("raw selector removal must fail");
+        assert!(matches!(
+            error,
+            HttpCapabilitySelectorError::Empty {
+                source: HttpCapabilitySelectorSource::DirectJmeterProperty
+            }
+        ));
+
+        let mut properties = parse_ok(&["-J", "ordinary=value"]);
+        let occurrence = properties
+            .options
+            .occurrences
+            .first_mut()
+            .expect("direct occurrence");
+        occurrence.value = Some(HTTP_DNS_NAMESERVERS_KEY.to_owned());
+        let error = properties
+            .resolve_http_native_v2_properties()
+            .expect_err("raw NativeV2 removal must fail");
+        assert!(matches!(
+            error,
+            HttpNativeV2PropertyError::Empty {
+                property: HTTP_DNS_NAMESERVERS_KEY,
+                source: HttpCapabilitySelectorSource::DirectJmeterProperty,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn http_selector_rejects_observable_non_direct_sources_and_redacts_values() {
+        let system = parse_ok(&["-D", "jmeter-rs.http.capability=http.native/1"])
+            .resolve_http_capability_selector()
+            .expect_err("-D must not authorize the application-owned selector");
+        assert!(matches!(
+            system,
+            HttpCapabilitySelectorError::NonDirectSource {
+                source: HttpCapabilitySelectorSource::SystemProperty,
+                ..
+            }
+        ));
+        assert_eq!(system.code(), "http.selector.non-direct-source");
+
+        let global = parse_ok(&["-G", "jmeter-rs.http.capability=http.native/1"])
+            .resolve_http_capability_selector()
+            .expect_err("-G must not authorize the application-owned selector");
+        assert!(matches!(
+            global,
+            HttpCapabilitySelectorError::NonDirectSource {
+                source: HttpCapabilitySelectorSource::GlobalProperty,
+                ..
+            }
+        ));
+
+        let system_v2 = parse_ok(&["-D", "jmeter-rs.http.capability=http.native/2"])
+            .resolve_http_capability_selector()
+            .expect_err("-D must not authorize the NativeV2 selector");
+        assert!(matches!(
+            &system_v2,
+            HttpCapabilitySelectorError::NonDirectSource {
+                source: HttpCapabilitySelectorSource::SystemProperty,
+                value,
+            } if value == HTTP_NATIVE_V2_CAPABILITY
+        ));
+        assert_eq!(system_v2.code(), "http.selector.non-direct-source");
+
+        let empty_global = parse_ok(&["-G", "jmeter-rs.http.capability="])
+            .resolve_http_capability_selector()
+            .expect_err("an observable non-direct removal must fail closed");
+        assert!(matches!(
+            empty_global,
+            HttpCapabilitySelectorError::NonDirectSource {
+                source: HttpCapabilitySelectorSource::GlobalProperty,
+                ..
+            }
+        ));
+
+        let secret_like = parse_ok(&["-Jjmeter-rs.http.capability=topsecret"])
+            .resolve_http_capability_selector()
+            .expect_err("secret-like unknown values must fail closed");
+        assert!(matches!(
+            secret_like,
+            HttpCapabilitySelectorError::UnknownValue { .. }
+        ));
+        assert!(!secret_like.to_string().contains("topsecret"));
+        assert!(!format!("{secret_like:?}").contains("topsecret"));
+        assert!(secret_like.to_string().contains("<redacted>"));
+        assert!(format!("{secret_like:?}").contains("<redacted>"));
+    }
+
+    #[test]
+    fn native_v2_properties_accept_exact_direct_forms_and_preserve_order_and_origin() {
+        let invocation = parse_ok(&[
+            "-J",
+            "ordinary=before",
+            "-Jjmeter-rs.http.dns.nameservers=1.1.1.1,[2001:db8::53]:53,192.0.2.10:53",
+            "-J",
+            "jmeter-rs.http.tls.ca-file=./certs/ca.pem",
+        ]);
+        let properties = invocation
+            .resolve_http_native_v2_properties()
+            .expect("valid NativeV2 properties");
+        let nameservers = properties
+            .dns_nameservers
+            .as_ref()
+            .expect("nameserver selection");
+        assert_eq!(
+            nameservers.nameservers,
+            [
+                "1.1.1.1:53".parse::<SocketAddr>().expect("IPv4"),
+                "[2001:db8::53]:53".parse::<SocketAddr>().expect("IPv6"),
+                "192.0.2.10:53".parse::<SocketAddr>().expect("IPv4 socket"),
+            ]
+        );
+        assert_eq!(
+            nameservers.origin.source,
+            HttpCapabilitySelectorSource::DirectJmeterProperty
+        );
+        assert_eq!(nameservers.origin.occurrence, 2);
+
+        let ca_file = properties.tls_ca_file.as_ref().expect("CA selection");
+        assert_eq!(ca_file.path.as_str(), "./certs/ca.pem");
+        assert_eq!(
+            ca_file.origin.source,
+            HttpCapabilitySelectorSource::DirectJmeterProperty
+        );
+        assert_eq!(ca_file.origin.occurrence, 3);
+        assert_eq!(
+            properties.nameservers(),
+            Some(nameservers.nameservers.as_slice())
+        );
+        assert_eq!(
+            properties.ca_file().map(HttpNativeV2CaFilePath::as_str),
+            Some("./certs/ca.pem")
+        );
+    }
+
+    #[test]
+    fn native_v2_properties_are_optional_when_absent() {
+        let absent = parse_ok(&[])
+            .resolve_http_native_v2_properties()
+            .expect("absent optional properties");
+        assert!(absent.is_empty());
+        assert_eq!(absent.dns_nameservers, None);
+        assert_eq!(absent.tls_ca_file, None);
+
+        let unrelated = parse_ok(&["-Jordinary=value"])
+            .resolve_http_native_v2_properties()
+            .expect("unrelated property");
+        assert!(unrelated.is_empty());
+    }
+
+    #[test]
+    fn native_v2_properties_reject_direct_repeats_and_non_direct_sources() {
+        for (key, values) in [
+            (HTTP_DNS_NAMESERVERS_KEY, "1.1.1.1:53,8.8.8.8:53"),
+            (HTTP_TLS_CA_FILE_KEY, "first.pem"),
+        ] {
+            let argument = format!("{key}={values}");
+            let repeated_argument = format!("{key}=second.pem");
+            let invocation = parse_strings(vec![
+                "-J".to_owned(),
+                argument,
+                "-J".to_owned(),
+                repeated_argument,
+            ])
+            .expect("repeated property parses");
+            let error = invocation
+                .resolve_http_native_v2_properties()
+                .expect_err("direct repeat must fail");
+            assert!(matches!(
+                error,
+                HttpNativeV2PropertyError::Repeated { property, occurrences: 2 }
+                    if property == key
+            ));
+            assert_eq!(error.code(), "http.native-v2.property.repeated");
+        }
+
+        for (option, source) in [
+            ("-D", HttpCapabilitySelectorSource::SystemProperty),
+            ("-G", HttpCapabilitySelectorSource::GlobalProperty),
+        ] {
+            let argument = format!("{HTTP_DNS_NAMESERVERS_KEY}=1.1.1.1:53");
+            let invocation = parse_ok(&[option, &argument]);
+            let error = invocation
+                .resolve_http_native_v2_properties()
+                .expect_err("non-direct DNS source must fail");
+            assert!(matches!(
+                error,
+                HttpNativeV2PropertyError::NonDirectSource {
+                    property: HTTP_DNS_NAMESERVERS_KEY,
+                    source: actual,
+                    occurrence: 0,
+                } if actual == source
+            ));
+            assert_eq!(error.code(), "http.native-v2.property.non-direct-source");
+        }
+
+        let global_removal = parse_ok(&["-G", "jmeter-rs.http.tls.ca-file="]);
+        let error = global_removal
+            .resolve_http_native_v2_properties()
+            .expect_err("observable global same-key removal must fail");
+        assert!(matches!(
+            error,
+            HttpNativeV2PropertyError::NonDirectSource {
+                property: HTTP_TLS_CA_FILE_KEY,
+                source: HttpCapabilitySelectorSource::GlobalProperty,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn native_v2_nameservers_enforce_numeric_ports_whitespace_duplicates_and_bounds() {
+        let invalid = [
+            ("not-a-hostname", HttpNativeV2NameserverError::NonNumeric),
+            ("[2001:db8::1", HttpNativeV2NameserverError::InvalidSocket),
+            (
+                "2001:db8::1:53",
+                HttpNativeV2NameserverError::UnbracketedIpv6Port,
+            ),
+            (
+                "1.1.1.1:54",
+                HttpNativeV2NameserverError::PortNot53 { port: 54 },
+            ),
+            ("1.1.1.1:0", HttpNativeV2NameserverError::Zero),
+            ("0.0.0.0", HttpNativeV2NameserverError::Zero),
+            ("1.1.1.1,", HttpNativeV2NameserverError::EmptyEntry),
+            ("1.1.1.1, 8.8.8.8", HttpNativeV2NameserverError::Whitespace),
+            ("1.1.1.1:53,1.1.1.1", HttpNativeV2NameserverError::Duplicate),
+        ];
+        for (value, reason) in invalid {
+            let argument = format!("{HTTP_DNS_NAMESERVERS_KEY}={value}");
+            let error = parse_ok(&["-J", &argument])
+                .resolve_http_native_v2_properties()
+                .expect_err("invalid nameserver must fail");
+            assert!(matches!(
+                error,
+                HttpNativeV2PropertyError::InvalidNameservers { reason: actual, .. }
+                    if actual == reason
+            ));
+        }
+
+        let exactly_max = (1..=MAX_HTTP_NATIVE_V2_NAMESERVERS)
+            .map(|octet| format!("192.0.2.{octet}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let argument = format!("{HTTP_DNS_NAMESERVERS_KEY}={exactly_max}");
+        let properties = parse_ok(&["-J", &argument])
+            .resolve_http_native_v2_properties()
+            .expect("maximum nameserver list is accepted");
+        assert_eq!(
+            properties
+                .dns_nameservers
+                .as_ref()
+                .expect("nameservers")
+                .nameservers
+                .len(),
+            MAX_HTTP_NATIVE_V2_NAMESERVERS
+        );
+
+        let over_max = (1..=MAX_HTTP_NATIVE_V2_NAMESERVERS + 1)
+            .map(|octet| format!("198.51.100.{octet}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let argument = format!("{HTTP_DNS_NAMESERVERS_KEY}={over_max}");
+        let error = parse_ok(&["-J", &argument])
+            .resolve_http_native_v2_properties()
+            .expect_err("too many nameservers must fail");
+        assert!(matches!(
+            error,
+            HttpNativeV2PropertyError::InvalidNameservers {
+                reason: HttpNativeV2NameserverError::TooMany { count: 17 },
+                ..
+            }
+        ));
+
+        assert_eq!(
+            HttpCapabilitySelectorError::OccurrenceOverflow {
+                source: HttpCapabilitySelectorSource::DirectJmeterProperty,
+            }
+            .code(),
+            "http.selector.occurrence-overflow"
+        );
+        assert_eq!(
+            HttpNativeV2PropertyError::OccurrenceOverflow {
+                property: HTTP_DNS_NAMESERVERS_KEY,
+            }
+            .code(),
+            "http.native-v2.property.occurrence-overflow"
+        );
+    }
+
+    #[test]
+    fn native_v2_properties_reject_empty_removed_oversized_and_malformed_ca_paths() {
+        for argument in [
+            format!("{HTTP_DNS_NAMESERVERS_KEY}="),
+            format!("{HTTP_TLS_CA_FILE_KEY}="),
+        ] {
+            let error = parse_ok(&["-J", &argument])
+                .resolve_http_native_v2_properties()
+                .expect_err("empty direct property must fail");
+            assert!(matches!(error, HttpNativeV2PropertyError::Empty { .. }));
+        }
+
+        let oversized = "x".repeat(MAX_HTTP_NATIVE_V2_PROPERTY_BYTES + 1);
+        let argument = format!("{HTTP_TLS_CA_FILE_KEY}={oversized}");
+        let error = parse_ok(&["-J", &argument])
+            .resolve_http_native_v2_properties()
+            .expect_err("oversized CA path must fail before copy");
+        assert!(matches!(
+            &error,
+            HttpNativeV2PropertyError::ValueTooLong {
+                property: HTTP_TLS_CA_FILE_KEY,
+                observed,
+                limit: MAX_HTTP_NATIVE_V2_PROPERTY_BYTES,
+                ..
+            } if *observed == MAX_HTTP_NATIVE_V2_PROPERTY_BYTES + 1
+        ));
+        assert_eq!(error.occurrence(), Some(0));
+
+        for (path, reason) in [
+            ("/tmp/ca.pem", HttpNativeV2CaPathError::Absolute),
+            ("../ca.pem", HttpNativeV2CaPathError::Parent),
+            ("certs/../ca.pem", HttpNativeV2CaPathError::Parent),
+            ("..\\ca.pem", HttpNativeV2CaPathError::Parent),
+            ("\\ca.pem", HttpNativeV2CaPathError::Root),
+            ("C:\\ca.pem", HttpNativeV2CaPathError::Prefix),
+            ("\\\\server\\share\\ca.pem", HttpNativeV2CaPathError::Prefix),
+        ] {
+            let argument = format!("{HTTP_TLS_CA_FILE_KEY}={path}");
+            let error = parse_ok(&["-J", &argument])
+                .resolve_http_native_v2_properties()
+                .expect_err("unsafe CA path must fail");
+            assert!(matches!(
+                error,
+                HttpNativeV2PropertyError::InvalidCaFile { reason: actual, .. }
+                    if actual == reason
+            ));
+        }
+
+        let nul = format!("{HTTP_TLS_CA_FILE_KEY}=cert\0.pem");
+        let error = parse_ok(&["-J", &nul])
+            .resolve_http_native_v2_properties()
+            .expect_err("NUL CA path must fail");
+        assert!(matches!(
+            error,
+            HttpNativeV2PropertyError::InvalidCaFile {
+                reason: HttpNativeV2CaPathError::Nul,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn native_v2_property_diagnostics_redact_values_and_ca_paths() {
+        let secret_nameserver = "203.0.113.77:54";
+        let argument = format!("{HTTP_DNS_NAMESERVERS_KEY}={secret_nameserver}");
+        let error = parse_ok(&["-J", &argument])
+            .resolve_http_native_v2_properties()
+            .expect_err("invalid nameserver");
+        let display = error.to_string();
+        let debug = format!("{error:?}");
+        assert!(!display.contains(secret_nameserver));
+        assert!(!debug.contains(secret_nameserver));
+        assert!(display.contains("<redacted>"));
+
+        let secret_path = "../private-ca.pem";
+        let argument = format!("{HTTP_TLS_CA_FILE_KEY}={secret_path}");
+        let error = parse_ok(&["-J", &argument])
+            .resolve_http_native_v2_properties()
+            .expect_err("unsafe CA path");
+        let display = error.to_string();
+        let debug = format!("{error:?}");
+        assert!(!display.contains(secret_path));
+        assert!(!debug.contains(secret_path));
+        assert!(display.contains("<redacted>"));
+
+        let accepted = parse_ok(&["-J", "jmeter-rs.http.tls.ca-file=private-ca.pem"])
+            .resolve_http_native_v2_properties()
+            .expect("valid CA path");
+        let debug = format!("{accepted:?}");
+        assert!(!debug.contains("private-ca.pem"));
+    }
+
+    #[test]
     fn last_is_preserved_and_marked_only_for_plan_and_logs() {
         let invocation = parse_ok(&["-t", "LAST", "-l", "LAST.jtl", "-jLAST.log"]);
         assert!(
@@ -2779,6 +5277,57 @@ mod tests {
     }
 
     #[test]
+    fn cli_diagnostics_redact_sensitive_unknown_and_argument_tokens() {
+        let typo = parse_ok_err(&["--passwrod=secret"]);
+        assert_eq!(typo.code(), "cli.unknown-option");
+        let typo_display = typo.to_string();
+        let typo_debug = format!("{typo:?}");
+        assert!(typo_display.contains("--passwrod"));
+        assert!(typo_display.contains(REDACTED_CLI_VALUE));
+        assert!(!typo_display.contains("secret"));
+        assert!(typo_debug.contains("--passwrod"));
+        assert!(typo_debug.contains(REDACTED_CLI_VALUE));
+        assert!(!typo_debug.contains("secret"));
+
+        let attached_password = CliError::UnknownOption {
+            token: "--password=secret".to_owned(),
+        };
+        assert_eq!(attached_password.code(), "cli.unknown-option");
+        assert!(attached_password.to_string().contains("--password"));
+        assert!(!attached_password.to_string().contains("secret"));
+
+        let secretish = CliError::UnknownOption {
+            token: "--typo=topsecret".to_owned(),
+        };
+        assert!(secretish.to_string().contains("--typo"));
+        assert!(!secretish.to_string().contains("topsecret"));
+
+        let positional = parse_ok_err(&["--", "password=secret"]);
+        assert_eq!(positional.code(), "cli.unexpected-argument");
+        assert!(positional.to_string().contains("password"));
+        assert!(!positional.to_string().contains("secret"));
+        assert!(!format!("{positional:?}").contains("secret"));
+
+        let duplicate = parse_ok_err(&["--password=first", "--password=second"]);
+        assert_eq!(duplicate.code(), "cli.duplicate-option");
+        assert!(duplicate.to_string().contains("--password"));
+        assert!(!duplicate.to_string().contains("second"));
+        assert!(!format!("{duplicate:?}").contains("second"));
+
+        let malformed_property = CliError::InvalidValue {
+            option: OptionId::Jmeterproperty,
+            value: "http.proxyPass=secret".to_owned(),
+            reason: ValueError::MissingAssignment,
+        };
+        assert!(malformed_property.to_string().contains("--jmeterproperty"));
+        assert!(!malformed_property.to_string().contains("secret"));
+        assert!(!format!("{malformed_property:?}").contains("secret"));
+
+        let ordinary = parse_ok_err(&["--typo=value"]);
+        assert!(ordinary.to_string().contains("--typo=value"));
+    }
+
+    #[test]
     fn property_and_loglevel_separate_forms_consume_exactly_one_token() {
         for option in ["-J", "-G", "-D", "-L"] {
             let error = parse_ok_err(&[option, "key=value", "orphan"]);
@@ -2821,16 +5370,18 @@ mod tests {
                 .options
                 .report_at_end
         );
-        let report_with_plan = parse_ok(&["-g", "input.jtl", "-t", "plan"]);
-        assert_eq!(report_with_plan.options.mode, RunMode::ReportOnly);
-        assert_eq!(
-            report_with_plan
-                .options
-                .testfile
-                .as_ref()
-                .map(PathArgument::as_str),
-            Some("plan")
-        );
+        for arguments in [
+            vec!["-g", "input.jtl", "-t", "plan"],
+            vec!["-t", "plan", "-g", "input.jtl"],
+        ] {
+            assert!(matches!(
+                parse_ok_err(&arguments),
+                CliError::IncompatibleOptions {
+                    reason: CombinationError::ReportOnlyNeedsOnlyJtl,
+                    ..
+                }
+            ));
+        }
         let report_with_end = parse_ok(&["-g", "input.jtl", "-e", "-o", "out"]);
         assert!(report_with_end.options.report_at_end);
         assert!(

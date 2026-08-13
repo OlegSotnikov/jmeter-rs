@@ -3,12 +3,14 @@
 
 use core::cmp::Ordering;
 use core::hash::{Hash, Hasher};
+use std::collections::BTreeMap;
 
 use jmeter_rs_results::WallTimestamp;
 
 use crate::error::{ConfigField, ReportError, ReportLimit};
 
-const DEFAULT_REPORT_PERCENTILES: [u8; 3] = [90, 95, 99];
+/// Default percentile levels used by JMeter's Aggregate/Summary listeners.
+pub const DEFAULT_REPORT_PERCENTILES: [u8; 3] = [90, 95, 99];
 const DEFAULT_MAX_LABEL_BYTES: usize = 16 * 1024;
 const DEFAULT_MAX_ERROR_KEY_BYTES: usize = 16 * 1024;
 /// Default bound for one caller-supplied graph/result input slice.
@@ -18,6 +20,54 @@ const DEFAULT_MAX_ERROR_KEY_BYTES: usize = 16 * 1024;
 /// bounded as well so a caller cannot turn a pure-core helper into an
 /// unbounded allocation by passing an arbitrarily large collection.
 pub(crate) const DEFAULT_MAX_INPUT_SAMPLES: usize = 100_000;
+
+/// Default `jmeter.reportgenerator.overall_granularity` value, in
+/// milliseconds.
+pub const DEFAULT_REPORT_OVERALL_GRANULARITY_MILLIS: u64 = 60_000;
+/// Default `jmeter.reportgenerator.statistic_window` size.
+pub const DEFAULT_REPORT_STATISTIC_WINDOW: usize = 20_000;
+/// Default response-time distribution bucket width, in milliseconds.
+pub const DEFAULT_RESPONSE_TIME_DISTRIBUTION_GRANULARITY_MILLIS: u64 = 100;
+/// The report generator rejects overall buckets at or below one second.
+pub const MIN_REPORT_OVERALL_GRANULARITY_MILLIS: u64 = 1_001;
+/// Maximum retained report-generator property key/value bytes.  Property
+/// loading is pure, but it must remain bounded when fed untrusted input.
+pub const MAX_REPORT_PROPERTY_BYTES: usize = 64 * 1024;
+/// Maximum unknown report-generator properties retained by one projection.
+pub const MAX_REPORT_PROPERTIES: usize = 256;
+
+/// Exact JMeter property names consumed by report configuration.
+pub const AGGREGATE_RPT_PCT1: &str = "aggregate_rpt_pct1";
+/// Exact JMeter property name for the second Aggregate/Summary percentile.
+pub const AGGREGATE_RPT_PCT2: &str = "aggregate_rpt_pct2";
+/// Exact JMeter property name for the third Aggregate/Summary percentile.
+pub const AGGREGATE_RPT_PCT3: &str = "aggregate_rpt_pct3";
+/// Exact JMeter report-generator APDEX satisfied-threshold property.
+pub const REPORTGENERATOR_APDEX_SATISFIED_THRESHOLD: &str =
+    "jmeter.reportgenerator.apdex_satisfied_threshold";
+/// Exact JMeter report-generator APDEX tolerated-threshold property.
+pub const REPORTGENERATOR_APDEX_TOLERATED_THRESHOLD: &str =
+    "jmeter.reportgenerator.apdex_tolerated_threshold";
+/// Exact JMeter report-generator overall-granularity property.
+pub const REPORTGENERATOR_OVERALL_GRANULARITY: &str = "jmeter.reportgenerator.overall_granularity";
+/// Exact JMeter report-generator statistical-window property.
+pub const REPORTGENERATOR_STATISTIC_WINDOW: &str = "jmeter.reportgenerator.statistic_window";
+/// Exact JMeter report-generator transaction-controller filtering property.
+pub const REPORTGENERATOR_EXCLUDE_TC_FROM_TOP5_ERRORS_BY_SAMPLER: &str =
+    "jmeter.reportgenerator.exclude_tc_from_top5_errors_by_sampler";
+/// Exact JMeter response-time distribution granularity property.
+pub const REPORTGENERATOR_RESPONSE_TIME_DISTRIBUTION_GRANULARITY: &str =
+    "jmeter.reportgenerator.graph.responseTimeDistribution.property.set_granularity";
+/// Exact JMeter report-generator sample-filter property.
+pub const REPORTGENERATOR_SAMPLE_FILTER: &str = "jmeter.reportgenerator.sample_filter";
+/// Exact JMeter report title property.
+pub const REPORTGENERATOR_REPORT_TITLE: &str = "jmeter.reportgenerator.report_title";
+/// Exact JMeter report date-format property.
+pub const REPORTGENERATOR_DATE_FORMAT: &str = "jmeter.reportgenerator.date_format";
+/// Exact JMeter report range-start property.
+pub const REPORTGENERATOR_START_DATE: &str = "jmeter.reportgenerator.start_date";
+/// Exact JMeter report range-end property.
+pub const REPORTGENERATOR_END_DATE: &str = "jmeter.reportgenerator.end_date";
 
 pub(crate) fn validate_input_sample_count(
     actual: usize,
@@ -31,6 +81,381 @@ pub(crate) fn validate_input_sample_count(
         });
     }
     Ok(())
+}
+
+/// Known report configuration properties and their exact JMeter spellings.
+///
+/// Keeping this mapping in the pure report crate prevents Rust-facing field
+/// names from becoming an accidental wire contract.  Unknown properties are
+/// retained by [`ReportGeneratorProperties`] rather than being silently
+/// discarded.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ReportProperty {
+    /// Aggregate/Summary first percentile.
+    AggregatePercentile1,
+    /// Aggregate/Summary second percentile.
+    AggregatePercentile2,
+    /// Aggregate/Summary third percentile.
+    AggregatePercentile3,
+    /// Dashboard APDEX satisfied threshold.
+    DashboardApdexSatisfiedThreshold,
+    /// Dashboard APDEX tolerated threshold.
+    DashboardApdexToleratedThreshold,
+    /// Dashboard overall time-series granularity.
+    DashboardOverallGranularity,
+    /// Dashboard statistical-window size.
+    DashboardStatisticWindow,
+    /// Dashboard transaction-controller top-five filtering.
+    DashboardExcludeTransactionControllersFromTop5,
+    /// Response-time distribution granularity.
+    ResponseTimeDistributionGranularity,
+    /// Dashboard sample filter expression.
+    DashboardSampleFilter,
+    /// Dashboard title.
+    DashboardReportTitle,
+    /// Dashboard date format.
+    DashboardDateFormat,
+    /// Dashboard range start.
+    DashboardStartDate,
+    /// Dashboard range end.
+    DashboardEndDate,
+}
+
+impl ReportProperty {
+    /// Returns the exact upstream property spelling.
+    pub const fn wire_name(self) -> &'static str {
+        match self {
+            Self::AggregatePercentile1 => AGGREGATE_RPT_PCT1,
+            Self::AggregatePercentile2 => AGGREGATE_RPT_PCT2,
+            Self::AggregatePercentile3 => AGGREGATE_RPT_PCT3,
+            Self::DashboardApdexSatisfiedThreshold => REPORTGENERATOR_APDEX_SATISFIED_THRESHOLD,
+            Self::DashboardApdexToleratedThreshold => REPORTGENERATOR_APDEX_TOLERATED_THRESHOLD,
+            Self::DashboardOverallGranularity => REPORTGENERATOR_OVERALL_GRANULARITY,
+            Self::DashboardStatisticWindow => REPORTGENERATOR_STATISTIC_WINDOW,
+            Self::DashboardExcludeTransactionControllersFromTop5 => {
+                REPORTGENERATOR_EXCLUDE_TC_FROM_TOP5_ERRORS_BY_SAMPLER
+            }
+            Self::ResponseTimeDistributionGranularity => {
+                REPORTGENERATOR_RESPONSE_TIME_DISTRIBUTION_GRANULARITY
+            }
+            Self::DashboardSampleFilter => REPORTGENERATOR_SAMPLE_FILTER,
+            Self::DashboardReportTitle => REPORTGENERATOR_REPORT_TITLE,
+            Self::DashboardDateFormat => REPORTGENERATOR_DATE_FORMAT,
+            Self::DashboardStartDate => REPORTGENERATOR_START_DATE,
+            Self::DashboardEndDate => REPORTGENERATOR_END_DATE,
+        }
+    }
+
+    /// Resolves an exact upstream property spelling to a known property.
+    pub fn from_wire_name(name: &str) -> Option<Self> {
+        Some(match name {
+            AGGREGATE_RPT_PCT1 => Self::AggregatePercentile1,
+            AGGREGATE_RPT_PCT2 => Self::AggregatePercentile2,
+            AGGREGATE_RPT_PCT3 => Self::AggregatePercentile3,
+            REPORTGENERATOR_APDEX_SATISFIED_THRESHOLD => Self::DashboardApdexSatisfiedThreshold,
+            REPORTGENERATOR_APDEX_TOLERATED_THRESHOLD => Self::DashboardApdexToleratedThreshold,
+            REPORTGENERATOR_OVERALL_GRANULARITY => Self::DashboardOverallGranularity,
+            REPORTGENERATOR_STATISTIC_WINDOW => Self::DashboardStatisticWindow,
+            REPORTGENERATOR_EXCLUDE_TC_FROM_TOP5_ERRORS_BY_SAMPLER => {
+                Self::DashboardExcludeTransactionControllersFromTop5
+            }
+            REPORTGENERATOR_RESPONSE_TIME_DISTRIBUTION_GRANULARITY => {
+                Self::ResponseTimeDistributionGranularity
+            }
+            REPORTGENERATOR_SAMPLE_FILTER => Self::DashboardSampleFilter,
+            REPORTGENERATOR_REPORT_TITLE => Self::DashboardReportTitle,
+            REPORTGENERATOR_DATE_FORMAT => Self::DashboardDateFormat,
+            REPORTGENERATOR_START_DATE => Self::DashboardStartDate,
+            REPORTGENERATOR_END_DATE => Self::DashboardEndDate,
+            _ => return None,
+        })
+    }
+}
+
+/// A presence-aware, pure projection of report-generator properties.
+///
+/// `Option<String>` intentionally distinguishes an absent property (`None`)
+/// from an explicitly present empty value (`Some(String::new())`). Numeric and
+/// boolean properties reject empty values because JMeter cannot interpret
+/// them as those types. Properties outside the known report surface are
+/// retained in source order-independent form so plugin/custom graph data is
+/// not silently lost.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ReportGeneratorProperties {
+    aggregate_percentiles: [Option<f64>; 3],
+    apdex_satisfied_millis: Option<u64>,
+    apdex_tolerated_millis: Option<u64>,
+    overall_granularity_millis: Option<u64>,
+    statistic_window: Option<usize>,
+    exclude_transaction_controllers_from_top5: Option<bool>,
+    response_time_distribution_granularity_millis: Option<u64>,
+    sample_filter: Option<String>,
+    report_title: Option<String>,
+    date_format: Option<String>,
+    start_date: Option<String>,
+    end_date: Option<String>,
+    unknown: Vec<(String, String)>,
+}
+
+impl ReportGeneratorProperties {
+    /// Builds a projection from ordered JMeter properties. Repeated keys use
+    /// the last value, matching Java `Properties` merge behavior.
+    pub fn from_properties<I, K, V>(properties: I) -> Result<Self, ReportError>
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
+    {
+        let mut projection = Self::default();
+        for (key, value) in properties {
+            projection.apply_property(key.as_ref(), value.as_ref())?;
+        }
+        Ok(projection)
+    }
+
+    /// Builds a projection from a property map.
+    pub fn from_property_map(properties: &BTreeMap<String, String>) -> Result<Self, ReportError> {
+        Self::from_properties(properties.iter())
+    }
+
+    /// Applies one property, retaining unknown report-generator keys.
+    pub fn apply_property(&mut self, key: &str, value: &str) -> Result<(), ReportError> {
+        if key.len() > MAX_REPORT_PROPERTY_BYTES || value.len() > MAX_REPORT_PROPERTY_BYTES {
+            return Err(ReportError::Unsupported {
+                capability: "report.property_bounds",
+            });
+        }
+        let known = ReportProperty::from_wire_name(key);
+        match known {
+            Some(ReportProperty::AggregatePercentile1)
+            | Some(ReportProperty::AggregatePercentile2)
+            | Some(ReportProperty::AggregatePercentile3) => {
+                let percentile = parse_percentile(value)?;
+                let index = if key == AGGREGATE_RPT_PCT1 {
+                    0
+                } else if key == AGGREGATE_RPT_PCT2 {
+                    1
+                } else {
+                    2
+                };
+                self.aggregate_percentiles[index] = Some(percentile);
+            }
+            Some(ReportProperty::DashboardApdexSatisfiedThreshold) => {
+                self.apdex_satisfied_millis = Some(parse_u64(value, ConfigField::ApdexThresholds)?);
+            }
+            Some(ReportProperty::DashboardApdexToleratedThreshold) => {
+                self.apdex_tolerated_millis = Some(parse_u64(value, ConfigField::ApdexThresholds)?);
+            }
+            Some(ReportProperty::DashboardOverallGranularity) => {
+                self.overall_granularity_millis =
+                    Some(parse_u64(value, ConfigField::OverallGranularity)?);
+            }
+            Some(ReportProperty::DashboardStatisticWindow) => {
+                self.statistic_window =
+                    Some(parse_usize(value, ConfigField::MaxPercentileSamples)?);
+            }
+            Some(ReportProperty::DashboardExcludeTransactionControllersFromTop5) => {
+                self.exclude_transaction_controllers_from_top5 =
+                    Some(parse_bool(value, ConfigField::TransactionControllerErrors)?);
+            }
+            Some(ReportProperty::ResponseTimeDistributionGranularity) => {
+                self.response_time_distribution_granularity_millis =
+                    Some(parse_u64(value, ConfigField::OverallGranularity)?);
+            }
+            Some(ReportProperty::DashboardSampleFilter) => {
+                self.sample_filter = Some(value.to_owned());
+            }
+            Some(ReportProperty::DashboardReportTitle) => {
+                self.report_title = Some(value.to_owned());
+            }
+            Some(ReportProperty::DashboardDateFormat) => {
+                self.date_format = Some(value.to_owned());
+            }
+            Some(ReportProperty::DashboardStartDate) => {
+                self.start_date = Some(value.to_owned());
+            }
+            Some(ReportProperty::DashboardEndDate) => {
+                self.end_date = Some(value.to_owned());
+            }
+            None if key.starts_with("jmeter.reportgenerator.") => {
+                if let Some((_, existing)) = self.unknown.iter_mut().find(|(name, _)| name == key) {
+                    *existing = value.to_owned();
+                } else {
+                    if self.unknown.len() >= MAX_REPORT_PROPERTIES {
+                        return Err(ReportError::Unsupported {
+                            capability: "report.property_bounds",
+                        });
+                    }
+                    self.unknown.push((key.to_owned(), value.to_owned()));
+                }
+            }
+            None => {}
+        }
+        Ok(())
+    }
+
+    /// Returns whether the exact property was present in the input.
+    pub fn contains(&self, property: ReportProperty) -> bool {
+        match property {
+            ReportProperty::AggregatePercentile1 => self.aggregate_percentiles[0].is_some(),
+            ReportProperty::AggregatePercentile2 => self.aggregate_percentiles[1].is_some(),
+            ReportProperty::AggregatePercentile3 => self.aggregate_percentiles[2].is_some(),
+            ReportProperty::DashboardApdexSatisfiedThreshold => {
+                self.apdex_satisfied_millis.is_some()
+            }
+            ReportProperty::DashboardApdexToleratedThreshold => {
+                self.apdex_tolerated_millis.is_some()
+            }
+            ReportProperty::DashboardOverallGranularity => {
+                self.overall_granularity_millis.is_some()
+            }
+            ReportProperty::DashboardStatisticWindow => self.statistic_window.is_some(),
+            ReportProperty::DashboardExcludeTransactionControllersFromTop5 => {
+                self.exclude_transaction_controllers_from_top5.is_some()
+            }
+            ReportProperty::ResponseTimeDistributionGranularity => {
+                self.response_time_distribution_granularity_millis.is_some()
+            }
+            ReportProperty::DashboardSampleFilter => self.sample_filter.is_some(),
+            ReportProperty::DashboardReportTitle => self.report_title.is_some(),
+            ReportProperty::DashboardDateFormat => self.date_format.is_some(),
+            ReportProperty::DashboardStartDate => self.start_date.is_some(),
+            ReportProperty::DashboardEndDate => self.end_date.is_some(),
+        }
+    }
+
+    /// Returns the configured aggregate percentile, if explicitly present.
+    pub fn aggregate_percentile(&self, index: usize) -> Option<f64> {
+        self.aggregate_percentiles.get(index).copied().flatten()
+    }
+
+    /// Returns explicit aggregate levels, filling absent levels with JMeter's
+    /// 90/95/99 defaults.
+    pub fn aggregate_percentiles(&self) -> [f64; 3] {
+        [0, 1, 2].map(|index| {
+            self.aggregate_percentile(index)
+                .unwrap_or(f64::from(DEFAULT_REPORT_PERCENTILES[index]))
+        })
+    }
+
+    /// Returns the explicit APDEX thresholds, if supplied.
+    pub const fn apdex_satisfied_millis(&self) -> Option<u64> {
+        self.apdex_satisfied_millis
+    }
+
+    /// Returns the explicit APDEX tolerance threshold, if supplied.
+    pub const fn apdex_tolerated_millis(&self) -> Option<u64> {
+        self.apdex_tolerated_millis
+    }
+
+    /// Returns the explicit overall granularity, if supplied.
+    pub const fn overall_granularity_millis(&self) -> Option<u64> {
+        self.overall_granularity_millis
+    }
+
+    /// Returns the explicit statistical window, if supplied.
+    pub const fn statistic_window(&self) -> Option<usize> {
+        self.statistic_window
+    }
+
+    /// Returns the explicit transaction-controller filtering flag, if supplied.
+    pub const fn exclude_transaction_controllers_from_top5(&self) -> Option<bool> {
+        self.exclude_transaction_controllers_from_top5
+    }
+
+    /// Returns the explicit response-time distribution granularity, if supplied.
+    pub const fn response_time_distribution_granularity_millis(&self) -> Option<u64> {
+        self.response_time_distribution_granularity_millis
+    }
+
+    /// Returns the optional sample filter, preserving an explicit empty value.
+    pub fn sample_filter(&self) -> Option<&str> {
+        self.sample_filter.as_deref()
+    }
+
+    /// Returns the optional report title, preserving an explicit empty value.
+    pub fn report_title(&self) -> Option<&str> {
+        self.report_title.as_deref()
+    }
+
+    /// Returns the optional Java date format, preserving an explicit empty value.
+    pub fn date_format(&self) -> Option<&str> {
+        self.date_format.as_deref()
+    }
+
+    /// Returns the optional date-range start, preserving an explicit empty value.
+    pub fn start_date(&self) -> Option<&str> {
+        self.start_date.as_deref()
+    }
+
+    /// Returns the optional date-range end, preserving an explicit empty value.
+    pub fn end_date(&self) -> Option<&str> {
+        self.end_date.as_deref()
+    }
+
+    /// Returns retained unknown report-generator properties.
+    pub fn unknown_properties(&self) -> &[(String, String)] {
+        &self.unknown
+    }
+
+    /// Returns one retained unknown property by its exact wire name.
+    pub fn unknown_property(&self, name: &str) -> Option<&str> {
+        self.unknown
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
+    }
+}
+
+fn parse_u64(value: &str, field: ConfigField) -> Result<u64, ReportError> {
+    // JMeter's report-generator long properties are parsed with
+    // Long.parseLong after trimming. Keep the Rust-facing value non-negative
+    // while rejecting values that Java cannot represent.
+    value
+        .trim()
+        .parse::<i64>()
+        .ok()
+        .and_then(|value| u64::try_from(value).ok())
+        .ok_or(ReportError::InvalidConfig { field })
+}
+
+fn parse_usize(value: &str, field: ConfigField) -> Result<usize, ReportError> {
+    let value = value
+        .trim()
+        .parse::<i64>()
+        .map_err(|_| ReportError::InvalidConfig { field })?;
+    // JMeter reads statistic_window through its int-valued property helper;
+    // keep that wire bound independent of the host usize width.
+    if !(0..=i64::from(i32::MAX)).contains(&value) {
+        return Err(ReportError::InvalidConfig { field });
+    }
+    Ok(value as usize)
+}
+
+fn parse_bool(value: &str, field: ConfigField) -> Result<bool, ReportError> {
+    if value.eq_ignore_ascii_case("true") {
+        Ok(true)
+    } else if value.eq_ignore_ascii_case("false") {
+        Ok(false)
+    } else {
+        Err(ReportError::InvalidConfig { field })
+    }
+}
+
+fn parse_percentile(value: &str) -> Result<f64, ReportError> {
+    let value = value
+        .trim()
+        .parse::<f64>()
+        .map_err(|_| ReportError::InvalidConfig {
+            field: ConfigField::PercentileLevels,
+        })?;
+    if value.is_finite() && (0.0..=100.0).contains(&value) {
+        Ok(value)
+    } else {
+        Err(ReportError::InvalidConfig {
+            field: ConfigField::PercentileLevels,
+        })
+    }
 }
 const DEFAULT_REPORT_PERCENTILE_LEVELS: [PercentileLevel; 3] = [
     PercentileLevel::from_basis_points(9_000),
@@ -485,6 +910,29 @@ impl ListenerConfig {
         self.with_percentiles(percentiles)
     }
 
+    /// Builds listener configuration from JMeter's Aggregate/Summary
+    /// percentile properties and an explicit reporting interval.
+    pub fn from_properties<I, K, V>(
+        interval: ReportInterval,
+        properties: I,
+    ) -> Result<Self, ReportError>
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
+    {
+        let properties = ReportGeneratorProperties::from_properties(properties)?;
+        Self::from_report_generator_properties(interval, &properties)
+    }
+
+    /// Builds listener configuration from a parsed property projection.
+    pub fn from_report_generator_properties(
+        interval: ReportInterval,
+        properties: &ReportGeneratorProperties,
+    ) -> Result<Self, ReportError> {
+        Self::new(interval).with_decimal_percentiles(properties.aggregate_percentiles())
+    }
+
     /// Sets event-label grouping for event-based ingestion.
     pub const fn with_label_grouping(mut self, grouping: LabelGrouping) -> Self {
         self.label_grouping = grouping;
@@ -556,6 +1004,7 @@ pub struct DashboardConfig {
     percentile_levels: [PercentileLevel; 3],
     estimator: DashboardPercentileEstimator,
     overall_granularity_millis: u64,
+    response_time_distribution_granularity_millis: u64,
     exclude_transaction_controllers_from_top5: bool,
     label_grouping: LabelGrouping,
 }
@@ -573,13 +1022,15 @@ impl DashboardConfig {
         Ok(Self {
             interval,
             limits,
-            percentile_window: 20_000,
+            percentile_window: DEFAULT_REPORT_STATISTIC_WINDOW,
             apdex: ApdexThresholds::default(),
             top_error_limit: 5,
             percentiles: DEFAULT_REPORT_PERCENTILES,
             percentile_levels: DEFAULT_REPORT_PERCENTILE_LEVELS,
             estimator: DashboardPercentileEstimator::Legacy,
-            overall_granularity_millis: 60_000,
+            overall_granularity_millis: DEFAULT_REPORT_OVERALL_GRANULARITY_MILLIS,
+            response_time_distribution_granularity_millis:
+                DEFAULT_RESPONSE_TIME_DISTRIBUTION_GRANULARITY_MILLIS,
             exclude_transaction_controllers_from_top5: true,
             label_grouping: LabelGrouping::Raw,
         })
@@ -668,12 +1119,32 @@ impl DashboardConfig {
         mut self,
         granularity_millis: u64,
     ) -> Result<Self, ReportError> {
-        if granularity_millis <= 1_000 {
+        if granularity_millis < MIN_REPORT_OVERALL_GRANULARITY_MILLIS
+            || granularity_millis > i64::MAX as u64
+        {
             return Err(ReportError::InvalidConfig {
                 field: ConfigField::OverallGranularity,
             });
         }
         self.overall_granularity_millis = granularity_millis;
+        Ok(self)
+    }
+
+    /// Sets the response-time distribution bucket width in milliseconds.
+    ///
+    /// JMeter's built-in report-generator default is 100 ms. Unlike the
+    /// overall time-series width, this consumer accepts sub-second values;
+    /// zero is still rejected because it cannot define a bucket.
+    pub fn with_response_time_distribution_granularity_millis(
+        mut self,
+        granularity_millis: u64,
+    ) -> Result<Self, ReportError> {
+        if granularity_millis == 0 || granularity_millis > i64::MAX as u64 {
+            return Err(ReportError::InvalidConfig {
+                field: ConfigField::OverallGranularity,
+            });
+        }
+        self.response_time_distribution_granularity_millis = granularity_millis;
         Ok(self)
     }
 
@@ -694,6 +1165,56 @@ impl DashboardConfig {
     /// Alias matching JMeter's `statistic_window` property terminology.
     pub fn with_statistic_window(self, window: usize) -> Result<Self, ReportError> {
         self.with_percentile_window(window)
+    }
+
+    /// Builds dashboard configuration from JMeter report-generator
+    /// properties and an explicit reporting interval.
+    pub fn from_properties<I, K, V>(
+        interval: ReportInterval,
+        properties: I,
+    ) -> Result<Self, ReportError>
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
+    {
+        let properties = ReportGeneratorProperties::from_properties(properties)?;
+        Self::from_report_generator_properties(interval, &properties)
+    }
+
+    /// Builds dashboard configuration from a parsed property projection.
+    pub fn from_report_generator_properties(
+        interval: ReportInterval,
+        properties: &ReportGeneratorProperties,
+    ) -> Result<Self, ReportError> {
+        let mut config = Self::new(interval)?;
+        // JMeter's dashboard statistics and response-time-percentile graph
+        // consumers read the Aggregate/Summary percentile properties
+        // (`aggregate_rpt_pct1/2/3`).  Keep their decimal values intact for
+        // the dashboard's configured percentile levels.
+        config = config.with_decimal_percentiles(properties.aggregate_percentiles())?;
+        if let Some(window) = properties.statistic_window() {
+            config = config.with_percentile_window(window)?;
+        }
+        if let Some(granularity) = properties.overall_granularity_millis() {
+            config = config.with_overall_granularity_millis(granularity)?;
+        }
+        if let Some(granularity) = properties.response_time_distribution_granularity_millis() {
+            config = config.with_response_time_distribution_granularity_millis(granularity)?;
+        }
+        let apdex = ApdexThresholds::new(
+            properties
+                .apdex_satisfied_millis()
+                .unwrap_or_else(|| ApdexThresholds::default().satisfied_millis()),
+            properties
+                .apdex_tolerated_millis()
+                .unwrap_or_else(|| ApdexThresholds::default().tolerated_millis()),
+        )?;
+        config = config.with_apdex(apdex);
+        if let Some(exclude) = properties.exclude_transaction_controllers_from_top5() {
+            config = config.with_exclude_transaction_controllers_from_top5(exclude);
+        }
+        Ok(config)
     }
 
     /// Returns the explicit interval.
@@ -750,6 +1271,11 @@ impl DashboardConfig {
         self.overall_granularity_millis
     }
 
+    /// Returns response-time distribution bucket width in milliseconds.
+    pub const fn response_time_distribution_granularity_millis(self) -> u64 {
+        self.response_time_distribution_granularity_millis
+    }
+
     /// Returns the per-label transaction-controller top-five filtering policy.
     pub const fn exclude_transaction_controllers_from_top5(self) -> bool {
         self.exclude_transaction_controllers_from_top5
@@ -763,5 +1289,442 @@ impl DashboardConfig {
     /// Returns the FIFO statistical-window size under JMeter's property name.
     pub const fn statistic_window(self) -> usize {
         self.percentile_window
+    }
+}
+
+#[cfg(test)]
+// Fixed fixture constructors panic only when a fixed test value no longer
+// satisfies the validated report configuration contract.
+#[allow(clippy::panic)]
+mod tests {
+    use super::*;
+
+    fn interval() -> ReportInterval {
+        match ReportInterval::from_millis(0, 10_000) {
+            Ok(interval) => interval,
+            Err(error) => panic!("non-empty test interval: {error:?}"),
+        }
+    }
+
+    #[test]
+    fn report_property_wire_names_are_exact_and_round_trip() {
+        let properties = [
+            ReportProperty::AggregatePercentile1,
+            ReportProperty::AggregatePercentile2,
+            ReportProperty::AggregatePercentile3,
+            ReportProperty::DashboardApdexSatisfiedThreshold,
+            ReportProperty::DashboardApdexToleratedThreshold,
+            ReportProperty::DashboardOverallGranularity,
+            ReportProperty::DashboardStatisticWindow,
+            ReportProperty::DashboardExcludeTransactionControllersFromTop5,
+            ReportProperty::ResponseTimeDistributionGranularity,
+            ReportProperty::DashboardSampleFilter,
+            ReportProperty::DashboardReportTitle,
+            ReportProperty::DashboardDateFormat,
+            ReportProperty::DashboardStartDate,
+            ReportProperty::DashboardEndDate,
+        ];
+        for property in properties {
+            assert_eq!(
+                ReportProperty::from_wire_name(property.wire_name()),
+                Some(property)
+            );
+        }
+        assert_eq!(AGGREGATE_RPT_PCT1, "aggregate_rpt_pct1");
+        assert_eq!(
+            REPORTGENERATOR_STATISTIC_WINDOW,
+            "jmeter.reportgenerator.statistic_window"
+        );
+        assert_eq!(
+            REPORTGENERATOR_EXCLUDE_TC_FROM_TOP5_ERRORS_BY_SAMPLER,
+            "jmeter.reportgenerator.exclude_tc_from_top5_errors_by_sampler"
+        );
+    }
+
+    #[test]
+    fn property_projection_preserves_presence_empty_and_unknown_values() {
+        let properties = match ReportGeneratorProperties::from_properties([
+            (AGGREGATE_RPT_PCT1, "90.5"),
+            (REPORTGENERATOR_SAMPLE_FILTER, ""),
+            (
+                "jmeter.reportgenerator.graph.custom.classname",
+                "plugin.Graph",
+            ),
+            (REPORTGENERATOR_STATISTIC_WINDOW, "7"),
+            (REPORTGENERATOR_STATISTIC_WINDOW, "5"),
+        ]) {
+            Ok(properties) => properties,
+            Err(error) => panic!("valid report properties: {error:?}"),
+        };
+        assert!(properties.contains(ReportProperty::AggregatePercentile1));
+        assert_eq!(properties.aggregate_percentile(0), Some(90.5));
+        assert!(properties.contains(ReportProperty::DashboardSampleFilter));
+        assert_eq!(properties.sample_filter(), Some(""));
+        assert_eq!(properties.statistic_window(), Some(5));
+        assert_eq!(
+            properties.unknown_property("jmeter.reportgenerator.graph.custom.classname"),
+            Some("plugin.Graph")
+        );
+
+        let absent = ReportGeneratorProperties::default();
+        assert!(!absent.contains(ReportProperty::DashboardSampleFilter));
+        assert_eq!(absent.sample_filter(), None);
+    }
+
+    #[test]
+    fn property_projection_applies_documented_defaults_and_rejects_bounds() {
+        let properties = match ReportGeneratorProperties::from_properties([
+            (AGGREGATE_RPT_PCT1, "90.125"),
+            (AGGREGATE_RPT_PCT2, "95.25"),
+            (AGGREGATE_RPT_PCT3, "99.875"),
+            (REPORTGENERATOR_OVERALL_GRANULARITY, "10000"),
+            (REPORTGENERATOR_STATISTIC_WINDOW, "5"),
+            (REPORTGENERATOR_APDEX_SATISFIED_THRESHOLD, "500"),
+            (REPORTGENERATOR_APDEX_TOLERATED_THRESHOLD, "1500"),
+            (REPORTGENERATOR_RESPONSE_TIME_DISTRIBUTION_GRANULARITY, "25"),
+            (
+                REPORTGENERATOR_EXCLUDE_TC_FROM_TOP5_ERRORS_BY_SAMPLER,
+                "false",
+            ),
+        ]) {
+            Ok(properties) => properties,
+            Err(error) => panic!("valid report properties: {error:?}"),
+        };
+        let dashboard =
+            match DashboardConfig::from_report_generator_properties(interval(), &properties) {
+                Ok(dashboard) => dashboard,
+                Err(error) => panic!("valid dashboard config: {error:?}"),
+            };
+        assert_eq!(dashboard.percentile_values(), [90.125, 95.25, 99.875]);
+        assert_eq!(dashboard.overall_granularity_millis(), 10_000);
+        assert_eq!(dashboard.statistic_window(), 5);
+        let apdex = match ApdexThresholds::new(500, 1_500) {
+            Ok(apdex) => apdex,
+            Err(error) => panic!("apdex: {error:?}"),
+        };
+        assert_eq!(dashboard.apdex(), apdex);
+        assert_eq!(
+            dashboard.response_time_distribution_granularity_millis(),
+            25
+        );
+        assert!(!dashboard.exclude_transaction_controllers_from_top5());
+
+        let defaults = match DashboardConfig::new(interval()) {
+            Ok(defaults) => defaults,
+            Err(error) => panic!("default dashboard config: {error:?}"),
+        };
+        assert_eq!(defaults.overall_granularity_millis(), 60_000);
+        assert_eq!(defaults.statistic_window(), 20_000);
+        assert_eq!(
+            defaults.response_time_distribution_granularity_millis(),
+            DEFAULT_RESPONSE_TIME_DISTRIBUTION_GRANULARITY_MILLIS
+        );
+
+        assert_eq!(
+            DashboardConfig::from_properties(
+                interval(),
+                [(REPORTGENERATOR_OVERALL_GRANULARITY, "1000")]
+            ),
+            Err(ReportError::InvalidConfig {
+                field: ConfigField::OverallGranularity
+            })
+        );
+        assert_eq!(
+            DashboardConfig::from_properties(interval(), [(REPORTGENERATOR_STATISTIC_WINDOW, "0")]),
+            Err(ReportError::InvalidConfig {
+                field: ConfigField::MaxPercentileSamples
+            })
+        );
+        assert_eq!(
+            ReportGeneratorProperties::from_properties([(
+                REPORTGENERATOR_EXCLUDE_TC_FROM_TOP5_ERRORS_BY_SAMPLER,
+                "yes"
+            )]),
+            Err(ReportError::InvalidConfig {
+                field: ConfigField::TransactionControllerErrors
+            })
+        );
+    }
+
+    #[test]
+    fn dashboard_properties_apply_each_supported_override() {
+        let defaults = match DashboardConfig::new(interval()) {
+            Ok(config) => config,
+            Err(error) => panic!("default dashboard config: {error:?}"),
+        };
+        assert_eq!(defaults.percentile_values(), [90.0, 95.0, 99.0]);
+
+        let first =
+            match DashboardConfig::from_properties(interval(), [(AGGREGATE_RPT_PCT1, "12.345")]) {
+                Ok(config) => config,
+                Err(error) => panic!("first percentile override: {error:?}"),
+            };
+        assert_eq!(first.percentile_values(), [12.345, 95.0, 99.0]);
+
+        let second =
+            match DashboardConfig::from_properties(interval(), [(AGGREGATE_RPT_PCT2, "50.5")]) {
+                Ok(config) => config,
+                Err(error) => panic!("second percentile override: {error:?}"),
+            };
+        assert_eq!(second.percentile_values(), [90.0, 50.5, 99.0]);
+
+        let third =
+            match DashboardConfig::from_properties(interval(), [(AGGREGATE_RPT_PCT3, "99.875")]) {
+                Ok(config) => config,
+                Err(error) => panic!("third percentile override: {error:?}"),
+            };
+        assert_eq!(third.percentile_values(), [90.0, 95.0, 99.875]);
+
+        let satisfied = match DashboardConfig::from_properties(
+            interval(),
+            [(REPORTGENERATOR_APDEX_SATISFIED_THRESHOLD, "250")],
+        ) {
+            Ok(config) => config,
+            Err(error) => panic!("satisfied APDEX override: {error:?}"),
+        };
+        assert_eq!(satisfied.apdex().satisfied_millis(), 250);
+        assert_eq!(satisfied.apdex().tolerated_millis(), 1_500);
+
+        let tolerated = match DashboardConfig::from_properties(
+            interval(),
+            [(REPORTGENERATOR_APDEX_TOLERATED_THRESHOLD, "2500")],
+        ) {
+            Ok(config) => config,
+            Err(error) => panic!("tolerated APDEX override: {error:?}"),
+        };
+        assert_eq!(tolerated.apdex().satisfied_millis(), 500);
+        assert_eq!(tolerated.apdex().tolerated_millis(), 2_500);
+
+        let window = match DashboardConfig::from_properties(
+            interval(),
+            [(REPORTGENERATOR_STATISTIC_WINDOW, "1")],
+        ) {
+            Ok(config) => config,
+            Err(error) => panic!("statistic window override: {error:?}"),
+        };
+        assert_eq!(window.statistic_window(), 1);
+
+        let overall = match DashboardConfig::from_properties(
+            interval(),
+            [(REPORTGENERATOR_OVERALL_GRANULARITY, "1001")],
+        ) {
+            Ok(config) => config,
+            Err(error) => panic!("overall granularity override: {error:?}"),
+        };
+        assert_eq!(overall.overall_granularity_millis(), 1_001);
+
+        let distribution = match DashboardConfig::from_properties(
+            interval(),
+            [(REPORTGENERATOR_RESPONSE_TIME_DISTRIBUTION_GRANULARITY, "1")],
+        ) {
+            Ok(config) => config,
+            Err(error) => panic!("response distribution override: {error:?}"),
+        };
+        assert_eq!(
+            distribution.response_time_distribution_granularity_millis(),
+            1
+        );
+
+        let include_controllers = match DashboardConfig::from_properties(
+            interval(),
+            [(
+                REPORTGENERATOR_EXCLUDE_TC_FROM_TOP5_ERRORS_BY_SAMPLER,
+                "false",
+            )],
+        ) {
+            Ok(config) => config,
+            Err(error) => panic!("controller filtering override: {error:?}"),
+        };
+        assert!(!include_controllers.exclude_transaction_controllers_from_top5());
+    }
+
+    #[test]
+    fn dashboard_properties_reject_invalid_values_and_honor_boundaries() {
+        for value in ["", "-0.1", "100.1", "NaN", "inf"] {
+            assert_eq!(
+                ReportGeneratorProperties::from_properties([(AGGREGATE_RPT_PCT1, value)]),
+                Err(ReportError::InvalidConfig {
+                    field: ConfigField::PercentileLevels
+                })
+            );
+        }
+
+        let boundaries = match DashboardConfig::from_properties(
+            interval(),
+            [
+                (AGGREGATE_RPT_PCT1, "0"),
+                (AGGREGATE_RPT_PCT2, "100"),
+                (AGGREGATE_RPT_PCT3, "50.125"),
+                (REPORTGENERATOR_APDEX_SATISFIED_THRESHOLD, "0"),
+                (REPORTGENERATOR_APDEX_TOLERATED_THRESHOLD, "0"),
+                (REPORTGENERATOR_STATISTIC_WINDOW, "1"),
+                (REPORTGENERATOR_OVERALL_GRANULARITY, "1001"),
+                (REPORTGENERATOR_RESPONSE_TIME_DISTRIBUTION_GRANULARITY, "1"),
+                (
+                    REPORTGENERATOR_EXCLUDE_TC_FROM_TOP5_ERRORS_BY_SAMPLER,
+                    "true",
+                ),
+            ],
+        ) {
+            Ok(config) => config,
+            Err(error) => panic!("boundary dashboard config: {error:?}"),
+        };
+        assert_eq!(boundaries.percentile_values(), [0.0, 100.0, 50.125]);
+        let zero_apdex = match ApdexThresholds::new(0, 0) {
+            Ok(apdex) => apdex,
+            Err(error) => panic!("zero APDEX thresholds: {error:?}"),
+        };
+        assert_eq!(boundaries.apdex(), zero_apdex);
+
+        let max_window = AggregateLimits::default().max_percentile_samples();
+        let max_window_value = max_window.to_string();
+        let max_window_config = match DashboardConfig::from_properties(
+            interval(),
+            [(REPORTGENERATOR_STATISTIC_WINDOW, max_window_value.as_str())],
+        ) {
+            Ok(config) => config,
+            Err(error) => panic!("maximum statistic window: {error:?}"),
+        };
+        assert_eq!(max_window_config.statistic_window(), max_window);
+
+        let too_large_window = (i64::from(i32::MAX) + 1).to_string();
+        assert_eq!(
+            ReportGeneratorProperties::from_properties([(
+                REPORTGENERATOR_STATISTIC_WINDOW,
+                too_large_window.as_str(),
+            )]),
+            Err(ReportError::InvalidConfig {
+                field: ConfigField::MaxPercentileSamples
+            })
+        );
+
+        let max_long = i64::MAX.to_string();
+        let max_long_config = match DashboardConfig::from_properties(
+            interval(),
+            [
+                (REPORTGENERATOR_APDEX_SATISFIED_THRESHOLD, max_long.as_str()),
+                (REPORTGENERATOR_APDEX_TOLERATED_THRESHOLD, max_long.as_str()),
+                (REPORTGENERATOR_OVERALL_GRANULARITY, max_long.as_str()),
+                (
+                    REPORTGENERATOR_RESPONSE_TIME_DISTRIBUTION_GRANULARITY,
+                    max_long.as_str(),
+                ),
+            ],
+        ) {
+            Ok(config) => config,
+            Err(error) => panic!("maximum Java long properties: {error:?}"),
+        };
+        let maximum_apdex = match ApdexThresholds::new(i64::MAX as u64, i64::MAX as u64) {
+            Ok(apdex) => apdex,
+            Err(error) => panic!("maximum APDEX thresholds: {error:?}"),
+        };
+        assert_eq!(max_long_config.apdex(), maximum_apdex);
+        assert_eq!(
+            max_long_config.overall_granularity_millis(),
+            i64::MAX as u64
+        );
+        assert_eq!(
+            max_long_config.response_time_distribution_granularity_millis(),
+            i64::MAX as u64
+        );
+
+        assert_eq!(
+            DashboardConfig::from_properties(
+                interval(),
+                [(REPORTGENERATOR_APDEX_SATISFIED_THRESHOLD, "not-a-number")]
+            ),
+            Err(ReportError::InvalidConfig {
+                field: ConfigField::ApdexThresholds
+            })
+        );
+        assert_eq!(
+            DashboardConfig::from_properties(interval(), [(REPORTGENERATOR_STATISTIC_WINDOW, "0")]),
+            Err(ReportError::InvalidConfig {
+                field: ConfigField::MaxPercentileSamples
+            })
+        );
+        assert_eq!(
+            DashboardConfig::from_properties(
+                interval(),
+                [(REPORTGENERATOR_OVERALL_GRANULARITY, "1000")]
+            ),
+            Err(ReportError::InvalidConfig {
+                field: ConfigField::OverallGranularity
+            })
+        );
+        assert_eq!(
+            DashboardConfig::from_properties(
+                interval(),
+                [(REPORTGENERATOR_RESPONSE_TIME_DISTRIBUTION_GRANULARITY, "0")]
+            ),
+            Err(ReportError::InvalidConfig {
+                field: ConfigField::OverallGranularity
+            })
+        );
+        assert_eq!(
+            DashboardConfig::from_properties(
+                interval(),
+                [(
+                    REPORTGENERATOR_EXCLUDE_TC_FROM_TOP5_ERRORS_BY_SAMPLER,
+                    "maybe",
+                )]
+            ),
+            Err(ReportError::InvalidConfig {
+                field: ConfigField::TransactionControllerErrors
+            })
+        );
+
+        let too_large = (i64::MAX as u128 + 1).to_string();
+        assert_eq!(
+            ReportGeneratorProperties::from_properties([(
+                REPORTGENERATOR_APDEX_SATISFIED_THRESHOLD,
+                too_large.as_str(),
+            )]),
+            Err(ReportError::InvalidConfig {
+                field: ConfigField::ApdexThresholds
+            })
+        );
+
+        let text_only = match DashboardConfig::from_properties(
+            interval(),
+            [
+                (REPORTGENERATOR_SAMPLE_FILTER, "sample.*"),
+                (REPORTGENERATOR_REPORT_TITLE, "Custom title"),
+                (REPORTGENERATOR_DATE_FORMAT, "yyyy"),
+                (REPORTGENERATOR_START_DATE, "20240101000000"),
+                (REPORTGENERATOR_END_DATE, "20240102000000"),
+            ],
+        ) {
+            Ok(config) => config,
+            Err(error) => panic!("unsupported dashboard text properties: {error:?}"),
+        };
+        let defaults = match DashboardConfig::new(interval()) {
+            Ok(config) => config,
+            Err(error) => panic!("default dashboard config: {error:?}"),
+        };
+        assert_eq!(text_only, defaults);
+    }
+
+    #[test]
+    fn listener_properties_retain_decimal_percentiles() {
+        let listener = match ListenerConfig::from_properties(
+            interval(),
+            [
+                (AGGREGATE_RPT_PCT1, "50.5"),
+                (AGGREGATE_RPT_PCT2, "90"),
+                (AGGREGATE_RPT_PCT3, "99.25"),
+            ],
+        ) {
+            Ok(listener) => listener,
+            Err(error) => panic!("valid listener properties: {error:?}"),
+        };
+        assert_eq!(listener.percentile_values(), [50.5, 90.0, 99.25]);
+        assert_eq!(listener.percentiles(), [51, 90, 99]);
+        assert_eq!(
+            ListenerConfig::from_properties(interval(), [(AGGREGATE_RPT_PCT1, "101")]),
+            Err(ReportError::InvalidConfig {
+                field: ConfigField::PercentileLevels
+            })
+        );
     }
 }

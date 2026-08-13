@@ -14,6 +14,7 @@
 use crate::error::{ErrorCode, StableError};
 use crate::random::RandomSeed;
 use std::fmt;
+use std::path::{Component, Path, PathBuf};
 
 /// Bounds for one in-memory fixture case.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,6 +73,194 @@ impl Default for FixtureLimits {
     fn default() -> Self {
         Self::default_bounded()
     }
+}
+
+/// A SHA-256 digest used to identify fixture bytes without retaining their
+/// contents in diagnostics.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FixtureDigest([u8; 32]);
+
+impl FixtureDigest {
+    /// The number of bytes in a SHA-256 digest.
+    pub const BYTE_LEN: usize = 32;
+
+    /// Computes SHA-256 over a bounded byte slice.
+    #[must_use]
+    pub fn sha256(bytes: &[u8]) -> Self {
+        Self(sha256_bytes(bytes))
+    }
+
+    /// Constructs a digest from its raw 32-byte representation.
+    #[must_use]
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    /// Returns the raw digest bytes.
+    #[must_use]
+    pub const fn as_bytes(self) -> [u8; 32] {
+        self.0
+    }
+
+    /// Returns lowercase hexadecimal without consulting locale or process
+    /// state.
+    #[must_use]
+    pub fn to_hex(self) -> String {
+        let mut output = String::with_capacity(64);
+        for byte in self.0 {
+            output.push(HEX[(byte >> 4) as usize]);
+            output.push(HEX[(byte & 0x0f) as usize]);
+        }
+        output
+    }
+}
+
+impl fmt::Debug for FixtureDigest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("FixtureDigest")
+            .field(&self.to_hex())
+            .finish()
+    }
+}
+
+impl fmt::Display for FixtureDigest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.to_hex())
+    }
+}
+
+const HEX: [char; 16] = [
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
+];
+
+/// Errors reported by an injected fixture filesystem.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FixtureFilesystemError {
+    /// The requested path does not exist.
+    NotFound,
+    /// The adapter refused access.
+    PermissionDenied,
+    /// The adapter could not resolve the path.
+    InvalidPath,
+    /// The requested file exceeds the supplied read bound.
+    TooLarge,
+    /// The adapter is unavailable.
+    Unavailable,
+}
+
+impl FixtureFilesystemError {
+    /// Returns the stable adapter failure spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NotFound => "not-found",
+            Self::PermissionDenied => "permission-denied",
+            Self::InvalidPath => "invalid-path",
+            Self::TooLarge => "too-large",
+            Self::Unavailable => "unavailable",
+        }
+    }
+}
+
+impl fmt::Display for FixtureFilesystemError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::NotFound => "fixture file not found",
+            Self::PermissionDenied => "fixture file access denied",
+            Self::InvalidPath => "fixture path could not be resolved",
+            Self::TooLarge => "fixture file exceeds the read bound",
+            Self::Unavailable => "fixture filesystem unavailable",
+        })
+    }
+}
+
+impl std::error::Error for FixtureFilesystemError {}
+
+/// Explicit filesystem capability used by local fixture loading.
+pub trait FixtureFilesystem {
+    /// Resolves symlinks/junctions using the adapter's explicit filesystem.
+    fn canonicalize(&self, path: &Path) -> Result<PathBuf, FixtureFilesystemError>;
+
+    /// Reads one file while enforcing the supplied byte bound.
+    fn read_bounded(
+        &self,
+        path: &Path,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, FixtureFilesystemError>;
+}
+
+/// Validates and normalizes a relative fixture path without touching the
+/// filesystem. Parent traversal, roots, drive prefixes, controls, and
+/// non-UTF-8 names are rejected for cross-platform manifest stability.
+pub fn validate_fixture_relative_path(path: &Path) -> Result<PathBuf, FixtureError> {
+    if path.to_str().is_some_and(|value| {
+        value.contains('\\')
+            || (value.as_bytes().get(1) == Some(&b':')
+                && value
+                    .as_bytes()
+                    .first()
+                    .is_some_and(u8::is_ascii_alphabetic))
+    }) {
+        return Err(FixtureError::InvalidMetadata {
+            field: "artifact_path",
+        });
+    }
+    let mut normalized = PathBuf::new();
+    let mut saw_component = false;
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => {
+                let text = part.to_str().ok_or(FixtureError::InvalidMetadata {
+                    field: "artifact_path",
+                })?;
+                if text.is_empty()
+                    || text.contains('\\')
+                    || text.chars().any(|character| {
+                        character.is_control() || matches!(character, '\u{2028}' | '\u{2029}')
+                    })
+                {
+                    return Err(FixtureError::InvalidMetadata {
+                        field: "artifact_path",
+                    });
+                }
+                saw_component = true;
+                normalized.push(part);
+            }
+            Component::CurDir
+            | Component::ParentDir
+            | Component::RootDir
+            | Component::Prefix(_) => {
+                return Err(FixtureError::InvalidMetadata {
+                    field: "artifact_path",
+                });
+            }
+        }
+    }
+    saw_component
+        .then_some(normalized)
+        .ok_or(FixtureError::InvalidMetadata {
+            field: "artifact_path",
+        })
+}
+
+/// Resolves a relative fixture path beneath an explicit absolute root using
+/// lexical checks only. Use the builder filesystem loader when symlink or
+/// junction containment must also be checked.
+pub fn resolve_fixture_path(root: &Path, relative: &Path) -> Result<PathBuf, FixtureError> {
+    if !root.is_absolute() {
+        return Err(FixtureError::InvalidMetadata {
+            field: "fixture_root",
+        });
+    }
+    Ok(root.join(validate_fixture_relative_path(relative)?))
+}
+
+fn is_strictly_contained(root: &Path, candidate: &Path) -> bool {
+    candidate
+        .strip_prefix(root)
+        .ok()
+        .is_some_and(|suffix| suffix.components().next().is_some())
 }
 
 /// How a fixture artifact was obtained.
@@ -299,6 +488,7 @@ impl FixtureMetadata {
 pub struct FixtureArtifact {
     name: String,
     bytes: Vec<u8>,
+    digest: FixtureDigest,
 }
 
 /// A bounded diagnostic view of a fixture artifact.
@@ -311,6 +501,8 @@ pub struct FixtureArtifactDiagnostic {
     pub name: String,
     /// Number of raw bytes in the artifact.
     pub byte_len: usize,
+    /// SHA-256 of the raw artifact bytes.
+    pub sha256: FixtureDigest,
 }
 
 impl FixtureArtifact {
@@ -320,6 +512,7 @@ impl FixtureArtifact {
         FixtureArtifactDiagnostic {
             name: self.name.clone(),
             byte_len: self.bytes.len(),
+            sha256: self.digest,
         }
     }
 }
@@ -341,6 +534,12 @@ impl FixtureArtifact {
     #[must_use]
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
+    }
+
+    /// Returns the SHA-256 of the raw artifact bytes.
+    #[must_use]
+    pub const fn sha256(&self) -> FixtureDigest {
+        self.digest
     }
 
     /// Returns artifact byte length.
@@ -411,6 +610,22 @@ pub enum FixtureError {
         /// Configured bound.
         limit: usize,
     },
+    /// The resolved artifact path was not contained by the canonical root.
+    OutsideRoot,
+    /// The injected filesystem rejected a bounded read or canonicalization.
+    Filesystem {
+        /// Stable adapter-level failure category.
+        kind: FixtureFilesystemError,
+    },
+    /// Artifact bytes did not match the manifest's expected digest.
+    DigestMismatch {
+        /// Artifact name, retained only for local assertion context.
+        name: String,
+        /// Digest declared by the manifest.
+        expected: FixtureDigest,
+        /// Digest observed from the injected filesystem.
+        actual: FixtureDigest,
+    },
 }
 
 impl fmt::Debug for FixtureError {
@@ -456,6 +671,19 @@ impl fmt::Debug for FixtureError {
                 .field("kind", &"MetadataTooLarge")
                 .field("actual", actual)
                 .field("limit", limit),
+            Self::OutsideRoot => debug.field("kind", &"OutsideRoot"),
+            Self::Filesystem { kind } => debug
+                .field("kind", &"Filesystem")
+                .field("filesystem_kind", kind),
+            Self::DigestMismatch {
+                name,
+                expected,
+                actual,
+            } => debug
+                .field("kind", &"DigestMismatch")
+                .field("name_bytes", &name.len())
+                .field("expected", expected)
+                .field("actual", actual),
         };
         debug.finish()
     }
@@ -466,9 +694,11 @@ impl FixtureError {
     #[must_use]
     pub const fn code(&self) -> ErrorCode {
         match self {
-            Self::InvalidMetadata { .. } | Self::MetadataTooLarge { .. } => {
-                ErrorCode::FixtureInvalidMetadata
-            }
+            Self::InvalidMetadata { .. }
+            | Self::MetadataTooLarge { .. }
+            | Self::OutsideRoot
+            | Self::Filesystem { .. }
+            | Self::DigestMismatch { .. } => ErrorCode::FixtureInvalidMetadata,
             Self::DuplicateArtifact { .. } => ErrorCode::FixtureDuplicateArtifact,
             Self::ArtifactTooLarge { .. } => ErrorCode::FixtureArtifactTooLarge,
             Self::ArtifactNameTooLarge { .. } => ErrorCode::FixtureArtifactNameTooLarge,
@@ -517,6 +747,21 @@ impl fmt::Display for FixtureError {
             Self::MetadataTooLarge { actual, limit } => write!(
                 formatter,
                 "{}: metadata bytes {actual} exceed {limit}",
+                self.code()
+            ),
+            Self::OutsideRoot => write!(
+                formatter,
+                "{}: fixture path is outside its root",
+                self.code()
+            ),
+            Self::Filesystem { kind } => write!(formatter, "{}: {kind}", self.code()),
+            Self::DigestMismatch {
+                name,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "{}: artifact {name:?} digest {actual} does not match {expected}",
                 self.code()
             ),
         }
@@ -664,6 +909,58 @@ impl FixtureCase {
             hash_bytes(&mut hash, &artifact.bytes);
         }
         hash
+    }
+
+    /// Returns the SHA-256 identity of the complete bounded fixture manifest.
+    ///
+    /// Fields are length-prefixed in insertion order, so adjacent strings,
+    /// artifact names, and artifact bytes cannot become ambiguous.  The
+    /// digest is suitable for provenance references; it is not a substitute
+    /// for a signed upstream artifact digest.
+    #[must_use]
+    pub fn manifest_digest(&self) -> FixtureDigest {
+        let mut encoded = Vec::with_capacity(self.total_bytes.saturating_add(512));
+        encoded.extend_from_slice(b"jmeter-rs/fixture-manifest/1\0");
+        for limit in [
+            self.limits.max_artifacts,
+            self.limits.max_artifact_name_bytes,
+            self.limits.max_artifact_bytes,
+            self.limits.max_total_bytes,
+            self.limits.max_metadata_bytes,
+        ] {
+            append_digest_field(&mut encoded, &limit.to_le_bytes());
+        }
+        for field in [
+            self.metadata.profile_id.as_bytes(),
+            self.metadata.fixture_family_id.as_bytes(),
+            self.metadata.case_id.as_bytes(),
+            self.metadata.clock_mode.as_bytes(),
+            self.metadata.locale.as_bytes(),
+            self.metadata.timezone.as_bytes(),
+            self.metadata.charset.as_bytes(),
+            self.metadata.provenance.origin.as_str().as_bytes(),
+            self.metadata.provenance.source.as_bytes(),
+            self.metadata.provenance.revision.as_bytes(),
+            self.metadata.provenance.author.as_bytes(),
+            self.metadata.provenance.license.as_bytes(),
+            self.metadata.provenance.retrieved_on.as_bytes(),
+            self.metadata.provenance.modification.as_bytes(),
+            &self.metadata.seed.value().to_le_bytes(),
+        ] {
+            append_digest_field(&mut encoded, field);
+        }
+        append_digest_field(&mut encoded, &(self.artifacts.len() as u64).to_le_bytes());
+        for artifact in &self.artifacts {
+            append_digest_field(&mut encoded, artifact.name.as_bytes());
+            append_digest_field(&mut encoded, &artifact.bytes);
+        }
+        FixtureDigest::sha256(&encoded)
+    }
+
+    /// Alias for [`Self::manifest_digest`].
+    #[must_use]
+    pub fn sha256(&self) -> FixtureDigest {
+        self.manifest_digest()
     }
 }
 
@@ -834,6 +1131,102 @@ impl FixtureCaseBuilder {
         self.artifact(name, bytes)
     }
 
+    /// Reads one artifact through an explicit, injected filesystem.
+    ///
+    /// The root must be absolute. Both root and candidate are canonicalized by
+    /// the adapter before containment is checked, so symlinks/junctions that
+    /// escape the declared root are rejected. The adapter receives the
+    /// canonical candidate and the configured per-artifact byte limit.
+    pub fn artifact_from_filesystem<F: FixtureFilesystem>(
+        self,
+        name: impl Into<String>,
+        root: &Path,
+        relative: &Path,
+        filesystem: &F,
+    ) -> Result<Self, FixtureError> {
+        self.artifact_from_filesystem_checked(name, root, relative, filesystem, None)
+    }
+
+    /// Reads one artifact and checks its bytes against an expected SHA-256.
+    pub fn artifact_from_filesystem_with_digest<F: FixtureFilesystem>(
+        self,
+        name: impl Into<String>,
+        root: &Path,
+        relative: &Path,
+        filesystem: &F,
+        expected: FixtureDigest,
+    ) -> Result<Self, FixtureError> {
+        self.artifact_from_filesystem_checked(name, root, relative, filesystem, Some(expected))
+    }
+
+    /// Alias for [`Self::artifact_from_filesystem`].
+    pub fn artifact_from_path<F: FixtureFilesystem>(
+        self,
+        name: impl Into<String>,
+        root: &Path,
+        relative: &Path,
+        filesystem: &F,
+    ) -> Result<Self, FixtureError> {
+        self.artifact_from_filesystem(name, root, relative, filesystem)
+    }
+
+    fn artifact_from_filesystem_checked<F: FixtureFilesystem>(
+        self,
+        name: impl Into<String>,
+        root: &Path,
+        relative: &Path,
+        filesystem: &F,
+        expected: Option<FixtureDigest>,
+    ) -> Result<Self, FixtureError> {
+        let name = name.into();
+        validate_identifier("artifact_name", &name)?;
+        if self.artifacts.iter().any(|artifact| artifact.name == name) {
+            return Err(FixtureError::DuplicateArtifact { name });
+        }
+        if name.len() > self.limits.max_artifact_name_bytes {
+            let actual = name.len();
+            return Err(FixtureError::ArtifactNameTooLarge {
+                name,
+                actual,
+                limit: self.limits.max_artifact_name_bytes,
+            });
+        }
+        let candidate = resolve_fixture_path(root, relative)?;
+        let canonical_root = filesystem
+            .canonicalize(root)
+            .map_err(|kind| FixtureError::Filesystem { kind })?;
+        let canonical_candidate = filesystem
+            .canonicalize(&candidate)
+            .map_err(|kind| FixtureError::Filesystem { kind })?;
+        if !canonical_root.is_absolute()
+            || !canonical_candidate.is_absolute()
+            || !is_strictly_contained(&canonical_root, &canonical_candidate)
+        {
+            return Err(FixtureError::OutsideRoot);
+        }
+        let bytes = filesystem
+            .read_bounded(&canonical_candidate, self.limits.max_artifact_bytes)
+            .map_err(|kind| FixtureError::Filesystem { kind })?;
+        if bytes.len() > self.limits.max_artifact_bytes {
+            return Err(FixtureError::ArtifactTooLarge {
+                name,
+                actual: bytes.len(),
+                limit: self.limits.max_artifact_bytes,
+            });
+        }
+        if let Some(expected) = expected {
+            let actual = FixtureDigest::sha256(&bytes);
+            if actual != expected {
+                return Err(FixtureError::DigestMismatch {
+                    name: name.clone(),
+                    expected,
+                    actual,
+                });
+            }
+        }
+        self.try_artifact(name, bytes)
+    }
+
     /// Builds the immutable case after validating all metadata and bounds.
     pub fn build(self) -> Result<FixtureCase, FixtureError> {
         if let Some(error) = self.pending_error {
@@ -954,7 +1347,12 @@ impl FixtureCaseBuilder {
                 total_limit: self.limits.max_total_bytes,
             });
         }
-        self.artifacts.push(FixtureArtifact { name, bytes });
+        let digest = FixtureDigest::sha256(&bytes);
+        self.artifacts.push(FixtureArtifact {
+            name,
+            bytes,
+            digest,
+        });
         self.total_bytes = total_bytes;
         Ok(())
     }
@@ -1010,11 +1408,263 @@ fn hash_bytes(hash: &mut u64, bytes: &[u8]) {
     *hash = hash.wrapping_mul(0x0000_0100_0000_01B3);
 }
 
+fn append_digest_field(encoded: &mut Vec<u8>, value: &[u8]) {
+    encoded.extend_from_slice(&(value.len() as u64).to_le_bytes());
+    encoded.extend_from_slice(value);
+}
+
+// SHA-256 is kept here instead of adding a dependency to the std-only
+// test-support crate. The implementation follows FIPS 180-4's padded,
+// big-endian 512-bit block schedule and is exercised against published test
+// vectors below.
+fn sha256_bytes(bytes: &[u8]) -> [u8; 32] {
+    let mut state = [
+        0x6a09_e667,
+        0xbb67_ae85,
+        0x3c6e_f372,
+        0xa54f_f53a,
+        0x510e_527f,
+        0x9b05_688c,
+        0x1f83_d9ab,
+        0x5be0_cd19,
+    ];
+    let mut block = [0_u8; 64];
+    let mut used = 0_usize;
+    for byte in bytes {
+        block[used] = *byte;
+        used += 1;
+        if used == block.len() {
+            sha256_compress(&mut state, &block);
+            used = 0;
+        }
+    }
+
+    block[used] = 0x80;
+    used += 1;
+    if used > 56 {
+        block[used..].fill(0);
+        sha256_compress(&mut state, &block);
+        block.fill(0);
+    } else {
+        block[used..56].fill(0);
+    }
+    let bit_len = (bytes.len() as u64).wrapping_mul(8);
+    block[56..].copy_from_slice(&bit_len.to_be_bytes());
+    sha256_compress(&mut state, &block);
+
+    let mut digest = [0_u8; 32];
+    for (index, word) in state.into_iter().enumerate() {
+        digest[index * 4..index * 4 + 4].copy_from_slice(&word.to_be_bytes());
+    }
+    digest
+}
+
+fn sha256_compress(state: &mut [u32; 8], block: &[u8; 64]) {
+    const ROUND_CONSTANTS: [u32; 64] = [
+        0x428a_2f98,
+        0x7137_4491,
+        0xb5c0_fbcf,
+        0xe9b5_dba5,
+        0x3956_c25b,
+        0x59f1_11f1,
+        0x923f_82a4,
+        0xab1c_5ed5,
+        0xd807_aa98,
+        0x1283_5b01,
+        0x2431_85be,
+        0x550c_7dc3,
+        0x72be_5d74,
+        0x80de_b1fe,
+        0x9bdc_06a7,
+        0xc19b_f174,
+        0xe49b_69c1,
+        0xefbe_4786,
+        0x0fc1_9dc6,
+        0x240c_a1cc,
+        0x2de9_2c6f,
+        0x4a74_84aa,
+        0x5cb0_a9dc,
+        0x76f9_88da,
+        0x983e_5152,
+        0xa831_c66d,
+        0xb003_27c8,
+        0xbf59_7fc7,
+        0xc6e0_0bf3,
+        0xd5a7_9147,
+        0x06ca_6351,
+        0x1429_2967,
+        0x27b7_0a85,
+        0x2e1b_2138,
+        0x4d2c_6dfc,
+        0x5338_0d13,
+        0x650a_7354,
+        0x766a_0abb,
+        0x81c2_c92e,
+        0x9272_2c85,
+        0xa2bf_e8a1,
+        0xa81a_664b,
+        0xc24b_8b70,
+        0xc76c_51a3,
+        0xd192_e819,
+        0xd699_0624,
+        0xf40e_3585,
+        0x106a_a070,
+        0x19a4_c116,
+        0x1e37_6c08,
+        0x2748_774c,
+        0x34b0_bcb5,
+        0x391c_0cb3,
+        0x4ed8_aa4a,
+        0x5b9c_ca4f,
+        0x682e_6ff3,
+        0x748f_82ee,
+        0x78a5_636f,
+        0x84c8_7814,
+        0x8cc7_0208,
+        0x90be_fffa,
+        0xa450_6ceb,
+        0xbef9_a3f7,
+        0xc671_78f2,
+    ];
+    let mut schedule = [0_u32; 64];
+    for (index, word) in schedule.iter_mut().enumerate().take(16) {
+        let offset = index * 4;
+        *word = u32::from_be_bytes([
+            block[offset],
+            block[offset + 1],
+            block[offset + 2],
+            block[offset + 3],
+        ]);
+    }
+    for index in 16..64 {
+        let lower = schedule[index - 15];
+        let upper = schedule[index - 2];
+        let sigma0 = lower.rotate_right(7) ^ lower.rotate_right(18) ^ (lower >> 3);
+        let sigma1 = upper.rotate_right(17) ^ upper.rotate_right(19) ^ (upper >> 10);
+        schedule[index] = schedule[index - 16]
+            .wrapping_add(sigma0)
+            .wrapping_add(schedule[index - 7])
+            .wrapping_add(sigma1);
+    }
+
+    let mut working = *state;
+    for index in 0..64 {
+        let [a, b, c, d, e, f, g, h] = working;
+        let sigma1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+        let choose = (e & f) ^ ((!e) & g);
+        let temporary1 = h
+            .wrapping_add(sigma1)
+            .wrapping_add(choose)
+            .wrapping_add(ROUND_CONSTANTS[index])
+            .wrapping_add(schedule[index]);
+        let sigma0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+        let majority = (a & b) ^ (a & c) ^ (b & c);
+        let temporary2 = sigma0.wrapping_add(majority);
+        working = [
+            temporary1.wrapping_add(temporary2),
+            a,
+            b,
+            c,
+            d.wrapping_add(temporary1),
+            e,
+            f,
+            g,
+        ];
+    }
+    for (state_word, working_word) in state.iter_mut().zip(working) {
+        *state_word = state_word.wrapping_add(working_word);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
 
     use super::*;
+
+    struct MemoryFilesystem {
+        root: PathBuf,
+        files: Vec<(PathBuf, Vec<u8>)>,
+        escaped: PathBuf,
+    }
+
+    impl FixtureFilesystem for MemoryFilesystem {
+        fn canonicalize(&self, path: &Path) -> Result<PathBuf, FixtureFilesystemError> {
+            if path == self.root {
+                return Ok(self.root.clone());
+            }
+            if path == self.root.join("escape.jmx") {
+                return Ok(self.escaped.clone());
+            }
+            if self.files.iter().any(|(file, _)| file == path) {
+                return Ok(path.to_owned());
+            }
+            Err(FixtureFilesystemError::NotFound)
+        }
+
+        fn read_bounded(
+            &self,
+            path: &Path,
+            max_bytes: usize,
+        ) -> Result<Vec<u8>, FixtureFilesystemError> {
+            let Some((_, bytes)) = self.files.iter().find(|(file, _)| file == path) else {
+                return Err(FixtureFilesystemError::NotFound);
+            };
+            if bytes.len() > max_bytes {
+                return Err(FixtureFilesystemError::TooLarge);
+            }
+            Ok(bytes.clone())
+        }
+    }
+
+    fn memory_root() -> PathBuf {
+        #[cfg(windows)]
+        {
+            PathBuf::from(r"C:\fixture-root")
+        }
+        #[cfg(not(windows))]
+        {
+            PathBuf::from("/fixture-root")
+        }
+    }
+
+    fn memory_filesystem() -> MemoryFilesystem {
+        let root = memory_root();
+        MemoryFilesystem {
+            files: vec![(root.join("plan.jmx"), b"<test/>".to_vec())],
+            escaped: {
+                #[cfg(windows)]
+                {
+                    PathBuf::from(r"C:\outside\secret.jmx")
+                }
+                #[cfg(not(windows))]
+                {
+                    PathBuf::from("/outside/secret.jmx")
+                }
+            },
+            root,
+        }
+    }
+
+    #[test]
+    fn sha256_uses_published_vectors_and_fixed_hex() {
+        assert_eq!(
+            FixtureDigest::sha256(b"").to_hex(),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            FixtureDigest::sha256(b"abc").to_hex(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(
+            FixtureDigest::sha256(&vec![b'a'; 1_000]).to_hex(),
+            "41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3"
+        );
+        assert_eq!(
+            FixtureDigest::sha256(b"abc").as_bytes().len(),
+            FixtureDigest::BYTE_LEN
+        );
+    }
 
     #[test]
     fn builder_preserves_metadata_order_and_artifact_bytes() {
@@ -1241,5 +1891,131 @@ mod tests {
             fixture.artifact("artifact"),
             Some(b"fixture-secret".as_slice())
         );
+        assert_eq!(
+            fixture.artifact_entry("artifact").unwrap().sha256(),
+            FixtureDigest::sha256(b"fixture-secret")
+        );
+        assert_eq!(
+            fixture
+                .artifact_entry("artifact")
+                .unwrap()
+                .redacted()
+                .sha256,
+            FixtureDigest::sha256(b"fixture-secret")
+        );
+    }
+
+    #[test]
+    fn manifest_digest_is_ordered_and_changes_on_provenance_or_bytes() {
+        let first = FixtureBuilder::new("case")
+            .artifact("one", b"1".to_vec())
+            .artifact("two", b"2".to_vec())
+            .build()
+            .unwrap();
+        let reordered = FixtureBuilder::new("case")
+            .artifact("two", b"2".to_vec())
+            .artifact("one", b"1".to_vec())
+            .build()
+            .unwrap();
+        let changed = FixtureBuilder::new("case")
+            .artifact("one", b"changed".to_vec())
+            .artifact("two", b"2".to_vec())
+            .build()
+            .unwrap();
+        assert_ne!(first.manifest_digest(), reordered.manifest_digest());
+        assert_ne!(first.manifest_digest(), changed.manifest_digest());
+        assert_eq!(first.manifest_digest(), first.sha256());
+    }
+
+    #[test]
+    fn injected_filesystem_requires_absolute_root_and_canonical_containment() {
+        let filesystem = memory_filesystem();
+        let root = memory_root();
+        let fixture = FixtureBuilder::new("case")
+            .artifact_from_filesystem_with_digest(
+                "plan",
+                &root,
+                Path::new("plan.jmx"),
+                &filesystem,
+                FixtureDigest::sha256(b"<test/>"),
+            )
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(fixture.artifact("plan"), Some(b"<test/>".as_slice()));
+
+        let outside = FixtureBuilder::new("case")
+            .artifact_from_filesystem("escape", &root, Path::new("escape.jmx"), &filesystem)
+            .unwrap_err();
+        assert!(matches!(outside, FixtureError::OutsideRoot));
+
+        let relative_root = FixtureBuilder::new("case")
+            .artifact_from_filesystem(
+                "plan",
+                Path::new("fixture"),
+                Path::new("plan.jmx"),
+                &filesystem,
+            )
+            .unwrap_err();
+        assert!(matches!(
+            relative_root,
+            FixtureError::InvalidMetadata {
+                field: "fixture_root"
+            }
+        ));
+    }
+
+    #[test]
+    fn relative_paths_reject_escape_and_platform_absolute_forms() {
+        for value in [
+            "../outside.txt",
+            "nested/../../outside.txt",
+            "/absolute.txt",
+            r"..\outside.txt",
+            r"C:\outside.txt",
+            "C:relative.txt",
+            r"\\server\share\outside.txt",
+            ".",
+            "",
+        ] {
+            assert!(matches!(
+                validate_fixture_relative_path(Path::new(value)),
+                Err(FixtureError::InvalidMetadata {
+                    field: "artifact_path"
+                })
+            ));
+        }
+        assert_eq!(
+            validate_fixture_relative_path(Path::new("nested/input.txt")).unwrap(),
+            PathBuf::from("nested/input.txt")
+        );
+    }
+
+    #[test]
+    fn injected_filesystem_read_is_bounded_and_digest_mismatch_is_rejected() {
+        let mut filesystem = memory_filesystem();
+        filesystem.files[0].1 = b"too-large".to_vec();
+        let limits = FixtureLimits::new(2, 3, 32, 128);
+        let too_large = FixtureBuilder::with_limits("case", limits)
+            .artifact_from_filesystem("plan", &memory_root(), Path::new("plan.jmx"), &filesystem)
+            .unwrap_err();
+        assert!(matches!(
+            too_large,
+            FixtureError::Filesystem {
+                kind: FixtureFilesystemError::TooLarge
+            }
+        ));
+
+        filesystem.files[0].1 = b"ok".to_vec();
+        let mismatch = FixtureBuilder::new("case")
+            .artifact_from_filesystem_with_digest(
+                "plan",
+                &memory_root(),
+                Path::new("plan.jmx"),
+                &filesystem,
+                FixtureDigest::sha256(b"not-ok"),
+            )
+            .unwrap_err();
+        assert!(matches!(mismatch, FixtureError::DigestMismatch { .. }));
     }
 }

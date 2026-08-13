@@ -94,6 +94,25 @@ impl PropertyEntry {
             value,
         }
     }
+
+    /// Validates this entry with caller-provided resource limits.
+    ///
+    /// A standalone entry is one property value for counting purposes.  The
+    /// name is accounted as model text, while the value is walked iteratively
+    /// so hostile nesting cannot consume the Rust call stack.
+    pub fn validate_with_limits(
+        &self,
+        limits: &ValidationLimits,
+    ) -> Result<(), ModelValidationError> {
+        let mut state = ValidationState::new(limits);
+        state.add_property()?;
+        state.add_string_bytes(self.name.len())?;
+        let mut tasks = vec![ValidationTask::Value {
+            value: &self.value,
+            depth: 0,
+        }];
+        validate_property_tasks(&mut tasks, &mut state)
+    }
 }
 
 /// Alias for map entries in nested property values.
@@ -337,6 +356,20 @@ impl ObjectProperty {
     pub const fn is_opaque_xml(&self) -> bool {
         matches!(self.payload_kind, ObjectPayloadKind::OpaqueXml)
     }
+
+    /// Validates this object property with caller-provided resource limits.
+    ///
+    /// Raw bytes are accounted as opaque payload, while class and extension
+    /// metadata are accounted as model text.  No attempt is made to decode or
+    /// normalize the payload.
+    pub fn validate_with_limits(
+        &self,
+        limits: &ValidationLimits,
+    ) -> Result<(), ModelValidationError> {
+        let mut state = ValidationState::new(limits);
+        state.add_property()?;
+        validate_object_property(self, &mut state)
+    }
 }
 
 /// A nested JMeter `elementProp` value.
@@ -375,12 +408,25 @@ impl ElementProperty {
     /// Creates a nested element property with no class attribute.
     #[must_use]
     pub fn new(name: impl Into<String>) -> Self {
+        Self::from_optional_class_name(name, None)
+    }
+
+    /// Creates a nested element property while retaining whether its source
+    /// `elementType` attribute was absent or explicitly empty.
+    #[must_use]
+    pub fn from_optional_class_name(name: impl Into<String>, class_name: Option<String>) -> Self {
         Self {
             name: name.into(),
-            class_name: None,
+            class_name,
             properties: Properties::new(),
             opaque_extensions: Vec::new(),
         }
+    }
+
+    /// Returns the optional source `elementType` attribute.
+    #[must_use]
+    pub fn class_name(&self) -> Option<&str> {
+        self.class_name.as_deref()
     }
 
     /// Sets the nested upstream class name, retaining an explicit empty value.
@@ -390,19 +436,56 @@ impl ElementProperty {
         self
     }
 
+    /// Replaces the optional source `elementType` attribute.
+    #[must_use]
+    pub fn with_optional_class_name(mut self, class_name: Option<String>) -> Self {
+        self.class_name = class_name;
+        self
+    }
+
+    /// Removes the source `elementType` attribute while retaining the value.
+    #[must_use]
+    pub fn without_class_name(mut self) -> Self {
+        self.class_name = None;
+        self
+    }
+
+    /// Alias for [`Self::without_class_name`].
+    #[must_use]
+    pub fn without_class_attribute(self) -> Self {
+        self.without_class_name()
+    }
+
     /// Adds an opaque nested extension.
     pub fn push_opaque(&mut self, value: OpaqueValue) {
         self.opaque_extensions.push(value);
+    }
+
+    /// Validates this nested element property with caller-provided resource
+    /// limits.
+    ///
+    /// The nested element itself is one property value.  Its child properties
+    /// are therefore validated at depth one, matching the accounting used
+    /// when it is held by another [`PropertyValue`].
+    pub fn validate_with_limits(
+        &self,
+        limits: &ValidationLimits,
+    ) -> Result<(), ModelValidationError> {
+        let mut state = ValidationState::new(limits);
+        state.add_property()?;
+        let mut tasks = Vec::new();
+        validate_element_value(self, &mut state, 0, &mut tasks)?;
+        validate_property_tasks(&mut tasks, &mut state)
     }
 
     /// Compares persistent nested-element state while ignoring no runtime
     /// fields (nested properties have none).
     #[must_use]
     pub fn semantic_eq(&self, other: &Self) -> bool {
-        self.name == other.name
-            && self.class_name == other.class_name
-            && self.properties.semantic_eq(&other.properties)
-            && self.opaque_extensions == other.opaque_extensions
+        semantic_eq_tasks(vec![SemanticCompareTask::Element {
+            left: self,
+            right: other,
+        }])
     }
 }
 
@@ -743,38 +826,214 @@ impl PropertyValue {
     /// semantic value and preserving signed-zero distinctions.
     #[must_use]
     pub fn semantic_eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Null, Self::Null)
-            | (Self::Boolean(_), Self::Boolean(_))
-            | (Self::Integer(_), Self::Integer(_))
-            | (Self::Long(_), Self::Long(_))
-            | (Self::String(_), Self::String(_))
-            | (Self::Opaque(_), Self::Opaque(_)) => self == other,
-            (Self::Float(left), Self::Float(right)) => {
-                (left.is_nan() && right.is_nan()) || left.to_bits() == right.to_bits()
+        semantic_eq_tasks(vec![SemanticCompareTask::Value {
+            left: self,
+            right: other,
+        }])
+    }
+
+    /// Validates this standalone property value with caller-provided resource
+    /// limits.  The value itself counts toward `max_properties`.
+    pub fn validate_with_limits(
+        &self,
+        limits: &ValidationLimits,
+    ) -> Result<(), ModelValidationError> {
+        let mut state = ValidationState::new(limits);
+        state.add_property()?;
+        let mut tasks = vec![ValidationTask::Value {
+            value: self,
+            depth: 0,
+        }];
+        validate_property_tasks(&mut tasks, &mut state)
+    }
+}
+
+/// Explicit work items used by semantic equality.
+///
+/// Equality is a public convenience on directly constructed model values, so
+/// it must not recurse through attacker-controlled nesting.  Collection and
+/// property frames advance one entry at a time to avoid allocating a second
+/// stack proportional to a wide input.
+enum SemanticCompareTask<'a> {
+    Value {
+        left: &'a PropertyValue,
+        right: &'a PropertyValue,
+    },
+    Element {
+        left: &'a ElementProperty,
+        right: &'a ElementProperty,
+    },
+    Properties {
+        left: &'a Properties,
+        right: &'a Properties,
+        index: usize,
+    },
+    Values {
+        left: &'a [PropertyValue],
+        right: &'a [PropertyValue],
+        index: usize,
+    },
+    Entries {
+        left: &'a [PropertyEntry],
+        right: &'a [PropertyEntry],
+        index: usize,
+    },
+    Extensions {
+        left: &'a [OpaqueValue],
+        right: &'a [OpaqueValue],
+        index: usize,
+    },
+}
+
+fn semantic_eq_tasks(mut tasks: Vec<SemanticCompareTask<'_>>) -> bool {
+    while let Some(task) = tasks.pop() {
+        match task {
+            SemanticCompareTask::Value { left, right } => match (left, right) {
+                (PropertyValue::Null, PropertyValue::Null)
+                | (PropertyValue::Boolean(_), PropertyValue::Boolean(_))
+                | (PropertyValue::Integer(_), PropertyValue::Integer(_))
+                | (PropertyValue::Long(_), PropertyValue::Long(_))
+                | (PropertyValue::String(_), PropertyValue::String(_))
+                | (PropertyValue::Opaque(_), PropertyValue::Opaque(_)) => {
+                    if left != right {
+                        return false;
+                    }
+                }
+                (PropertyValue::Float(left), PropertyValue::Float(right)) => {
+                    if !((left.is_nan() && right.is_nan()) || left.to_bits() == right.to_bits()) {
+                        return false;
+                    }
+                }
+                (PropertyValue::Double(left), PropertyValue::Double(right)) => {
+                    if !((left.is_nan() && right.is_nan()) || left.to_bits() == right.to_bits()) {
+                        return false;
+                    }
+                }
+                (PropertyValue::Collection(left), PropertyValue::Collection(right)) => {
+                    if left.len() != right.len() {
+                        return false;
+                    }
+                    tasks.push(SemanticCompareTask::Values {
+                        left,
+                        right,
+                        index: 0,
+                    });
+                }
+                (PropertyValue::NamedCollection(left), PropertyValue::NamedCollection(right))
+                | (PropertyValue::Map(left), PropertyValue::Map(right)) => {
+                    if left.len() != right.len() {
+                        return false;
+                    }
+                    tasks.push(SemanticCompareTask::Entries {
+                        left,
+                        right,
+                        index: 0,
+                    });
+                }
+                (PropertyValue::Object(left), PropertyValue::Object(right)) => {
+                    if left != right {
+                        return false;
+                    }
+                }
+                (PropertyValue::Element(left), PropertyValue::Element(right)) => {
+                    tasks.push(SemanticCompareTask::Element { left, right });
+                }
+                _ => return false,
+            },
+            SemanticCompareTask::Element { left, right } => {
+                if left.name != right.name || left.class_name != right.class_name {
+                    return false;
+                }
+                if left.opaque_extensions.len() != right.opaque_extensions.len() {
+                    return false;
+                }
+                tasks.push(SemanticCompareTask::Extensions {
+                    left: &left.opaque_extensions,
+                    right: &right.opaque_extensions,
+                    index: 0,
+                });
+                tasks.push(SemanticCompareTask::Properties {
+                    left: &left.properties,
+                    right: &right.properties,
+                    index: 0,
+                });
             }
-            (Self::Double(left), Self::Double(right)) => {
-                (left.is_nan() && right.is_nan()) || left.to_bits() == right.to_bits()
+            SemanticCompareTask::Properties { left, right, index } => {
+                if left.len() != right.len() {
+                    return false;
+                }
+                if index < left.len() {
+                    let left_entry = &left.as_slice()[index];
+                    let right_entry = &right.as_slice()[index];
+                    if left_entry.name != right_entry.name {
+                        return false;
+                    }
+                    tasks.push(SemanticCompareTask::Properties {
+                        left,
+                        right,
+                        index: index.saturating_add(1),
+                    });
+                    tasks.push(SemanticCompareTask::Value {
+                        left: &left_entry.value,
+                        right: &right_entry.value,
+                    });
+                }
             }
-            (Self::Collection(left), Self::Collection(right)) => {
-                left.len() == right.len()
-                    && left
-                        .iter()
-                        .zip(right)
-                        .all(|(left, right)| left.semantic_eq(right))
+            SemanticCompareTask::Values { left, right, index } => {
+                if left.len() != right.len() {
+                    return false;
+                }
+                if index < left.len() {
+                    tasks.push(SemanticCompareTask::Values {
+                        left,
+                        right,
+                        index: index.saturating_add(1),
+                    });
+                    tasks.push(SemanticCompareTask::Value {
+                        left: &left[index],
+                        right: &right[index],
+                    });
+                }
             }
-            (Self::NamedCollection(left), Self::NamedCollection(right))
-            | (Self::Map(left), Self::Map(right)) => {
-                left.len() == right.len()
-                    && left.iter().zip(right).all(|(left, right)| {
-                        left.name == right.name && left.value.semantic_eq(&right.value)
-                    })
+            SemanticCompareTask::Entries { left, right, index } => {
+                if left.len() != right.len() {
+                    return false;
+                }
+                if index < left.len() {
+                    let left_entry = &left[index];
+                    let right_entry = &right[index];
+                    if left_entry.name != right_entry.name {
+                        return false;
+                    }
+                    tasks.push(SemanticCompareTask::Entries {
+                        left,
+                        right,
+                        index: index.saturating_add(1),
+                    });
+                    tasks.push(SemanticCompareTask::Value {
+                        left: &left_entry.value,
+                        right: &right_entry.value,
+                    });
+                }
             }
-            (Self::Object(left), Self::Object(right)) => left == right,
-            (Self::Element(left), Self::Element(right)) => left.semantic_eq(right),
-            _ => false,
+            SemanticCompareTask::Extensions { left, right, index } => {
+                if left.len() != right.len() {
+                    return false;
+                }
+                if index < left.len() {
+                    if left[index] != right[index] {
+                        return false;
+                    }
+                    tasks.push(SemanticCompareTask::Extensions {
+                        left,
+                        right,
+                        index: index.saturating_add(1),
+                    });
+                }
+            }
         }
     }
+    true
 }
 
 /// Explicit validation work item.  Keeping nested values as references in a
@@ -805,6 +1064,49 @@ enum ValidationTask<'a> {
         extensions: &'a [OpaqueValue],
         index: usize,
     },
+}
+
+fn validate_object_property(
+    object: &ObjectProperty,
+    state: &mut ValidationState<'_>,
+) -> Result<(), ModelValidationError> {
+    if let Some(class_name) = &object.class_name {
+        state.add_string_bytes(class_name.len())?;
+    }
+    state.add_opaque_bytes(object.raw.len())?;
+    for attribute in &object.attributes {
+        state.add_string_bytes(attribute.name.len())?;
+        state.add_string_bytes(attribute.value.len())?;
+    }
+    Ok(())
+}
+
+fn validate_element_value<'a>(
+    element: &'a ElementProperty,
+    state: &mut ValidationState<'_>,
+    depth: usize,
+    tasks: &mut Vec<ValidationTask<'a>>,
+) -> Result<(), ModelValidationError> {
+    state.add_string_bytes(element.name.len())?;
+    if let Some(class_name) = &element.class_name {
+        state.add_string_bytes(class_name.len())?;
+    }
+    // Extensions follow nested properties on the source wire.  Push them
+    // first so the property task runs before the extension task (LIFO stack
+    // order), while retaining all unknown/plugin values exactly.
+    if !element.opaque_extensions.is_empty() {
+        tasks.push(ValidationTask::ElementExtensions {
+            extensions: &element.opaque_extensions,
+            index: 0,
+        });
+    }
+    tasks.push(ValidationTask::Properties {
+        properties: &element.properties,
+        depth: depth.saturating_add(1),
+        index: 0,
+        names: BTreeSet::new(),
+    });
+    Ok(())
 }
 
 fn validate_properties_iterative(
@@ -862,35 +1164,10 @@ fn validate_property_tasks(
                         }
                     }
                     PropertyValue::Object(object) => {
-                        if let Some(class_name) = &object.class_name {
-                            state.add_string_bytes(class_name.len())?;
-                        }
-                        state.add_opaque_bytes(object.raw.len())?;
-                        for attribute in &object.attributes {
-                            state.add_string_bytes(attribute.name.len())?;
-                            state.add_string_bytes(attribute.value.len())?;
-                        }
+                        validate_object_property(object, state)?;
                     }
                     PropertyValue::Element(element) => {
-                        state.add_string_bytes(element.name.len())?;
-                        if let Some(class_name) = &element.class_name {
-                            state.add_string_bytes(class_name.len())?;
-                        }
-                        // Extensions follow nested properties on the source
-                        // wire.  Push them first so the property task runs
-                        // before the extension task (LIFO stack order).
-                        if !element.opaque_extensions.is_empty() {
-                            tasks.push(ValidationTask::ElementExtensions {
-                                extensions: &element.opaque_extensions,
-                                index: 0,
-                            });
-                        }
-                        tasks.push(ValidationTask::Properties {
-                            properties: &element.properties,
-                            depth: depth.saturating_add(1),
-                            index: 0,
-                            names: BTreeSet::new(),
-                        });
+                        validate_element_value(element, state, depth, tasks)?;
                     }
                     PropertyValue::Opaque(value) => {
                         state.add_string_bytes(value.type_name.len())?;
@@ -1199,10 +1476,11 @@ impl Properties {
     /// semantic floating-point equality.
     #[must_use]
     pub fn semantic_eq(&self, other: &Self) -> bool {
-        self.len() == other.len()
-            && self.iter().zip(other).all(|(left, right)| {
-                left.name == right.name && left.value.semantic_eq(&right.value)
-            })
+        semantic_eq_tasks(vec![SemanticCompareTask::Properties {
+            left: self,
+            right: other,
+            index: 0,
+        }])
     }
 }
 
@@ -1232,3 +1510,164 @@ pub type PropertyMap = Properties;
 
 /// Alias used by model consumers that mirror JMeter's run-scoped naming.
 pub type JMeterProperties = Properties;
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "property tests use fixed in-memory values and assert setup before inspection"
+)]
+mod tests {
+    use super::*;
+    use crate::ValidationLimitKind;
+
+    fn limit_kind(error: ModelValidationError) -> ValidationLimitKind {
+        let ModelValidationError::LimitExceeded { kind, .. } = error else {
+            panic!("expected a resource-limit error");
+        };
+        kind
+    }
+
+    fn nested_value(depth: usize) -> PropertyValue {
+        let mut value = PropertyValue::string("leaf");
+        for index in (0..depth).rev() {
+            let mut element = ElementProperty::new(format!("nested-{index}"));
+            element.properties.insert("child", value);
+            value = PropertyValue::Element(element);
+        }
+        value
+    }
+
+    #[test]
+    fn element_type_absent_and_empty_are_distinct() {
+        let absent = ElementProperty::new("nested");
+        let empty = ElementProperty::from_optional_class_name("nested", Some(String::new()));
+        let present = ElementProperty::new("nested").with_class_name("plugin.Nested");
+
+        assert_eq!(absent.class_name(), None);
+        assert_eq!(empty.class_name(), Some(""));
+        assert_eq!(present.class_name(), Some("plugin.Nested"));
+        assert_ne!(absent, empty);
+        assert_ne!(empty, present);
+        assert_eq!(empty.clone().without_class_name().class_name(), None);
+        assert_eq!(present.clone().without_class_attribute(), absent);
+        assert_eq!(
+            absent
+                .with_optional_class_name(Some("plugin.Nested".to_owned()))
+                .class_name(),
+            Some("plugin.Nested")
+        );
+    }
+
+    #[test]
+    fn ordered_maps_and_collections_keep_duplicate_names_and_raw_bytes() {
+        let map = PropertyValue::map(vec![
+            PropertyEntry::new("duplicate", PropertyValue::opaque("plug.Value", [0, 255])),
+            PropertyEntry::new("duplicate", PropertyValue::string(String::new())),
+            PropertyEntry::new("last", PropertyValue::null()),
+        ]);
+        let named = PropertyValue::named_collection(vec![
+            PropertyEntry::new("first", PropertyValue::integer(1)),
+            PropertyEntry::new("first", PropertyValue::integer(2)),
+        ]);
+
+        let PropertyValue::Map(entries) = &map else {
+            panic!("map constructor must retain map entries");
+        };
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["duplicate", "duplicate", "last"]
+        );
+        assert_eq!(entries[0].value.as_opaque().unwrap().raw_bytes(), &[0, 255]);
+        assert_eq!(entries[1].value, PropertyValue::String(String::new()));
+
+        let reordered = PropertyValue::map(vec![
+            PropertyEntry::new("duplicate", PropertyValue::string(String::new())),
+            PropertyEntry::new("duplicate", PropertyValue::opaque("plug.Value", [0, 255])),
+            PropertyEntry::new("last", PropertyValue::null()),
+        ]);
+        assert!(!map.semantic_eq(&reordered));
+        assert_eq!(map, map.clone());
+        assert_eq!(named.as_named_collection().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn standalone_validation_counts_nested_values_and_text_bytes() {
+        let value = PropertyValue::collection(vec![PropertyValue::string("x")]);
+        let mut limits = ValidationLimits::small();
+        limits.max_properties = 2;
+        limits.max_string_bytes = 1;
+        assert!(value.validate_with_limits(&limits).is_ok());
+
+        limits.max_properties = 1;
+        assert_eq!(
+            limit_kind(value.validate_with_limits(&limits).unwrap_err()),
+            ValidationLimitKind::Properties
+        );
+
+        limits.max_properties = 2;
+        limits.max_string_bytes = 0;
+        assert_eq!(
+            limit_kind(value.validate_with_limits(&limits).unwrap_err()),
+            ValidationLimitKind::StringBytes
+        );
+
+        let entry = PropertyEntry::new("key", PropertyValue::null());
+        limits.max_string_bytes = 3;
+        assert!(entry.validate_with_limits(&limits).is_ok());
+        limits.max_string_bytes = 2;
+        assert_eq!(
+            limit_kind(entry.validate_with_limits(&limits).unwrap_err()),
+            ValidationLimitKind::StringBytes
+        );
+    }
+
+    #[test]
+    fn standalone_validation_bounds_depth_and_opaque_payloads() {
+        let value = nested_value(2);
+        let mut limits = ValidationLimits::small();
+        limits.max_property_depth = 1;
+        assert_eq!(
+            limit_kind(value.validate_with_limits(&limits).unwrap_err()),
+            ValidationLimitKind::PropertyDepth
+        );
+
+        let object = ObjectProperty::opaque_xml(
+            "plugin.Object",
+            vec![1, 2, 3],
+            [ObjectPropertyAttribute::new("attribute", "value")],
+        );
+        let mut limits = ValidationLimits::small();
+        limits.max_opaque_bytes = 2;
+        assert_eq!(
+            limit_kind(object.validate_with_limits(&limits).unwrap_err()),
+            ValidationLimitKind::OpaqueBytes
+        );
+        limits.max_opaque_bytes = 3;
+        limits.max_string_bytes = 27;
+        assert!(object.validate_with_limits(&limits).is_ok());
+        limits.max_string_bytes = 26;
+        assert_eq!(
+            limit_kind(object.validate_with_limits(&limits).unwrap_err()),
+            ValidationLimitKind::StringBytes
+        );
+    }
+
+    #[test]
+    fn semantic_equality_handles_deep_values_without_recursive_calls() {
+        let left = nested_value(4_096);
+        let right = nested_value(4_096);
+        assert!(left.semantic_eq(&right));
+
+        let mut different = nested_value(4_096);
+        let PropertyValue::Element(root) = &mut different else {
+            panic!("nested fixture must have an element root");
+        };
+        root.name.push_str("-different");
+        assert!(!left.semantic_eq(&different));
+    }
+}

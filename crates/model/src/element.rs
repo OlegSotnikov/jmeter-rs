@@ -39,6 +39,13 @@ impl fmt::Debug for ElementMetadata {
 }
 
 impl ElementMetadata {
+    /// The exact XML attribute carrying the test-element class.
+    pub const TEST_CLASS_ATTRIBUTE: &'static str = "testclass";
+    /// The exact XML attribute carrying the GUI class.
+    pub const GUI_CLASS_ATTRIBUTE: &'static str = "guiclass";
+    /// The exact XML attribute carrying the element name.
+    pub const NAME_ATTRIBUTE: &'static str = "testname";
+
     /// Creates metadata from exact upstream values.
     #[must_use]
     pub fn new(
@@ -51,6 +58,22 @@ impl ElementMetadata {
             gui_class: gui_class.into(),
             name: name.into(),
         }
+    }
+
+    /// Creates metadata and rejects a missing required wire attribute.
+    ///
+    /// [`Self::new`] remains available for callers that need to assemble a
+    /// value before a profile-specific validation pass.  JMX input-facing
+    /// code should prefer this constructor when an incomplete element cannot
+    /// be represented meaningfully.
+    pub fn try_new(
+        test_class: impl Into<String>,
+        gui_class: impl Into<String>,
+        name: impl Into<String>,
+    ) -> Result<Self, ModelValidationError> {
+        let metadata = Self::new(test_class, gui_class, name);
+        metadata.validate_nonempty()?;
+        Ok(metadata)
     }
 
     /// Returns the exact `testclass` wire value.
@@ -71,6 +94,19 @@ impl ElementMetadata {
         &self.name
     }
 
+    fn validate_nonempty(&self) -> Result<(), ModelValidationError> {
+        for (field, value) in [
+            (MetadataField::TestClass, &self.test_class),
+            (MetadataField::GuiClass, &self.gui_class),
+            (MetadataField::Name, &self.name),
+        ] {
+            if value.is_empty() {
+                return Err(ModelValidationError::EmptyMetadata { field });
+            }
+        }
+        Ok(())
+    }
+
     /// Validates required metadata and aggregate string usage.
     pub fn validate_with_limits(
         &self,
@@ -84,14 +120,8 @@ impl ElementMetadata {
         &self,
         state: &mut ValidationState<'_>,
     ) -> Result<(), ModelValidationError> {
-        for (field, value) in [
-            (MetadataField::TestClass, &self.test_class),
-            (MetadataField::GuiClass, &self.gui_class),
-            (MetadataField::Name, &self.name),
-        ] {
-            if value.is_empty() {
-                return Err(ModelValidationError::EmptyMetadata { field });
-            }
+        self.validate_nonempty()?;
+        for value in [&self.test_class, &self.gui_class, &self.name] {
             state.add_string_bytes(value.len())?;
         }
         Ok(())
@@ -178,6 +208,21 @@ impl TestElement {
         Self::new(ElementMetadata::new(test_class, gui_class, name))
     }
 
+    /// Creates an element and rejects missing required wire metadata.
+    pub fn try_new(metadata: ElementMetadata) -> Result<Self, ModelValidationError> {
+        metadata.validate_nonempty()?;
+        Ok(Self::new(metadata))
+    }
+
+    /// Creates an element from exact class, GUI class, and name values.
+    pub fn try_named(
+        test_class: impl Into<String>,
+        gui_class: impl Into<String>,
+        name: impl Into<String>,
+    ) -> Result<Self, ModelValidationError> {
+        Self::try_new(ElementMetadata::new(test_class, gui_class, name))
+    }
+
     /// Returns the exact test class value.
     #[must_use]
     pub fn test_class(&self) -> &str {
@@ -222,6 +267,34 @@ impl TestElement {
         self.properties.insert(name, value)
     }
 
+    /// Inserts or replaces a persistent property only when the resulting
+    /// element stays within `limits`.
+    ///
+    /// The mutation is transactional: a failed validation restores the
+    /// original value and insertion position.  This keeps a bounded caller
+    /// from observing a partially accepted plan edit.
+    pub fn try_set_property(
+        &mut self,
+        name: impl Into<String>,
+        value: PropertyValue,
+        limits: &ValidationLimits,
+    ) -> Result<Option<PropertyValue>, ModelValidationError> {
+        let name = name.into();
+        let previous = self.set_property(name.clone(), value);
+        if let Err(error) = self.validate_with_limits(limits) {
+            match previous {
+                Some(previous) => {
+                    let _ = self.set_property(name, previous);
+                }
+                None => {
+                    let _ = self.remove_property(&name);
+                }
+            }
+            return Err(error);
+        }
+        Ok(previous)
+    }
+
     /// Removes a persistent property by exact name.
     pub fn remove_property(&mut self, name: &str) -> Option<PropertyValue> {
         self.properties.remove(name)
@@ -242,9 +315,48 @@ impl TestElement {
         self.temporary_properties.insert(name, value)
     }
 
+    /// Inserts or replaces a temporary property only when the resulting
+    /// element stays within `limits`.
+    pub fn try_set_temporary_property(
+        &mut self,
+        name: impl Into<String>,
+        value: PropertyValue,
+        limits: &ValidationLimits,
+    ) -> Result<Option<PropertyValue>, ModelValidationError> {
+        let name = name.into();
+        let previous = self.set_temporary_property(name.clone(), value);
+        if let Err(error) = self.validate_with_limits(limits) {
+            match previous {
+                Some(previous) => {
+                    let _ = self.set_temporary_property(name, previous);
+                }
+                None => {
+                    let _ = self.temporary_properties.remove(&name);
+                }
+            }
+            return Err(error);
+        }
+        Ok(previous)
+    }
+
     /// Adds an opaque/plugin extension payload.
     pub fn push_opaque_extension(&mut self, extension: OpaqueExtension) {
         self.opaque_extensions.push(extension);
+    }
+
+    /// Appends an opaque/plugin payload only when the resulting element stays
+    /// within `limits`.
+    pub fn try_push_opaque_extension(
+        &mut self,
+        extension: OpaqueExtension,
+        limits: &ValidationLimits,
+    ) -> Result<(), ModelValidationError> {
+        self.opaque_extensions.push(extension);
+        if let Err(error) = self.validate_with_limits(limits) {
+            let _ = self.opaque_extensions.pop();
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// Returns the source location.
@@ -320,19 +432,257 @@ impl TestElement {
         &self,
         state: &mut ValidationState<'_>,
     ) -> Result<(), ModelValidationError> {
-        self.metadata.validate_into(state)?;
-        self.source_location
+        Self::validate_state_into(
+            state,
+            &self.metadata,
+            &self.properties,
+            &self.temporary_properties,
+            &self.source_location,
+            &self.opaque_extensions,
+        )?;
+        if let Some(snapshot) = &self.running_version {
+            Self::validate_state_into(
+                state,
+                &snapshot.metadata,
+                &snapshot.properties,
+                &snapshot.temporary_properties,
+                &snapshot.source_location,
+                &snapshot.opaque_extensions,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn validate_state_into(
+        state: &mut ValidationState<'_>,
+        metadata: &ElementMetadata,
+        properties: &Properties,
+        temporary_properties: &Properties,
+        source_location: &SourceLocation,
+        opaque_extensions: &[OpaqueExtension],
+    ) -> Result<(), ModelValidationError> {
+        metadata.validate_into(state)?;
+        source_location
             .validate()
             .map_err(|error| ModelValidationError::InvalidSourceLocation { error })?;
-        if let Some(source) = self.source_location.source_name() {
+        if let Some(source) = source_location.source_name() {
             state.add_string_bytes(source.len())?;
         }
-        self.properties.validate_into(state, 0)?;
-        self.temporary_properties.validate_into(state, 0)?;
-        for extension in &self.opaque_extensions {
+        properties.validate_into(state, 0)?;
+        temporary_properties.validate_into(state, 0)?;
+        for extension in opaque_extensions {
             state.add_string_bytes(extension.type_name.len())?;
             state.add_opaque_bytes(extension.raw.len())?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "deterministic element tests assert setup before inspecting values"
+)]
+mod tests {
+    use super::*;
+    use crate::{OpaqueValue, ValidationLimitKind};
+
+    fn element() -> TestElement {
+        TestElement::try_named("plugin.TestElement", "plugin.Gui", " exact ☃ name ")
+            .expect("non-empty exact metadata")
+    }
+
+    #[test]
+    fn exact_wire_metadata_and_enabled_state_are_preserved() {
+        let mut item = element();
+        assert_eq!(ElementMetadata::TEST_CLASS_ATTRIBUTE, "testclass");
+        assert_eq!(ElementMetadata::GUI_CLASS_ATTRIBUTE, "guiclass");
+        assert_eq!(ElementMetadata::NAME_ATTRIBUTE, "testname");
+        assert_eq!(item.test_class(), "plugin.TestElement");
+        assert_eq!(item.gui_class(), "plugin.Gui");
+        assert_eq!(item.name(), " exact ☃ name ");
+        assert!(item.is_enabled());
+        item.set_enabled(false);
+        assert!(!item.is_enabled());
+        assert!(
+            item.validate_with_limits(&ValidationLimits::default())
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn fallible_constructors_report_each_missing_wire_attribute() {
+        for (field, test_class, gui_class, name) in [
+            (MetadataField::TestClass, "", "Gui", "name"),
+            (MetadataField::GuiClass, "Test", "", "name"),
+            (MetadataField::Name, "Test", "Gui", ""),
+        ] {
+            let error = ElementMetadata::try_new(test_class, gui_class, name)
+                .expect_err("empty required metadata must be rejected");
+            assert_eq!(error, ModelValidationError::EmptyMetadata { field });
+            assert_eq!(error.code(), "model.validation.empty-metadata");
+        }
+        assert_eq!(
+            TestElement::try_named("", "Gui", "name").expect_err("empty class"),
+            ModelValidationError::EmptyMetadata {
+                field: MetadataField::TestClass
+            }
+        );
+    }
+
+    #[test]
+    fn ordered_properties_replace_in_place_and_keep_wire_states_distinct() {
+        let mut item = element();
+        for index in 0..32 {
+            item.set_property(
+                format!("plugin.property.{index}"),
+                PropertyValue::Integer(index),
+            );
+        }
+        item.set_property("plugin.property.7", PropertyValue::String(String::new()));
+        item.set_property("plugin.null", PropertyValue::Null);
+        assert_eq!(item.properties.position("plugin.property.7"), Some(7));
+        let keys = item.properties.keys().collect::<Vec<_>>();
+        assert!(
+            keys.iter()
+                .take(8)
+                .enumerate()
+                .all(|(index, key)| *key == format!("plugin.property.{index}"))
+        );
+        assert_eq!(
+            item.property("plugin.property.7"),
+            Some(&PropertyValue::String(String::new()))
+        );
+        assert_eq!(item.property("plugin.null"), Some(&PropertyValue::Null));
+        assert!(item.property("plugin.absent").is_none());
+    }
+
+    #[test]
+    fn unknown_payload_order_and_disabled_source_state_survive_clone_and_recovery() {
+        let mut item = element();
+        item.set_enabled(false);
+        item.push_opaque_extension(OpaqueValue::new("plugin.first", vec![0, 1, 2]));
+        item.push_opaque_extension(OpaqueValue::new("plugin.second", b"<raw>".to_vec()));
+        item.set_running_version();
+        item.set_enabled(true);
+        item.opaque_extensions[0].raw[0] = 9;
+        assert!(item.recover_running_version());
+        assert!(!item.is_enabled());
+        assert_eq!(item.opaque_extensions[0].raw, vec![0, 1, 2]);
+        assert_eq!(item.opaque_extensions[1].raw, b"<raw>".to_vec());
+        let mut clone = item.clone();
+        clone.opaque_extensions[1].raw.push(b'!');
+        assert_ne!(clone.opaque_extensions, item.opaque_extensions);
+        assert!(!item.semantic_eq(&clone));
+    }
+
+    #[test]
+    fn duplicate_element_values_keep_distinct_document_local_identities() {
+        let mut tree = crate::ElementTree::new();
+        let first = tree
+            .insert_root(element())
+            .expect("first source element identity");
+        let second = tree
+            .insert_root(element())
+            .expect("second source element identity");
+        assert_ne!(first, second);
+        assert_eq!(
+            tree.element(first).expect("first element"),
+            tree.element(second).expect("second element")
+        );
+        assert_eq!(tree.root_ids(), &[first, second]);
+    }
+
+    #[test]
+    fn bounded_mutations_are_transactional_and_return_typed_limits() {
+        let mut item = element();
+        let limits = ValidationLimits {
+            max_properties: 0,
+            ..ValidationLimits::default()
+        };
+        let error = item
+            .try_set_property(
+                "too-many",
+                PropertyValue::String("value".to_owned()),
+                &limits,
+            )
+            .expect_err("bounded property insertion must fail");
+        assert_eq!(
+            error,
+            ModelValidationError::LimitExceeded {
+                kind: ValidationLimitKind::Properties,
+                limit: 0,
+                actual: 1,
+            }
+        );
+        assert!(item.property("too-many").is_none());
+
+        let opaque_limits = ValidationLimits {
+            max_opaque_bytes: 2,
+            ..ValidationLimits::default()
+        };
+        let error = item
+            .try_push_opaque_extension(OpaqueValue::new("plugin", vec![1, 2, 3]), &opaque_limits)
+            .expect_err("bounded opaque insertion must fail");
+        assert_eq!(error.code(), "model.validation.limit-opaque-bytes");
+        assert!(item.opaque_extensions.is_empty());
+
+        let mut replacement = element();
+        replacement.set_property("stable", PropertyValue::String("before".to_owned()));
+        replacement.set_property("later", PropertyValue::Null);
+        let stable_position = replacement.properties.position("stable");
+        let replacement_limits = ValidationLimits {
+            max_string_bytes: replacement
+                .metadata
+                .test_class
+                .len()
+                .saturating_add(replacement.metadata.gui_class.len())
+                .saturating_add(replacement.metadata.name.len())
+                .saturating_add("stable".len())
+                .saturating_add("later".len())
+                .saturating_add("before".len()),
+            ..ValidationLimits::default()
+        };
+        let error = replacement
+            .try_set_property(
+                "stable",
+                PropertyValue::String("replacement-that-is-too-long".to_owned()),
+                &replacement_limits,
+            )
+            .expect_err("replacement over the string bound must fail");
+        assert_eq!(error.code(), "model.validation.limit-string-bytes");
+        assert_eq!(replacement.properties.position("stable"), stable_position);
+        assert_eq!(
+            replacement.property("stable"),
+            Some(&PropertyValue::String("before".to_owned()))
+        );
+
+        let temporary_limits = ValidationLimits {
+            max_properties: 0,
+            ..ValidationLimits::default()
+        };
+        let error = replacement
+            .try_set_temporary_property("runtime", PropertyValue::Null, &temporary_limits)
+            .expect_err("temporary properties are bounded too");
+        assert_eq!(error.code(), "model.validation.limit-properties");
+        assert!(replacement.temporary_property("runtime").is_none());
+    }
+
+    #[test]
+    fn retained_running_version_is_included_in_bounds() {
+        let mut item = element();
+        item.set_running_version();
+        let limits = ValidationLimits {
+            max_string_bytes: item.metadata.test_class.len()
+                + item.metadata.gui_class.len()
+                + item.metadata.name.len(),
+            ..ValidationLimits::default()
+        };
+        let error = item
+            .validate_with_limits(&limits)
+            .expect_err("retained snapshot must consume bounded string budget");
+        assert_eq!(error.code(), "model.validation.limit-string-bytes");
     }
 }

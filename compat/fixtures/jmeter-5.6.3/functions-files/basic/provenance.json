@@ -73,6 +73,9 @@
         "path": "inputs/utf16-input.txt",
         "source": "inputs/utf16-source.txt",
         "command": "iconv -f UTF-8 -t UTF-16LE inputs/utf16-source.txt > inputs/utf16-input.txt",
+        "generator_version": "iconv (version not recorded in original provenance)",
+        "seed": null,
+        "seed_reason": "not applicable: deterministic encoding conversion does not use a random seed",
         "reproducible": true
       }
     ]

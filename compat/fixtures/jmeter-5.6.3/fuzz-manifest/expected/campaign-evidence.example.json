@@ -53,7 +53,7 @@
     {
       "target": "jmx_xml",
       "source_path": "fuzz/fuzz_targets/jmx_xml.rs",
-      "source_sha256": "59b00b33a2a08d00528199360b8d532deeb1329530b9ddc1555c9779474fce4b",
+      "source_sha256": "269c3ecf7cc2b2358a705f1f1518631b43d786bd9ff54e6b1779650a1e1b8680",
       "corpus_directory": "fuzz/corpus/jmx_xml",
       "bounds": {"max_input_bytes": 262144, "max_output_bytes": 524288},
       "invariant_ids": ["JMX-LIMIT-001", "JMX-SOURCE-RETAIN-001", "JMX-OPAQUE-INVENTORY-001", "JMX-DROPPED-INVENTORY-001"],
@@ -63,7 +63,7 @@
     {
       "target": "jtl_csv",
       "source_path": "fuzz/fuzz_targets/jtl_csv.rs",
-      "source_sha256": "505d5afb50f39893c921befa5005daede8a1e3d3f6bda96ed3151daaf469e8ed",
+      "source_sha256": "2b0d9333da9c255935559543e49711f02179d57703b45d089d84f0b1df90d2bf",
       "corpus_directory": "fuzz/corpus/jtl_csv",
       "bounds": {"max_input_bytes": 262144, "max_record_bytes": 16384, "max_attribute_bytes": 4096, "max_columns": 64, "max_depth": 16, "max_nodes": 512, "max_samples": 128, "max_attributes": 64, "max_output_bytes": 524288},
       "invariant_ids": ["JTL-CSV-PROJECTION-001", "JTL-CSV-LIMIT-001", "JTL-CSV-UNKNOWN-HEADER-001"],
@@ -73,7 +73,7 @@
     {
       "target": "jtl_xml",
       "source_path": "fuzz/fuzz_targets/jtl_xml.rs",
-      "source_sha256": "c22b6e1d7aafbaa6878fe7ff8ead85177d859bda79da0450a74eae2f4a17b112",
+      "source_sha256": "c7099fb103987965501cc9b37859145a19b1e723514ee17d27b35074ed2ed365",
       "corpus_directory": "fuzz/corpus/jtl_xml",
       "bounds": {"max_input_bytes": 262144, "max_record_bytes": 16384, "max_attribute_bytes": 4096, "max_columns": 64, "max_depth": 16, "max_nodes": 512, "max_samples": 128, "max_attributes": 64, "max_output_bytes": 524288},
       "invariant_ids": ["JTL-XML-PROJECTION-001", "JTL-XML-LIMIT-001", "JTL-XML-WIRE-001"],
@@ -83,7 +83,7 @@
     {
       "target": "expr",
       "source_path": "fuzz/fuzz_targets/expr.rs",
-      "source_sha256": "88eb6ef44671a2fa40a8795524c1921917051a28f6b38c3f7db3822f953f8f5a",
+      "source_sha256": "19f64b843687d7eb5eff0cbf7c30e72dd1342a1c60aaa3814e8d8a68fc66bdb4",
       "corpus_directory": "fuzz/corpus/expr",
       "bounds": {"max_input_bytes": 65536, "max_expansions": 256, "max_nesting": 16, "max_output_bytes": 131072},
       "invariant_ids": ["EXPR-UNDEFINED-001", "EXPR-LIMITS-001", "EXPR-PROGRESS-001"],
@@ -93,7 +93,7 @@
     {
       "target": "bridge",
       "source_path": "fuzz/fuzz_targets/bridge.rs",
-      "source_sha256": "ef8ffd271875a4f446da582f1d3de64802ccea48e36e7b9f8c8beddb35386c3c",
+      "source_sha256": "0c580017073f81a99192989fc39ab0a89a8b3888a1daf7b7e3dea776503f07bb",
       "corpus_directory": "fuzz/corpus/bridge",
       "bounds": {"max_input_bytes": 262144, "max_payload_bytes": 65536},
       "invariant_ids": ["BRIDGE-FRAME-ROUNDTRIP-001", "BRIDGE-METADATA-001", "BRIDGE-LIMIT-001"],
@@ -103,7 +103,7 @@
     {
       "target": "property_config",
       "source_path": "fuzz/fuzz_targets/property_config.rs",
-      "source_sha256": "18b1b70c0a539f86a244ef2975fe581d4d70da1b9b47791355d00e14b089d903",
+      "source_sha256": "2e9eb697966dc967c2b6763c22738ef328b99878260c329328ea9938d43b2dad",
       "corpus_directory": "fuzz/corpus/property_config",
       "bounds": {"max_input_bytes": 65536, "max_lines": 64, "max_line_bytes": 2048, "max_columns": 64},
       "invariant_ids": ["CONFIG-UNKNOWN-IGNORED-001", "CONFIG-DUPLICATE-001", "CONFIG-BOUNDS-001"],
@@ -113,7 +113,7 @@
     {
       "target": "http_policy",
       "source_path": "fuzz/fuzz_targets/http_policy.rs",
-      "source_sha256": "b10a56e779e5c229842a7d49db3bf883a90534ce4d11879b274d45324ae5c528",
+      "source_sha256": "8cc285d41a368c78d4c905a4931d99cd25fb7232d6dc0c7c3020faced71c08eb",
       "corpus_directory": "fuzz/corpus/http_policy",
       "bounds": {"max_input_bytes": 65536, "max_field_bytes": 4096, "max_url_bytes": 8192, "max_authority_bytes": 2048, "max_path_query_bytes": 6144, "max_fragment_bytes": 2048, "max_header_entries": 8, "max_header_bytes": 65536, "max_cookie_entries": 8, "max_cookie_header_bytes": 65536},
       "invariant_ids": ["HTTP-URL-BOUNDS-001", "HTTP-HEADER-BOUNDS-001", "HTTP-COOKIE-BOUNDS-001"],
@@ -123,7 +123,7 @@
     {
       "target": "plugin_json",
       "source_path": "fuzz/fuzz_targets/plugin_json.rs",
-      "source_sha256": "514b2c60deea0d8a4c679619b26836dfb034c3902832782edd501a92d80e6404",
+      "source_sha256": "a447d4574bf1534f85516b7c8a57f98d2940c73193c3de0d7557cf5a54ecd050",
       "corpus_directory": "fuzz/corpus/plugin_json",
       "bounds": {"max_input_bytes": 65536, "max_message_bytes": 32768, "max_raw_bytes": 49152},
       "invariant_ids": ["PLUGIN-JSON-PREFLIGHT-001"],
@@ -133,7 +133,7 @@
     {
       "target": "remote",
       "source_path": "fuzz/fuzz_targets/remote.rs",
-      "source_sha256": "3946acbf8e33deb1ae9d0f0b2478a8a84ed1c74b1be48c21bfa10915197f9964",
+      "source_sha256": "035de74759b1bebd6a5aa9de80a488d2478346b0201967b5179d20d99ffa0918",
       "corpus_directory": "fuzz/corpus/remote",
       "bounds": {"max_input_bytes": 65536, "max_field_bytes": 4096, "max_frame_bytes": 131072, "max_plan_bytes": 65536, "max_properties": 8, "max_references": 8, "max_capabilities": 8, "max_sample_depth": 8, "max_sample_nodes": 64, "max_samples": 8},
       "invariant_ids": ["REMOTE-CODEC-ROUNDTRIP-001", "REMOTE-STATE-001", "REMOTE-BOUNDS-001"],
@@ -143,7 +143,7 @@
     {
       "target": "runtime",
       "source_path": "fuzz/fuzz_targets/runtime.rs",
-      "source_sha256": "f460b2c99ac7cff8747bd9793869a2ac75ca8b75b365c1fbfe9b09213cf85fa8",
+      "source_sha256": "69c869ff339490b1017c200e56780fca95cda5b9a37cee41c059e19bff11fc84",
       "corpus_directory": "fuzz/corpus/runtime",
       "bounds": {"max_input_bytes": 65536, "max_children": 8, "max_loop_count": 3, "max_run_samples": 32, "max_run_steps": 128, "max_scheduler_wakes": 8, "max_step_budget": 1},
       "invariant_ids": ["RUNTIME-CONTROLLER-001", "RUNTIME-SCHEDULER-001", "RUNTIME-BOUNDS-001"],
@@ -153,7 +153,7 @@
   ],
   "corpus": {
     "provenance_path": "fuzz/corpus/PROVENANCE.md",
-    "provenance_sha256": "4b8d30bb1a7ac53887ecddae65e975fa0f56a0ea9f911dde4fb4f199b0cd14af",
+    "provenance_sha256": "c7b4e7be441f3e75cebad1ffdf93855ce85f1aed81e2b64f2efffa04efe0dda0",
     "seed_count": 34,
     "total_bytes": 5745,
     "seeds": [

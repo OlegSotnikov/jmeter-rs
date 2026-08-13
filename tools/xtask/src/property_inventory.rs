@@ -5,7 +5,9 @@
 //! It does not load Java properties, start JMeter, invoke a process, or make a
 //! network request.  Property entries are kept in source order (including
 //! commented defaults, duplicates, and empty values) so the generated file is
-//! a source inventory rather than a lossy effective-property map.
+//! a source inventory rather than a lossy effective-property map.  The active
+//! profile identity is checked before source reads so a changed release pin
+//! cannot silently produce an artifact with stale provenance.
 
 use crate::diagnostics::{Diagnostic, Diagnostics};
 use serde_json::{Value, json};
@@ -18,11 +20,14 @@ const SCHEMA_ID: &str = "jmeter-rs.cfg-002-property-inventory";
 const SCHEMA_VERSION: u64 = 1;
 const PROFILE_ID: &str = "jmeter-5.6.3";
 const PROFILE_VERSION: &str = "5.6.3";
+const PROFILE_ARTIFACT_DIGEST_ALGORITHM: &str = "SHA-512";
 const PROFILE_DECLARATION_VERSION: u64 = 2;
 const PROFILE_SOURCE_COMMIT: &str = "34a2785748e9e0b14702595e8682c387869deda3";
+const PROFILE_ARTIFACT_FILENAME: &str = "apache-jmeter-5.6.3.zip";
 const PROFILE_ARTIFACT_SHA512: &str = "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076";
 const DEFAULT_SOURCE_RELATIVE: &str = "jmeter-oracle-cache/apache-jmeter-5.6.3/bin";
 const DEFAULT_OUTPUT_RELATIVE: &str = "compat/inventory/jmeter-5.6.3/properties.json";
+const PROFILE_RELATIVE: &str = "compat/profiles/jmeter-5.6.3.json";
 const GENERATOR_PATH: &str = "tools/xtask/src/property_inventory.rs";
 const GENERATOR_COMMAND: &str = "cargo xtask property-inventory --generate";
 const UPSTREAM_PROJECT: &str = "Apache JMeter";
@@ -49,6 +54,7 @@ const MAX_SOURCE_LINES: usize = 100_000;
 const MAX_ENTRIES_PER_FILE: usize = 50_000;
 const MAX_TOTAL_ENTRIES: usize = 200_000;
 const MAX_OUTPUT_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_PROFILE_BYTES: u64 = 2 * 1024 * 1024;
 
 const SOURCE_FILE_NAMES: [&str; 6] = [
     "jmeter.properties",
@@ -82,6 +88,42 @@ pub(crate) fn run(
         .map(Path::to_path_buf)
         .unwrap_or_else(|| root.join(DEFAULT_OUTPUT_RELATIVE));
     let mut diagnostics = Diagnostics::default();
+    let Some(source_directory) = scoped_path(root, &source_directory) else {
+        diagnostics.push(Diagnostic::new(
+            "INVENTORY-PATH",
+            source_directory.to_string_lossy().into_owned(),
+            "pinned JMeter properties directory must be inside the repository root",
+        ));
+        diagnostics.sort_deterministically();
+        return diagnostics;
+    };
+    let Some(output_path) = scoped_path(root, &output_path) else {
+        diagnostics.push(Diagnostic::new(
+            "INVENTORY-PATH",
+            output_path.to_string_lossy().into_owned(),
+            "generated inventory output must be inside the repository root",
+        ));
+        diagnostics.sort_deterministically();
+        return diagnostics;
+    };
+    if !reject_symlink_ancestors(
+        root,
+        &source_directory,
+        "pinned JMeter properties directory",
+        &mut diagnostics,
+    ) || !reject_symlink_ancestors(
+        root,
+        &output_path,
+        "generated inventory output",
+        &mut diagnostics,
+    ) {
+        diagnostics.sort_deterministically();
+        return diagnostics;
+    }
+    if !check_profile_identity(root, &mut diagnostics) {
+        diagnostics.sort_deterministically();
+        return diagnostics;
+    }
     let Some(output) = build_inventory(root, &source_directory, &output_path, &mut diagnostics)
     else {
         diagnostics.sort_deterministically();
@@ -118,6 +160,239 @@ pub(crate) fn run(
     }
     diagnostics.sort_deterministically();
     diagnostics
+}
+
+/// Resolve a caller-supplied path without allowing it to escape the
+/// repository root.  Keeping all paths root-relative is part of the generated
+/// artifact's reproducibility contract: an absolute `/tmp` or home-directory
+/// path must never become embedded in checked-in JSON.
+fn scoped_path(root: &Path, path: &Path) -> Option<std::path::PathBuf> {
+    let candidate = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    };
+    let relative = candidate.strip_prefix(root).ok()?;
+    if relative.as_os_str().is_empty()
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::CurDir
+                    | std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+            )
+        })
+    {
+        return None;
+    }
+    Some(candidate)
+}
+
+fn reject_symlink_ancestors(
+    root: &Path,
+    path: &Path,
+    description: &str,
+    diagnostics: &mut Diagnostics,
+) -> bool {
+    let mut current = path.to_path_buf();
+    loop {
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                diagnostics.push(Diagnostic::new(
+                    "INVENTORY-PATH",
+                    display_path(root, &current),
+                    format!("{description} may not pass through a symlink"),
+                ));
+                return false;
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                diagnostics.push(Diagnostic::new(
+                    "INVENTORY-PATH",
+                    display_path(root, &current),
+                    format!("cannot inspect {description} path: {error}"),
+                ));
+                return false;
+            }
+        }
+        if current == root {
+            return true;
+        }
+        if !current.pop() {
+            return false;
+        }
+    }
+}
+
+/// Check the generator's pinned identity against the active profile. A missing
+/// or malformed profile is a closed error: the generator must not emit an
+/// inventory whose provenance silently refers to a different JMeter release.
+fn check_profile_identity(root: &Path, diagnostics: &mut Diagnostics) -> bool {
+    let path = root.join(PROFILE_RELATIVE);
+    let display = display_path(root, &path);
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            diagnostics.push(Diagnostic::new(
+                "INVENTORY-PROFILE",
+                display.clone(),
+                "active compatibility profile must not be a symlink",
+            ));
+            return false;
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            diagnostics.push(Diagnostic::new(
+                "INVENTORY-PROFILE",
+                display.clone(),
+                format!("cannot inspect active compatibility profile: {error}"),
+            ));
+            return false;
+        }
+    }
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            diagnostics.push(Diagnostic::new(
+                "INVENTORY-PROFILE",
+                display,
+                "active compatibility profile is missing",
+            ));
+            return false;
+        }
+        Err(error) => {
+            diagnostics.push(Diagnostic::new(
+                "INVENTORY-PROFILE",
+                display,
+                format!("cannot read active compatibility profile: {error}"),
+            ));
+            return false;
+        }
+    };
+    if bytes.len() as u64 > MAX_PROFILE_BYTES {
+        diagnostics.push(Diagnostic::new(
+            "INVENTORY-PROFILE",
+            display,
+            format!("active compatibility profile exceeds the {MAX_PROFILE_BYTES}-byte bound"),
+        ));
+        return false;
+    }
+    let value: Value = match serde_json::from_slice(&bytes) {
+        Ok(value) => value,
+        Err(error) => {
+            diagnostics.push(Diagnostic::new(
+                "INVENTORY-PROFILE",
+                display,
+                format!("cannot parse active compatibility profile: {error}"),
+            ));
+            return false;
+        }
+    };
+    let Some(object) = value.as_object() else {
+        diagnostics.push(Diagnostic::new(
+            "INVENTORY-PROFILE",
+            display,
+            "active compatibility profile must be a JSON object",
+        ));
+        return false;
+    };
+
+    let mut valid = true;
+    for (field, actual, expected) in [
+        (
+            "profile_id",
+            object.get("profile_id").and_then(Value::as_str),
+            PROFILE_ID,
+        ),
+        (
+            "upstream.project",
+            object
+                .get("upstream")
+                .and_then(Value::as_object)
+                .and_then(|upstream| upstream.get("project"))
+                .and_then(Value::as_str),
+            UPSTREAM_PROJECT,
+        ),
+        (
+            "upstream.version",
+            object
+                .get("upstream")
+                .and_then(Value::as_object)
+                .and_then(|upstream| upstream.get("version"))
+                .and_then(Value::as_str),
+            PROFILE_VERSION,
+        ),
+        (
+            "upstream.release_tag",
+            object
+                .get("upstream")
+                .and_then(Value::as_object)
+                .and_then(|upstream| upstream.get("release_tag"))
+                .and_then(Value::as_str),
+            UPSTREAM_RELEASE,
+        ),
+        (
+            "upstream.source_commit",
+            object
+                .get("upstream")
+                .and_then(Value::as_object)
+                .and_then(|upstream| upstream.get("source_commit"))
+                .and_then(Value::as_str),
+            PROFILE_SOURCE_COMMIT,
+        ),
+        (
+            "upstream.artifact.filename",
+            object
+                .get("upstream")
+                .and_then(Value::as_object)
+                .and_then(|upstream| upstream.get("artifact"))
+                .and_then(Value::as_object)
+                .and_then(|artifact| artifact.get("filename"))
+                .and_then(Value::as_str),
+            PROFILE_ARTIFACT_FILENAME,
+        ),
+        (
+            "upstream.artifact.digest_algorithm",
+            object
+                .get("upstream")
+                .and_then(Value::as_object)
+                .and_then(|upstream| upstream.get("artifact"))
+                .and_then(Value::as_object)
+                .and_then(|artifact| artifact.get("digest_algorithm"))
+                .and_then(Value::as_str),
+            PROFILE_ARTIFACT_DIGEST_ALGORITHM,
+        ),
+        (
+            "upstream.artifact.digest",
+            object
+                .get("upstream")
+                .and_then(Value::as_object)
+                .and_then(|upstream| upstream.get("artifact"))
+                .and_then(Value::as_object)
+                .and_then(|artifact| artifact.get("digest"))
+                .and_then(Value::as_str),
+            PROFILE_ARTIFACT_SHA512,
+        ),
+    ] {
+        if actual != Some(expected) {
+            diagnostics.push(Diagnostic::new(
+                "INVENTORY-PROFILE",
+                format!("{display}.{field}"),
+                format!("does not match the generator pin {expected:?}"),
+            ));
+            valid = false;
+        }
+    }
+    if object.get("profile_version").and_then(Value::as_u64) != Some(PROFILE_DECLARATION_VERSION) {
+        diagnostics.push(Diagnostic::new(
+            "INVENTORY-PROFILE",
+            format!("{display}.profile_version"),
+            format!("does not match the generator pin {PROFILE_DECLARATION_VERSION}"),
+        ));
+        valid = false;
+    }
+    valid
 }
 
 fn build_inventory(
@@ -250,7 +525,7 @@ fn build_inventory(
             "version": PROFILE_VERSION,
             "profile_version": PROFILE_DECLARATION_VERSION,
             "source_commit": PROFILE_SOURCE_COMMIT,
-            "artifact": "apache-jmeter-5.6.3.zip",
+            "artifact": PROFILE_ARTIFACT_FILENAME,
             "artifact_sha512": PROFILE_ARTIFACT_SHA512,
         },
         "inventory_status": "inventory-only",
@@ -266,7 +541,7 @@ fn build_inventory(
                 "project": UPSTREAM_PROJECT,
                 "release": UPSTREAM_RELEASE,
                 "source_commit": PROFILE_SOURCE_COMMIT,
-                "artifact": "apache-jmeter-5.6.3.zip",
+                "artifact": PROFILE_ARTIFACT_FILENAME,
                 "artifact_sha512": PROFILE_ARTIFACT_SHA512,
                 "source_files": provenance_files,
             },
@@ -399,6 +674,7 @@ fn read_source_file(
         ));
         return None;
     }
+    let source_bytes = bytes.len();
     let source_hash = sha256_hex(&bytes);
     let text = match String::from_utf8(bytes) {
         Ok(text) => text,
@@ -502,7 +778,7 @@ fn read_source_file(
             "path": relative_path,
             "sha256": source_hash,
             "hash_algorithm": "SHA-256",
-            "bytes": text.len(),
+            "bytes": source_bytes,
             "line_count": lines.len(),
             "line_ending": line_ending,
             "entries": entries.clone(),
@@ -997,7 +1273,7 @@ mod tests {
         assert!(fs::create_dir_all(&source).is_ok());
         for name in super::SOURCE_FILE_NAMES {
             let contents = if name == "jmeter.properties" {
-                "#---\n# XML Parser\n#---\n#alpha=\nalpha=one\nalpha=two\ncontinued=one\\\n  two\n"
+                "#---\n# XML Parser\n#---\n#alpha=\nalpha=one\nalpha=two\ncontinued=one\\\n  two\nunicode=é\n"
             } else if name == "reportgenerator.properties" {
                 "#key=one\\\n# second\n"
             } else {
@@ -1014,6 +1290,7 @@ mod tests {
             serde_json::from_slice(&fs::read(&output).unwrap_or_default()).unwrap_or(Value::Null);
         assert_eq!(document["compatibility_ids"][0], "CFG-002");
         assert_eq!(document["conformance_evidence"], false);
+        assert_eq!(document["inventory_status"], "inventory-only");
         assert_eq!(
             document["provenance"]["upstream"]["source_commit"],
             super::PROFILE_SOURCE_COMMIT
@@ -1051,6 +1328,18 @@ mod tests {
         assert_eq!(
             document["source"]["files"].as_array().map(Vec::len),
             Some(6)
+        );
+        assert_eq!(document["summary"]["duplicate_key_count"], 2);
+        assert_eq!(
+            document["source"]["files"][0]["bytes"],
+            fs::read(&source.join("jmeter.properties"))
+                .unwrap_or_default()
+                .len()
+        );
+        let jmeter_source_bytes = fs::read(source.join("jmeter.properties")).unwrap_or_default();
+        assert_eq!(
+            document["source"]["files"][0]["sha256"],
+            sha256_hex(&jmeter_source_bytes)
         );
         let first_entry = &document["source"]["files"][0]["entries"][0];
         assert_eq!(first_entry["occurrence"], 1);
@@ -1101,11 +1390,64 @@ mod tests {
     }
 
     #[test]
+    fn every_declared_source_file_is_required() {
+        let tree = TestTree::new();
+        let source = tree
+            .root
+            .join("jmeter-oracle-cache/apache-jmeter-5.6.3/bin");
+        assert!(fs::create_dir_all(&source).is_ok());
+        for name in super::SOURCE_FILE_NAMES {
+            assert!(fs::write(source.join(name), b"#key=value\n").is_ok());
+        }
+        assert!(fs::remove_file(source.join("upgrade.properties")).is_ok());
+        let diagnostics = run(&tree.root, Action::Check, None, None);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "INVENTORY-SOURCE")
+        );
+    }
+
+    #[test]
     fn source_hash_is_sha256_and_build_is_json() {
         let bytes = b"known";
         assert_eq!(
             sha256_hex(bytes),
             "7117fff2d0fd294462b3c802b7cb8753579f23f3946b99cf55f38e873f013f10"
+        );
+    }
+
+    #[test]
+    fn custom_paths_cannot_escape_repository_root() {
+        let tree = TestTree::new();
+        let outside = tree.root.join("..").join("outside");
+        let source_diagnostics = run(&tree.root, Action::Check, Some(&outside), None);
+        assert!(
+            source_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "INVENTORY-PATH")
+        );
+
+        let output = tree.root.join("..").join("outside.json");
+        let output_diagnostics = run(&tree.root, Action::Check, None, Some(&output));
+        assert!(
+            output_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "INVENTORY-PATH")
+        );
+    }
+
+    #[test]
+    fn profile_identity_drift_is_rejected_before_source_read() {
+        let tree = TestTree::new();
+        let profile = tree.root.join(super::PROFILE_RELATIVE);
+        assert!(fs::create_dir_all(profile.parent().unwrap_or(&tree.root)).is_ok());
+        assert!(fs::write(profile, r#"{"profile_id":"wrong"}"#).is_ok());
+        let diagnostics = run(&tree.root, Action::Check, None, None);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "INVENTORY-PROFILE")
         );
     }
 
@@ -1123,6 +1465,25 @@ mod tests {
             ));
             let _ = fs::remove_dir_all(&root);
             assert!(fs::create_dir_all(&root).is_ok());
+            let profile = root.join(super::PROFILE_RELATIVE);
+            assert!(fs::create_dir_all(profile.parent().unwrap_or(&root)).is_ok());
+            let profile_contents = serde_json::json!({
+                "profile_id": super::PROFILE_ID,
+                "profile_version": super::PROFILE_DECLARATION_VERSION,
+                "upstream": {
+                    "project": super::UPSTREAM_PROJECT,
+                    "version": super::PROFILE_VERSION,
+                    "release_tag": super::UPSTREAM_RELEASE,
+                    "source_commit": super::PROFILE_SOURCE_COMMIT,
+                    "artifact": {
+                        "filename": super::PROFILE_ARTIFACT_FILENAME,
+                        "digest_algorithm": super::PROFILE_ARTIFACT_DIGEST_ALGORITHM,
+                        "digest": super::PROFILE_ARTIFACT_SHA512,
+                    },
+                },
+            })
+            .to_string();
+            assert!(fs::write(profile, profile_contents).is_ok());
             Self { root }
         }
     }

@@ -14,6 +14,142 @@ use std::os::unix::fs::OpenOptionsExt;
 const PROFILE_SCHEMA_ID: &str = "jmeter-rs.compatibility-profile";
 const PROFILE_SCHEMA_VERSION: u64 = 1;
 const EXPECTED_FEATURE_COUNT: usize = 52;
+// The first profile is deliberately a closed inventory.  Keeping the
+// canonical row order here makes a dropped or accidentally substituted row a
+// validation error even when the replacement still has a valid-looking
+// prefix/number and the total count remains 52.
+const EXPECTED_FEATURE_IDS: [&str; EXPECTED_FEATURE_COUNT] = [
+    "CLI-001",
+    "CLI-002",
+    "CLI-003",
+    "CFG-001",
+    "CFG-002",
+    "CFG-003",
+    "JMX-001",
+    "JMX-002",
+    "JMX-003",
+    "JMX-004",
+    "JTL-001",
+    "JTL-002",
+    "JTL-003",
+    "JTL-004",
+    "JTL-005",
+    "ELEM-001",
+    "ELEM-002",
+    "ELEM-003",
+    "ELEM-004",
+    "ELEM-005",
+    "ELEM-006",
+    "ELEM-007",
+    "ELEM-008",
+    "ELEM-009",
+    "FUNC-001",
+    "FUNC-002",
+    "FUNC-003",
+    "SCRIPT-001",
+    "SCRIPT-002",
+    "REPORT-001",
+    "REPORT-002",
+    "REPORT-003",
+    "DIST-001",
+    "DIST-002",
+    "DIST-003",
+    "DIST-004",
+    "PROXY-001",
+    "PROXY-002",
+    "PROXY-003",
+    "TLS-001",
+    "TLS-002",
+    "PLUG-001",
+    "PLUG-002",
+    "PLUG-003",
+    "GUI-001",
+    "GUI-002",
+    "GUI-003",
+    "TEST-001",
+    "TEST-002",
+    "TEST-003",
+    "TEST-004",
+    "TEST-005",
+];
+const INITIAL_PROFILE_ID: &str = "jmeter-5.6.3";
+const INITIAL_PROFILE_VERSION: u64 = 2;
+const INITIAL_EXTERNAL_FEATURE_IDS: [&str; 19] = [
+    "JMX-004",
+    "ELEM-001",
+    "ELEM-002",
+    "ELEM-008",
+    "ELEM-009",
+    "FUNC-003",
+    "SCRIPT-001",
+    "SCRIPT-002",
+    "REPORT-003",
+    "DIST-001",
+    "DIST-002",
+    "PROXY-001",
+    "PROXY-002",
+    "TLS-001",
+    "TLS-002",
+    "PLUG-001",
+    "PLUG-002",
+    "TEST-002",
+    "TEST-004",
+];
+const INITIAL_PLANNED_FEATURE_COUNT: usize =
+    EXPECTED_FEATURE_COUNT - INITIAL_EXTERNAL_FEATURE_IDS.len();
+const PINNED_UPSTREAM_PROJECT: &str = "Apache JMeter";
+const PINNED_UPSTREAM_VERSION: &str = "5.6.3";
+const PINNED_UPSTREAM_RELEASE_TAG: &str = "rel/v5.6.3";
+const PINNED_UPSTREAM_SOURCE_COMMIT: &str = "34a2785748e9e0b14702595e8682c387869deda3";
+const PINNED_UPSTREAM_ARTIFACT: &str = "apache-jmeter-5.6.3.zip";
+const PINNED_UPSTREAM_DIGEST: &str = "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076";
+const EXPECTED_NORMALIZATION_POLICY_IDS: [&str; 10] = [
+    "NORM-STRUCTURE-001",
+    "NORM-JMX-001",
+    "NORM-JTL-001",
+    "NORM-TIME-001",
+    "NORM-CLI-001",
+    "NORM-CONFIG-001",
+    "NORM-ENV-001",
+    "NORM-REPORT-001",
+    "NORM-EXTERNAL-001",
+    "NORM-SECURITY-001",
+];
+const EXPECTED_BOUNDARY_IDS: [&str; 6] = [
+    "EXT-JVM-001",
+    "EXT-SERVICE-001",
+    "EXT-RMI-001",
+    "EXT-TLS-001",
+    "EXT-PLUGIN-001",
+    "EXT-OS-001",
+];
+const EXPECTED_FIXTURE_FAMILY_IDS: [&str; 17] = [
+    "FX-CLI-001",
+    "FX-CONFIG-001",
+    "FX-JMX-001",
+    "FX-JTL-001",
+    "FX-ELEMENTS-CORE-001",
+    "FX-ELEMENTS-EXTERNAL-001",
+    "FX-FUNCTIONS-001",
+    "FX-SCRIPT-001",
+    "FX-REPORT-001",
+    "FX-REPORT-EXTERNAL-001",
+    "FX-DIST-001",
+    "FX-PROXY-TLS-001",
+    "FX-PLUGIN-001",
+    "FX-GUI-001",
+    "FX-HARNESS-001",
+    "FX-FUZZ-001",
+    "FX-CROSS-PLATFORM-001",
+];
+const INITIAL_EXTERNAL_FIXTURE_IDS: [&str; 6] = [
+    "FX-ELEMENTS-EXTERNAL-001",
+    "FX-SCRIPT-001",
+    "FX-REPORT-EXTERNAL-001",
+    "FX-DIST-001",
+    "FX-PROXY-TLS-001",
+    "FX-PLUGIN-001",
+];
 const FEATURE_PREFIXES: [&str; 14] = [
     "CLI", "CFG", "JMX", "JTL", "ELEM", "FUNC", "SCRIPT", "REPORT", "DIST", "PROXY", "TLS", "PLUG",
     "GUI", "TEST",
@@ -231,6 +367,7 @@ fn same_file_identity(_left: &Metadata, _right: &Metadata) -> bool {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ProfileIndex {
     pub(crate) profile_id: String,
+    pub(crate) profile_version: u64,
     pub(crate) feature_ids: BTreeSet<String>,
     pub(crate) feature_statuses: BTreeMap<String, String>,
     pub(crate) feature_fixture_ids: BTreeMap<String, BTreeSet<String>>,
@@ -256,6 +393,14 @@ pub(crate) struct UpstreamPin {
     pub(crate) source_commit: String,
     pub(crate) artifact: String,
     pub(crate) digest: String,
+    pub(crate) digest_verified: bool,
+    pub(crate) signature_verified: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ChecklistRow {
+    id: String,
+    inventory_status: String,
 }
 
 /// Validate a profile and return both diagnostics and its usable reference index.
@@ -390,7 +535,9 @@ fn validate_root_fields(
         }
         index.profile_id = value;
     }
-    let _ = required_u64(object, "profile_version", &path, diagnostics);
+    if let Some(value) = required_u64(object, "profile_version", &path, diagnostics) {
+        index.profile_version = value;
+    }
     if let Some(value) = required_string(object, "profile_date", &path, diagnostics)
         && !is_iso_date(&value)
     {
@@ -589,12 +736,22 @@ fn validate_root_fields(
             &format!("{path}.upstream.artifact"),
             diagnostics,
         ) {
-            let _ = required_bool(
+            if let Some(value) = required_bool(
                 verification,
                 "verified",
                 &format!("{path}.upstream.artifact.verification"),
                 diagnostics,
-            );
+            ) {
+                index.upstream.digest_verified = value;
+            }
+            if let Some(value) = required_bool(
+                verification,
+                "signature_verified",
+                &format!("{path}.upstream.artifact.verification"),
+                diagnostics,
+            ) {
+                index.upstream.signature_verified = value;
+            }
             for field in ["verified_at", "method", "official_digest_source", "notes"] {
                 let _ = required_string(
                     verification,
@@ -610,7 +767,115 @@ fn validate_root_fields(
             );
         }
     }
+    validate_initial_upstream_pin(&path, object, index, diagnostics);
     validate_runtime_assumptions(root, profile_path, object, diagnostics);
+}
+
+fn validate_initial_upstream_pin(
+    profile_path: &str,
+    object: &Map<String, Value>,
+    index: &ProfileIndex,
+    diagnostics: &mut Diagnostics,
+) {
+    if index.profile_id != INITIAL_PROFILE_ID {
+        return;
+    }
+    let Some(upstream) = object.get("upstream").and_then(Value::as_object) else {
+        return;
+    };
+    let upstream_path = format!("{profile_path}.upstream");
+    check_exact_string(
+        upstream,
+        "project",
+        PINNED_UPSTREAM_PROJECT,
+        &upstream_path,
+        diagnostics,
+    );
+    check_exact_string(
+        upstream,
+        "version",
+        PINNED_UPSTREAM_VERSION,
+        &upstream_path,
+        diagnostics,
+    );
+    check_exact_string(
+        upstream,
+        "release_tag",
+        PINNED_UPSTREAM_RELEASE_TAG,
+        &upstream_path,
+        diagnostics,
+    );
+    check_exact_string(
+        upstream,
+        "source_commit",
+        PINNED_UPSTREAM_SOURCE_COMMIT,
+        &upstream_path,
+        diagnostics,
+    );
+    let Some(artifact) = upstream.get("artifact").and_then(Value::as_object) else {
+        return;
+    };
+    let artifact_path = format!("{upstream_path}.artifact");
+    check_exact_string(
+        artifact,
+        "filename",
+        PINNED_UPSTREAM_ARTIFACT,
+        &artifact_path,
+        diagnostics,
+    );
+    check_exact_string(artifact, "format", "zip", &artifact_path, diagnostics);
+    check_exact_string(
+        artifact,
+        "digest_algorithm",
+        "SHA-512",
+        &artifact_path,
+        diagnostics,
+    );
+    check_exact_string(
+        artifact,
+        "digest",
+        PINNED_UPSTREAM_DIGEST,
+        &artifact_path,
+        diagnostics,
+    );
+    let Some(verification) = artifact.get("verification").and_then(Value::as_object) else {
+        return;
+    };
+    if verification.get("verified") != Some(&Value::Bool(true)) {
+        diagnostics.push(Diagnostic::new(
+            "PROFILE-PROVENANCE",
+            format!("{artifact_path}.verification.verified"),
+            "the active profile must retain its recorded SHA-512 verification",
+        ));
+    }
+    // The initial profile is a not-yet-authenticated release pin. PGP
+    // verification is a separate gate and must not be inferred from a
+    // matching digest or from static fixture validation.
+    if verification.get("signature_verified") != Some(&Value::Bool(false)) {
+        diagnostics.push(Diagnostic::new(
+            "PROFILE-PROVENANCE",
+            format!("{artifact_path}.verification.signature_verified"),
+            "the initial profile must keep signature_verified=false until independent PGP evidence is recorded",
+        ));
+    }
+}
+
+fn check_exact_string(
+    object: &Map<String, Value>,
+    field: &str,
+    expected: &str,
+    parent_path: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    if let Some(actual) = object.get(field).and_then(Value::as_str)
+        && actual != expected
+    {
+        diagnostics.push(Diagnostic::new(
+            "PROFILE-PROVENANCE",
+            format!("{parent_path}.{field}"),
+            format!("must remain pinned to {expected:?}"),
+        ));
+    }
 }
 
 fn checklist_source_path(
@@ -836,7 +1101,7 @@ fn read_inventory(
     path: &Path,
     expected_status: &str,
     diagnostics: &mut Diagnostics,
-) -> Option<Vec<String>> {
+) -> Option<Vec<ChecklistRow>> {
     let display = display_path(root, path);
     let source = match read_bounded_utf8(path, MAX_PROFILE_BYTES) {
         Ok(source) => source,
@@ -852,6 +1117,14 @@ fn read_inventory(
         if cells.len() < 2 || !is_feature_id(cells[1]) {
             continue;
         }
+        if cells.len() < 6 {
+            diagnostics.push(Diagnostic::new(
+                "PROFILE-INVENTORY",
+                format!("{display}:{}", line_number + 1),
+                "checklist row must contain id, surface, tier, required evidence, and inventory status columns",
+            ));
+            continue;
+        }
         if cells.len() >= 6 && cells[5] != expected_status {
             diagnostics.push(Diagnostic::new(
                 "PROFILE-INVENTORY",
@@ -859,24 +1132,43 @@ fn read_inventory(
                 format!("checklist status {:?} does not match profile inventory_status_value {expected_status:?}", cells[5]),
             ));
         }
-        let id = cells[1].to_owned();
-        if !seen.insert(id.clone()) {
+        let row = ChecklistRow {
+            id: cells[1].to_owned(),
+            inventory_status: cells[5].to_owned(),
+        };
+        if !seen.insert(row.id.clone()) {
             diagnostics.push(Diagnostic::new(
                 "PROFILE-INVENTORY",
                 format!("{display}:{}", line_number + 1),
-                format!("duplicate checklist ID {id}"),
+                format!("duplicate checklist ID {}", row.id),
             ));
         }
-        inventory.push(id);
+        inventory.push(row);
     }
     if inventory.len() != EXPECTED_FEATURE_COUNT {
         diagnostics.push(Diagnostic::new(
             "PROFILE-INVENTORY",
-            display,
+            display.clone(),
             format!(
                 "expected {EXPECTED_FEATURE_COUNT} checklist IDs, found {}",
                 inventory.len()
             ),
+        ));
+    }
+    let expected_ids = EXPECTED_FEATURE_IDS
+        .iter()
+        .map(|id| (*id).to_owned())
+        .collect::<Vec<_>>();
+    if inventory
+        .iter()
+        .map(|row| row.id.clone())
+        .collect::<Vec<_>>()
+        != expected_ids
+    {
+        diagnostics.push(Diagnostic::new(
+            "PROFILE-INVENTORY",
+            display,
+            "checklist IDs must match the pinned 52-row inventory in canonical order",
         ));
     }
     Some(inventory)
@@ -925,6 +1217,18 @@ fn validate_normalization_policies(
             let _ = required_string(policy, field, &path, diagnostics);
         }
     }
+    let ids = policies
+        .iter()
+        .filter_map(Value::as_object)
+        .filter_map(|policy| policy.get("id").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    if ids != EXPECTED_NORMALIZATION_POLICY_IDS.as_slice() {
+        diagnostics.push(Diagnostic::new(
+            "PROFILE-REFERENCE",
+            format!("{profile_display}.normalization_policies"),
+            "normalization policy IDs must match the pinned initial profile catalog in canonical order",
+        ));
+    }
 }
 
 fn validate_features(
@@ -933,7 +1237,7 @@ fn validate_features(
     object: &Map<String, Value>,
     diagnostics: &mut Diagnostics,
     index: &mut ProfileIndex,
-    inventory: Option<&Vec<String>>,
+    inventory: Option<&Vec<ChecklistRow>>,
 ) {
     let profile_display = display_path(root, profile_path);
     let Some(features) = required_array(object, "features", &profile_display, diagnostics) else {
@@ -1057,7 +1361,10 @@ fn validate_features(
     }
     if let Some(inventory) = inventory {
         let feature_ids = seen.keys().cloned().collect::<BTreeSet<_>>();
-        let inventory_ids = inventory.iter().cloned().collect::<BTreeSet<_>>();
+        let inventory_ids = inventory
+            .iter()
+            .map(|row| row.id.clone())
+            .collect::<BTreeSet<_>>();
         for id in inventory_ids.difference(&feature_ids) {
             diagnostics.push(Diagnostic::new(
                 "PROFILE-INVENTORY",
@@ -1073,6 +1380,70 @@ fn validate_features(
             ));
         }
     }
+    let feature_ids_in_order = features
+        .iter()
+        .filter_map(Value::as_object)
+        .filter_map(|feature| feature.get("id").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    if feature_ids_in_order != EXPECTED_FEATURE_IDS.as_slice() {
+        diagnostics.push(Diagnostic::new(
+            "PROFILE-INVENTORY",
+            format!("{profile_display}.features"),
+            "feature IDs must match the pinned 52-row inventory in canonical order",
+        ));
+    }
+    if is_initial_profile(index) {
+        let statuses = seen
+            .keys()
+            .filter_map(|id| index.feature_statuses.get(id))
+            .collect::<Vec<_>>();
+        let planned_count = statuses
+            .iter()
+            .filter(|status| status.as_str() == "planned")
+            .count();
+        let external_count = statuses
+            .iter()
+            .filter(|status| status.as_str() == "external")
+            .count();
+        if planned_count != INITIAL_PLANNED_FEATURE_COUNT
+            || external_count != INITIAL_EXTERNAL_FEATURE_IDS.len()
+        {
+            diagnostics.push(Diagnostic::new(
+                "PROFILE-STATUS",
+                format!("{profile_display}.features"),
+                format!(
+                    "initial profile requires {INITIAL_PLANNED_FEATURE_COUNT} planned and {} external rows; found {planned_count} planned and {external_count} external",
+                    INITIAL_EXTERNAL_FEATURE_IDS.len()
+                ),
+            ));
+        }
+        for feature_id in INITIAL_EXTERNAL_FEATURE_IDS {
+            if index.feature_statuses.get(feature_id).map(String::as_str) != Some("external") {
+                diagnostics.push(Diagnostic::new(
+                    "PROFILE-STATUS",
+                    format!("{profile_display}.features"),
+                    format!("{feature_id} must remain external in the initial profile"),
+                ));
+            }
+        }
+        for feature_id in EXPECTED_FEATURE_IDS {
+            if index
+                .feature_statuses
+                .get(feature_id)
+                .is_some_and(|status| status == "verified" || status == "blocked")
+            {
+                diagnostics.push(Diagnostic::new(
+                    "PROFILE-CLAIM",
+                    format!("{profile_display}.features"),
+                    format!("{feature_id} cannot be promoted or blocked without an explicit evidence/blocker record"),
+                ));
+            }
+        }
+    }
+}
+
+fn is_initial_profile(index: &ProfileIndex) -> bool {
+    index.profile_id == INITIAL_PROFILE_ID && index.profile_version == INITIAL_PROFILE_VERSION
 }
 
 fn validate_boundaries(
@@ -1136,6 +1507,18 @@ fn validate_boundaries(
             _ => {}
         }
         let _ = required_id_array(boundary, "applies_to", &path, diagnostics);
+    }
+    let ids = boundaries
+        .iter()
+        .filter_map(Value::as_object)
+        .filter_map(|boundary| boundary.get("id").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    if ids != EXPECTED_BOUNDARY_IDS.as_slice() {
+        diagnostics.push(Diagnostic::new(
+            "PROFILE-REFERENCE",
+            format!("{profile_display}.external_runtime_boundaries"),
+            "external boundary IDs must match the pinned initial profile catalog in canonical order",
+        ));
     }
 }
 
@@ -1207,6 +1590,15 @@ fn validate_fixture_catalog(
                 "verified fixture evidence must be materialized",
             ));
         }
+        if fixture.get("materialized").and_then(Value::as_bool) == Some(true)
+            && fixture_status.as_deref() != Some("verified")
+        {
+            diagnostics.push(Diagnostic::new(
+                "PROFILE-CLAIM",
+                format!("{path}.status"),
+                "materialized fixture evidence must use status verified",
+            ));
+        }
         if fixture_status.as_deref() == Some("verified")
             && let Some(id) = fixture.get("id").and_then(Value::as_str)
         {
@@ -1235,6 +1627,71 @@ fn validate_fixture_catalog(
             index.fixture_boundaries.insert(id.to_owned(), boundaries);
         }
         let _ = required_id_array(fixture, "external_runtime_boundary_ids", &path, diagnostics);
+    }
+    let ids = fixtures
+        .iter()
+        .filter_map(Value::as_object)
+        .filter_map(|fixture| fixture.get("id").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    if ids != EXPECTED_FIXTURE_FAMILY_IDS.as_slice() {
+        diagnostics.push(Diagnostic::new(
+            "PROFILE-REFERENCE",
+            format!("{profile_display}.oracle_fixture_catalog"),
+            "fixture family IDs must match the pinned initial profile catalog in canonical order",
+        ));
+    }
+    if is_initial_profile(index) {
+        let mut planned_count = 0;
+        let mut external_count = 0;
+        for fixture in fixtures.iter().filter_map(Value::as_object) {
+            let Some(id) = fixture.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            let status = fixture.get("status").and_then(Value::as_str);
+            let materialized = fixture.get("materialized").and_then(Value::as_bool);
+            if materialized != Some(false) {
+                diagnostics.push(Diagnostic::new(
+                    "PROFILE-CLAIM",
+                    format!("{profile_display}.oracle_fixture_catalog[{id}].materialized"),
+                    "initial profile fixture requirements must remain unmaterialized",
+                ));
+            }
+            match status {
+                Some("planned") => planned_count += 1,
+                Some("external") => {
+                    external_count += 1;
+                    if !INITIAL_EXTERNAL_FIXTURE_IDS.contains(&id) {
+                        diagnostics.push(Diagnostic::new(
+                            "PROFILE-STATUS",
+                            format!("{profile_display}.oracle_fixture_catalog[{id}].status"),
+                            "this fixture family must remain planned in the initial profile",
+                        ));
+                    }
+                }
+                Some("verified" | "blocked") => diagnostics.push(Diagnostic::new(
+                    "PROFILE-CLAIM",
+                    format!("{profile_display}.oracle_fixture_catalog[{id}].status"),
+                    "static fixture declarations cannot promote or block initial profile evidence",
+                )),
+                _ => {}
+            }
+            if INITIAL_EXTERNAL_FIXTURE_IDS.contains(&id) && status != Some("external") {
+                diagnostics.push(Diagnostic::new(
+                    "PROFILE-STATUS",
+                    format!("{profile_display}.oracle_fixture_catalog[{id}].status"),
+                    "this fixture family must remain external in the initial profile",
+                ));
+            }
+        }
+        if planned_count != 11 || external_count != 6 {
+            diagnostics.push(Diagnostic::new(
+                "PROFILE-STATUS",
+                format!("{profile_display}.oracle_fixture_catalog"),
+                format!(
+                    "initial profile requires 11 planned and 6 external fixture families; found {planned_count} planned and {external_count} external"
+                ),
+            ));
+        }
     }
 }
 
@@ -1276,19 +1733,36 @@ fn validate_cross_references(
             diagnostics,
         );
         if feature.get("status").and_then(Value::as_str) == Some("verified") {
-            for fixture_id in feature
+            let required_fixtures = feature
                 .get("required_oracle_fixture_ids")
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
                 .filter_map(Value::as_str)
-            {
+                .collect::<Vec<_>>();
+            if required_fixtures.is_empty() {
+                diagnostics.push(Diagnostic::new(
+                    "PROFILE-CLAIM",
+                    format!("{path}.required_oracle_fixture_ids"),
+                    "verified feature requires at least one pinned oracle fixture",
+                ));
+            }
+            for fixture_id in required_fixtures {
                 if !index.materialized_fixture_ids.contains(fixture_id) {
                     diagnostics.push(Diagnostic::new(
                         "PROFILE-CLAIM",
                         format!("{path}.required_oracle_fixture_ids"),
                         format!(
                             "verified feature requires materialized immutable fixture evidence {fixture_id:?}"
+                        ),
+                    ));
+                }
+                if index.fixture_statuses.get(fixture_id).map(String::as_str) != Some("verified") {
+                    diagnostics.push(Diagnostic::new(
+                        "PROFILE-CLAIM",
+                        format!("{path}.required_oracle_fixture_ids"),
+                        format!(
+                            "verified feature requires fixture {fixture_id:?} to have status verified"
                         ),
                     ));
                 }
@@ -1705,11 +2179,12 @@ pub(crate) fn display_path(root: &Path, path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        ProfileIndex, ProfileReadError, is_feature_id, read_bounded_handle, read_bounded_utf8,
-        safe_relative_path, validate_cross_references,
+        EXPECTED_FEATURE_COUNT, INITIAL_PROFILE_VERSION, ProfileIndex, ProfileReadError, check,
+        is_feature_id, read_bounded_handle, read_bounded_utf8, safe_relative_path,
+        validate_cross_references,
     };
     use crate::diagnostics::Diagnostics;
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::collections::{BTreeMap, BTreeSet};
 
     fn must_ok<T, E>(result: Result<T, E>, context: &str) -> Option<T> {
@@ -1722,6 +2197,11 @@ mod tests {
         result.err()
     }
 
+    fn must_some<T>(value: Option<T>, context: &str) -> Option<T> {
+        assert!(value.is_some(), "{context}");
+        value
+    }
+
     #[test]
     fn feature_ids_are_strict_and_inventory_shaped() {
         assert!(is_feature_id("TEST-001"));
@@ -1729,6 +2209,136 @@ mod tests {
         assert!(!is_feature_id("test-001"));
         assert!(!is_feature_id("TEST-01"));
         assert!(!is_feature_id("UNKNOWN-001"));
+    }
+
+    #[test]
+    fn active_profile_has_exact_52_row_inventory_and_unverified_evidence() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let profile = root.join("compat/profiles/jmeter-5.6.3.json");
+        let (diagnostics, index) = check(&root, &profile);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert!(index.is_some(), "active profile should produce an index");
+        let Some(index) = index else { return };
+        assert_eq!(index.profile_version, INITIAL_PROFILE_VERSION);
+        assert_eq!(index.feature_ids.len(), EXPECTED_FEATURE_COUNT);
+        assert_eq!(index.feature_statuses.len(), EXPECTED_FEATURE_COUNT);
+        assert_eq!(index.materialized_fixture_ids.len(), 0);
+        assert_eq!(index.verified_fixture_ids.len(), 0);
+        assert!(!index.upstream.signature_verified);
+        assert!(index.upstream.digest_verified);
+    }
+
+    #[test]
+    fn active_profile_rejects_static_promotion_and_materialization() {
+        use std::fs;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let profile = root.join("compat/profiles/jmeter-5.6.3.json");
+        let Some(profile_text) = must_ok(fs::read_to_string(&profile), "read active profile")
+        else {
+            return;
+        };
+        let Some(mut value) = must_ok(
+            serde_json::from_str::<Value>(&profile_text),
+            "active profile JSON",
+        ) else {
+            return;
+        };
+        let directory = std::env::temp_dir().join(format!(
+            "jmeter-rs-xtask-profile-claims-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        assert!(fs::create_dir_all(&directory).is_ok());
+        let path = directory.join("profile.json");
+
+        {
+            let Some(features) = must_some(
+                value.get_mut("features").and_then(Value::as_array_mut),
+                "feature array",
+            ) else {
+                return;
+            };
+            let Some(test_feature) = must_some(
+                features
+                    .iter_mut()
+                    .find(|feature| feature.get("id").and_then(Value::as_str) == Some("TEST-001")),
+                "TEST-001 row",
+            ) else {
+                return;
+            };
+            test_feature["status"] = Value::String("verified".to_owned());
+        }
+        let Some(serialized) = must_ok(serde_json::to_vec(&value), "serialize promoted profile")
+        else {
+            return;
+        };
+        if must_ok(fs::write(&path, serialized), "write promoted profile").is_none() {
+            return;
+        }
+        let (diagnostics, _) = check(&root, &path);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "PROFILE-STATUS")
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "PROFILE-CLAIM")
+        );
+
+        {
+            let Some(features) = must_some(
+                value.get_mut("features").and_then(Value::as_array_mut),
+                "feature array",
+            ) else {
+                return;
+            };
+            let Some(test_feature) = must_some(
+                features
+                    .iter_mut()
+                    .find(|feature| feature.get("id").and_then(Value::as_str) == Some("TEST-001")),
+                "TEST-001 row",
+            ) else {
+                return;
+            };
+            test_feature["status"] = Value::String("planned".to_owned());
+        }
+        let Some(fixtures) = must_some(
+            value
+                .get_mut("oracle_fixture_catalog")
+                .and_then(Value::as_array_mut),
+            "fixture catalog",
+        ) else {
+            return;
+        };
+        let Some(harness) = must_some(
+            fixtures.iter_mut().find(|fixture| {
+                fixture.get("id").and_then(Value::as_str) == Some("FX-HARNESS-001")
+            }),
+            "FX-HARNESS-001 row",
+        ) else {
+            return;
+        };
+        harness["materialized"] = Value::Bool(true);
+        let Some(serialized) =
+            must_ok(serde_json::to_vec(&value), "serialize materialized profile")
+        else {
+            return;
+        };
+        if must_ok(fs::write(&path, serialized), "write materialized profile").is_none() {
+            return;
+        }
+        let (diagnostics, _) = check(&root, &path);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "PROFILE-CLAIM")
+        );
+        assert!(fs::remove_dir_all(directory).is_ok());
     }
 
     #[test]

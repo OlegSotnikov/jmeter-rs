@@ -3,6 +3,7 @@
 use crate::error::{PluginError, PluginErrorCode};
 use serde::{Deserialize, Serialize, de, ser::SerializeMap};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
@@ -15,8 +16,22 @@ use std::{
 pub const MANIFEST_SCHEMA_VERSION: u16 = 1;
 /// Maximum length of a stable plugin identifier in bytes.
 pub const MAX_PLUGIN_ID_LEN: usize = 128;
+/// Maximum length of a plugin version in bytes.
+pub const MAX_PLUGIN_VERSION_LEN: usize = 64;
 /// Maximum length of an element/function ID or alias in bytes.
 pub const MAX_CAPABILITY_ID_LEN: usize = 256;
+/// Maximum aliases declared by one capability.
+pub const MAX_CAPABILITY_ALIASES: usize = 256;
+/// Maximum total canonical names and aliases in one manifest namespace.
+pub const MAX_DECLARED_CAPABILITY_NAMES: usize = 16 * 1024;
+/// Maximum compatibility profiles in one manifest.
+pub const MAX_DECLARED_PROFILES: usize = 64;
+/// Maximum top-level fields retained from one forward-compatible manifest.
+pub const MAX_MANIFEST_EXTENSIONS: usize = 1024;
+/// Maximum JMX forward-compatible fields retained for one element.
+pub const MAX_JMX_EXTENSIONS: usize = 1024;
+/// Maximum bytes in one forward-compatible field name.
+pub const MAX_EXTENSION_KEY_BYTES: usize = 4096;
 /// Maximum length of an opaque JMX property name in bytes.
 ///
 /// JMX property names are payload keys, not plugin capability identifiers: a
@@ -24,8 +39,24 @@ pub const MAX_CAPABILITY_ID_LEN: usize = 256;
 /// host only applies a size and NUL bound so unknown properties can be carried
 /// without silently narrowing their upstream spelling.
 pub const MAX_JMX_PROPERTY_NAME_LEN: usize = 4096;
+/// Maximum number of typed/opaque properties retained for one JMX element.
+pub const MAX_JMX_PROPERTIES: usize = 4096;
+/// Maximum length of a JMX class/name field in bytes.
+pub const MAX_JMX_METADATA_TEXT_LEN: usize = 4096;
+/// Maximum raw subtree bytes retained by one plugin request.
+pub const MAX_RAW_JMX_SUBTREE_BYTES: usize = 8 * 1024 * 1024;
+/// Maximum bytes retained for one opaque JMX property value.
+pub const MAX_UNKNOWN_JMX_PROPERTY_BYTES: usize = 8 * 1024 * 1024;
 /// Maximum number of declared capabilities in one manifest.
 pub const MAX_DECLARED_CAPABILITIES: usize = 1024;
+/// Maximum number of dependency/artifact declarations in one manifest.
+pub const MAX_PLUGIN_DEPENDENCIES: usize = 4096;
+/// Maximum executable bytes that may be claimed by one artifact identity.
+pub const MAX_PLUGIN_ARTIFACT_BYTES: u64 = 256 * 1024 * 1024;
+/// Maximum bytes retained for one identity/provenance text field.
+pub const MAX_IDENTITY_TEXT_BYTES: usize = 64 * 1024;
+/// Maximum bytes in one hexadecimal SHA-256 digest.
+pub const SHA256_HEX_LEN: usize = 64;
 /// Maximum supported framed payload, independent of a per-plugin lower bound.
 pub const HARD_MAX_MESSAGE_BYTES: usize =
     jmeter_rs_bridge_protocol::MAX_MESSAGE_BYTES - jmeter_rs_bridge_protocol::MAX_METADATA_LEN;
@@ -34,6 +65,192 @@ pub const HARD_MAX_OUTPUT_BYTES: usize = 256 * 1024 * 1024;
 
 fn default_schema_version() -> u16 {
     MANIFEST_SCHEMA_VERSION
+}
+
+/// A SHA-256 digest encoded as lower-case hexadecimal on the JSON wire.
+///
+/// Digest values are identity data, not arbitrary strings.  Keeping the
+/// representation typed prevents accidental comparison of differently cased
+/// or truncated values and gives manifest validation one canonical rule.
+#[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct Sha256Digest([u8; 32]);
+
+impl Sha256Digest {
+    /// The all-zero value.  It is useful as a construction default but is not
+    /// a valid artifact identity.
+    pub const ZERO: Self = Self([0; 32]);
+
+    /// Creates a digest from raw bytes.
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    /// Parses exactly 64 hexadecimal characters.
+    pub fn from_hex(value: &str) -> Result<Self, PluginError> {
+        if value.len() != SHA256_HEX_LEN {
+            return Err(PluginError::new(
+                PluginErrorCode::ManifestInvalid,
+                "SHA-256 digest must contain exactly 64 hexadecimal bytes",
+            ));
+        }
+        let mut bytes = [0_u8; 32];
+        for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
+            let high = decode_hex_digit(pair[0]).ok_or_else(|| {
+                PluginError::new(
+                    PluginErrorCode::ManifestInvalid,
+                    "SHA-256 digest contains a non-hexadecimal character",
+                )
+            })?;
+            let low = decode_hex_digit(pair[1]).ok_or_else(|| {
+                PluginError::new(
+                    PluginErrorCode::ManifestInvalid,
+                    "SHA-256 digest contains a non-hexadecimal character",
+                )
+            })?;
+            bytes[index] = (high << 4) | low;
+        }
+        Ok(Self(bytes))
+    }
+
+    /// Compatibility spelling matching the bridge identity types.
+    pub fn parse_hex(value: &str) -> Result<Self, PluginError> {
+        Self::from_hex(value)
+    }
+
+    /// Returns the raw bytes.
+    pub const fn as_bytes(self) -> [u8; 32] {
+        self.0
+    }
+
+    /// Returns whether this is the forbidden all-zero identity sentinel.
+    pub fn is_zero(self) -> bool {
+        self.0.iter().all(|byte| *byte == 0)
+    }
+
+    /// Returns lower-case hexadecimal wire text.
+    pub fn to_hex(self) -> String {
+        let mut value = String::with_capacity(SHA256_HEX_LEN);
+        for byte in self.0 {
+            use std::fmt::Write as _;
+            let _ = write!(value, "{byte:02x}");
+        }
+        value
+    }
+}
+
+impl Default for Sha256Digest {
+    fn default() -> Self {
+        Self::ZERO
+    }
+}
+
+impl fmt::Debug for Sha256Digest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("Sha256Digest(<redacted>)")
+    }
+}
+
+impl fmt::Display for Sha256Digest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.to_hex())
+    }
+}
+
+impl FromStr for Sha256Digest {
+    type Err = PluginError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::from_hex(value)
+    }
+}
+
+impl Serialize for Sha256Digest {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_hex())
+    }
+}
+
+impl<'de> Deserialize<'de> for Sha256Digest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::from_hex(&value).map_err(de::Error::custom)
+    }
+}
+
+fn decode_hex_digit(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn validate_identity_text(value: &str, label: &str, allow_empty: bool) -> Result<(), PluginError> {
+    if (!allow_empty && value.is_empty()) || value.len() > MAX_IDENTITY_TEXT_BYTES {
+        return Err(PluginError::new(
+            PluginErrorCode::ManifestInvalid,
+            format!(
+                "{label} must contain {}..={} bytes",
+                if allow_empty { 0 } else { 1 },
+                MAX_IDENTITY_TEXT_BYTES
+            ),
+        ));
+    }
+    if value.contains('\0') {
+        return Err(PluginError::new(
+            PluginErrorCode::ManifestInvalid,
+            format!("{label} must not contain NUL"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_digest(value: Sha256Digest, label: &str) -> Result<(), PluginError> {
+    if value.is_zero() {
+        return Err(PluginError::new(
+            PluginErrorCode::ManifestInvalid,
+            format!("{label} must not be the all-zero SHA-256 digest"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_extension_map(
+    extensions: &BTreeMap<String, Value>,
+    maximum: usize,
+    label: &str,
+) -> Result<(), PluginError> {
+    if extensions.len() > maximum {
+        return Err(PluginError::new(
+            PluginErrorCode::ManifestInvalid,
+            format!(
+                "{label} contains {}; maximum is {maximum}",
+                extensions.len()
+            ),
+        ));
+    }
+    for name in extensions.keys() {
+        if name.is_empty() || name.len() > MAX_EXTENSION_KEY_BYTES {
+            return Err(PluginError::new(
+                PluginErrorCode::ManifestInvalid,
+                format!("{label} field names must contain 1..={MAX_EXTENSION_KEY_BYTES} bytes"),
+            ));
+        }
+        if name.contains('\0') {
+            return Err(PluginError::new(
+                PluginErrorCode::ManifestInvalid,
+                format!("{label} field names must not contain NUL"),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// A stable plugin identifier.
@@ -70,6 +287,12 @@ impl PluginVersion {
     /// Parses a `major.minor.patch` release version.
     pub fn parse(value: impl Into<String>) -> Result<Self, PluginError> {
         let value = value.into();
+        if value.is_empty() || value.len() > MAX_PLUGIN_VERSION_LEN {
+            return Err(PluginError::new(
+                PluginErrorCode::ManifestInvalid,
+                format!("plugin version must contain 1..={MAX_PLUGIN_VERSION_LEN} bytes"),
+            ));
+        }
         let mut parts = value.split('.');
         let major = parse_version_component(parts.next(), "major")?;
         let minor = parse_version_component(parts.next(), "minor")?;
@@ -299,6 +522,12 @@ impl<'de> Deserialize<'de> for JmxProperties {
             {
                 let mut properties = JmxProperties::new();
                 while let Some((name, value)) = access.next_entry::<String, Value>()? {
+                    if properties.entries.len() >= MAX_JMX_PROPERTIES {
+                        return Err(de::Error::custom(format!(
+                            "JMX property count exceeds {MAX_JMX_PROPERTIES}"
+                        )));
+                    }
+                    validate_opaque_jmx_property_name(&name).map_err(de::Error::custom)?;
                     if properties.get(&name).is_some() {
                         return Err(de::Error::custom("duplicate JMX property name"));
                     }
@@ -414,6 +643,17 @@ impl CapabilityDeclaration {
     pub fn validate(&self, kind: CapabilityKind) -> Result<(), PluginError> {
         let label = format!("{} capability", kind.as_str());
         validate_capability_identifier(&self.id, MAX_CAPABILITY_ID_LEN, &label)?;
+        if self.aliases.len() > MAX_CAPABILITY_ALIASES {
+            return Err(PluginError::new(
+                PluginErrorCode::ManifestInvalid,
+                format!(
+                    "{} capability {} declares {} aliases; maximum is {MAX_CAPABILITY_ALIASES}",
+                    kind.as_str(),
+                    self.id,
+                    self.aliases.len()
+                ),
+            ));
+        }
         let mut names = std::collections::BTreeSet::new();
         if !names.insert(self.id.as_str()) {
             return Err(PluginError::new(
@@ -430,7 +670,11 @@ impl CapabilityDeclaration {
                 ));
             }
         }
-        Ok(())
+        validate_extension_map(
+            &self.extensions,
+            MAX_MANIFEST_EXTENSIONS,
+            "capability extensions",
+        )
     }
 }
 
@@ -490,6 +734,18 @@ impl CapabilityDeclarations {
                 ),
             ));
         }
+        let name_count = self
+            .iter()
+            .map(|(_, declaration)| 1_usize.saturating_add(declaration.aliases.len()))
+            .fold(0_usize, usize::saturating_add);
+        if name_count > MAX_DECLARED_CAPABILITY_NAMES {
+            return Err(PluginError::new(
+                PluginErrorCode::ManifestInvalid,
+                format!(
+                    "manifest declares {name_count} capability names; maximum is {MAX_DECLARED_CAPABILITY_NAMES}"
+                ),
+            ));
+        }
         // Capability lookup is namespaced by kind.  Within one namespace,
         // however, every canonical ID and alias must resolve to exactly one
         // declaration before a manifest can be advertised or a worker
@@ -531,6 +787,14 @@ impl CapabilityReference {
             kind,
             name: name.into(),
         }
+    }
+
+    /// Validates a request-side canonical capability name or alias.
+    pub fn validate(&self) -> Result<(), PluginError> {
+        validate_capability_identifier(&self.name, MAX_CAPABILITY_ID_LEN, "plugin capability")
+            .map_err(|error| {
+                PluginError::new(PluginErrorCode::InvalidJmx, error.detail().to_owned())
+            })
     }
 }
 
@@ -709,6 +973,233 @@ impl ResourceLimits {
     }
 }
 
+/// License and NOTICE provenance state for one plugin artifact.
+///
+/// `Missing` is explicit rather than inferred from empty strings.  This keeps
+/// a manifest's provenance decision observable while allowing a caller to
+/// retain an artifact descriptor that is known to be incomplete.
+#[derive(
+    Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum LicenseNoticeStatus {
+    /// The license and NOTICE material was checked against the artifact.
+    Verified,
+    /// The manifest declares license and NOTICE material but it was not
+    /// independently verified by this host.
+    Declared,
+    /// One or both provenance documents are unavailable.
+    #[default]
+    Missing,
+}
+
+impl LicenseNoticeStatus {
+    /// Returns whether this status requires declared license and NOTICE text.
+    const fn requires_text(self) -> bool {
+        matches!(self, Self::Verified | Self::Declared)
+    }
+}
+
+/// One ordered plugin dependency/artifact identity.
+///
+/// Dependency entries are data only.  This crate does not resolve, load, or
+/// execute them; the optional Java compatibility pack owns that behavior.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PluginDependency {
+    /// Stable dependency or plugin name.
+    pub name: String,
+    /// Dependency release/version identity.
+    pub version: String,
+    /// SHA-256 of the exact dependency bytes.
+    pub sha256: Sha256Digest,
+    /// SPDX/license identifier or bounded provenance text.
+    pub license: String,
+    /// NOTICE identifier, digest, or bounded provenance text.
+    pub notice: String,
+    /// Position in the effective ordered classpath.
+    #[serde(alias = "ordinal")]
+    pub classpath_order: u32,
+    /// Forward-compatible dependency metadata retained verbatim.
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
+}
+
+impl PluginDependency {
+    /// Validates dependency identity and provenance fields.
+    pub fn validate(&self) -> Result<(), PluginError> {
+        validate_identity_text(&self.name, "dependency name", false)?;
+        validate_identity_text(&self.version, "dependency version", false)?;
+        validate_digest(self.sha256, "dependency SHA-256")?;
+        validate_identity_text(&self.license, "dependency license", false)?;
+        validate_identity_text(&self.notice, "dependency NOTICE", false)?;
+        validate_extension_map(
+            &self.extensions,
+            MAX_MANIFEST_EXTENSIONS,
+            "dependency extensions",
+        )
+    }
+}
+
+impl fmt::Debug for PluginDependency {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PluginDependency")
+            .field("name", &self.name)
+            .field("version", &self.version)
+            .field("sha256", &self.sha256)
+            .field("license_len", &self.license.len())
+            .field("notice_len", &self.notice.len())
+            .field("classpath_order", &self.classpath_order)
+            .field("extension_count", &self.extensions.len())
+            .finish()
+    }
+}
+
+/// Identity and provenance for the executable represented by a plugin
+/// manifest.
+///
+/// This is optional for backwards-compatible native manifests.  When it is
+/// present, validation is deliberately strict: a plugin can only claim a
+/// reproducible artifact identity when its content digest, size, ordered
+/// dependencies, and license/NOTICE state are all explicit.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PluginArtifact {
+    /// SHA-256 of the exact executable bytes.
+    #[serde(alias = "content_sha256", alias = "artifact_sha256")]
+    pub sha256: Sha256Digest,
+    /// Exact executable byte length.
+    #[serde(default, alias = "size_bytes")]
+    pub byte_length: u64,
+    /// Plugin artifact release/version identity.
+    #[serde(default)]
+    pub version: String,
+    /// Bounded source/provenance identifier.
+    #[serde(default)]
+    pub provenance: String,
+    /// SPDX/license identifier or bounded provenance text.
+    #[serde(default)]
+    pub license: String,
+    /// NOTICE identifier, digest, or bounded provenance text.
+    #[serde(default)]
+    pub notice: String,
+    /// Explicit license/NOTICE accounting state.
+    #[serde(default)]
+    pub license_notice: LicenseNoticeStatus,
+    /// Dependencies in effective classpath order.
+    #[serde(default)]
+    pub dependencies: Vec<PluginDependency>,
+    /// Forward-compatible artifact metadata retained verbatim.
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
+}
+
+impl PluginArtifact {
+    /// Validates artifact identity, ordered dependencies, and provenance.
+    pub fn validate(&self) -> Result<(), PluginError> {
+        validate_digest(self.sha256, "plugin artifact SHA-256")?;
+        if self.byte_length == 0 || self.byte_length > MAX_PLUGIN_ARTIFACT_BYTES {
+            return Err(PluginError::new(
+                PluginErrorCode::ManifestInvalid,
+                format!(
+                    "plugin artifact byte_length must be between 1 and {MAX_PLUGIN_ARTIFACT_BYTES}"
+                ),
+            ));
+        }
+        validate_identity_text(&self.version, "plugin artifact version", false)?;
+        validate_identity_text(&self.provenance, "plugin artifact provenance", false)?;
+        validate_identity_text(
+            &self.license,
+            "plugin artifact license",
+            self.license_notice == LicenseNoticeStatus::Missing,
+        )?;
+        validate_identity_text(
+            &self.notice,
+            "plugin artifact NOTICE",
+            self.license_notice == LicenseNoticeStatus::Missing,
+        )?;
+        if self.license_notice.requires_text()
+            && (self.license.is_empty() || self.notice.is_empty())
+        {
+            return Err(PluginError::new(
+                PluginErrorCode::ManifestInvalid,
+                "plugin artifact license_notice state requires license and NOTICE text",
+            ));
+        }
+        if self.dependencies.len() > MAX_PLUGIN_DEPENDENCIES {
+            return Err(PluginError::new(
+                PluginErrorCode::ManifestInvalid,
+                format!(
+                    "plugin artifact declares {}; maximum dependencies is {MAX_PLUGIN_DEPENDENCIES}",
+                    self.dependencies.len()
+                ),
+            ));
+        }
+        let mut names = BTreeSet::new();
+        let mut ordinals = BTreeSet::new();
+        let mut previous_ordinal = None;
+        for dependency in &self.dependencies {
+            dependency.validate()?;
+            if !names.insert(dependency.name.as_str()) {
+                return Err(PluginError::new(
+                    PluginErrorCode::ManifestInvalid,
+                    format!("duplicate plugin dependency name {}", dependency.name),
+                ));
+            }
+            if !ordinals.insert(dependency.classpath_order) {
+                return Err(PluginError::new(
+                    PluginErrorCode::ManifestInvalid,
+                    format!(
+                        "duplicate plugin dependency classpath order {}",
+                        dependency.classpath_order
+                    ),
+                ));
+            }
+            if let Some(previous) = previous_ordinal
+                && dependency.classpath_order <= previous
+            {
+                return Err(PluginError::new(
+                    PluginErrorCode::ManifestInvalid,
+                    "plugin dependency declarations must be in classpath order",
+                ));
+            }
+            previous_ordinal = Some(dependency.classpath_order);
+        }
+        validate_extension_map(
+            &self.extensions,
+            MAX_MANIFEST_EXTENSIONS,
+            "plugin artifact extensions",
+        )
+    }
+
+    /// Returns whether an observed executable identity matches this artifact.
+    pub fn matches_executable(&self, length: u64, digest: Sha256Digest) -> bool {
+        self.byte_length == length && self.sha256 == digest
+    }
+}
+
+impl fmt::Debug for PluginArtifact {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PluginArtifact")
+            .field("sha256", &self.sha256)
+            .field("byte_length", &self.byte_length)
+            .field("version", &self.version)
+            .field("provenance_len", &self.provenance.len())
+            .field("license_len", &self.license.len())
+            .field("notice_len", &self.notice.len())
+            .field("license_notice", &self.license_notice)
+            .field("dependency_count", &self.dependencies.len())
+            .field("extension_count", &self.extensions.len())
+            .finish()
+    }
+}
+
+/// Compatibility aliases for callers that use the identity terminology from
+/// the optional JVM/compatibility pack.
+pub type ArtifactIdentity = PluginArtifact;
+/// Compatibility alias for a dependency identity.
+pub type DependencyIdentity = PluginDependency;
+
 /// A versioned plugin manifest loaded from an explicitly allowlisted file.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PluginManifest {
@@ -733,6 +1224,17 @@ pub struct PluginManifest {
     /// Unknown JMX element/property preservation contract.
     #[serde(default)]
     pub preservation: PreservationContract,
+    /// Optional executable/dependency identity and license provenance.
+    ///
+    /// `artifact` and `artifact_identity` are accepted as historical wire
+    /// spellings; serialization always emits the canonical `identity` key.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "artifact",
+        alias = "artifact_identity"
+    )]
+    pub identity: Option<PluginArtifact>,
     /// Forward-compatible manifest fields retained for inspection.
     #[serde(flatten)]
     pub extensions: BTreeMap<String, Value>,
@@ -757,6 +1259,7 @@ impl PluginManifest {
             capabilities: CapabilityDeclarations::default(),
             limits: ResourceLimits::default(),
             preservation: PreservationContract::default(),
+            identity: None,
             extensions: BTreeMap::new(),
         }
     }
@@ -780,6 +1283,16 @@ impl PluginManifest {
                 "executable path must be absolute",
             ));
         }
+        let executable_text = self.executable.to_string_lossy();
+        if executable_text.is_empty()
+            || executable_text.len() > MAX_IDENTITY_TEXT_BYTES
+            || executable_text.contains('\0')
+        {
+            return Err(PluginError::new(
+                PluginErrorCode::ManifestInvalid,
+                "executable path is empty, too long, or contains NUL",
+            ));
+        }
         self.protocol.validate()?;
         if self.profiles.is_empty() {
             return Err(PluginError::new(
@@ -797,9 +1310,32 @@ impl PluginManifest {
                 ));
             }
         }
+        if self.profiles.len() > MAX_DECLARED_PROFILES {
+            return Err(PluginError::new(
+                PluginErrorCode::ManifestInvalid,
+                format!(
+                    "manifest declares {}; maximum profiles is {MAX_DECLARED_PROFILES}",
+                    self.profiles.len()
+                ),
+            ));
+        }
         self.capabilities.validate()?;
         self.limits.validate()?;
         self.preservation.validate()?;
+        if let Some(identity) = &self.identity {
+            identity.validate()?;
+            if identity.license_notice == LicenseNoticeStatus::Missing {
+                return Err(PluginError::new(
+                    PluginErrorCode::ManifestInvalid,
+                    "plugin manifest artifact identity has missing license/NOTICE provenance",
+                ));
+            }
+        }
+        validate_extension_map(
+            &self.extensions,
+            MAX_MANIFEST_EXTENSIONS,
+            "manifest extensions",
+        )?;
         Ok(())
     }
 
@@ -814,6 +1350,63 @@ impl PluginManifest {
         reference: &CapabilityReference,
     ) -> Option<&CapabilityDeclaration> {
         self.capabilities.find(reference.kind, &reference.name)
+    }
+
+    /// Returns the optional artifact identity declaration.
+    pub fn identity(&self) -> Option<&PluginArtifact> {
+        self.identity.as_ref()
+    }
+
+    /// Returns the optional artifact identity declaration using the artifact
+    /// terminology retained by older callers.
+    pub fn artifact(&self) -> Option<&PluginArtifact> {
+        self.identity()
+    }
+
+    /// Computes the SHA-256 of this manifest's canonical JSON representation.
+    ///
+    /// The digest is calculated after validation, and therefore includes the
+    /// ordered capability/dependency declarations, negotiated limits,
+    /// preservation contract, optional artifact identity, and retained
+    /// extension fields.  It never includes a self-referential digest field.
+    pub fn manifest_sha256(&self) -> Result<Sha256Digest, PluginError> {
+        self.validate()?;
+        let bytes = serde_json::to_vec(self).map_err(|error| {
+            PluginError::new(
+                PluginErrorCode::ManifestInvalid,
+                format!("could not encode canonical plugin manifest: {error}"),
+            )
+        })?;
+        let mut digest = Sha256::new();
+        digest.update(bytes);
+        Ok(Sha256Digest::from_bytes(digest.finalize().into()))
+    }
+
+    /// Verifies an observed executable identity against the declared artifact.
+    ///
+    /// A manifest without identity metadata cannot make a content-integrity
+    /// claim, so this method returns a typed manifest error instead of
+    /// silently accepting an unverifiable executable.
+    pub fn validate_executable_identity(
+        &self,
+        length: u64,
+        digest: Sha256Digest,
+    ) -> Result<(), PluginError> {
+        let Some(identity) = self.identity.as_ref() else {
+            return Err(PluginError::new(
+                PluginErrorCode::ManifestInvalid,
+                "plugin manifest does not declare executable identity",
+            ));
+        };
+        identity.validate()?;
+        if identity.matches_executable(length, digest) {
+            Ok(())
+        } else {
+            Err(PluginError::new(
+                PluginErrorCode::ManifestInvalid,
+                "observed executable identity does not match plugin manifest",
+            ))
+        }
     }
 
     /// Returns a handshake description corresponding to this manifest.
@@ -842,6 +1435,7 @@ impl fmt::Debug for PluginManifest {
             .field("capability_count", &self.capabilities.iter().count())
             .field("limits", &self.limits)
             .field("preservation", &self.preservation)
+            .field("identity_present", &self.identity.is_some())
             .field("extension_count", &self.extensions.len())
             .finish()
     }
@@ -901,11 +1495,31 @@ impl JmxElementMetadata {
     /// Validates the minimum metadata needed to avoid confusing invalid JMX
     /// with a missing plugin.
     pub fn validate(&self) -> Result<(), PluginError> {
-        if self.test_class.trim().is_empty() || self.test_class.contains('\0') {
+        if self.test_class.trim().is_empty()
+            || self.test_class.len() > MAX_JMX_METADATA_TEXT_LEN
+            || self.test_class.contains('\0')
+        {
             return Err(PluginError::new(
                 PluginErrorCode::InvalidJmx,
-                "JMX testclass must be non-empty and contain no NUL",
+                format!(
+                    "JMX testclass must contain 1..={MAX_JMX_METADATA_TEXT_LEN} bytes and no NUL"
+                ),
             ));
+        }
+        for (label, value) in [
+            ("JMX guiclass", self.gui_class.as_deref()),
+            ("JMX testname", self.name.as_deref()),
+        ] {
+            if let Some(value) = value
+                && (value.len() > MAX_JMX_METADATA_TEXT_LEN || value.contains('\0'))
+            {
+                return Err(PluginError::new(
+                    PluginErrorCode::InvalidJmx,
+                    format!(
+                        "{label} must not exceed {MAX_JMX_METADATA_TEXT_LEN} bytes or contain NUL"
+                    ),
+                ));
+            }
         }
         if let Some(raw) = &self.raw_subtree
             && raw.is_empty()
@@ -914,6 +1528,40 @@ impl JmxElementMetadata {
                 PluginErrorCode::InvalidJmx,
                 "JMX raw subtree must not be empty when present",
             ));
+        }
+        if let Some(raw) = &self.raw_subtree
+            && raw.len() > MAX_RAW_JMX_SUBTREE_BYTES
+        {
+            return Err(PluginError::new(
+                PluginErrorCode::InvalidJmx,
+                format!("JMX raw subtree exceeds {MAX_RAW_JMX_SUBTREE_BYTES} bytes"),
+            ));
+        }
+        let property_count = self
+            .properties
+            .len()
+            .saturating_add(self.unknown_properties.len());
+        if property_count > MAX_JMX_PROPERTIES {
+            return Err(PluginError::new(
+                PluginErrorCode::InvalidJmx,
+                format!("JMX property count exceeds {MAX_JMX_PROPERTIES}"),
+            ));
+        }
+        if self.extensions.len() > MAX_JMX_EXTENSIONS {
+            return Err(PluginError::new(
+                PluginErrorCode::InvalidJmx,
+                format!("JMX extension count exceeds {MAX_JMX_EXTENSIONS}"),
+            ));
+        }
+        for name in self.extensions.keys() {
+            if name.is_empty() || name.len() > MAX_EXTENSION_KEY_BYTES || name.contains('\0') {
+                return Err(PluginError::new(
+                    PluginErrorCode::InvalidJmx,
+                    format!(
+                        "JMX extension field names must contain 1..={MAX_EXTENSION_KEY_BYTES} bytes and no NUL"
+                    ),
+                ));
+            }
         }
 
         // The typed property map and opaque-property vector each retain their
@@ -946,12 +1594,34 @@ impl JmxElementMetadata {
         }
         for property in &self.unknown_properties {
             validate_opaque_jmx_property_name(&property.name)?;
+            if property.raw_value.len() > MAX_UNKNOWN_JMX_PROPERTY_BYTES {
+                return Err(PluginError::new(
+                    PluginErrorCode::InvalidJmx,
+                    format!(
+                        "opaque JMX property {} exceeds {MAX_UNKNOWN_JMX_PROPERTY_BYTES} bytes",
+                        property.name
+                    ),
+                ));
+            }
             if !property_names.insert(property.name.as_str()) {
                 return Err(PluginError::new(
                     PluginErrorCode::InvalidJmx,
                     "duplicate JMX property name",
                 ));
             }
+        }
+        let opaque_property_bytes = self
+            .unknown_properties
+            .iter()
+            .map(|property| property.raw_value.len())
+            .fold(0_usize, usize::saturating_add);
+        let opaque_bytes =
+            opaque_property_bytes.saturating_add(self.raw_subtree.as_ref().map_or(0, Vec::len));
+        if opaque_bytes > MAX_RAW_JMX_SUBTREE_BYTES {
+            return Err(PluginError::new(
+                PluginErrorCode::InvalidJmx,
+                format!("combined opaque JMX bytes exceed {MAX_RAW_JMX_SUBTREE_BYTES}"),
+            ));
         }
         Ok(())
     }
@@ -1010,13 +1680,13 @@ pub struct PluginRequest {
 impl PluginRequest {
     /// Validates request metadata before a process is started.
     pub fn validate(&self) -> Result<(), PluginError> {
-        if self.capability.name.trim().is_empty() {
-            return Err(PluginError::new(
-                PluginErrorCode::InvalidJmx,
-                "plugin capability name must be non-empty",
-            ));
-        }
-        self.jmx.validate()
+        self.capability.validate()?;
+        self.jmx.validate()?;
+        validate_extension_map(
+            &self.extensions,
+            MAX_MANIFEST_EXTENSIONS,
+            "request extensions",
+        )
     }
 
     /// Validates the complete request shape and counts its JSON encoding
@@ -1333,5 +2003,208 @@ mod tests {
         separate_namespaces
             .validate()
             .expect("element and function capability namespaces are distinct");
+    }
+
+    fn valid_artifact() -> PluginArtifact {
+        PluginArtifact {
+            sha256: Sha256Digest::from_bytes([1; 32]),
+            byte_length: 7,
+            version: "1.2.3".to_owned(),
+            provenance: "fixture-source".to_owned(),
+            license: "Apache-2.0".to_owned(),
+            notice: "NOTICE.fixture".to_owned(),
+            license_notice: LicenseNoticeStatus::Verified,
+            dependencies: Vec::new(),
+            extensions: BTreeMap::new(),
+        }
+    }
+
+    fn valid_manifest() -> PluginManifest {
+        let mut manifest = PluginManifest::new(
+            PluginId::parse("example.plugin").expect("plugin ID"),
+            PluginVersion::parse("1.2.3").expect("plugin version"),
+            "/opt/example-plugin",
+        );
+        manifest.profiles = vec!["jmeter-5.6.3".to_owned()];
+        manifest.identity = Some(valid_artifact());
+        manifest
+    }
+
+    #[test]
+    fn digest_is_canonical_and_redacted_in_debug() {
+        let digest = Sha256Digest::from_hex(
+            "AABBCCDDEEFF00112233445566778899aabbccddeeff00112233445566778899",
+        )
+        .expect("hex digest");
+        assert_eq!(
+            digest.to_hex(),
+            "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
+        );
+        assert_eq!(digest.as_bytes()[0], 0xaa);
+        assert!(format!("{digest:?}").contains("redacted"));
+        let encoded = serde_json::to_string(&digest).expect("digest JSON");
+        assert_eq!(encoded, format!("\"{}\"", digest.to_hex()));
+        let decoded: Sha256Digest = serde_json::from_str(&encoded).expect("digest JSON decode");
+        assert_eq!(decoded, digest);
+        assert!(Sha256Digest::from_hex("00").is_err());
+    }
+
+    #[test]
+    fn artifact_identity_requires_hash_size_and_provenance() {
+        valid_artifact()
+            .validate()
+            .expect("valid artifact identity");
+
+        let mut artifact = valid_artifact();
+        artifact.sha256 = Sha256Digest::ZERO;
+        assert_eq!(
+            artifact
+                .validate()
+                .expect_err("zero digest must fail")
+                .code(),
+            PluginErrorCode::ManifestInvalid
+        );
+
+        let mut artifact = valid_artifact();
+        artifact.byte_length = 0;
+        assert_eq!(
+            artifact
+                .validate()
+                .expect_err("zero byte length must fail")
+                .code(),
+            PluginErrorCode::ManifestInvalid
+        );
+
+        let mut artifact = valid_artifact();
+        artifact.license.clear();
+        assert_eq!(
+            artifact
+                .validate()
+                .expect_err("verified artifact needs license text")
+                .code(),
+            PluginErrorCode::ManifestInvalid
+        );
+
+        let mut manifest = valid_manifest();
+        manifest.identity.as_mut().expect("identity").license_notice = LicenseNoticeStatus::Missing;
+        assert_eq!(
+            manifest
+                .validate()
+                .expect_err("admission rejects missing provenance")
+                .code(),
+            PluginErrorCode::ManifestInvalid
+        );
+    }
+
+    #[test]
+    fn dependency_identity_preserves_order_but_rejects_duplicates() {
+        let dependency = PluginDependency {
+            name: "dep-a".to_owned(),
+            version: "1.0.0".to_owned(),
+            sha256: Sha256Digest::from_bytes([2; 32]),
+            license: "Apache-2.0".to_owned(),
+            notice: "NOTICE.dep-a".to_owned(),
+            classpath_order: 3,
+            extensions: BTreeMap::new(),
+        };
+        let mut artifact = valid_artifact();
+        artifact.dependencies = vec![
+            dependency.clone(),
+            PluginDependency {
+                name: "dep-b".to_owned(),
+                classpath_order: 4,
+                ..dependency
+            },
+        ];
+        artifact.validate().expect("ordered dependencies");
+
+        artifact.dependencies[1].classpath_order = 3;
+        assert_eq!(
+            artifact
+                .validate()
+                .expect_err("duplicate classpath order")
+                .code(),
+            PluginErrorCode::ManifestInvalid
+        );
+        artifact.dependencies[1].classpath_order = 4;
+        artifact.dependencies[1].name = "dep-a".to_owned();
+        assert_eq!(
+            artifact
+                .validate()
+                .expect_err("duplicate dependency name")
+                .code(),
+            PluginErrorCode::ManifestInvalid
+        );
+    }
+
+    #[test]
+    fn manifest_identity_hash_covers_ordered_contract_and_aliases() {
+        let mut manifest = valid_manifest();
+        manifest.validate().expect("valid manifest");
+        let first = manifest.manifest_sha256().expect("manifest digest");
+        assert_eq!(first, manifest.manifest_sha256().expect("stable digest"));
+
+        manifest.capabilities.elements.push(CapabilityDeclaration {
+            id: "example.element".to_owned(),
+            aliases: vec!["HistoricalElement".to_owned()],
+            extensions: BTreeMap::new(),
+        });
+        let second = manifest.manifest_sha256().expect("changed manifest digest");
+        assert_ne!(first, second);
+        assert!(
+            manifest
+                .validate_executable_identity(7, Sha256Digest::from_bytes([1; 32]))
+                .is_ok()
+        );
+        assert!(
+            manifest
+                .validate_executable_identity(8, Sha256Digest::from_bytes([1; 32]))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn artifact_wire_alias_is_accepted_and_canonicalized() {
+        let manifest = valid_manifest();
+        let mut value = serde_json::to_value(&manifest).expect("manifest JSON");
+        let object = value.as_object_mut().expect("manifest object");
+        let identity = object.remove("identity").expect("identity field");
+        object.insert("artifact".to_owned(), identity);
+        let decoded: PluginManifest = serde_json::from_value(value).expect("artifact alias");
+        assert_eq!(decoded.identity, manifest.identity);
+        assert_eq!(
+            serde_json::to_value(decoded).expect("canonical JSON")["identity"],
+            serde_json::to_value(&manifest).expect("manifest JSON")["identity"]
+        );
+    }
+
+    #[test]
+    fn capability_reference_and_manifest_limits_fail_closed() {
+        let invalid = CapabilityReference::new(CapabilityKind::Element, "bad name");
+        assert_eq!(
+            invalid
+                .validate()
+                .expect_err("invalid capability name")
+                .code(),
+            PluginErrorCode::InvalidJmx
+        );
+
+        assert!(PluginVersion::parse("1.2.3".to_owned()).is_ok());
+        assert!(
+            PluginVersion::parse("1.2.3".to_owned() + &"x".repeat(MAX_PLUGIN_VERSION_LEN)).is_err()
+        );
+
+        let mut metadata =
+            JmxElementMetadata::unknown("example.Element", vec![0; MAX_RAW_JMX_SUBTREE_BYTES + 1]);
+        assert_eq!(
+            metadata.validate().expect_err("raw subtree limit").code(),
+            PluginErrorCode::InvalidJmx
+        );
+        metadata.raw_subtree = Some(vec![1]);
+        metadata.test_class = "x".repeat(MAX_JMX_METADATA_TEXT_LEN + 1);
+        assert_eq!(
+            metadata.validate().expect_err("class text limit").code(),
+            PluginErrorCode::InvalidJmx
+        );
     }
 }

@@ -981,9 +981,43 @@ impl DeterministicScheduler {
     }
 
     /// Consumes all currently ready tasks in deterministic order.
+    ///
+    /// The complete wake batch is preflighted before any task is consumed.
+    /// This makes a bounded event-log failure atomic: callers never receive
+    /// an error after only a prefix of the ready queue has been removed.
     pub fn drain_ready(&self) -> Result<Vec<ScheduledTask>, SchedulerError> {
-        let mut tasks = Vec::new();
-        while let Some(task) = self.poll_ready()? {
+        let mut state = recover_lock(&self.inner.state);
+        let now = self.inner.clock.monotonic();
+        let due = state
+            .active
+            .iter()
+            .filter(|record| {
+                let task = record_task(record);
+                record_state(record) == SchedulerTaskState::Pending && task.deadline <= now
+            })
+            .count();
+        let required_events =
+            state
+                .ready
+                .len()
+                .checked_add(due)
+                .ok_or(SchedulerError::EventCapacityExceeded {
+                    limit: state.limits.max_events,
+                })?;
+        let total_events = state.events.len().checked_add(required_events).ok_or(
+            SchedulerError::EventCapacityExceeded {
+                limit: state.limits.max_events,
+            },
+        )?;
+        if total_events > state.limits.max_events {
+            return Err(SchedulerError::EventCapacityExceeded {
+                limit: state.limits.max_events,
+            });
+        }
+
+        collect_due_locked(&mut state, now);
+        let mut tasks = Vec::with_capacity(required_events);
+        while let Some(task) = poll_ready_locked(&mut state)? {
             tasks.push(task);
         }
         Ok(tasks)
@@ -1441,6 +1475,59 @@ mod tests {
 
         scheduler.clear_events();
         assert_eq!(scheduler.poll_ready().unwrap(), Some(task.task()));
+    }
+
+    #[test]
+    fn drain_ready_event_capacity_failure_is_atomic() {
+        let scheduler =
+            DeterministicScheduler::new(VirtualClock::at_epoch(), SchedulerLimits::new(4, 3));
+        let high = scheduler.schedule_after(Duration::ZERO, 2).unwrap();
+        let low = scheduler.schedule_after(Duration::ZERO, 1).unwrap();
+        let events = scheduler.events();
+
+        assert_eq!(
+            scheduler.drain_ready().unwrap_err(),
+            SchedulerError::EventCapacityExceeded { limit: 3 }
+        );
+        assert_eq!(scheduler.events(), events);
+        assert_eq!(scheduler.ready_count(), 2);
+        assert_eq!(high.state(), SchedulerTaskState::Ready);
+        assert_eq!(low.state(), SchedulerTaskState::Ready);
+
+        scheduler.clear_events();
+        assert_eq!(
+            scheduler.drain_ready().unwrap(),
+            vec![low.task(), high.task()]
+        );
+        assert_eq!(scheduler.registered_count(), 0);
+    }
+
+    #[test]
+    fn already_due_registrations_use_deadline_order_and_replay() {
+        let scheduler =
+            DeterministicScheduler::new(VirtualClock::at_epoch(), SchedulerLimits::new(4, 8));
+        scheduler.clock().advance(Duration::from_secs(5)).unwrap();
+        let later = scheduler
+            .schedule_at(MonotonicInstant::from_duration(Duration::from_secs(5)), 0)
+            .unwrap();
+        let earlier = scheduler
+            .schedule_at(MonotonicInstant::from_duration(Duration::from_secs(3)), 0)
+            .unwrap();
+
+        assert_eq!(
+            scheduler.drain_ready().unwrap(),
+            vec![earlier.task(), later.task()]
+        );
+        let replay = scheduler.replay_log().unwrap();
+        assert_eq!(
+            replay.events(),
+            &[
+                SchedulerEvent::Scheduled(later.task()),
+                SchedulerEvent::Scheduled(earlier.task()),
+                SchedulerEvent::Woken(earlier.task()),
+                SchedulerEvent::Woken(later.task()),
+            ]
+        );
     }
 
     #[test]

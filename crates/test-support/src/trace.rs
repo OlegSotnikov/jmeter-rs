@@ -445,6 +445,34 @@ impl EventTrace {
         })
     }
 
+    /// Creates a partial-order replay log over the current snapshot.
+    ///
+    /// Each pair in `before` names zero-based event positions from this
+    /// snapshot. `(a, b)` means that event `a` must be observed before event
+    /// `b`; events without a path between them may occur in either order. The
+    /// relation is validated for bounds, duplicates, and cycles before a
+    /// cursor can consume any event.
+    pub fn partial_order(
+        &self,
+        before: &[(usize, usize)],
+    ) -> Result<PartialOrderLog, PartialOrderError> {
+        let state = recover_lock(&self.state);
+        PartialOrderLog::from_replay_log(
+            ReplayLog {
+                limits: state.limits,
+                events: state.events.clone(),
+                total_bytes: state.total_bytes,
+            },
+            before,
+        )
+    }
+
+    /// Compares a complete actual stream using exact order and stable event
+    /// identity.
+    pub fn assert_events(&self, actual: &[TraceEvent]) -> Result<(), ReplayError> {
+        self.replay().assert_events(actual)
+    }
+
     /// Clears retained events while preserving the next sequence number.
     pub fn clear(&self) {
         let mut state = recover_lock(&self.state);
@@ -547,6 +575,500 @@ impl ReplayLog {
     pub fn replay(&self) -> ReplayCursor {
         ReplayCursor::from_log(self.clone())
     }
+
+    /// Creates a partial-order replay log from this validated event stream.
+    ///
+    /// See [`EventTrace::partial_order`] for the relation semantics. The
+    /// exact replay log remains available through [`Self::replay`].
+    pub fn partial_order(
+        &self,
+        before: &[(usize, usize)],
+    ) -> Result<PartialOrderLog, PartialOrderError> {
+        PartialOrderLog::from_replay_log(self.clone(), before)
+    }
+
+    /// Compares a complete actual event stream using exact order and identity.
+    ///
+    /// This helper is deliberately separate from partial-order assertions;
+    /// callers must opt into relaxed ordering at the call site.
+    pub fn assert_events(&self, actual: &[TraceEvent]) -> Result<(), ReplayError> {
+        let mut cursor = self.replay();
+        for event in actual {
+            cursor.expect_event(event)?;
+        }
+        cursor.finish()
+    }
+}
+
+/// An invalid happens-before relation for a [`PartialOrderLog`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PartialOrderError {
+    /// An edge refers to an event outside the expected stream, or is a self-dependency.
+    InvalidEdge {
+        /// Zero-based predecessor event index.
+        before: usize,
+        /// Zero-based successor event index.
+        after: usize,
+        /// Number of events in the expected stream.
+        event_count: usize,
+    },
+    /// The same directed edge was supplied more than once.
+    DuplicateEdge {
+        /// Zero-based predecessor event index.
+        before: usize,
+        /// Zero-based successor event index.
+        after: usize,
+    },
+    /// The relation contains a cycle and therefore has no valid replay order.
+    Cycle {
+        /// A deterministic event index left in the cycle.
+        event_index: usize,
+    },
+    /// The relation itself exceeded a finite edge bound derived from the expected event count.
+    TooManyEdges {
+        /// Number of supplied edges.
+        actual: usize,
+        /// Maximum accepted edges for this expected stream.
+        limit: usize,
+    },
+    /// The underlying replay event stream was invalid.
+    InvalidInput(TraceError),
+}
+
+impl PartialOrderError {
+    /// Returns the stable machine-readable error code.
+    #[must_use]
+    pub const fn code(&self) -> ErrorCode {
+        match self {
+            Self::InvalidEdge { .. } | Self::DuplicateEdge { .. } | Self::Cycle { .. } => {
+                ErrorCode::TraceSequenceInvalid
+            }
+            Self::TooManyEdges { .. } => ErrorCode::TraceCapacity,
+            Self::InvalidInput(error) => error.code(),
+        }
+    }
+}
+
+impl fmt::Display for PartialOrderError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidEdge {
+                before,
+                after,
+                event_count,
+            } => write!(
+                formatter,
+                "{}: invalid edge {before}->{after} for {event_count} event(s)",
+                self.code()
+            ),
+            Self::DuplicateEdge { before, after } => {
+                write!(
+                    formatter,
+                    "{}: duplicate edge {before}->{after}",
+                    self.code()
+                )
+            }
+            Self::Cycle { event_index } => write!(
+                formatter,
+                "{}: happens-before relation contains a cycle at event {event_index}",
+                self.code()
+            ),
+            Self::TooManyEdges { actual, limit } => write!(
+                formatter,
+                "{}: relation edges {actual} exceed {limit}",
+                self.code()
+            ),
+            Self::InvalidInput(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for PartialOrderError {}
+impl StableError for PartialOrderError {
+    fn code(&self) -> ErrorCode {
+        self.code()
+    }
+}
+
+/// A validated replay stream with explicit happens-before constraints.
+///
+/// The event vector supplies stable event identities by position and, when
+/// [`PartialOrderCursor::expect_event`] is used, by sequence number. The
+/// relation never sorts events or infers independence from equal data.
+#[derive(Clone, PartialEq, Eq)]
+pub struct PartialOrderLog {
+    log: ReplayLog,
+    predecessors: Vec<Vec<usize>>,
+}
+
+// Keep relation validation bounded independently of the event-vector bound.
+// A sparse happens-before relation is the useful test contract; accepting an
+// O(n²) edge list would make duplicate checking and adjacency retention
+// disproportionately expensive for the default 4,096-event trace.
+const MAX_PARTIAL_ORDER_EDGES: usize = 65_536;
+
+impl fmt::Debug for PartialOrderLog {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PartialOrderLog")
+            .field("log", &self.log)
+            .field("edge_count", &self.edge_count())
+            .finish()
+    }
+}
+
+impl PartialOrderLog {
+    /// Validates a partial-order relation over bounded replay events.
+    pub fn new(
+        events: Vec<TraceEvent>,
+        before: &[(usize, usize)],
+        limits: TraceLimits,
+    ) -> Result<Self, PartialOrderError> {
+        let log = ReplayLog::new(events, limits).map_err(PartialOrderError::InvalidInput)?;
+        Self::from_replay_log(log, before)
+    }
+
+    /// Builds a relation from an already validated exact replay log.
+    pub fn from_replay_log(
+        log: ReplayLog,
+        before: &[(usize, usize)],
+    ) -> Result<Self, PartialOrderError> {
+        let event_count = log.len();
+        // A simple directed graph has at most n * (n - 1) non-self edges.
+        // Check this before allocating relation storage so an attacker cannot
+        // make relation validation retain an arbitrary input vector.
+        let edge_limit = event_count
+            .saturating_mul(event_count.saturating_sub(1))
+            .min(MAX_PARTIAL_ORDER_EDGES);
+        if before.len() > edge_limit {
+            return Err(PartialOrderError::TooManyEdges {
+                actual: before.len(),
+                limit: edge_limit,
+            });
+        }
+
+        let mut predecessors = vec![Vec::new(); event_count];
+        let mut successors = vec![Vec::new(); event_count];
+        for &(before_index, after_index) in before {
+            if before_index >= event_count
+                || after_index >= event_count
+                || before_index == after_index
+            {
+                return Err(PartialOrderError::InvalidEdge {
+                    before: before_index,
+                    after: after_index,
+                    event_count,
+                });
+            }
+            if predecessors[after_index].contains(&before_index) {
+                return Err(PartialOrderError::DuplicateEdge {
+                    before: before_index,
+                    after: after_index,
+                });
+            }
+            predecessors[after_index].push(before_index);
+            successors[before_index].push(after_index);
+        }
+
+        // Kahn's algorithm is iterative and bounded, unlike recursive cycle
+        // detection which could overflow the test process on a deep graph.
+        let mut indegree = predecessors.iter().map(Vec::len).collect::<Vec<_>>();
+        let mut ready = std::collections::VecDeque::new();
+        for (index, degree) in indegree.iter().enumerate() {
+            if *degree == 0 {
+                ready.push_back(index);
+            }
+        }
+        let mut visited = 0_usize;
+        while let Some(index) = ready.pop_front() {
+            visited += 1;
+            for &successor in &successors[index] {
+                indegree[successor] -= 1;
+                if indegree[successor] == 0 {
+                    ready.push_back(successor);
+                }
+            }
+        }
+        if visited != event_count {
+            let event_index = indegree.iter().position(|degree| *degree != 0).unwrap_or(0);
+            return Err(PartialOrderError::Cycle { event_index });
+        }
+
+        Ok(Self { log, predecessors })
+    }
+
+    /// Builds an unconstrained partial-order log with the expected event multiset.
+    pub fn from_events(events: Vec<TraceEvent>) -> Result<Self, PartialOrderError> {
+        Self::new(events, &[], TraceLimits::default())
+    }
+
+    /// Returns the exact bounds inherited from the replay log.
+    #[must_use]
+    pub const fn limits(&self) -> TraceLimits {
+        self.log.limits
+    }
+
+    /// Returns the number of expected events.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.log.len()
+    }
+
+    /// Returns whether no events are expected.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.log.is_empty()
+    }
+
+    /// Returns the bounded event bytes retained by this log.
+    #[must_use]
+    pub const fn total_bytes(&self) -> usize {
+        self.log.total_bytes
+    }
+
+    /// Returns the expected events in their stable identity order.
+    #[must_use]
+    pub fn events(&self) -> &[TraceEvent] {
+        self.log.events()
+    }
+
+    /// Returns the direct predecessors of one expected event.
+    #[must_use]
+    pub fn predecessors(&self, event_index: usize) -> Option<&[usize]> {
+        self.predecessors.get(event_index).map(Vec::as_slice)
+    }
+
+    /// Returns the number of direct happens-before edges.
+    #[must_use]
+    pub fn edge_count(&self) -> usize {
+        self.predecessors.iter().map(Vec::len).sum()
+    }
+
+    /// Starts a partial-order cursor at the first event.
+    #[must_use]
+    pub fn replay(&self) -> PartialOrderCursor {
+        PartialOrderCursor::from_log(self.clone())
+    }
+
+    /// Compares a complete actual stream under the declared partial order.
+    pub fn assert_events(&self, actual: &[TraceEvent]) -> Result<(), ReplayError> {
+        let mut cursor = self.replay();
+        for event in actual {
+            cursor.expect_event(event)?;
+        }
+        cursor.finish()
+    }
+}
+
+/// A cursor that consumes each expected event once while enforcing only the
+/// declared happens-before edges.
+#[derive(Clone)]
+pub struct PartialOrderCursor {
+    log: PartialOrderLog,
+    consumed: Vec<bool>,
+    position: usize,
+}
+
+impl fmt::Debug for PartialOrderCursor {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PartialOrderCursor")
+            .field("position", &self.position)
+            .field("remaining", &self.remaining())
+            .field("log", &self.log)
+            .finish()
+    }
+}
+
+impl PartialOrderCursor {
+    fn from_log(log: PartialOrderLog) -> Self {
+        let consumed = vec![false; log.len()];
+        Self {
+            log,
+            consumed,
+            position: 0,
+        }
+    }
+
+    /// Returns the number of actual events consumed.
+    #[must_use]
+    pub const fn position(&self) -> usize {
+        self.position
+    }
+
+    /// Returns the number of expected events not yet consumed.
+    #[must_use]
+    pub fn remaining(&self) -> usize {
+        self.log.len().saturating_sub(self.position)
+    }
+
+    /// Consumes the first currently eligible expected event in stable
+    /// identity order.
+    ///
+    /// This is a diagnostic/setup escape hatch. It marks the event as
+    /// consumed and therefore also satisfies its outgoing dependencies.
+    pub fn next_expected(&mut self) -> Result<TraceEvent, ReplayError> {
+        let event_index = self.next_eligible_index().ok_or(ReplayError::Exhausted {
+            position: self.position,
+            actual: None,
+        })?;
+        let event = self.log.events()[event_index].clone();
+        self.mark_consumed(event_index);
+        Ok(event)
+    }
+
+    /// Compares and consumes one event by kind and payload.
+    ///
+    /// The first currently eligible event whose data matches is consumed.
+    /// If data matches an ineligible event, an ordering diagnostic identifies
+    /// the predecessor sequence identities blocking it.
+    pub fn expect(&mut self, kind: &str, payload: &[u8]) -> Result<TraceEvent, ReplayError> {
+        let event_bytes = kind
+            .len()
+            .checked_add(payload.len())
+            .ok_or(ReplayError::InvalidInput(TraceError::InvalidLimit))?;
+        validate_lengths(&self.log.limits(), kind.len(), event_bytes)
+            .map_err(ReplayError::InvalidInput)?;
+        let data = TraceEventData::new(kind, payload.to_vec());
+        let mut matching_blocked = None;
+        for (event_index, event) in self.log.events().iter().enumerate() {
+            if self.consumed[event_index] || event.data != data {
+                continue;
+            }
+            let blocked_by = self.blocked_by(event_index);
+            if blocked_by.is_empty() {
+                let event = event.clone();
+                self.mark_consumed(event_index);
+                return Ok(event);
+            }
+            matching_blocked = Some((event_index, blocked_by));
+        }
+        if let Some((event_index, blocked_by)) = matching_blocked {
+            return Err(ReplayError::OrderingViolation {
+                position: self.position,
+                expected_sequence: self.log.events()[event_index].sequence,
+                expected: self.log.events()[event_index].data.clone(),
+                actual: Box::new(data),
+                blocked_by: blocked_by
+                    .into_iter()
+                    .map(|index| self.log.events()[index].sequence)
+                    .collect(),
+            });
+        }
+        if self.position == self.log.len() {
+            return Err(ReplayError::Exhausted {
+                position: self.position,
+                actual: Some(data),
+            });
+        }
+        let expected_index = self
+            .next_available_index()
+            .unwrap_or(self.position.min(self.log.len().saturating_sub(1)));
+        Err(ReplayError::Mismatch {
+            position: self.position,
+            expected: self.log.events()[expected_index].data.clone(),
+            actual: data,
+        })
+    }
+
+    /// Alias for [`PartialOrderCursor::expect`].
+    pub fn assert_next(&mut self, kind: &str, payload: &[u8]) -> Result<TraceEvent, ReplayError> {
+        self.expect(kind, payload)
+    }
+
+    /// Compares and consumes a complete event, including its stable sequence
+    /// identity. Any event may be selected if it is currently eligible.
+    pub fn expect_event(&mut self, actual: &TraceEvent) -> Result<TraceEvent, ReplayError> {
+        self.validate_actual(&actual.data)?;
+        let Some(event_index) = self
+            .log
+            .events()
+            .iter()
+            .position(|event| event.sequence == actual.sequence)
+        else {
+            return Err(ReplayError::UnknownSequence {
+                position: self.position,
+                actual: actual.sequence,
+            });
+        };
+        if self.consumed[event_index] {
+            return Err(ReplayError::AlreadyConsumed {
+                position: self.position,
+                sequence: actual.sequence,
+            });
+        }
+        let expected = &self.log.events()[event_index];
+        if expected.data != actual.data {
+            return Err(ReplayError::Mismatch {
+                position: self.position,
+                expected: expected.data.clone(),
+                actual: actual.data.clone(),
+            });
+        }
+        let blocked_by = self.blocked_by(event_index);
+        if !blocked_by.is_empty() {
+            return Err(ReplayError::OrderingViolation {
+                position: self.position,
+                expected_sequence: expected.sequence,
+                expected: expected.data.clone(),
+                actual: Box::new(actual.data.clone()),
+                blocked_by: blocked_by
+                    .into_iter()
+                    .map(|index| self.log.events()[index].sequence)
+                    .collect(),
+            });
+        }
+        let expected = expected.clone();
+        self.mark_consumed(event_index);
+        Ok(expected)
+    }
+
+    /// Asserts that all expected events have been consumed.
+    pub fn finish(&self) -> Result<(), ReplayError> {
+        if self.remaining() == 0 {
+            return Ok(());
+        }
+        Err(ReplayError::TrailingEvents {
+            position: self.position,
+            remaining: self.remaining(),
+        })
+    }
+
+    fn validate_actual(&self, data: &TraceEventData) -> Result<(), ReplayError> {
+        let bytes = data
+            .byte_len()
+            .ok_or(ReplayError::InvalidInput(TraceError::InvalidLimit))?;
+        validate_data(&self.log.limits(), bytes, data).map_err(ReplayError::InvalidInput)
+    }
+
+    fn next_available_index(&self) -> Option<usize> {
+        self.consumed.iter().position(|consumed| !*consumed)
+    }
+
+    fn next_eligible_index(&self) -> Option<usize> {
+        self.consumed
+            .iter()
+            .enumerate()
+            .find_map(|(index, consumed)| {
+                (!*consumed && self.blocked_by(index).is_empty()).then_some(index)
+            })
+    }
+
+    fn blocked_by(&self, event_index: usize) -> Vec<usize> {
+        let Some(predecessors) = self.log.predecessors(event_index) else {
+            return Vec::new();
+        };
+        predecessors
+            .iter()
+            .copied()
+            .filter(|predecessor| !self.consumed[*predecessor])
+            .collect()
+    }
+
+    fn mark_consumed(&mut self, event_index: usize) {
+        self.consumed[event_index] = true;
+        self.position += 1;
+    }
 }
 
 /// Errors returned by replay consumption.
@@ -569,6 +1091,38 @@ pub enum ReplayError {
         expected: TraceEventData,
         /// Actual event data.
         actual: TraceEventData,
+    },
+    /// A partial-order event was observed before one or more declared
+    /// predecessors.  Sequence identities in `blocked_by` are stable and
+    /// contain no event payload data.
+    OrderingViolation {
+        /// Zero-based number of events already consumed.
+        position: usize,
+        /// Sequence identity of the expected event.
+        expected_sequence: u64,
+        /// Expected event data.
+        expected: TraceEventData,
+        /// Actual event data, boxed at the error boundary so replay errors
+        /// remain small without discarding diagnostic or equality data.
+        actual: Box<TraceEventData>,
+        /// Sequence identities that must be consumed first.
+        blocked_by: Vec<u64>,
+    },
+    /// A complete event supplied for partial-order replay has no matching
+    /// expected sequence identity.
+    UnknownSequence {
+        /// Zero-based number of events already consumed.
+        position: usize,
+        /// Sequence identity supplied by the caller.
+        actual: u64,
+    },
+    /// A complete event supplied for partial-order replay repeats an event
+    /// that was already consumed.
+    AlreadyConsumed {
+        /// Zero-based number of events already consumed.
+        position: usize,
+        /// Sequence identity supplied by the caller.
+        sequence: u64,
     },
     /// The event payload matches but its sequence number differs.
     SequenceMismatch {
@@ -607,6 +1161,27 @@ impl fmt::Debug for ReplayError {
                 .field("position", position)
                 .field("expected", &expected.redacted())
                 .field("actual", &actual.redacted()),
+            Self::OrderingViolation {
+                position,
+                expected_sequence,
+                expected,
+                actual,
+                blocked_by,
+            } => debug
+                .field("kind", &"OrderingViolation")
+                .field("position", position)
+                .field("expected_sequence", expected_sequence)
+                .field("expected", &expected.redacted())
+                .field("actual", &actual.redacted())
+                .field("blocked_by", blocked_by),
+            Self::UnknownSequence { position, actual } => debug
+                .field("kind", &"UnknownSequence")
+                .field("position", position)
+                .field("actual", actual),
+            Self::AlreadyConsumed { position, sequence } => debug
+                .field("kind", &"AlreadyConsumed")
+                .field("position", position)
+                .field("sequence", sequence),
             Self::SequenceMismatch {
                 position,
                 expected,
@@ -635,8 +1210,10 @@ impl ReplayError {
     pub const fn code(&self) -> ErrorCode {
         match self {
             Self::Exhausted { .. } => ErrorCode::ReplayExhausted,
-            Self::Mismatch { .. } => ErrorCode::ReplayMismatch,
-            Self::SequenceMismatch { .. } => ErrorCode::ReplaySequenceMismatch,
+            Self::Mismatch { .. } | Self::OrderingViolation { .. } => ErrorCode::ReplayMismatch,
+            Self::SequenceMismatch { .. }
+            | Self::UnknownSequence { .. }
+            | Self::AlreadyConsumed { .. } => ErrorCode::ReplaySequenceMismatch,
             Self::TrailingEvents { .. } => ErrorCode::ReplayTrailingEvents,
             Self::InvalidInput(error) => error.code(),
         }
@@ -648,6 +1225,9 @@ impl ReplayError {
         match self {
             Self::Exhausted { position, .. }
             | Self::Mismatch { position, .. }
+            | Self::OrderingViolation { position, .. }
+            | Self::UnknownSequence { position, .. }
+            | Self::AlreadyConsumed { position, .. }
             | Self::SequenceMismatch { position, .. }
             | Self::TrailingEvents { position, .. } => *position,
             Self::InvalidInput(_) => 0,
@@ -672,6 +1252,27 @@ impl fmt::Display for ReplayError {
                     self.code()
                 )
             }
+            Self::OrderingViolation {
+                position,
+                expected_sequence,
+                blocked_by,
+                ..
+            } => write!(
+                formatter,
+                "{}: event sequence {expected_sequence} at position {position} is blocked by {} predecessor(s)",
+                self.code(),
+                blocked_by.len()
+            ),
+            Self::UnknownSequence { position, actual } => write!(
+                formatter,
+                "{}: unknown event sequence {actual} at position {position}",
+                self.code()
+            ),
+            Self::AlreadyConsumed { position, sequence } => write!(
+                formatter,
+                "{}: event sequence {sequence} was already consumed at position {position}",
+                self.code()
+            ),
             Self::SequenceMismatch {
                 position,
                 expected,
@@ -815,6 +1416,14 @@ impl ReplayCursor {
                 remaining,
             })
         }
+    }
+
+    /// Compares and consumes a complete actual stream in exact order.
+    pub fn assert_events(&mut self, actual: &[TraceEvent]) -> Result<(), ReplayError> {
+        for event in actual {
+            self.expect_event(event)?;
+        }
+        self.finish()
     }
 
     fn validate_actual(&self, data: &TraceEventData) -> Result<(), ReplayError> {
@@ -1002,5 +1611,95 @@ mod tests {
         let error_debug = format!("{error:?}");
         assert!(!error_debug.contains("secret-kind"));
         assert!(!error_debug.contains("secret-payload"));
+    }
+
+    #[test]
+    fn exact_assertions_reject_reordering_and_partial_order_allows_independent_events() {
+        let trace = EventTrace::new(limits());
+        let first = trace.record("first", &[1]).unwrap();
+        let independent = trace.record("free", &[2]).unwrap();
+        let last = trace.record("last", &[3]).unwrap();
+        let actual = [independent.clone(), first.clone(), last.clone()];
+
+        let exact_error = trace.assert_events(&actual).unwrap_err();
+        assert_eq!(exact_error.code(), ErrorCode::ReplaySequenceMismatch);
+
+        let partial = trace.partial_order(&[(0, 2)]).unwrap();
+        partial.assert_events(&actual).unwrap();
+        assert_eq!(partial.predecessors(2), Some(&[0][..]));
+    }
+
+    #[test]
+    fn partial_order_enforces_edges_and_keeps_duplicate_identities_distinct() {
+        let trace = EventTrace::new(limits());
+        let predecessor = trace.record("same", &[9]).unwrap();
+        let duplicate = trace.record("same", &[9]).unwrap();
+        let dependent = trace.record("after", &[]).unwrap();
+        let partial = trace.partial_order(&[(0, 2)]).unwrap();
+        let mut replay = partial.replay();
+
+        // The second equal-data event is independent and is selected by its
+        // sequence identity rather than by an unstable data-only match.
+        replay.expect_event(&duplicate).unwrap();
+        let error = replay.expect_event(&dependent).unwrap_err();
+        assert_eq!(error.code(), ErrorCode::ReplayMismatch);
+        assert!(matches!(error, ReplayError::OrderingViolation { .. }));
+        replay.expect_event(&predecessor).unwrap();
+        replay.expect_event(&dependent).unwrap();
+        replay.finish().unwrap();
+    }
+
+    #[test]
+    fn partial_order_validation_rejects_invalid_duplicate_and_cyclic_edges() {
+        let events = vec![
+            TraceEvent::new(0, "a", Vec::<u8>::new()),
+            TraceEvent::new(1, "b", Vec::<u8>::new()),
+            TraceEvent::new(2, "c", Vec::<u8>::new()),
+        ];
+        let invalid = PartialOrderLog::new(events.clone(), &[(0, 3)], limits()).unwrap_err();
+        assert!(matches!(invalid, PartialOrderError::InvalidEdge { .. }));
+
+        let duplicate =
+            PartialOrderLog::new(events.clone(), &[(0, 1), (0, 1)], limits()).unwrap_err();
+        assert!(matches!(duplicate, PartialOrderError::DuplicateEdge { .. }));
+
+        let cycle = PartialOrderLog::new(events, &[(0, 1), (1, 2), (2, 0)], limits()).unwrap_err();
+        assert!(matches!(cycle, PartialOrderError::Cycle { .. }));
+    }
+
+    #[test]
+    fn partial_order_bounds_relation_and_preserves_redacted_diagnostics() {
+        let events = vec![
+            TraceEvent::new(0, "secret-before", b"secret-before-payload"),
+            TraceEvent::new(1, "secret-after", b"secret-after-payload"),
+        ];
+        let limits = TraceLimits::new(2, 64, 128).with_kind_limit(64);
+        let too_many =
+            PartialOrderLog::new(events.clone(), &[(0, 1), (1, 0), (0, 0)], limits).unwrap_err();
+        assert!(matches!(too_many, PartialOrderError::TooManyEdges { .. }));
+        let self_edge = PartialOrderLog::new(events.clone(), &[(0, 0)], limits).unwrap_err();
+        assert!(matches!(self_edge, PartialOrderError::InvalidEdge { .. }));
+
+        let partial = PartialOrderLog::new(events.clone(), &[(0, 1)], limits).unwrap();
+        let error = partial.replay().expect_event(&events[1]).unwrap_err();
+        let same_error = partial.replay().expect_event(&events[1]).unwrap_err();
+        assert_eq!(error, same_error);
+        let debug = format!("{error:?}");
+        assert!(matches!(error, ReplayError::OrderingViolation { .. }));
+        assert!(!debug.contains("secret-before"));
+        assert!(!debug.contains("secret-after"));
+        assert!(!debug.contains("secret-before-payload"));
+        assert!(!debug.contains("secret-after-payload"));
+    }
+
+    #[test]
+    fn partial_order_next_expected_obeys_dependencies() {
+        let trace = EventTrace::new(limits());
+        trace.record("before", &[]).unwrap();
+        trace.record("after", &[]).unwrap();
+        let mut replay = trace.partial_order(&[(0, 1)]).unwrap().replay();
+        assert_eq!(replay.next_expected().unwrap().kind(), "before");
+        assert_eq!(replay.next_expected().unwrap().kind(), "after");
+        replay.finish().unwrap();
     }
 }

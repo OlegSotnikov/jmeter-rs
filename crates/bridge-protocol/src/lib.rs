@@ -62,16 +62,32 @@ use std::str;
 /// This module is not the `jvm-capability/2` execution contract and is not
 /// selected by the standalone application. Use [`jvm_capability_v2`] for the
 /// canonical schema.
+// Keep the implementation under a non-deprecated hidden name so its own
+// test-harness paths do not trigger deprecation diagnostics. The public alias
+// below retains the migration warning for callers.
+#[allow(
+    clippy::expect_used,
+    clippy::field_reassign_with_default,
+    clippy::items_after_test_module,
+    clippy::panic
+)]
+#[path = "jvm_capability.rs"]
+#[doc(hidden)]
+pub mod legacy_jvm_capability_impl;
+
 #[deprecated(
     note = "legacy provisional JVM codec; use `jvm_capability_v2` for the canonical schema"
 )]
-#[path = "jvm_capability.rs"]
-pub mod legacy_jvm_capability;
+pub use legacy_jvm_capability_impl as legacy_jvm_capability;
 
 /// Pure, canonical JVM capability version-two operation and transaction
 /// schema. The legacy provisional codec remains available in
 /// [`legacy_jvm_capability`] for migration diagnostics, but is not an
 /// execution contract.
+// JVC2's pure fixtures use explicit `expect`/`panic` assertions to identify
+// which canonical-vector setup failed. They are test-only and do not weaken
+// production decoding or execution paths.
+#[allow(clippy::expect_used, clippy::panic)]
 pub mod jvm_capability_v2;
 
 /// Pure, bounded stream schema for the pinned Java RMI adapter.

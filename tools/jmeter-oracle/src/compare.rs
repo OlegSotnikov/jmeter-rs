@@ -33,9 +33,14 @@ const HARD_MAX_DIAGNOSTICS: usize = 1_000_000;
 const HARD_MAX_OPAQUE_BYTES: usize = 64 * 1024 * 1024;
 const HARD_MAX_DIFF_COUNT: usize = 1_000_000;
 const HARD_MAX_HUMAN_DIFF_BYTES: usize = 1024 * 1024;
+const HARD_MAX_IGNORED_LINE_PATTERNS: usize = 4_096;
+const HARD_MAX_IGNORED_LINE_PATTERN_BYTES: usize = 8 * 1024 * 1024;
 const MAX_JSON_NODES_PER_EVENT: usize = 256;
 const MAX_DIFF_VALUE: usize = 512;
 const MAX_HUMAN_DIFF: usize = 8 * 1024;
+const MAX_PATTERN_ALTERNATIVES: usize = 256;
+const MAX_PATTERN_GROUP_DEPTH: usize = 32;
+const MAX_PATTERN_BYTES: usize = 16 * 1024;
 
 /// Supported input/output projection formats.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -522,25 +527,36 @@ pub fn compare_case_artifacts(
     }
     apply_fixture_resource_limits(fixture.case().document(), &mut effective.limits)?;
     validate_options(&effective)?;
-    let csv_header = expected_csv_header(&expected_projection);
+    let expected_format = expected_projection_format(&expected_projection)?;
+    validate_comparator_variant(&expected_projection)?;
+    match expected_format {
+        CompareFormat::Csv => {
+            validate_expected_csv_projection_with_limits(&expected_projection, &effective.limits)?;
+        }
+        CompareFormat::Xml => {
+            validate_expected_xml_projection(&expected_projection, &effective.limits)?;
+        }
+        CompareFormat::Json => {}
+        CompareFormat::JmxSemantic => {
+            return Err(OracleError::new_for_cli(
+                ErrorCode::UnsupportedFormat,
+                "jmx-semantic projections require the JMX semantic comparator route",
+            ));
+        }
+    }
+    load_expected_normalization(&expected_projection, &mut effective)?;
+    validate_options(&effective)?;
+    let csv_header = if expected_format == CompareFormat::Csv {
+        expected_csv_header(&expected_projection)?
+    } else {
+        None
+    };
     let actual = parse_input(
         &actual_path,
         &effective.limits,
         options.format,
         csv_header.as_deref().or(effective.csv_header.as_deref()),
     )?;
-    load_expected_normalization(&expected_projection, &mut effective)?;
-    validate_options(&effective)?;
-    let expected_format = expected_projection
-        .get("format")
-        .and_then(Value::as_str)
-        .and_then(CompareFormat::from_hint)
-        .ok_or_else(|| {
-            OracleError::new_for_cli(
-                ErrorCode::UnsupportedFormat,
-                "expected projection must declare format jtl-csv, jtl-xml, or neutral-json",
-            )
-        })?;
     if expected_format != actual.document.format {
         return Err(OracleError::new_for_cli(
             ErrorCode::UnsupportedFormat,
@@ -555,7 +571,7 @@ pub fn compare_case_artifacts(
         path: expected_path.to_string_lossy().into_owned(),
         format: expected_format,
         size_bytes: expected_size_bytes,
-        event_count: expected_event_count(&expected_projection),
+        event_count: expected_event_count(&expected_projection, &effective.limits)?,
     };
     let mut report = base_report(&actual.summary, &expected_summary, &effective);
     report.raw_diagnostic_diff = raw_projection_diff(
@@ -574,10 +590,46 @@ pub fn compare_case_artifacts(
 
 fn validate_options(options: &CompareOptions) -> Result<()> {
     options.limits.validate()?;
-    if options.ignored_fields.len() > options.limits.max_diff_count.saturating_mul(4) {
+    let max_ignored_fields = options
+        .limits
+        .max_diff_count
+        .checked_mul(4)
+        .ok_or_else(|| {
+            OracleError::new_for_cli(
+                ErrorCode::OutputLimit,
+                "normalization field bound overflowed",
+            )
+        })?;
+    if options.ignored_fields.len() > max_ignored_fields {
         return Err(OracleError::new_for_cli(
             ErrorCode::OutputLimit,
             "normalization field count exceeds the comparison bound",
+        ));
+    }
+    if options.ignored_line_patterns.len() > HARD_MAX_IGNORED_LINE_PATTERNS {
+        return Err(OracleError::new_for_cli(
+            ErrorCode::OutputLimit,
+            format!(
+                "ignored line pattern count exceeds the hard maximum {HARD_MAX_IGNORED_LINE_PATTERNS}"
+            ),
+        ));
+    }
+    let pattern_bytes = options
+        .ignored_line_patterns
+        .iter()
+        .try_fold(0_usize, |total, pattern| total.checked_add(pattern.len()))
+        .ok_or_else(|| {
+            OracleError::new_for_cli(
+                ErrorCode::OutputLimit,
+                "ignored line pattern byte count overflowed",
+            )
+        })?;
+    if pattern_bytes > HARD_MAX_IGNORED_LINE_PATTERN_BYTES {
+        return Err(OracleError::new_for_cli(
+            ErrorCode::OutputLimit,
+            format!(
+                "ignored line pattern bytes exceed the hard maximum {HARD_MAX_IGNORED_LINE_PATTERN_BYTES}"
+            ),
         ));
     }
     for policy in &options.normalization_policy_refs {
@@ -603,10 +655,13 @@ fn validate_options(options: &CompareOptions) -> Result<()> {
         }
     }
     for pattern in &options.ignored_line_patterns {
-        if pattern.is_empty() || pattern.len() > options.limits.max_text_bytes {
+        if pattern.is_empty()
+            || pattern.len() > options.limits.max_text_bytes
+            || pattern.len() > MAX_PATTERN_BYTES
+        {
             return Err(OracleError::new_for_cli(
                 ErrorCode::Normalization,
-                "ignored line pattern is empty or exceeds its bound",
+                "ignored line pattern is empty or exceeds its text/complexity bound",
             ));
         }
         if !has_policy(&options.normalization_policy_refs, "NORM-ENV-001")
@@ -622,6 +677,12 @@ fn validate_options(options: &CompareOptions) -> Result<()> {
             return Err(OracleError::new_for_cli(
                 ErrorCode::Normalization,
                 "an unscoped ignored line wildcard is not allowed",
+            ));
+        }
+        if !valid_line_pattern(pattern) {
+            return Err(OracleError::new_for_cli(
+                ErrorCode::Normalization,
+                "ignored line pattern is malformed or exceeds its complexity bound",
             ));
         }
     }
@@ -649,110 +710,302 @@ fn has_policy(policies: &BTreeSet<String>, id: &str) -> bool {
 }
 
 fn allowed_ignored_field(field: &str, policies: &BTreeSet<String>) -> bool {
+    let field = canonical_field_path(field);
     let lower = field.to_ascii_lowercase();
     if lower == "xml_lexical_whitespace" || lower.contains("label") {
         return false;
     }
-    if lower.contains("debug_response.dynamic_lines") {
+    if lower == "debug_response.dynamic_lines" {
         return has_policy(policies, "NORM-ENV-001") || has_policy(policies, "NORM-TIME-001");
     }
-    if lower.contains("elapsed")
-        || lower.ends_with(".t")
-        || lower.ends_with(".it")
-        || lower.ends_with(".lt")
-        || lower.ends_with(".ct")
-        || lower.ends_with(".ts")
-    {
+    if matches!(
+        lower.as_str(),
+        "sample.t"
+            | "sample.it"
+            | "sample.lt"
+            | "sample.ct"
+            | "sample.ts"
+            | "rows[*].elapsed"
+            | "rows[*].latency"
+            | "rows[*].connect"
+            | "rows[*].idletime"
+            | "rows[*].timestamp"
+    ) {
         return has_policy(policies, "NORM-TIME-001");
     }
-    if lower.contains("bytes") || lower.ends_with(".by") {
-        return has_policy(policies, "NORM-JTL-001")
-            && (has_policy(policies, "NORM-TIME-001")
-                || has_policy(policies, "NORM-SECURITY-001"));
+    if matches!(
+        lower.as_str(),
+        "sample.by" | "sample.sby" | "rows[*].bytes" | "rows[*].sentbytes"
+    ) {
+        return has_policy(policies, "NORM-JTL-001") && has_policy(policies, "NORM-TIME-001");
     }
-    if lower.contains("host") || lower.contains("port") || lower.contains("tls") {
+    if matches!(
+        lower.as_str(),
+        "sample.hn"
+            | "sample.host"
+            | "sample.hostname"
+            | "rows[*].host"
+            | "rows[*].hostname"
+            | "rows[*].port"
+            | "run.hostname"
+            | "run.ephemeral_root"
+            | "runtime.hostname"
+            | "runtime.display_id"
+            | "runtime.ephemeral_root"
+            | "runtime.target_image_id"
+    ) {
         return has_policy(policies, "NORM-ENV-001");
     }
     false
 }
 
-fn load_expected_normalization(expected: &Value, options: &mut CompareOptions) -> Result<()> {
-    let Some(normalization) = expected.get("normalization").and_then(Value::as_object) else {
-        return Ok(());
-    };
-    if let Some(fields) = normalization.get("ignored_fields") {
-        let fields = fields.as_array().ok_or_else(|| {
+fn expected_projection_format(expected: &Value) -> Result<CompareFormat> {
+    let format = expected
+        .get("format")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
             OracleError::new_for_cli(
-                ErrorCode::Normalization,
-                "normalization.ignored_fields must be an array",
+                ErrorCode::UnsupportedFormat,
+                "expected projection must declare a string format",
             )
         })?;
-        for field in fields {
-            let field = field.as_str().ok_or_else(|| {
-                OracleError::new_for_cli(
-                    ErrorCode::Normalization,
-                    "normalization ignored field must be a string",
-                )
-            })?;
-            options.ignored_fields.insert(field.to_owned());
+    CompareFormat::from_hint(format).ok_or_else(|| {
+        OracleError::new_for_cli(
+            ErrorCode::UnsupportedFormat,
+            format!("expected projection format '{format}' is unsupported"),
+        )
+    })
+}
+
+/// Validate every descriptor which can contribute normalization, regardless
+/// of whether the optional top-level `normalization` object exists.  Expected
+/// projections are untrusted JSON; a failed `and_then(as_array)` here would
+/// turn a malformed descriptor into an omitted assertion.
+fn validate_expected_normalization_descriptors(
+    expected: &Value,
+    limits: &CompareLimits,
+) -> Result<()> {
+    // Neutral JSON is an open projection envelope.  Its `rows`/`samples`
+    // keys, when present, are ordinary user data rather than JTL descriptor
+    // namespaces.  The direct helper tests omit `format`, which deliberately
+    // keeps the strict descriptor audit enabled for untyped inputs.
+    let validates_jtl_descriptors = !matches!(
+        expected
+            .get("format")
+            .and_then(Value::as_str)
+            .and_then(CompareFormat::from_hint),
+        Some(CompareFormat::Json | CompareFormat::JmxSemantic)
+    );
+    if let Some(value) = expected.get("normalization") {
+        let normalization = value.as_object().ok_or_else(|| {
+            OracleError::new_for_cli(
+                ErrorCode::ManifestSchema,
+                "expected projection normalization must be an object",
+            )
+        })?;
+        for key in normalization.keys() {
+            if !matches!(key.as_str(), "ignored_fields" | "reason") {
+                return Err(OracleError::new_for_cli(
+                    ErrorCode::UnsupportedFormat,
+                    format!("unsupported expected normalization field '{key}'"),
+                ));
+            }
+        }
+        if let Some(fields) = normalization.get("ignored_fields") {
+            validate_string_array(fields, "expected normalization ignored_fields")?;
+        }
+        if let Some(reason) = normalization.get("reason")
+            && !reason.is_string()
+        {
+            return Err(OracleError::new_for_cli(
+                ErrorCode::ManifestSchema,
+                "expected normalization reason must be a string",
+            ));
         }
     }
-    if let Some(rows) = expected.get("rows").and_then(Value::as_array) {
+    if validates_jtl_descriptors && let Some(value) = expected.get("rows") {
+        let rows = value.as_array().ok_or_else(|| {
+            OracleError::new_for_cli(
+                ErrorCode::ManifestSchema,
+                "expected CSV rows must be an array",
+            )
+        })?;
+        if rows.len() > limits.max_events {
+            return Err(OracleError::new_for_cli(
+                ErrorCode::OutputLimit,
+                "expected CSV rows exceed the event bound",
+            ));
+        }
         for row in rows {
-            if let Some(fields) = row.get("ignored_fields").and_then(Value::as_array) {
+            let row = row.as_object().ok_or_else(|| {
+                OracleError::new_for_cli(
+                    ErrorCode::ManifestSchema,
+                    "expected CSV row must be an object",
+                )
+            })?;
+            if let Some(fields) = row.get("ignored_fields") {
+                validate_string_array(fields, "expected CSV row ignored_fields")?;
+            }
+        }
+    }
+    if validates_jtl_descriptors && let Some(value) = expected.get("samples") {
+        let samples = value.as_array().ok_or_else(|| {
+            OracleError::new_for_cli(
+                ErrorCode::ManifestSchema,
+                "expected XML samples must be an array",
+            )
+        })?;
+        if samples.len() > limits.max_events {
+            return Err(OracleError::new_for_cli(
+                ErrorCode::OutputLimit,
+                "expected XML samples exceed the event bound",
+            ));
+        }
+        for sample in samples {
+            validate_expected_xml_sample(sample, limits, 0)?;
+        }
+    }
+    if validates_jtl_descriptors && let Some(contract) = expected.get("sample_contract") {
+        validate_expected_xml_sample(contract, limits, 0)?;
+    }
+    Ok(())
+}
+
+fn load_expected_normalization(expected: &Value, options: &mut CompareOptions) -> Result<()> {
+    // Validate first and mutate only after every descriptor has been checked.
+    // This makes an error atomic for callers that reuse their options value.
+    validate_expected_normalization_descriptors(expected, &options.limits)?;
+    let validates_jtl_descriptors = !matches!(
+        expected
+            .get("format")
+            .and_then(Value::as_str)
+            .and_then(CompareFormat::from_hint),
+        Some(CompareFormat::Json | CompareFormat::JmxSemantic)
+    );
+
+    let mut ignored_fields = BTreeSet::new();
+    let mut ignored_line_patterns = Vec::new();
+    if let Some(normalization) = expected.get("normalization") {
+        let normalization = normalization.as_object().ok_or_else(|| {
+            OracleError::new_for_cli(
+                ErrorCode::ManifestSchema,
+                "expected projection normalization must be an object",
+            )
+        })?;
+        if let Some(fields) = normalization.get("ignored_fields") {
+            let fields = fields.as_array().ok_or_else(|| {
+                OracleError::new_for_cli(
+                    ErrorCode::ManifestSchema,
+                    "expected normalization ignored_fields must be an array",
+                )
+            })?;
+            for field in fields {
+                let field = field.as_str().ok_or_else(|| {
+                    OracleError::new_for_cli(
+                        ErrorCode::ManifestSchema,
+                        "expected normalization ignored field must be a string",
+                    )
+                })?;
+                ignored_fields.insert(field.to_owned());
+            }
+        }
+    }
+    if validates_jtl_descriptors && let Some(rows) = expected.get("rows") {
+        let rows = rows.as_array().ok_or_else(|| {
+            OracleError::new_for_cli(
+                ErrorCode::ManifestSchema,
+                "expected CSV rows must be an array",
+            )
+        })?;
+        for row in rows {
+            let row = row.as_object().ok_or_else(|| {
+                OracleError::new_for_cli(
+                    ErrorCode::ManifestSchema,
+                    "expected CSV row must be an object",
+                )
+            })?;
+            if let Some(fields) = row.get("ignored_fields") {
+                let fields = fields.as_array().ok_or_else(|| {
+                    OracleError::new_for_cli(
+                        ErrorCode::ManifestSchema,
+                        "expected CSV row ignored_fields must be an array",
+                    )
+                })?;
                 for field in fields {
                     let field = field.as_str().ok_or_else(|| {
                         OracleError::new_for_cli(
-                            ErrorCode::Normalization,
-                            "CSV row ignored field must be a string",
+                            ErrorCode::ManifestSchema,
+                            "expected CSV row ignored field must be a string",
                         )
                     })?;
-                    options.ignored_fields.insert(format!("rows[*].{field}"));
+                    ignored_fields.insert(format!("rows[*].{field}"));
                 }
             }
         }
     }
-    if let Some(samples) = expected.get("samples").and_then(Value::as_array) {
-        for sample in samples {
-            if let Some(patterns) = sample
-                .get("debug_response_projection")
-                .and_then(|projection| projection.get("ignored_line_patterns"))
-                .and_then(Value::as_array)
-            {
-                options
-                    .ignored_line_patterns
-                    .extend(patterns.iter().filter_map(Value::as_str).map(str::to_owned));
+    let mut collect_xml_descriptors = |sample: &Value| -> Result<()> {
+        let sample = sample.as_object().ok_or_else(|| {
+            OracleError::new_for_cli(
+                ErrorCode::ManifestSchema,
+                "expected XML normalization descriptor must be an object",
+            )
+        })?;
+        if let Some(patterns) = sample
+            .get("debug_response_projection")
+            .and_then(Value::as_object)
+            .and_then(|projection| projection.get("ignored_line_patterns"))
+        {
+            let patterns = patterns.as_array().ok_or_else(|| {
+                OracleError::new_for_cli(
+                    ErrorCode::ManifestSchema,
+                    "expected debug ignored_line_patterns must be an array",
+                )
+            })?;
+            for pattern in patterns {
+                let pattern = pattern.as_str().ok_or_else(|| {
+                    OracleError::new_for_cli(
+                        ErrorCode::ManifestSchema,
+                        "expected debug ignored line pattern must be a string",
+                    )
+                })?;
+                ignored_line_patterns.push(pattern.to_owned());
             }
         }
-    }
-    if let Some(patterns) = expected
-        .get("sample_contract")
-        .and_then(|contract| contract.get("debug_response_projection"))
-        .and_then(|projection| projection.get("ignored_line_patterns"))
-        .and_then(Value::as_array)
-    {
-        options
-            .ignored_line_patterns
-            .extend(patterns.iter().filter_map(Value::as_str).map(str::to_owned));
-    }
-    let mut ignored_attributes = Vec::new();
-    if let Some(samples) = expected.get("samples").and_then(Value::as_array) {
-        for sample in samples {
-            if let Some(attributes) = sample.get("ignored_attributes").and_then(Value::as_array) {
-                ignored_attributes.extend(attributes.iter().filter_map(Value::as_str));
+        if let Some(attributes) = sample.get("ignored_attributes") {
+            let attributes = attributes.as_array().ok_or_else(|| {
+                OracleError::new_for_cli(
+                    ErrorCode::ManifestSchema,
+                    "expected XML ignored_attributes must be an array",
+                )
+            })?;
+            for attribute in attributes {
+                let attribute = attribute.as_str().ok_or_else(|| {
+                    OracleError::new_for_cli(
+                        ErrorCode::ManifestSchema,
+                        "expected XML ignored attribute must be a string",
+                    )
+                })?;
+                ignored_fields.insert(format!("sample.{attribute}"));
             }
         }
+        Ok(())
+    };
+    if validates_jtl_descriptors && let Some(samples) = expected.get("samples") {
+        let samples = samples.as_array().ok_or_else(|| {
+            OracleError::new_for_cli(
+                ErrorCode::ManifestSchema,
+                "expected XML samples must be an array",
+            )
+        })?;
+        for sample in samples {
+            collect_xml_descriptors(sample)?;
+        }
     }
-    if let Some(attributes) = expected
-        .get("sample_contract")
-        .and_then(|contract| contract.get("ignored_attributes"))
-        .and_then(Value::as_array)
-    {
-        ignored_attributes.extend(attributes.iter().filter_map(Value::as_str));
+    if validates_jtl_descriptors && let Some(contract) = expected.get("sample_contract") {
+        collect_xml_descriptors(contract)?;
     }
-    for attribute in ignored_attributes {
-        options.ignored_fields.insert(format!("sample.{attribute}"));
-    }
+    options.ignored_fields.extend(ignored_fields);
+    options.ignored_line_patterns.extend(ignored_line_patterns);
     Ok(())
 }
 
@@ -867,7 +1120,12 @@ fn read_bounded_handle(file: File, path: &Path, maximum: u64) -> Result<Vec<u8>>
             "comparison input bound is too large",
         )
     })?;
-    let capacity = usize::try_from(metadata.len().min(maximum_plus_one)).unwrap_or(0);
+    let capacity = usize::try_from(metadata.len().min(maximum_plus_one)).map_err(|_| {
+        OracleError::new_for_cli(
+            ErrorCode::OutputLimit,
+            "comparison input bound cannot be represented on this platform",
+        )
+    })?;
     let mut bytes = Vec::with_capacity(capacity);
     let mut limited = file.take(maximum_plus_one);
     limited.read_to_end(&mut bytes).map_err(|error| {
@@ -1017,25 +1275,27 @@ fn parse_neutral_json(text: &str, limits: &CompareLimits, path: &Path) -> Result
     }
     let mut nodes = 0_usize;
     validate_json_limits(&projection, limits, 0, &mut nodes)?;
-    let events = projection
-        .get("events")
-        .and_then(Value::as_array)
-        .map(|events| {
-            if events.len() > limits.max_events {
-                Err(OracleError::new_for_cli(
-                    ErrorCode::OutputLimit,
-                    format!("neutral JSON event count exceeds {}", limits.max_events),
-                ))
-            } else {
-                Ok(events
-                    .iter()
-                    .enumerate()
-                    .map(|(position, value)| neutral_event_from_json(position, value))
-                    .collect::<Vec<_>>())
-            }
-        })
-        .transpose()?
-        .unwrap_or_default();
+    let events = if let Some(value) = projection.get("events") {
+        let events = value.as_array().ok_or_else(|| {
+            OracleError::new_for_cli(
+                ErrorCode::ManifestJson,
+                "neutral JSON events must be an array",
+            )
+        })?;
+        if events.len() > limits.max_events {
+            return Err(OracleError::new_for_cli(
+                ErrorCode::OutputLimit,
+                format!("neutral JSON event count exceeds {}", limits.max_events),
+            ));
+        }
+        events
+            .iter()
+            .enumerate()
+            .map(|(position, value)| neutral_event_from_json(position, value))
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        Vec::new()
+    };
     Ok(NeutralDocument {
         format: CompareFormat::Json,
         root: None,
@@ -1074,7 +1334,12 @@ fn validate_json_lexical_limits(text: &str, limits: &CompareLimits) -> Result<()
                 string_start = index;
             }
             b'{' | b'[' => {
-                depth = depth.saturating_add(1);
+                depth = depth.checked_add(1).ok_or_else(|| {
+                    OracleError::new_for_cli(
+                        ErrorCode::OutputLimit,
+                        "neutral JSON nesting depth overflowed",
+                    )
+                })?;
                 if depth > limits.max_depth {
                     return Err(OracleError::new_for_cli(
                         ErrorCode::OutputLimit,
@@ -1120,10 +1385,15 @@ fn validate_json_limits(
             format!("neutral JSON nesting exceeds {}", limits.max_depth),
         ));
     }
-    *nodes = nodes.saturating_add(1);
+    *nodes = nodes.checked_add(1).ok_or_else(|| {
+        OracleError::new_for_cli(ErrorCode::OutputLimit, "neutral JSON node count overflowed")
+    })?;
     let max_nodes = limits
         .max_events
-        .saturating_mul(MAX_JSON_NODES_PER_EVENT)
+        .checked_mul(MAX_JSON_NODES_PER_EVENT)
+        .ok_or_else(|| {
+            OracleError::new_for_cli(ErrorCode::OutputLimit, "neutral JSON node bound overflowed")
+        })?
         .max(MAX_JSON_NODES_PER_EVENT);
     if *nodes > max_nodes {
         return Err(OracleError::new_for_cli(
@@ -1167,35 +1437,72 @@ fn validate_json_limits(
     Ok(())
 }
 
-fn neutral_event_from_json(position: usize, value: &Value) -> NeutralEvent {
-    let object = value.as_object();
-    NeutralEvent {
-        position,
-        element: object
-            .and_then(|map| map.get("element"))
-            .and_then(Value::as_str)
-            .unwrap_or("event")
+fn neutral_event_from_json(position: usize, value: &Value) -> Result<NeutralEvent> {
+    let object = value.as_object().ok_or_else(|| {
+        OracleError::new_for_cli(
+            ErrorCode::ManifestJson,
+            "neutral JSON event must be an object",
+        )
+    })?;
+    let element = match object.get("element") {
+        None => "event".to_owned(),
+        Some(value) => value
+            .as_str()
+            .ok_or_else(|| {
+                OracleError::new_for_cli(
+                    ErrorCode::ManifestJson,
+                    "neutral JSON event element must be a string",
+                )
+            })?
             .to_owned(),
-        attributes: string_map(object.and_then(|map| map.get("attributes"))),
-        sections: string_map(object.and_then(|map| map.get("sections"))),
-        text: String::new(),
+    };
+    let attributes = string_map(object.get("attributes"), "neutral JSON event attributes")?;
+    let sections = string_map(object.get("sections"), "neutral JSON event sections")?;
+    let text = match object.get("text") {
+        None => String::new(),
+        Some(value) => value
+            .as_str()
+            .ok_or_else(|| {
+                OracleError::new_for_cli(
+                    ErrorCode::ManifestJson,
+                    "neutral JSON event text must be a string",
+                )
+            })?
+            .to_owned(),
+    };
+    Ok(NeutralEvent {
+        position,
+        element,
+        attributes,
+        sections,
+        text,
         assertions: Vec::new(),
         children: Vec::new(),
         child_events: Vec::new(),
-    }
+    })
 }
 
-fn string_map(value: Option<&Value>) -> BTreeMap<String, String> {
-    value
-        .and_then(Value::as_object)
-        .map(|map| {
-            map.iter()
-                .filter_map(|(key, value)| {
-                    value.as_str().map(|value| (key.clone(), value.to_owned()))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+fn string_map(value: Option<&Value>, label: &str) -> Result<BTreeMap<String, String>> {
+    let Some(value) = value else {
+        return Ok(BTreeMap::new());
+    };
+    let map = value.as_object().ok_or_else(|| {
+        OracleError::new_for_cli(
+            ErrorCode::ManifestJson,
+            format!("{label} must be an object"),
+        )
+    })?;
+    let mut result = BTreeMap::new();
+    for (key, value) in map {
+        let value = value.as_str().ok_or_else(|| {
+            OracleError::new_for_cli(
+                ErrorCode::ManifestJson,
+                format!("{label} values must be strings"),
+            )
+        })?;
+        result.insert(key.clone(), value.to_owned());
+    }
+    Ok(result)
 }
 
 fn parse_csv(
@@ -1430,7 +1737,13 @@ impl<'a> CsvRecordReader<'a> {
                     '\r' => {
                         if self.characters.peek() == Some(&'\n') {
                             self.characters.next();
-                            self.record_bytes = self.record_bytes.saturating_add(1);
+                            self.record_bytes =
+                                self.record_bytes.checked_add(1).ok_or_else(|| {
+                                    OracleError::new_for_cli(
+                                        ErrorCode::OutputLimit,
+                                        "CSV record byte count overflowed",
+                                    )
+                                })?;
                             self.check_record_bound()?;
                         }
                         finish_csv_field(&mut record, &mut field, &mut serialized);
@@ -1472,7 +1785,12 @@ impl<'a> CsvRecordReader<'a> {
                 '\r' => {
                     if self.characters.peek() == Some(&'\n') {
                         self.characters.next();
-                        self.record_bytes = self.record_bytes.saturating_add(1);
+                        self.record_bytes = self.record_bytes.checked_add(1).ok_or_else(|| {
+                            OracleError::new_for_cli(
+                                ErrorCode::OutputLimit,
+                                "CSV record byte count overflowed",
+                            )
+                        })?;
                         self.check_record_bound()?;
                     }
                     finish_csv_field(&mut record, &mut field, &mut serialized);
@@ -1745,7 +2063,12 @@ fn xml_event(
     let mut child_position = 0_usize;
     for child in &node.children {
         if child.name == "assertionResult" {
-            *assertion_count = assertion_count.saturating_add(1);
+            *assertion_count = assertion_count.checked_add(1).ok_or_else(|| {
+                OracleError::new_for_cli(
+                    ErrorCode::OutputLimit,
+                    "XML assertion result count overflowed",
+                )
+            })?;
             if *assertion_count > limits.max_assertion_results {
                 return Err(OracleError::new_for_cli(
                     ErrorCode::OutputLimit,
@@ -1824,7 +2147,12 @@ fn insert_xml_section(
             entry.insert(value);
             return Ok(());
         }
-        duplicate = duplicate.saturating_add(1);
+        duplicate = duplicate.checked_add(1).ok_or_else(|| {
+            OracleError::new_for_cli(
+                ErrorCode::OutputLimit,
+                "duplicate XML section count overflowed",
+            )
+        })?;
     }
 }
 
@@ -2036,7 +2364,9 @@ impl<'a> XmlParser<'a> {
         let name = self.parse_name()?;
         self.count_node()?;
         if depth == 1 && (name == "sample" || name == "httpSample") {
-            self.events = self.events.saturating_add(1);
+            self.events = self.events.checked_add(1).ok_or_else(|| {
+                OracleError::new_for_cli(ErrorCode::OutputLimit, "XML event count overflowed")
+            })?;
             if self.events > self.limits.max_events {
                 return Err(OracleError::new_for_cli(
                     ErrorCode::OutputLimit,
@@ -2076,7 +2406,9 @@ impl<'a> XmlParser<'a> {
             self.skip_whitespace();
             let value = self.parse_quoted_value()?;
             attributes.insert(key, value);
-            self.attributes = self.attributes.saturating_add(1);
+            self.attributes = self.attributes.checked_add(1).ok_or_else(|| {
+                OracleError::new_for_cli(ErrorCode::OutputLimit, "XML attribute count overflowed")
+            })?;
         }
         let mut children = Vec::new();
         let mut text = String::new();
@@ -2154,7 +2486,9 @@ impl<'a> XmlParser<'a> {
     }
 
     fn count_node(&mut self) -> Result<()> {
-        self.nodes = self.nodes.saturating_add(1);
+        self.nodes = self.nodes.checked_add(1).ok_or_else(|| {
+            OracleError::new_for_cli(ErrorCode::OutputLimit, "XML node count overflowed")
+        })?;
         if self.nodes > self.limits.max_nodes {
             return Err(OracleError::new_for_cli(
                 ErrorCode::OutputLimit,
@@ -2726,26 +3060,79 @@ fn select_expected_path(fixture: &ValidatedCase) -> Result<PathBuf> {
     contained_expected_relative_file(fixture.fixture_dir(), path)
 }
 
-fn expected_event_count(value: &Value) -> usize {
-    value
-        .get("sample_count")
-        .and_then(Value::as_u64)
-        .or_else(|| {
-            value
-                .get("rows")
-                .and_then(Value::as_array)
-                .map(|rows| rows.len() as u64)
-        })
-        .or_else(|| {
-            value
-                .get("samples")
-                .and_then(Value::as_array)
-                .map(|samples| samples.len() as u64)
-        })
-        .unwrap_or(0) as usize
+fn expected_event_count(value: &Value, limits: &CompareLimits) -> Result<usize> {
+    let count = if let Some(sample_count) = value.get("sample_count") {
+        if sample_count.is_null() {
+            if let Some(rows) = value.get("rows") {
+                rows.as_array()
+                    .ok_or_else(|| {
+                        OracleError::new_for_cli(
+                            ErrorCode::ManifestSchema,
+                            "expected projection rows must be an array",
+                        )
+                    })?
+                    .len() as u64
+            } else if let Some(samples) = value.get("samples") {
+                samples
+                    .as_array()
+                    .ok_or_else(|| {
+                        OracleError::new_for_cli(
+                            ErrorCode::ManifestSchema,
+                            "expected projection samples must be an array",
+                        )
+                    })?
+                    .len() as u64
+            } else {
+                0
+            }
+        } else {
+            sample_count.as_u64().ok_or_else(|| {
+                OracleError::new_for_cli(
+                    ErrorCode::ManifestSchema,
+                    "expected projection sample_count must be an unsigned integer",
+                )
+            })?
+        }
+    } else if let Some(rows) = value.get("rows") {
+        rows.as_array()
+            .ok_or_else(|| {
+                OracleError::new_for_cli(
+                    ErrorCode::ManifestSchema,
+                    "expected projection rows must be an array",
+                )
+            })?
+            .len() as u64
+    } else if let Some(samples) = value.get("samples") {
+        samples
+            .as_array()
+            .ok_or_else(|| {
+                OracleError::new_for_cli(
+                    ErrorCode::ManifestSchema,
+                    "expected projection samples must be an array",
+                )
+            })?
+            .len() as u64
+    } else {
+        0
+    };
+    if count > limits.max_events as u64 {
+        return Err(OracleError::new_for_cli(
+            ErrorCode::OutputLimit,
+            format!(
+                "expected projection event count exceeds {}",
+                limits.max_events
+            ),
+        ));
+    }
+    usize::try_from(count).map_err(|_| {
+        OracleError::new_for_cli(
+            ErrorCode::ManifestSchema,
+            "expected projection event count does not fit the target",
+        )
+    })
 }
 
-fn expected_csv_header(value: &Value) -> Option<Vec<String>> {
+fn expected_csv_header(value: &Value) -> Result<Option<Vec<String>>> {
     let no_header = value
         .get("writer_wire")
         .and_then(Value::as_object)
@@ -2754,15 +3141,53 @@ fn expected_csv_header(value: &Value) -> Option<Vec<String>> {
         == Some(false)
         || value.get("print_field_names").and_then(Value::as_bool) == Some(false);
     if !no_header {
-        return None;
+        return Ok(None);
     }
-    value.get("header").and_then(Value::as_array).map(|header| {
-        header
-            .iter()
-            .filter_map(Value::as_str)
-            .map(str::to_owned)
-            .collect()
-    })
+    let header = value
+        .get("header")
+        .ok_or_else(|| {
+            OracleError::new_for_cli(
+                ErrorCode::ManifestSchema,
+                "expected CSV header is required when print_field_names is false",
+            )
+        })?
+        .as_array()
+        .ok_or_else(|| {
+            OracleError::new_for_cli(
+                ErrorCode::ManifestSchema,
+                "expected CSV header must be an array",
+            )
+        })?;
+    if header.is_empty() {
+        return Err(OracleError::new_for_cli(
+            ErrorCode::ManifestSchema,
+            "expected CSV header cannot be empty when print_field_names is false",
+        ));
+    }
+    let mut values = Vec::with_capacity(header.len());
+    let mut seen = BTreeSet::new();
+    for (index, value) in header.iter().enumerate() {
+        let value = value.as_str().ok_or_else(|| {
+            OracleError::new_for_cli(
+                ErrorCode::ManifestSchema,
+                format!("expected CSV header entry {index} must be a string"),
+            )
+        })?;
+        if value.is_empty() {
+            return Err(OracleError::new_for_cli(
+                ErrorCode::ManifestSchema,
+                "expected CSV header cannot contain an empty column",
+            ));
+        }
+        if !seen.insert(value) {
+            return Err(OracleError::new_for_cli(
+                ErrorCode::ManifestSchema,
+                format!("expected CSV header repeats column '{value}'"),
+            ));
+        }
+        values.push(value.to_owned());
+    }
+    Ok(Some(values))
 }
 
 pub(crate) fn base_report(
@@ -3001,43 +3426,51 @@ fn compare_csv_expectation(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let expected_rows = expected
-        .get("rows")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    if actual_rows.len() != expected_rows.len() {
-        push_diff(
-            report,
-            options,
-            "/rows",
-            "changed",
-            Some(&Value::Array(expected_rows.clone())),
-            Some(&Value::Array(actual_rows.clone())),
-        );
-    }
-    for (index, expected_row) in expected_rows.iter().enumerate() {
-        let path = format!("/rows/{index}");
-        let Some(actual_row) = actual_rows.get(index) else {
-            push_diff(report, options, &path, "missing", Some(expected_row), None);
-            continue;
-        };
-        compare_declared_value(
-            actual_row.get("position"),
-            expected_row.get("position"),
-            &format!("{path}/position"),
-            options,
-            report,
-        );
-        let actual_fields = actual_row.get("fields").and_then(Value::as_object);
-        let expected_fields = expected_row.get("fields").and_then(Value::as_object);
-        compare_field_map(
-            actual_fields,
-            expected_fields,
-            &format!("{path}/fields"),
-            options,
-            report,
-        );
+    if let Some(expected_rows_value) = expected.get("rows") {
+        if let Some(expected_rows) = expected_rows_value.as_array() {
+            if actual_rows.len() != expected_rows.len() {
+                push_diff(
+                    report,
+                    options,
+                    "/rows",
+                    "changed",
+                    Some(&Value::Array(expected_rows.clone())),
+                    Some(&Value::Array(actual_rows.clone())),
+                );
+            }
+            for (index, expected_row) in expected_rows.iter().enumerate() {
+                let path = format!("/rows/{index}");
+                let Some(actual_row) = actual_rows.get(index) else {
+                    push_diff(report, options, &path, "missing", Some(expected_row), None);
+                    continue;
+                };
+                compare_declared_value(
+                    actual_row.get("position"),
+                    expected_row.get("position"),
+                    &format!("{path}/position"),
+                    options,
+                    report,
+                );
+                let actual_fields = actual_row.get("fields").and_then(Value::as_object);
+                let expected_fields = expected_row.get("fields").and_then(Value::as_object);
+                compare_field_map(
+                    actual_fields,
+                    expected_fields,
+                    &format!("{path}/fields"),
+                    options,
+                    report,
+                );
+            }
+        } else {
+            push_diff(
+                report,
+                options,
+                "/rows",
+                "changed",
+                Some(expected_rows_value),
+                Some(&Value::Array(actual_rows.clone())),
+            );
+        }
     }
     if let Some(quoting) = expected.get("quoting_assertions").and_then(Value::as_array) {
         for (index, assertion) in quoting.iter().enumerate() {
@@ -3093,6 +3526,13 @@ fn compare_csv_expectation(
 }
 
 fn validate_expected_csv_projection(expected: &Value) -> Result<()> {
+    validate_expected_csv_projection_with_limits(expected, &CompareLimits::default())
+}
+
+fn validate_expected_csv_projection_with_limits(
+    expected: &Value,
+    limits: &CompareLimits,
+) -> Result<()> {
     validate_expected_projection_envelope(expected, CompareFormat::Csv)?;
     if let Some(header) = expected.get("header") {
         let header = header.as_array().ok_or_else(|| {
@@ -3107,6 +3547,36 @@ fn validate_expected_csv_projection(expected: &Value) -> Result<()> {
                 "expected CSV header must contain strings",
             ));
         }
+        if header.len() > limits.max_csv_columns {
+            return Err(OracleError::new_for_cli(
+                ErrorCode::OutputLimit,
+                format!(
+                    "expected CSV column count exceeds {}",
+                    limits.max_csv_columns
+                ),
+            ));
+        }
+        let mut seen = BTreeSet::new();
+        for column in header {
+            let Some(column) = column.as_str() else {
+                return Err(OracleError::new_for_cli(
+                    ErrorCode::ManifestSchema,
+                    "expected CSV header must contain strings",
+                ));
+            };
+            if column.is_empty() {
+                return Err(OracleError::new_for_cli(
+                    ErrorCode::ManifestSchema,
+                    "expected CSV header cannot contain an empty column",
+                ));
+            }
+            if !seen.insert(column) {
+                return Err(OracleError::new_for_cli(
+                    ErrorCode::ManifestSchema,
+                    format!("expected CSV header repeats column '{column}'"),
+                ));
+            }
+        }
     }
     if let Some(sample_count) = expected.get("sample_count")
         && !sample_count.is_null()
@@ -3115,6 +3585,14 @@ fn validate_expected_csv_projection(expected: &Value) -> Result<()> {
         return Err(OracleError::new_for_cli(
             ErrorCode::ManifestSchema,
             "expected CSV sample_count must be an unsigned integer or null",
+        ));
+    }
+    if let Some(sample_count) = expected.get("sample_count").and_then(Value::as_u64)
+        && sample_count > limits.max_events as u64
+    {
+        return Err(OracleError::new_for_cli(
+            ErrorCode::OutputLimit,
+            format!("expected CSV sample count exceeds {}", limits.max_events),
         ));
     }
     if let Some(value) = expected.get("delimiter")
@@ -3337,6 +3815,12 @@ fn validate_expected_csv_projection(expected: &Value) -> Result<()> {
                 "expected CSV rows must be an array",
             )
         })?;
+        if rows.len() > limits.max_events {
+            return Err(OracleError::new_for_cli(
+                ErrorCode::OutputLimit,
+                format!("expected CSV row count exceeds {}", limits.max_events),
+            ));
+        }
         for row in rows {
             let row = row.as_object().ok_or_else(|| {
                 OracleError::new_for_cli(
@@ -3608,6 +4092,27 @@ fn compare_field_map(
             report,
         );
     }
+    // Once a row declares a field map, every emitted column must be accounted
+    // for by either an expected value or an explicit normalization rule.  A
+    // partial row with no `fields` member remains an assertion-free row shape
+    // used by metadata-only expectations.
+    if let Some(actual) = actual {
+        for (field, actual_value) in actual {
+            if expected.contains_key(field)
+                || is_ignored_field(&format!("rows[*].{field}"), options)
+            {
+                continue;
+            }
+            push_diff(
+                report,
+                options,
+                &format!("{path}/{field}"),
+                "unexpected",
+                None,
+                Some(actual_value),
+            );
+        }
+    }
 }
 
 fn compare_xml_expectation(
@@ -3720,38 +4225,49 @@ fn compare_xml_expectation(
             );
         }
     }
-    if let Some(samples) = expected.get("samples").and_then(Value::as_array) {
-        for (index, expected_sample) in samples.iter().enumerate() {
-            let path = format!("/samples/{index}");
-            let Some(actual_sample) = actual_samples.get(index) else {
+    if let Some(samples_value) = expected.get("samples") {
+        if let Some(samples) = samples_value.as_array() {
+            for (index, expected_sample) in samples.iter().enumerate() {
+                let path = format!("/samples/{index}");
+                let Some(actual_sample) = actual_samples.get(index) else {
+                    push_diff(
+                        report,
+                        options,
+                        &path,
+                        "missing",
+                        Some(expected_sample),
+                        None,
+                    );
+                    continue;
+                };
+                compare_xml_sample(
+                    actual_sample,
+                    expected_sample,
+                    &path,
+                    false,
+                    expected.get("wire_contract"),
+                    options,
+                    report,
+                );
+            }
+            if actual_samples.len() != samples.len() {
                 push_diff(
                     report,
                     options,
-                    &path,
-                    "missing",
-                    Some(expected_sample),
-                    None,
+                    "/samples",
+                    "changed",
+                    Some(&Value::Array(samples.clone())),
+                    Some(&Value::Array(actual_samples.clone())),
                 );
-                continue;
-            };
-            compare_xml_sample(
-                actual_sample,
-                expected_sample,
-                &path,
-                false,
-                expected.get("wire_contract"),
-                options,
-                report,
-            );
-        }
-        if actual_samples.len() != samples.len() {
+            }
+        } else {
             push_diff(
                 report,
                 options,
                 "/samples",
                 "changed",
-                Some(&Value::Array(samples.clone())),
-                Some(&Value::Array(actual_samples.clone())),
+                Some(samples_value),
+                Some(&Value::Array(actual_samples)),
             );
         }
     }
@@ -5456,28 +5972,45 @@ fn compare_xml_sample(
             report,
         );
     }
-    if let Some(expected_children) = expected.get("children").filter(|value| value.is_array()) {
-        let actual_typed_children = typed_child_event_values(actual);
-        compare_declared_value(
-            Some(&Value::Array(actual_typed_children)),
-            Some(expected_children),
-            &format!("{path}/children"),
-            options,
-            report,
-        );
-    } else if let Some(actual_children) = actual.get("children").and_then(Value::as_array)
-        && !actual_children.is_empty()
-        && expected.get("sub_results").is_none()
-        && !expected_declares_child_stream(expected)
-    {
-        push_diff(
-            report,
-            options,
-            &format!("{path}/children"),
-            "unexpected",
-            None,
-            Some(&Value::Array(actual_children.clone())),
-        );
+    match expected.get("children") {
+        Some(Value::Array(expected_children)) => {
+            let actual_typed_children = typed_child_event_values(actual);
+            compare_declared_value(
+                Some(&Value::Array(actual_typed_children)),
+                Some(&Value::Array(expected_children.clone())),
+                &format!("{path}/children"),
+                options,
+                report,
+            );
+        }
+        Some(Value::Object(_)) => {}
+        Some(expected_children) => {
+            let actual_typed_children = typed_child_event_values(actual);
+            push_diff(
+                report,
+                options,
+                &format!("{path}/children"),
+                "changed",
+                Some(expected_children),
+                Some(&Value::Array(actual_typed_children)),
+            );
+        }
+        None => {
+            if let Some(actual_children) = actual.get("children").and_then(Value::as_array)
+                && !actual_children.is_empty()
+                && expected.get("sub_results").is_none()
+                && !expected_declares_child_stream(expected)
+            {
+                push_diff(
+                    report,
+                    options,
+                    &format!("{path}/children"),
+                    "unexpected",
+                    None,
+                    Some(&Value::Array(actual_children.clone())),
+                );
+            }
+        }
     }
     if let Some(empty_children) = expected.get("empty_children").and_then(Value::as_array) {
         let actual_sections = actual.get("sections").and_then(Value::as_object);
@@ -5906,6 +6439,11 @@ fn compare_xml_wire_contract(
     };
     let children = child_event_values(actual);
     for (key, expected_value) in expected {
+        // A document-level contract describes optional writer children across
+        // heterogeneous samples.  An empty sample has no wire stream to
+        // compare here; sample-local `wire_children` descriptors remain
+        // strict and still assert an explicitly expected empty/non-empty
+        // stream.
         if children.is_empty()
             && matches!(
                 key.as_str(),
@@ -5947,7 +6485,7 @@ fn compare_xml_wire_contract(
                         })
                         .collect(),
                 );
-                compare_contract_multiset(
+                compare_ordered_contract(
                     &actual_value,
                     expected_value,
                     &format!("{path}/{key}"),
@@ -6285,69 +6823,6 @@ fn compare_ordered_contract(
     compare_declared_value(Some(actual), Some(expected), path, options, report);
 }
 
-/// Compare typed String-child metadata as a multiset.  The explicit
-/// `wire_child_order` field remains the exact ordered stream; this descriptor
-/// only states which class-tagged String sections were emitted.
-fn compare_contract_multiset(
-    actual: &Value,
-    expected: &Value,
-    path: &str,
-    options: &CompareOptions,
-    report: &mut CompareReport,
-) {
-    let Some(actual_values) = actual.as_array() else {
-        push_diff(
-            report,
-            options,
-            path,
-            "changed",
-            Some(expected),
-            Some(actual),
-        );
-        return;
-    };
-    let Some(expected_values) = expected.as_array() else {
-        push_diff(
-            report,
-            options,
-            path,
-            "changed",
-            Some(expected),
-            Some(actual),
-        );
-        return;
-    };
-    if actual_values.len() != expected_values.len() {
-        push_diff(
-            report,
-            options,
-            path,
-            "changed",
-            Some(expected),
-            Some(actual),
-        );
-        return;
-    }
-    let mut remaining = actual_values.to_vec();
-    for expected_value in expected_values {
-        let Some(index) = remaining
-            .iter()
-            .position(|actual_value| actual_value == expected_value)
-        else {
-            push_diff(
-                report,
-                options,
-                path,
-                "changed",
-                Some(expected),
-                Some(actual),
-            );
-            return;
-        };
-        remaining.remove(index);
-    }
-}
-
 fn compare_xml_wire_children(
     actual: &Value,
     expected: &Value,
@@ -6391,7 +6866,7 @@ fn compare_xml_wire_children(
                         .filter_map(|child| child.get("element").cloned())
                         .collect(),
                 );
-                compare_contract_multiset(
+                compare_ordered_contract(
                     &actual_value,
                     expected_value,
                     &format!("{path}/{key}"),
@@ -6408,7 +6883,14 @@ fn compare_xml_wire_children(
                     report,
                 );
             }
-            _ => {}
+            _ => push_diff(
+                report,
+                options,
+                &format!("{path}/{key}"),
+                "unsupported",
+                Some(expected_value),
+                None,
+            ),
         }
     }
 }
@@ -6506,16 +6988,26 @@ fn compare_xml_unknown_children(
     options: &CompareOptions,
     report: &mut CompareReport,
 ) {
-    let expected = expected
-        .as_array()
-        .map(|children| {
-            children
-                .iter()
-                .map(normalize_unknown_child_expectation)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let actual: Vec<Value> = child_event_values(actual)
+    let actual_children = child_event_values(actual);
+    let Some(expected_children) = expected.as_array() else {
+        let actual = actual_children
+            .iter()
+            .map(unknown_child_projection)
+            .collect::<Vec<_>>();
+        compare_declared_value(
+            Some(&Value::Array(actual)),
+            Some(expected),
+            path,
+            options,
+            report,
+        );
+        return;
+    };
+    let expected = expected_children
+        .iter()
+        .map(normalize_unknown_child_expectation)
+        .collect::<Vec<_>>();
+    let actual: Vec<Value> = actual_children
         .into_iter()
         .filter(|child| {
             child
@@ -6858,36 +7350,47 @@ fn compare_sub_results_contract(
             report,
         );
     }
-    if let Some(expected_nested) = expected.get("nested").and_then(Value::as_array) {
-        if actual_children.len() != expected_nested.len() {
+    if let Some(expected_nested_value) = expected.get("nested") {
+        if let Some(expected_nested) = expected_nested_value.as_array() {
+            if actual_children.len() != expected_nested.len() {
+                push_diff(
+                    report,
+                    options,
+                    &format!("{path}/nested"),
+                    "changed",
+                    Some(&Value::Array(expected_nested.clone())),
+                    Some(&Value::Array(actual_children.clone())),
+                );
+            }
+            for (index, expected_child) in expected_nested.iter().enumerate() {
+                let child_path = format!("{path}/nested/{index}");
+                let Some(actual_child) = actual_children.get(index) else {
+                    push_diff(
+                        report,
+                        options,
+                        &child_path,
+                        "missing",
+                        Some(expected_child),
+                        None,
+                    );
+                    continue;
+                };
+                compare_sub_result_descriptor(
+                    actual_child,
+                    expected_child,
+                    &child_path,
+                    options,
+                    report,
+                );
+            }
+        } else {
             push_diff(
                 report,
                 options,
                 &format!("{path}/nested"),
                 "changed",
-                Some(&Value::Array(expected_nested.clone())),
+                Some(expected_nested_value),
                 Some(&Value::Array(actual_children.clone())),
-            );
-        }
-        for (index, expected_child) in expected_nested.iter().enumerate() {
-            let child_path = format!("{path}/nested/{index}");
-            let Some(actual_child) = actual_children.get(index) else {
-                push_diff(
-                    report,
-                    options,
-                    &child_path,
-                    "missing",
-                    Some(expected_child),
-                    None,
-                );
-                continue;
-            };
-            compare_sub_result_descriptor(
-                actual_child,
-                expected_child,
-                &child_path,
-                options,
-                report,
             );
         }
     }
@@ -6940,55 +7443,69 @@ fn compare_sub_result_descriptor(
             report,
         );
     }
-    if let Some(expected_children) = expected.get("children").and_then(Value::as_array) {
-        let actual_children = actual
-            .get("children")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        if actual_children.len() != expected_children.len() {
-            push_diff(
-                report,
-                options,
-                &format!("{path}/children"),
-                "changed",
-                Some(&Value::Array(expected_children.clone())),
-                Some(&Value::Array(actual_children.clone())),
-            );
-        }
-        for (index, expected_child) in expected_children.iter().enumerate() {
-            let child_path = format!("{path}/children/{index}");
-            let Some(actual_child) = actual_children.get(index) else {
+    match expected.get("children") {
+        Some(Value::Array(expected_children)) => {
+            let actual_children = actual
+                .get("children")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            if actual_children.len() != expected_children.len() {
                 push_diff(
                     report,
                     options,
-                    &child_path,
-                    "missing",
-                    Some(expected_child),
-                    None,
+                    &format!("{path}/children"),
+                    "changed",
+                    Some(&Value::Array(expected_children.clone())),
+                    Some(&Value::Array(actual_children.clone())),
                 );
-                continue;
-            };
-            compare_sub_result_descriptor(
-                actual_child,
-                expected_child,
-                &child_path,
-                options,
-                report,
-            );
+            }
+            for (index, expected_child) in expected_children.iter().enumerate() {
+                let child_path = format!("{path}/children/{index}");
+                let Some(actual_child) = actual_children.get(index) else {
+                    push_diff(
+                        report,
+                        options,
+                        &child_path,
+                        "missing",
+                        Some(expected_child),
+                        None,
+                    );
+                    continue;
+                };
+                compare_sub_result_descriptor(
+                    actual_child,
+                    expected_child,
+                    &child_path,
+                    options,
+                    report,
+                );
+            }
         }
-    } else if let Some(actual_children) = actual.get("children").and_then(Value::as_array)
-        && !actual_children.is_empty()
-        && expected.get("sub_results").is_none()
-    {
-        push_diff(
+        Some(Value::Object(_)) => {}
+        Some(expected_children) => push_diff(
             report,
             options,
             &format!("{path}/children"),
-            "unexpected",
-            None,
-            Some(&Value::Array(actual_children.clone())),
-        );
+            "changed",
+            Some(expected_children),
+            actual.get("children"),
+        ),
+        None => {
+            if let Some(actual_children) = actual.get("children").and_then(Value::as_array)
+                && !actual_children.is_empty()
+                && expected.get("sub_results").is_none()
+            {
+                push_diff(
+                    report,
+                    options,
+                    &format!("{path}/children"),
+                    "unexpected",
+                    None,
+                    Some(&Value::Array(actual_children.clone())),
+                );
+            }
+        }
     }
     if let Some(expected_sub_results) = expected.get("sub_results") {
         compare_sub_results_contract(
@@ -7118,26 +7635,187 @@ fn parse_debug_sections(
     sections
 }
 
+/// Validate the deliberately small wildcard language used for dynamic debug
+/// lines.  The language is bounded and deterministic: `.*` matches a sequence
+/// of characters, a backslash quotes the following character, and
+/// parenthesized `|` alternatives are expanded up to a fixed limit.  It is
+/// intentionally not a general regular-expression engine.
+fn valid_line_pattern(pattern: &str) -> bool {
+    expand_pattern_alternatives(pattern).is_some()
+}
+
 fn wildcard_match(pattern: &str, text: &str) -> bool {
     let pattern = pattern.strip_prefix('^').unwrap_or(pattern);
     let pattern = pattern.strip_suffix('$').unwrap_or(pattern);
-    wildcard_match_inner(pattern, text)
+    let Some(alternatives) = expand_pattern_alternatives(pattern) else {
+        return false;
+    };
+    alternatives
+        .iter()
+        .any(|alternative| wildcard_match_inner(alternative, text))
 }
 
 fn wildcard_match_inner(pattern: &str, text: &str) -> bool {
-    if let Some(index) = pattern.find(".*") {
-        let (prefix, rest) = pattern.split_at(index);
-        let rest = &rest[2..];
-        if !text.starts_with(prefix) {
+    let Some(tokens) = wildcard_tokens(pattern) else {
+        return false;
+    };
+    let text: Vec<char> = text.chars().collect();
+    // This is the standard greedy glob matcher.  It uses O(pattern + text)
+    // memory and linear backtracking to the most recent `.*`, avoiding a
+    // pattern-by-response-size matrix for untrusted debug output.
+    let mut pattern_index = 0_usize;
+    let mut text_index = 0_usize;
+    let mut star_index = None;
+    let mut star_text_index = 0_usize;
+    while text_index < text.len() {
+        if let Some(WildcardToken::Literal(character)) = tokens.get(pattern_index)
+            && *character == text[text_index]
+        {
+            pattern_index = pattern_index.saturating_add(1);
+            text_index = text_index.saturating_add(1);
+        } else if tokens.get(pattern_index) == Some(&WildcardToken::AnyMany) {
+            star_index = Some(pattern_index);
+            pattern_index = pattern_index.saturating_add(1);
+            star_text_index = text_index;
+        } else if let Some(star_index) = star_index {
+            pattern_index = star_index.saturating_add(1);
+            star_text_index = star_text_index.saturating_add(1);
+            text_index = star_text_index;
+        } else {
             return false;
         }
-        if rest.is_empty() {
-            return true;
-        }
-        let suffix = rest;
-        return text.ends_with(suffix) && text.len() >= prefix.len() + suffix.len();
     }
-    pattern == text
+    while tokens.get(pattern_index) == Some(&WildcardToken::AnyMany) {
+        pattern_index = pattern_index.saturating_add(1);
+    }
+    pattern_index == tokens.len()
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WildcardToken {
+    Literal(char),
+    AnyMany,
+}
+
+fn wildcard_tokens(pattern: &str) -> Option<Vec<WildcardToken>> {
+    let characters: Vec<char> = pattern.chars().collect();
+    let mut tokens = Vec::with_capacity(characters.len());
+    let mut index = 0_usize;
+    while index < characters.len() {
+        match characters[index] {
+            '\\' => {
+                index = index.saturating_add(1);
+                let escaped = *characters.get(index)?;
+                tokens.push(WildcardToken::Literal(escaped));
+            }
+            '.' if characters.get(index.saturating_add(1)) == Some(&'*') => {
+                tokens.push(WildcardToken::AnyMany);
+                index = index.saturating_add(1);
+            }
+            character => tokens.push(WildcardToken::Literal(character)),
+        }
+        index = index.saturating_add(1);
+    }
+    Some(tokens)
+}
+
+/// Expand top-level parenthesized alternatives without relying on an
+/// unbounded regex backtracker.  A malformed/unbalanced group or an expansion
+/// beyond the hard cap is rejected by validation and simply cannot match.
+fn expand_pattern_alternatives(pattern: &str) -> Option<Vec<String>> {
+    expand_pattern_alternatives_at_depth(pattern, 0)
+}
+
+fn expand_pattern_alternatives_at_depth(pattern: &str, depth: usize) -> Option<Vec<String>> {
+    if depth > MAX_PATTERN_GROUP_DEPTH {
+        return None;
+    }
+    let characters: Vec<char> = pattern.chars().collect();
+    let Some(open) = characters
+        .iter()
+        .enumerate()
+        .find_map(|(index, character)| {
+            (*character == '(' && !is_escaped(&characters, index)).then_some(index)
+        })
+    else {
+        if characters
+            .iter()
+            .enumerate()
+            .any(|(index, character)| *character == ')' && !is_escaped(&characters, index))
+        {
+            return None;
+        }
+        return Some(vec![pattern.to_owned()]);
+    };
+    let mut depth = 0_usize;
+    let mut close = None;
+    for index in open..characters.len() {
+        if is_escaped(&characters, index) {
+            continue;
+        }
+        match characters[index] {
+            '(' => depth = depth.saturating_add(1),
+            ')' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    close = Some(index);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let close = close?;
+    let inner = &characters[open + 1..close];
+    let mut alternatives = Vec::new();
+    let mut start = 0_usize;
+    let mut inner_depth = 0_usize;
+    for index in 0..=inner.len() {
+        let split = index == inner.len()
+            || (inner[index] == '|' && inner_depth == 0 && !is_escaped(inner, index));
+        if split {
+            alternatives.push(inner[start..index].iter().collect::<String>());
+            start = index.saturating_add(1);
+            continue;
+        }
+        if !is_escaped(inner, index) {
+            match inner[index] {
+                '(' => inner_depth = inner_depth.saturating_add(1),
+                ')' => inner_depth = inner_depth.checked_sub(1)?,
+                _ => {}
+            }
+        }
+    }
+    let prefix: String = characters[..open].iter().collect();
+    let suffix: String = characters[close + 1..].iter().collect();
+    let mut expanded = Vec::new();
+    let mut expanded_bytes = 0_usize;
+    for alternative in alternatives {
+        let replacement = format!("{prefix}{alternative}{suffix}");
+        let nested = expand_pattern_alternatives_at_depth(&replacement, depth.saturating_add(1))?;
+        if expanded.len().saturating_add(nested.len()) > MAX_PATTERN_ALTERNATIVES {
+            return None;
+        }
+        let nested_bytes = nested
+            .iter()
+            .try_fold(0_usize, |total, value| total.checked_add(value.len()))?;
+        expanded_bytes = expanded_bytes.checked_add(nested_bytes)?;
+        if expanded_bytes > HARD_MAX_IGNORED_LINE_PATTERN_BYTES {
+            return None;
+        }
+        expanded.extend(nested);
+    }
+    Some(expanded)
+}
+
+fn is_escaped(characters: &[char], index: usize) -> bool {
+    let mut backslashes = 0_usize;
+    let mut cursor = index;
+    while cursor > 0 && characters[cursor - 1] == '\\' {
+        backslashes = backslashes.saturating_add(1);
+        cursor -= 1;
+    }
+    backslashes % 2 == 1
 }
 
 fn compare_projection_values(
@@ -7244,12 +7922,25 @@ fn is_ignored_field(path: &str, options: &CompareOptions) -> bool {
         return false;
     }
     let canonical = canonical_field_path(path);
+    let raw = path.trim_start_matches('/');
     options.ignored_fields.iter().any(|field| {
         let field = field.trim_start_matches('/');
-        field == canonical
-            || field == path.trim_start_matches('/')
-            || (field.ends_with("[*]") && canonical.starts_with(field.trim_end_matches("[*]")))
+        field == canonical || field == raw || wildcard_path_matches(field, &canonical)
     })
+}
+
+/// Match an explicit dotted field path without treating a collection marker
+/// as an unbounded prefix.  In particular, `rows[*].bytes` can only mask the
+/// bytes field of a row; it can never mask `/rows` (and therefore cannot hide a
+/// changed label or success value).
+fn wildcard_path_matches(pattern: &str, value: &str) -> bool {
+    let pattern: Vec<&str> = pattern.split('.').collect();
+    let value: Vec<&str> = value.split('.').collect();
+    pattern.len() == value.len()
+        && pattern
+            .iter()
+            .zip(value)
+            .all(|(pattern, value)| *pattern == "*" || *pattern == value)
 }
 
 fn canonical_field_path(path: &str) -> String {
@@ -7306,42 +7997,47 @@ fn redact_value(value: &Value, path: &str) -> Value {
     }
     match value {
         Value::String(text) => Value::String(bounded_diff_text(text, MAX_DIFF_VALUE)),
-        Value::Array(values) => Value::Array(
-            values
+        Value::Array(values) => {
+            let mut redacted = values
                 .iter()
                 .take(16)
                 .map(|value| redact_value(value, path))
-                .collect(),
-        ),
-        Value::Object(values) => Value::Object(
+                .collect::<Vec<_>>();
+            if values.len() > 16 {
+                redacted.push(Value::String("<truncated>".to_owned()));
+            }
+            Value::Array(redacted)
+        }
+        Value::Object(values) => {
             // JMX property descriptors carry their semantic path beside a
             // generic `value` key.  Treat a descriptor path containing a
             // sensitive property name as context for redaction as well, so a
             // password cannot leak merely because its wire value is stored in
             // a neutral field named `value`.
-            {
-                let sensitive_descriptor = values
-                    .get("path")
-                    .and_then(Value::as_str)
-                    .is_some_and(is_sensitive_path);
-                values
-                    .iter()
-                    .take(32)
-                    .map(|(key, value)| {
-                        let child_path = format!("{path}/{key}");
-                        let redacted = if is_sensitive_key(key)
-                            || (sensitive_descriptor
-                                && matches!(key.as_str(), "value" | "wire_value"))
-                        {
-                            Value::String("<redacted>".to_owned())
-                        } else {
-                            redact_value(value, &child_path)
-                        };
-                        (key.clone(), redacted)
-                    })
-                    .collect()
-            },
-        ),
+            let sensitive_descriptor = values
+                .get("path")
+                .and_then(Value::as_str)
+                .is_some_and(is_sensitive_path);
+            let mut redacted = values
+                .iter()
+                .take(32)
+                .map(|(key, value)| {
+                    let child_path = format!("{path}/{key}");
+                    let redacted = if is_sensitive_key(key)
+                        || (sensitive_descriptor && matches!(key.as_str(), "value" | "wire_value"))
+                    {
+                        Value::String("<redacted>".to_owned())
+                    } else {
+                        redact_value(value, &child_path)
+                    };
+                    (key.clone(), redacted)
+                })
+                .collect::<Map<String, Value>>();
+            if values.len() > 32 {
+                redacted.insert("<truncated>".to_owned(), Value::Bool(true));
+            }
+            Value::Object(redacted)
+        }
         _ => value.clone(),
     }
 }
@@ -7354,11 +8050,20 @@ fn is_sensitive_key(key: &str) -> bool {
     [
         "password",
         "passwd",
+        "passphrase",
         "secret",
         "token",
         "authorization",
         "credential",
         "private_key",
+        "private-key",
+        "privatekey",
+        "api_key",
+        "api-key",
+        "apikey",
+        "access_key",
+        "access-key",
+        "accesskey",
         "cookie",
     ]
     .iter()
@@ -7396,21 +8101,36 @@ pub(crate) fn finish_report(mut report: CompareReport, maximum: usize) -> Compar
             "{} {} expected {} actual {}",
             difference.kind, difference.path, expected, actual
         );
-        let line_bytes = line.len().saturating_add(1);
-        if human.len().saturating_add(line_bytes) > maximum {
+        let Some(line_bytes) = line.len().checked_add(1) else {
+            truncated = true;
+            break;
+        };
+        if human
+            .len()
+            .checked_add(line_bytes)
+            .is_none_or(|length| length > maximum)
+        {
             truncated = true;
             break;
         }
         human.push_str(&line);
         human.push('\n');
-        rendered = rendered.saturating_add(1);
+        let Some(next_rendered) = rendered.checked_add(1) else {
+            truncated = true;
+            break;
+        };
+        rendered = next_rendered;
     }
     if rendered < report.structured_diff.len() {
         truncated = true;
     }
     if truncated {
         const MARKER: &str = "<diff truncated>\n";
-        if human.len().saturating_add(MARKER.len()) <= maximum {
+        if human
+            .len()
+            .checked_add(MARKER.len())
+            .is_some_and(|length| length <= maximum)
+        {
             human.push_str(MARKER);
         }
     }
@@ -8338,6 +9058,158 @@ mod tests {
     }
 
     #[test]
+    fn xml_nested_order_assertions_and_presence_are_not_collapsed() {
+        let temp = TempDir::new();
+        let nested_path = temp.write(
+            "nested-order.xml",
+            r#"<testResults><sample lb="parent"><assertionResult><name>first assertion</name><failure>false</failure><error>false</error></assertionResult><assertionResult><name>second assertion</name><failure>true</failure><error>false</error></assertionResult><sample lb="first"/><sample lb="second"/></sample></testResults>"#,
+        );
+        let actual = parse_jtl(&nested_path, &CompareLimits::default()).expect("nested XML");
+        let expected = json!({
+            "format": "jtl-xml",
+            "samples": [{
+                "position": 0,
+                "element": "sample",
+                "assertions": [
+                    {"name": "first assertion", "failure": "false", "error": "false"},
+                    {"name": "second assertion", "failure": "true", "error": "false"}
+                ],
+                "sub_results": {
+                    "count": 2,
+                    "ordered_labels": ["first", "second"],
+                    "nested": [
+                        {"element": "sample", "label": "first"},
+                        {"element": "sample", "label": "second"}
+                    ]
+                }
+            }]
+        });
+        validate_expected_xml_projection(&expected, &CompareLimits::default())
+            .expect("nested order expectation schema");
+        let mut report = test_report();
+        compare_xml_expectation(&actual, &expected, &CompareOptions::default(), &mut report)
+            .expect("nested order comparison");
+        assert!(report.equal, "{}", report.human_diff);
+
+        let mut reordered = expected.clone();
+        reordered["samples"][0]["sub_results"]["ordered_labels"] = json!(["second", "first"]);
+        let mut mismatch = test_report();
+        compare_xml_expectation(
+            &actual,
+            &reordered,
+            &CompareOptions::default(),
+            &mut mismatch,
+        )
+        .expect("nested ordering mismatch is a comparison result");
+        assert!(!mismatch.equal);
+        assert!(
+            mismatch
+                .structured_diff
+                .iter()
+                .any(|difference| difference.path.contains("/sub_results/ordered_labels/"))
+        );
+
+        let mut assertion_reordered = expected.clone();
+        assertion_reordered["samples"][0]["assertions"][0]["name"] = json!("second assertion");
+        let mut assertion_mismatch = test_report();
+        compare_xml_expectation(
+            &actual,
+            &assertion_reordered,
+            &CompareOptions::default(),
+            &mut assertion_mismatch,
+        )
+        .expect("assertion ordering mismatch is a comparison result");
+        assert!(!assertion_mismatch.equal);
+        assert!(
+            assertion_mismatch
+                .structured_diff
+                .iter()
+                .any(|difference| difference.path.ends_with("/assertions/0/name"))
+        );
+
+        let empty_path = temp.write(
+            "empty-section.xml",
+            "<testResults><sample><responseData class=\"java.lang.String\"/></sample></testResults>",
+        );
+        let empty_actual = parse_jtl(&empty_path, &CompareLimits::default()).expect("empty XML");
+        let explicit_empty = json!({
+            "format": "jtl-xml",
+            "samples": [{
+                "position": 0,
+                "element": "sample",
+                "sections": {"responseData": ""}
+            }]
+        });
+        validate_expected_xml_projection(&explicit_empty, &CompareLimits::default())
+            .expect("empty section expectation schema");
+        let mut explicit_report = test_report();
+        compare_xml_expectation(
+            &empty_actual,
+            &explicit_empty,
+            &CompareOptions::default(),
+            &mut explicit_report,
+        )
+        .expect("explicit empty section comparison");
+        assert!(explicit_report.equal, "{}", explicit_report.human_diff);
+
+        let absent_section = json!({
+            "format": "jtl-xml",
+            "samples": [{"position": 0, "element": "sample"}]
+        });
+        let mut absent_report = test_report();
+        compare_xml_expectation(
+            &empty_actual,
+            &absent_section,
+            &CompareOptions::default(),
+            &mut absent_report,
+        )
+        .expect("missing section comparison");
+        assert!(!absent_report.equal, "present empty section was dropped");
+
+        let absent_path = temp.write("absent-section.xml", "<testResults><sample/></testResults>");
+        let absent_actual = parse_jtl(&absent_path, &CompareLimits::default()).expect("absent XML");
+        let mut present_report = test_report();
+        compare_xml_expectation(
+            &absent_actual,
+            &explicit_empty,
+            &CompareOptions::default(),
+            &mut present_report,
+        )
+        .expect("missing versus explicit empty comparison");
+        assert!(
+            !present_report.equal,
+            "missing section was collapsed to empty"
+        );
+
+        let csv_path = temp.write("rows.csv", "label\nvalue\n");
+        let csv_actual = parse_jtl(&csv_path, &CompareLimits::default()).expect("CSV");
+        let omitted_rows = json!({"format": "jtl-csv"});
+        let mut omitted_report = test_report();
+        compare_csv_expectation(
+            &csv_actual,
+            &omitted_rows,
+            &CompareOptions::default(),
+            &mut omitted_report,
+        );
+        assert!(
+            omitted_report.equal,
+            "omitted rows remain a partial expectation"
+        );
+        let explicit_rows = json!({"format": "jtl-csv", "rows": []});
+        let mut explicit_rows_report = test_report();
+        compare_csv_expectation(
+            &csv_actual,
+            &explicit_rows,
+            &CompareOptions::default(),
+            &mut explicit_rows_report,
+        );
+        assert!(
+            !explicit_rows_report.equal,
+            "explicit empty rows must assert no rows"
+        );
+    }
+
+    #[test]
     fn comparator_limits_cover_text_depth_events_and_fixture_resources() {
         let temp = TempDir::new();
         let rows = temp.write("rows.csv", "label\none\ntwo\n");
@@ -8688,6 +9560,12 @@ mod tests {
         options.ignored_fields.insert("rows[*].bytes".to_owned());
         let match_report = compare_jtl_files(&left, &right, &options).expect("masked compare");
         assert!(match_report.equal, "{}", match_report.human_diff);
+        assert!(
+            match_report
+                .raw_diagnostic_diff
+                .iter()
+                .any(|difference| { difference.path.ends_with("/bytes") })
+        );
         let mut bad = CompareOptions::default();
         bad.ignored_fields.insert("rows[*].label".to_owned());
         let error = compare_jtl_files(&left, &right, &bad).expect_err("label mask rejected");
@@ -8734,6 +9612,142 @@ mod tests {
         );
         assert_eq!(sensitive["value"], "<redacted>");
         assert_eq!(sensitive["wire_value"], "<redacted>");
+
+        let api_key = redact_value(
+            &json!({
+                "api_key": "fixture-api-secret",
+                "access_token": "fixture-token",
+                "ordinary": "retained"
+            }),
+            "/request",
+        );
+        let rendered = serde_json::to_string(&api_key).expect("redacted diagnostic JSON");
+        assert!(!rendered.contains("fixture-api-secret"));
+        assert!(!rendered.contains("fixture-token"));
+        assert_eq!(api_key["api_key"], "<redacted>");
+        assert_eq!(api_key["access_token"], "<redacted>");
+        assert_eq!(api_key["ordinary"], "retained");
+    }
+
+    #[test]
+    fn normalization_paths_are_leaf_exact_and_patterns_are_bounded() {
+        let temp = TempDir::new();
+        let left = temp.write("left.csv", "label,success,bytes\na,true,1\n");
+        let right = temp.write("right.csv", "label,success,bytes\na,false,2\n");
+        let mut options = CompareOptions::with_policies(["NORM-JTL-001", "NORM-TIME-001"]);
+        options.ignored_fields.insert("rows[*].bytes".to_owned());
+        let report = compare_jtl_files(&left, &right, &options).expect("leaf comparison");
+        assert!(!report.equal, "a success difference must remain observable");
+        assert!(
+            report
+                .structured_diff
+                .iter()
+                .any(|difference| { difference.path.ends_with("/success") })
+        );
+        assert!(
+            !report
+                .structured_diff
+                .iter()
+                .any(|difference| { difference.path.ends_with("/bytes") })
+        );
+
+        let document = parse_jtl(&left, &CompareLimits::default()).expect("CSV document");
+        let partial = json!({
+            "format": "jtl-csv",
+            "rows": [{"position": 0, "fields": {"label": "a"}}]
+        });
+        let mut partial_report = test_report();
+        compare_csv_expectation(&document, &partial, &options, &mut partial_report);
+        assert!(
+            partial_report
+                .structured_diff
+                .iter()
+                .any(|difference| { difference.path.ends_with("/success") }),
+            "omitted stable row fields must not be hidden"
+        );
+
+        let mut broad = CompareOptions::with_policies(["NORM-JTL-001", "NORM-TIME-001"]);
+        broad.ignored_fields.insert("rows[*]".to_owned());
+        let error = compare_jtl_files(&left, &right, &broad)
+            .expect_err("an array-wide normalization must be rejected");
+        assert_eq!(error.code(), ErrorCode::Normalization);
+
+        assert!(wildcard_match(
+            r"^(START|TESTSTART)\.(HMS|MS|YMD)=.*$",
+            "START.MS=123"
+        ));
+        assert!(wildcard_match(
+            r"^(START|TESTSTART)\.(HMS|MS|YMD)=.*$",
+            "TESTSTART.YMD=20260813"
+        ));
+        assert!(!wildcard_match(
+            r"^(START|TESTSTART)\.(HMS|MS|YMD)=.*$",
+            "OTHER.MS=123"
+        ));
+        assert!(!valid_line_pattern("^(unclosed|group$"));
+        assert!(valid_line_pattern("^.*$"));
+    }
+
+    #[test]
+    fn normalization_descriptors_do_not_drop_malformed_entries() {
+        let cases = [
+            (
+                "missing normalization still validates line patterns",
+                json!({
+                    "samples": [{
+                        "debug_response_projection": {
+                            "ignored_line_patterns": ["valid", 7]
+                        }
+                    }]
+                }),
+                ErrorCode::ManifestSchema,
+            ),
+            (
+                "missing normalization still validates attributes",
+                json!({
+                    "sample_contract": {"ignored_attributes": ["t", false]}
+                }),
+                ErrorCode::ManifestSchema,
+            ),
+            (
+                "normalization must be an object",
+                json!({"normalization": []}),
+                ErrorCode::ManifestSchema,
+            ),
+            (
+                "rows must be an array",
+                json!({"rows": {"ignored_fields": ["bytes"]}}),
+                ErrorCode::ManifestSchema,
+            ),
+            (
+                "unknown normalization fields are unsupported",
+                json!({"normalization": {"future_field": []}}),
+                ErrorCode::UnsupportedFormat,
+            ),
+        ];
+        for (label, malformed, expected_code) in cases {
+            let mut options = CompareOptions::with_policies(["NORM-ENV-001"]);
+            let before = options.clone();
+            let error = load_expected_normalization(&malformed, &mut options)
+                .expect_err("malformed descriptor must fail closed");
+            assert_eq!(error.code(), expected_code, "{label}: {error}");
+            assert_eq!(options, before, "{label} mutated options before failing");
+        }
+
+        let mut unknown = CompareOptions::with_policies(["NORM-JTL-001", "NORM-TIME-001"]);
+        unknown
+            .ignored_fields
+            .insert("rows[*].bytes_blob".to_owned());
+        let error = validate_options(&unknown).expect_err("unknown field must fail closed");
+        assert_eq!(error.code(), ErrorCode::Normalization);
+
+        let duplicate = CompareOptions::with_policies(["NORM-ENV-001", "NORM-ENV-001"]);
+        assert_eq!(duplicate.normalization_policy_refs.len(), 1);
+        validate_options(&duplicate).expect("duplicate policy references are de-duplicated");
+
+        let unknown_policy = CompareOptions::with_policies(["NORM-UNKNOWN-999"]);
+        let error = validate_options(&unknown_policy).expect_err("unknown policy must fail closed");
+        assert_eq!(error.code(), ErrorCode::Normalization);
     }
 
     #[test]

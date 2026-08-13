@@ -92,6 +92,13 @@ const MAX_FIXTURE_TREE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_JSON_DEPTH: usize = 64;
 const MAX_JSON_NODES: usize = 200_000;
 const FIXTURE_READ_CHUNK_BYTES: usize = 16 * 1024;
+// A fuzz run may retain only a bounded set of diagnostic artifacts.  Keep the
+// count named so this safety limit cannot be mistaken for a schema cardinality
+// or scattered as an unexplained literal through the validator.
+const MAX_FUZZ_ARTIFACT_DEFINITIONS: usize = 64;
+// Generated-input metadata is bounded independently from the artifact list;
+// neither limit is a claim about how many fixture inputs a case should have.
+const MAX_GENERATED_INPUT_DEFINITIONS: usize = 64;
 
 #[derive(Debug)]
 enum FixtureReadError {
@@ -320,15 +327,34 @@ enum ExecutionState {
 pub(crate) fn check(root: &Path, fixture_root: &Path, profile: &ProfileIndex) -> Diagnostics {
     let mut diagnostics = Diagnostics::default();
     let fixture_display = display_path(root, fixture_root);
-    if !fixture_root.exists() {
+    let fixture_root_metadata = match fs::symlink_metadata(fixture_root) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            diagnostics.push(Diagnostic::new(
+                "FIXTURE-IO",
+                fixture_display,
+                "fixture root does not exist",
+            ));
+            return diagnostics;
+        }
+        Err(error) => {
+            diagnostics.push(Diagnostic::new(
+                "FIXTURE-IO",
+                fixture_display,
+                format!("cannot inspect fixture root: {error}"),
+            ));
+            return diagnostics;
+        }
+    };
+    if fixture_root_metadata.file_type().is_symlink() {
         diagnostics.push(Diagnostic::new(
-            "FIXTURE-IO",
+            "FIXTURE-PATH",
             fixture_display,
-            "fixture root does not exist",
+            "fixture root must not be a symlink",
         ));
         return diagnostics;
     }
-    if !fixture_root.is_dir() {
+    if !fixture_root_metadata.is_dir() {
         diagnostics.push(Diagnostic::new(
             "FIXTURE-PATH",
             fixture_display,
@@ -1775,6 +1801,7 @@ fn validate_case(
             }
         }
     }
+    validate_coverage_contract(case, &path, profile, diagnostics);
 
     let static_descriptor = case.get("plan").is_none()
         && (case.contains_key("inputs")
@@ -2080,6 +2107,45 @@ fn validate_provenance(
             format!("must match case manifest case_id {case_id:?}"),
         ));
     }
+    // Older source-only provenance records predate the optional profile field,
+    // so absence remains compatible.  When a record declares identity, bind it
+    // to both the active profile and owning case rather than accepting a
+    // plausible-looking hash/oracle record from another profile.
+    if let Some(provenance_profile_id) = provenance.get("profile_id") {
+        match provenance_profile_id.as_str() {
+            Some(profile_id) if profile_id == profile.profile_id => {}
+            Some(profile_id) => diagnostics.push(Diagnostic::new(
+                "FIXTURE-REFERENCE",
+                format!("{path}.profile_id"),
+                format!(
+                    "must match active profile {:?}, found {profile_id:?}",
+                    profile.profile_id
+                ),
+            )),
+            None => diagnostics.push(Diagnostic::new(
+                "FIXTURE-SCHEMA",
+                format!("{path}.profile_id"),
+                "declared profile_id must be a string",
+            )),
+        }
+    }
+    if let Some(case_family_id) = case.get("fixture_family_id").and_then(Value::as_str)
+        && let Some(provenance_family_id) = provenance.get("fixture_family_id")
+    {
+        match provenance_family_id.as_str() {
+            Some(family_id) if family_id == case_family_id => {}
+            Some(family_id) => diagnostics.push(Diagnostic::new(
+                "FIXTURE-REFERENCE",
+                format!("{path}.fixture_family_id"),
+                format!("must match case manifest fixture_family_id {case_family_id:?}, found {family_id:?}"),
+            )),
+            None => diagnostics.push(Diagnostic::new(
+                "FIXTURE-SCHEMA",
+                format!("{path}.fixture_family_id"),
+                "declared fixture_family_id must be a string",
+            )),
+        }
+    }
     let static_descriptor = execution_state(case) != Some(ExecutionState::Observed);
     let Some(origin) = provenance.get("origin").and_then(Value::as_object) else {
         if !static_descriptor {
@@ -2270,8 +2336,8 @@ fn check_upstream_pin(
         }
     }
     validate_oracle_pgp(oracle, path, state, diagnostics);
-    if state == Some(ExecutionState::Observed)
-        && required_string(
+    if state == Some(ExecutionState::Observed) {
+        if required_string(
             oracle,
             "retrieved_at",
             &format!("{path}.oracle"),
@@ -2279,11 +2345,26 @@ fn check_upstream_pin(
             diagnostics,
         )
         .is_none()
-    {
+        {
+            diagnostics.push(Diagnostic::new(
+                "FIXTURE-PROVENANCE",
+                format!("{path}.oracle.retrieved_at"),
+                "observed evidence requires an artifact retrieval timestamp",
+            ));
+        }
+    } else if let Some(retrieved_at) = oracle.get("retrieved_at") {
+        if !matches!(retrieved_at, Value::Null | Value::String(_)) {
+            diagnostics.push(Diagnostic::new(
+                "FIXTURE-SCHEMA",
+                format!("{path}.oracle.retrieved_at"),
+                "non-observed provenance retrieval date must be a string or null",
+            ));
+        }
+    } else {
         diagnostics.push(Diagnostic::new(
             "FIXTURE-PROVENANCE",
             format!("{path}.oracle.retrieved_at"),
-            "observed evidence requires an artifact retrieval timestamp",
+            "provenance must declare retrieved_at, using null when no artifact retrieval occurred",
         ));
     }
     let verified = oracle
@@ -2488,6 +2569,16 @@ fn validate_inputs(
         diagnostics,
     );
     validate_named_input_hashes(root, path, inputs, case_dir, case, state, diagnostics);
+    if let Some(generated_inputs) = inputs.get("generated_inputs") {
+        validate_generated_inputs(
+            fixture_root,
+            case_dir,
+            &format!("{path}.inputs.generated_inputs"),
+            generated_inputs,
+            inputs,
+            diagnostics,
+        );
+    }
     let Some(plan) = case.get("plan").and_then(Value::as_object) else {
         validate_input_safety(path, inputs, diagnostics);
         return;
@@ -2619,6 +2710,150 @@ fn validate_inputs(
         }
     }
     validate_input_safety(path, inputs, diagnostics);
+}
+
+fn validate_generated_inputs(
+    fixture_root: &Path,
+    case_dir: &Path,
+    path: &str,
+    value: &Value,
+    inputs: &Map<String, Value>,
+    diagnostics: &mut Diagnostics,
+) {
+    const FIELDS: [&str; 7] = [
+        "path",
+        "source",
+        "command",
+        "generator_version",
+        "seed",
+        "seed_reason",
+        "reproducible",
+    ];
+    let Some(values) = value.as_array() else {
+        diagnostics.push(Diagnostic::new(
+            "FIXTURE-SCHEMA",
+            path,
+            "generated_inputs must be an array",
+        ));
+        return;
+    };
+    if values.len() > MAX_GENERATED_INPUT_DEFINITIONS {
+        diagnostics.push(Diagnostic::new(
+            "FIXTURE-BOUNDS",
+            path,
+            format!("generated input definitions exceed {MAX_GENERATED_INPUT_DEFINITIONS}"),
+        ));
+    }
+    let declared_input_paths = inputs
+        .get("input_files")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object)
+        .filter_map(|input| input.get("path").and_then(Value::as_str))
+        .collect::<BTreeSet<_>>();
+    let mut generated_paths = BTreeSet::new();
+    for (position, value) in values.iter().enumerate() {
+        let item_path = format!("{path}[{position}]");
+        let Some(item) = value.as_object() else {
+            diagnostics.push(Diagnostic::new(
+                "FIXTURE-SCHEMA",
+                item_path,
+                "generated input definition must be an object",
+            ));
+            continue;
+        };
+        for field in item.keys() {
+            if !FIELDS.contains(&field.as_str()) {
+                diagnostics.push(Diagnostic::new(
+                    "FIXTURE-SCHEMA",
+                    format!("{item_path}.{field}"),
+                    "unknown generated input field is not permitted",
+                ));
+            }
+        }
+        let Some(output_path) =
+            required_string(item, "path", &item_path, "FIXTURE-SCHEMA", diagnostics)
+        else {
+            continue;
+        };
+        if safe_fixture_path(fixture_root, case_dir, &output_path).is_none() {
+            diagnostics.push(Diagnostic::new(
+                "FIXTURE-PATH",
+                format!("{item_path}.path"),
+                "generated input path must be safe and relative to the case root",
+            ));
+        }
+        if !generated_paths.insert(output_path.clone()) {
+            diagnostics.push(Diagnostic::new(
+                "FIXTURE-REFERENCE",
+                format!("{item_path}.path"),
+                "generated input output path is duplicated",
+            ));
+        }
+        if !declared_input_paths.contains(output_path.as_str()) {
+            diagnostics.push(Diagnostic::new(
+                "FIXTURE-REFERENCE",
+                format!("{item_path}.path"),
+                "generated input output must be listed in inputs.input_files",
+            ));
+        }
+        let Some(source_path) =
+            required_string(item, "source", &item_path, "FIXTURE-SCHEMA", diagnostics)
+        else {
+            continue;
+        };
+        if safe_fixture_path(fixture_root, case_dir, &source_path).is_none() {
+            diagnostics.push(Diagnostic::new(
+                "FIXTURE-PATH",
+                format!("{item_path}.source"),
+                "generated input source must be safe and relative to the case root",
+            ));
+        }
+        if !declared_input_paths.contains(source_path.as_str()) {
+            diagnostics.push(Diagnostic::new(
+                "FIXTURE-REFERENCE",
+                format!("{item_path}.source"),
+                "generated input source must be listed in inputs.input_files",
+            ));
+        }
+        for field in ["command", "generator_version"] {
+            let _ = required_string(item, field, &item_path, "FIXTURE-SCHEMA", diagnostics);
+        }
+        let Some(seed) = item.get("seed") else {
+            diagnostics.push(Diagnostic::new(
+                "FIXTURE-SCHEMA",
+                format!("{item_path}.seed"),
+                "generated input definition requires an explicit seed or null",
+            ));
+            continue;
+        };
+        match seed {
+            Value::Null => {
+                let _ = required_string(
+                    item,
+                    "seed_reason",
+                    &item_path,
+                    "FIXTURE-PROVENANCE",
+                    diagnostics,
+                );
+            }
+            Value::String(value) if !value.trim().is_empty() => {}
+            Value::Number(_) => {}
+            _ => diagnostics.push(Diagnostic::new(
+                "FIXTURE-SCHEMA",
+                format!("{item_path}.seed"),
+                "generated input seed must be a non-empty string, number, or null",
+            )),
+        }
+        if item.get("reproducible").and_then(Value::as_bool) != Some(true) {
+            diagnostics.push(Diagnostic::new(
+                "FIXTURE-PROVENANCE",
+                format!("{item_path}.reproducible"),
+                "generated input definition must declare reproducible=true",
+            ));
+        }
+    }
 }
 
 fn validate_input_safety(path: &str, inputs: &Map<String, Value>, diagnostics: &mut Diagnostics) {
@@ -3258,6 +3493,193 @@ fn validate_custom_identity(
             }
         }
     }
+    validate_coverage_contract(object, path, profile, diagnostics);
+}
+
+/// Validate the per-feature coverage map carried by harness and external
+/// boundary descriptors.  The case manifest is the source of truth for which
+/// features a fixture covers, while the profile is the source of truth for
+/// each feature's normalization policies and external boundaries.  Checking
+/// both directions prevents a descriptor from silently dropping a policy or
+/// claiming a boundary that belongs to another feature.
+fn validate_coverage_contract(
+    object: &Map<String, Value>,
+    path: &str,
+    profile: &ProfileIndex,
+    diagnostics: &mut Diagnostics,
+) {
+    let Some(coverage) = object.get("coverage_by_conformance_id") else {
+        return;
+    };
+    let Some(coverage) = coverage.as_object() else {
+        diagnostics.push(Diagnostic::new(
+            "FIXTURE-SCHEMA",
+            format!("{path}.coverage_by_conformance_id"),
+            "coverage_by_conformance_id must be an object keyed by conformance ID",
+        ));
+        return;
+    };
+    let declared_features = object
+        .get("conformance_ids")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect::<BTreeSet<_>>();
+    let coverage_features = coverage.keys().map(String::as_str).collect::<BTreeSet<_>>();
+    if declared_features != coverage_features {
+        diagnostics.push(Diagnostic::new(
+            "FIXTURE-COVERAGE",
+            format!("{path}.coverage_by_conformance_id"),
+            format!(
+                "coverage keys must exactly match conformance_ids: expected {declared_features:?}, found {coverage_features:?}"
+            ),
+        ));
+    }
+
+    let mut normalization_union = BTreeSet::new();
+    let mut boundary_union = BTreeSet::new();
+    for (feature_id, feature_coverage) in coverage {
+        let feature_path = format!("{path}.coverage_by_conformance_id.{feature_id}");
+        let Some(feature_coverage) = feature_coverage.as_object() else {
+            diagnostics.push(Diagnostic::new(
+                "FIXTURE-SCHEMA",
+                feature_path,
+                "coverage entry must be an object",
+            ));
+            continue;
+        };
+        let normalization_refs = coverage_string_set(
+            feature_coverage.get("normalization_policy_refs"),
+            &format!("{feature_path}.normalization_policy_refs"),
+            "normalization_policy_refs",
+            diagnostics,
+        );
+        let boundary_refs = coverage_string_set(
+            feature_coverage.get("external_runtime_boundary_ids"),
+            &format!("{feature_path}.external_runtime_boundary_ids"),
+            "external_runtime_boundary_ids",
+            diagnostics,
+        );
+        if !profile.feature_ids.contains(feature_id) {
+            diagnostics.push(Diagnostic::new(
+                "FIXTURE-REFERENCE",
+                format!("{path}.coverage_by_conformance_id.{feature_id}"),
+                format!("unknown profile conformance ID {feature_id:?}"),
+            ));
+            continue;
+        }
+        let expected_normalizations = profile
+            .feature_normalization_ids
+            .get(feature_id)
+            .cloned()
+            .unwrap_or_default();
+        if normalization_refs != expected_normalizations {
+            diagnostics.push(Diagnostic::new(
+                "FIXTURE-NORMALIZATION",
+                format!("{feature_path}.normalization_policy_refs"),
+                format!(
+                    "must exactly match profile feature {feature_id:?}: expected {expected_normalizations:?}, found {normalization_refs:?}"
+                ),
+            ));
+        }
+        let expected_boundaries = profile
+            .feature_boundaries
+            .get(feature_id)
+            .cloned()
+            .unwrap_or_default();
+        if boundary_refs != expected_boundaries {
+            diagnostics.push(Diagnostic::new(
+                "FIXTURE-BOUNDARY",
+                format!("{feature_path}.external_runtime_boundary_ids"),
+                format!(
+                    "must exactly match profile feature {feature_id:?}: expected {expected_boundaries:?}, found {boundary_refs:?}"
+                ),
+            ));
+        }
+        normalization_union.extend(normalization_refs);
+        boundary_union.extend(boundary_refs);
+    }
+    if let Some(value) = object.get("normalization_policy_refs") {
+        let actual = value
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect::<BTreeSet<_>>();
+        if actual != normalization_union {
+            diagnostics.push(Diagnostic::new(
+                "FIXTURE-NORMALIZATION",
+                format!("{path}.normalization_policy_refs"),
+                format!(
+                    "top-level normalization policy union must match coverage entries: expected {normalization_union:?}, found {actual:?}"
+                ),
+            ));
+        }
+    }
+    if let Some(value) = object.get("external_runtime_boundary_ids") {
+        let actual = value
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect::<BTreeSet<_>>();
+        if actual != boundary_union {
+            diagnostics.push(Diagnostic::new(
+                "FIXTURE-BOUNDARY",
+                format!("{path}.external_runtime_boundary_ids"),
+                format!(
+                    "top-level external boundary union must match coverage entries: expected {boundary_union:?}, found {actual:?}"
+                ),
+            ));
+        }
+    }
+}
+
+fn coverage_string_set(
+    value: Option<&Value>,
+    path: &str,
+    field: &str,
+    diagnostics: &mut Diagnostics,
+) -> BTreeSet<String> {
+    let Some(value) = value else {
+        diagnostics.push(Diagnostic::new(
+            "FIXTURE-SCHEMA",
+            path,
+            format!("coverage entry requires {field}"),
+        ));
+        return BTreeSet::new();
+    };
+    let Some(values) = value.as_array() else {
+        diagnostics.push(Diagnostic::new(
+            "FIXTURE-SCHEMA",
+            path,
+            format!("{field} must be an array of strings"),
+        ));
+        return BTreeSet::new();
+    };
+    let mut result = BTreeSet::new();
+    for (position, value) in values.iter().enumerate() {
+        let item_path = format!("{path}[{position}]");
+        let Some(value) = value.as_str() else {
+            diagnostics.push(Diagnostic::new(
+                "FIXTURE-SCHEMA",
+                item_path,
+                format!("{field} members must be strings"),
+            ));
+            continue;
+        };
+        if !result.insert(value.to_owned()) {
+            diagnostics.push(Diagnostic::new(
+                "FIXTURE-SCHEMA",
+                item_path,
+                format!("{field} members must be unique"),
+            ));
+        }
+    }
+    result
 }
 
 fn validate_custom_schema(
@@ -3713,6 +4135,28 @@ fn validate_fuzz_campaign(
             "not_run=true requires status=planned",
         ));
     }
+    let evidence_state = evidence_status
+        .as_deref()
+        .and_then(|value| parse_expectation_state(&Value::String(value.to_owned())));
+    if not_run == Some(true)
+        && !matches!(
+            evidence_state,
+            Some(ExecutionState::NotRun | ExecutionState::Unavailable)
+        )
+    {
+        diagnostics.push(Diagnostic::new(
+            "FIXTURE-EVIDENCE",
+            format!("{path}.evidence_status"),
+            "not_run=true requires a not-run or unavailable evidence_status",
+        ));
+    }
+    if not_run == Some(false) && status.as_deref() == Some("planned") {
+        diagnostics.push(Diagnostic::new(
+            "FIXTURE-EVIDENCE",
+            format!("{path}.not_run"),
+            "planned fuzz campaigns must explicitly set not_run=true",
+        ));
+    }
     let Some(campaign) = required_object(object, "campaign", path, diagnostics) else {
         return;
     };
@@ -3755,6 +4199,7 @@ fn validate_fuzz_campaign(
         &target_index,
         &invariant_index,
         runner,
+        campaign,
         diagnostics,
     );
     validate_fuzz_outcome(
@@ -3774,6 +4219,45 @@ fn validate_fuzz_campaign(
         &invariant_index,
         diagnostics,
     );
+    if not_run == Some(true) {
+        validate_fuzz_not_run_contract(object, path, diagnostics);
+    }
+}
+
+fn validate_fuzz_not_run_contract(
+    object: &Map<String, Value>,
+    path: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    if let Some(target_outcomes) = object.get("target_outcomes").and_then(Value::as_array) {
+        for (position, outcome) in target_outcomes.iter().enumerate() {
+            if outcome
+                .as_object()
+                .and_then(|outcome| outcome.get("status"))
+                .and_then(Value::as_str)
+                != Some("not_run")
+            {
+                diagnostics.push(Diagnostic::new(
+                    "FIXTURE-EVIDENCE",
+                    format!("{path}.target_outcomes[{position}].status"),
+                    "not_run campaign requires every target outcome to be not_run",
+                ));
+            }
+        }
+    }
+    if object
+        .get("outcome")
+        .and_then(Value::as_object)
+        .and_then(|outcome| outcome.get("status"))
+        .and_then(Value::as_str)
+        != Some("not_run")
+    {
+        diagnostics.push(Diagnostic::new(
+            "FIXTURE-EVIDENCE",
+            format!("{path}.outcome.status"),
+            "not_run campaign requires aggregate outcome status not_run",
+        ));
+    }
 }
 
 fn validate_fuzz_campaign_header(
@@ -4420,6 +4904,7 @@ fn validate_fuzz_target_outcomes(
     targets: &BTreeMap<String, Map<String, Value>>,
     invariants: &BTreeMap<String, String>,
     runner: &Map<String, Value>,
+    campaign: &Map<String, Value>,
     diagnostics: &mut Diagnostics,
 ) {
     let Some(values) = value.and_then(Value::as_array) else {
@@ -4430,6 +4915,11 @@ fn validate_fuzz_target_outcomes(
         ));
         return;
     };
+    let max_executions_per_target = campaign
+        .get("configuration")
+        .and_then(Value::as_object)
+        .and_then(|configuration| configuration.get("runs_per_target"))
+        .and_then(Value::as_u64);
     let mut seen = BTreeSet::new();
     for (position, value) in values.iter().enumerate() {
         let item_path = format!("{path}[{position}]");
@@ -4493,6 +4983,18 @@ fn validate_fuzz_target_outcomes(
             continue;
         };
         validate_fuzz_counts(counts, &format!("{item_path}.counts"), runner, diagnostics);
+        if let Some(max_executions) = max_executions_per_target
+            && counts
+                .get("executions")
+                .and_then(Value::as_u64)
+                .is_some_and(|executions| executions > max_executions)
+        {
+            diagnostics.push(Diagnostic::new(
+                "FIXTURE-BOUNDS",
+                format!("{item_path}.counts.executions"),
+                "target executions exceed configured runs_per_target",
+            ));
+        }
         let Some(ids) = required_string_list(outcome, "invariant_ids", &item_path, diagnostics)
         else {
             continue;
@@ -4706,11 +5208,11 @@ fn validate_fuzz_artifacts(
         ));
         return;
     };
-    if values.len() > 64 {
+    if values.len() > MAX_FUZZ_ARTIFACT_DEFINITIONS {
         diagnostics.push(Diagnostic::new(
             "FIXTURE-BOUNDS",
             path,
-            "fuzz artifact definitions are capped at 64",
+            format!("fuzz artifact definitions exceed {MAX_FUZZ_ARTIFACT_DEFINITIONS}"),
         ));
     }
     let campaign_id = campaign.get("campaign_id").and_then(Value::as_str);
@@ -9049,25 +9551,6 @@ fn validate_declared_file_hash(
         ));
         return;
     };
-    if !path.is_file() {
-        let repository_path = root.join(declared_path);
-        if repository_path.is_file() {
-            path = repository_path;
-        }
-    }
-    if !path.is_file() {
-        if placeholder_allowed && is_external_static_artifact_ref(diagnostic_path, declared_path) {
-            return;
-        }
-        diagnostics.push(Diagnostic::new(
-            "FIXTURE-REFERENCE",
-            diagnostic_path,
-            format!(
-                "referenced file {} does not exist",
-                display_path(root, &path)
-            ),
-        ));
-    }
     let Some(hash) = hash.as_str() else {
         diagnostics.push(Diagnostic::new(
             "FIXTURE-SCHEMA",
@@ -9093,6 +9576,25 @@ fn validate_declared_file_hash(
             "must be a lowercase SHA-256 digest",
         ));
         return;
+    }
+    if !path.is_file() {
+        let repository_path = root.join(declared_path);
+        if repository_path.is_file() {
+            path = repository_path;
+        }
+    }
+    if !path.is_file() {
+        if placeholder_allowed && is_external_static_artifact_ref(diagnostic_path, declared_path) {
+            return;
+        }
+        diagnostics.push(Diagnostic::new(
+            "FIXTURE-REFERENCE",
+            diagnostic_path,
+            format!(
+                "referenced file {} does not exist",
+                display_path(root, &path)
+            ),
+        ));
     }
     check_sha256(
         root,
@@ -9164,15 +9666,16 @@ mod tests {
     use super::{
         ExecutionState, FixtureReadError, check_expectation_evidence, check_safe_path_value,
         check_sha256, execution_state, expectation_state, optional_hash, read_bounded_file,
-        read_bounded_handle, read_json, validate_bound_object, validate_digest_value,
-        validate_execution_status_value, validate_expectation, validate_fuzz_counts,
-        validate_fuzz_targets, validate_http_trace, validate_input_hash_value,
-        validate_json_schema_document, validate_mirror_case_ids, validate_nested_schema_ids,
-        validate_sensitive_json_values,
+        read_bounded_handle, read_json, validate_bound_object, validate_coverage_contract,
+        validate_digest_value, validate_execution_status_value, validate_expectation,
+        validate_fuzz_counts, validate_fuzz_targets, validate_generated_inputs,
+        validate_http_trace, validate_input_hash_value, validate_json_schema_document,
+        validate_mirror_case_ids, validate_nested_schema_ids, validate_sensitive_json_values,
     };
     use crate::diagnostics::Diagnostics;
     use crate::profile::ProfileIndex;
     use serde_json::{Map, Value, json};
+    use std::collections::BTreeSet;
 
     fn must_ok<T, E>(result: Result<T, E>, context: &str) -> Option<T> {
         assert!(result.is_ok(), "{context}");
@@ -9199,6 +9702,78 @@ mod tests {
             diagnostics.iter().next().map(|item| item.code.as_str()),
             Some("FIXTURE-PATH")
         );
+    }
+
+    #[test]
+    fn generated_inputs_require_reproducible_generator_metadata() {
+        let value = json!({
+            "input_files": [{"path": "inputs/generated.bin"}, {"path": "inputs/source.txt"}],
+            "generated_inputs": [{
+                "path": "inputs/generated.bin",
+                "source": "inputs/source.txt",
+                "command": "generator --source inputs/source.txt",
+                "reproducible": true
+            }]
+        });
+        let Some(inputs) = value.as_object() else {
+            return;
+        };
+        let mut diagnostics = Diagnostics::default();
+        validate_generated_inputs(
+            std::path::Path::new("fixture"),
+            std::path::Path::new("fixture/case"),
+            "provenance.inputs.generated_inputs",
+            inputs.get("generated_inputs").unwrap_or(&Value::Null),
+            inputs,
+            &mut diagnostics,
+        );
+        assert!(diagnostics.iter().any(|item| {
+            item.code == "FIXTURE-SCHEMA" && item.path.ends_with(".generator_version")
+        }));
+        assert!(
+            diagnostics
+                .iter()
+                .any(|item| { item.code == "FIXTURE-SCHEMA" && item.path.ends_with(".seed") })
+        );
+    }
+
+    #[test]
+    fn coverage_contract_rejects_policy_or_boundary_drift() {
+        let value = json!({
+            "conformance_ids": ["TEST-001"],
+            "normalization_policy_refs": ["NORM-ENV-001"],
+            "external_runtime_boundary_ids": [],
+            "coverage_by_conformance_id": {
+                "TEST-001": {
+                    "normalization_policy_refs": ["NORM-SECURITY-001"],
+                    "external_runtime_boundary_ids": ["EXT-JVM-001"]
+                }
+            }
+        });
+        let Some(object) = value.as_object() else {
+            return;
+        };
+        let mut profile = ProfileIndex::default();
+        profile.feature_ids.insert("TEST-001".to_owned());
+        profile.feature_normalization_ids.insert(
+            "TEST-001".to_owned(),
+            ["NORM-ENV-001".to_owned()].into_iter().collect(),
+        );
+        profile
+            .feature_boundaries
+            .insert("TEST-001".to_owned(), BTreeSet::new());
+        let mut diagnostics = Diagnostics::default();
+        validate_coverage_contract(object, "harness.json", &profile, &mut diagnostics);
+        assert!(diagnostics.iter().any(|item| {
+            item.code == "FIXTURE-NORMALIZATION"
+                && item.path.ends_with("TEST-001.normalization_policy_refs")
+        }));
+        assert!(diagnostics.iter().any(|item| {
+            item.code == "FIXTURE-BOUNDARY"
+                && item
+                    .path
+                    .ends_with("TEST-001.external_runtime_boundary_ids")
+        }));
     }
 
     #[test]
@@ -9830,6 +10405,33 @@ mod tests {
         );
         let removed = fs::remove_dir_all(root);
         assert!(removed.is_ok(), "remove fixture tree: {removed:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fixture_root_symlink_is_rejected_before_traversal() {
+        use std::fs;
+        use std::os::unix::fs::symlink;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "jmeter-rs-xtask-fixture-root-link-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        assert!(fs::create_dir_all(&root).is_ok());
+        let target = root.join("target");
+        let link = root.join("fixtures");
+        assert!(fs::create_dir(&target).is_ok());
+        assert!(symlink(&target, &link).is_ok());
+
+        let diagnostics = super::check(&root, &link, &ProfileIndex::default());
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "FIXTURE-PATH"
+                && diagnostic.message.contains("root must not be a symlink")
+        }));
+        assert!(fs::remove_dir_all(root).is_ok());
     }
 
     #[test]

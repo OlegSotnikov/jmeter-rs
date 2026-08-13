@@ -50,8 +50,9 @@ pub type SeededRandom = DeterministicRandom;
 /// Alias for a stream derived for one logical scope.
 pub type ScopedRandom = DeterministicRandom;
 pub use trace::{
-    EventTrace, ReplayCursor, ReplayError, ReplayLog, TraceError, TraceEvent, TraceEventData,
-    TraceEventDataDiagnostic, TraceEventDiagnostic, TraceLimits,
+    EventTrace, PartialOrderCursor, PartialOrderError, PartialOrderLog, ReplayCursor, ReplayError,
+    ReplayLog, TraceError, TraceEvent, TraceEventData, TraceEventDataDiagnostic,
+    TraceEventDiagnostic, TraceLimits,
 };
 /// Alias for a bounded logical-event recorder.
 pub type TraceRecorder = EventTrace;
@@ -63,7 +64,8 @@ pub use transport::{
     TransportExchangeDiagnostic, TransportHeader, TransportHeaderDiagnostic,
     TransportHeaderDirection, TransportLeakError, TransportLimits, TransportRequest,
     TransportRequestDiagnostic, TransportResponseBuilder, TransportResponsePlan,
-    TransportResponsePlanDiagnostic, TransportStep, TransportStepDiagnostic,
+    TransportResponsePlanDiagnostic, TransportStep, TransportStepDiagnostic, TransportWritePlan,
+    TransportWriteStep, TransportWriteStepDiagnostic,
 };
 
 /// A common error wrapper for callers that combine more than one test
@@ -80,6 +82,8 @@ pub enum TestSupportError {
     Random(RandomError),
     /// An error while recording or loading a trace.
     Trace(TraceError),
+    /// An error while validating a partial-order trace relation.
+    TraceOrder(PartialOrderError),
     /// An error while consuming a replay stream.
     Replay(ReplayError),
     /// An error from the deterministic scheduler.
@@ -110,6 +114,7 @@ impl TestSupportError {
             Self::TimerLeak(error) => (*error).code(),
             Self::Random(error) => (*error).code(),
             Self::Trace(error) => error.code(),
+            Self::TraceOrder(error) => error.code(),
             Self::Replay(error) => error.code(),
             Self::Scheduler(error) => (*error).code(),
             Self::SchedulerLeak(error) => (*error).code(),
@@ -131,6 +136,7 @@ impl std::fmt::Display for TestSupportError {
             Self::TimerLeak(error) => error.fmt(formatter),
             Self::Random(error) => error.fmt(formatter),
             Self::Trace(error) => error.fmt(formatter),
+            Self::TraceOrder(error) => error.fmt(formatter),
             Self::Replay(error) => error.fmt(formatter),
             Self::Scheduler(error) => error.fmt(formatter),
             Self::SchedulerLeak(error) => error.fmt(formatter),
@@ -188,6 +194,12 @@ impl From<RandomError> for TestSupportError {
 impl From<TraceError> for TestSupportError {
     fn from(error: TraceError) -> Self {
         Self::Trace(error)
+    }
+}
+
+impl From<PartialOrderError> for TestSupportError {
+    fn from(error: PartialOrderError) -> Self {
+        Self::TraceOrder(error)
     }
 }
 

@@ -6,13 +6,13 @@ use std::collections::VecDeque;
 use std::io::{Read, Write};
 
 use crate::jtl::{
-    CsvColumn, CsvField, DateFormatProvider, JtlError, JtlLimits, MAX_DECODE_ALL_EVENTS,
-    SampleSaveConfiguration, TimestampFormat, first_failure_message, parse_optional_u64,
-    timing_from_wire,
+    CsvColumn, CsvField, DateFormatProvider, JtlCounter, JtlError, JtlLimits, JtlOutputPolicy,
+    MAX_DECODE_ALL_EVENTS, SampleSaveConfiguration, TimestampFormat, checked_counter_add,
+    first_failure_message, parse_optional_u64, timing_from_wire,
 };
 use crate::{
     DataEncoding, DataType, HostIdentity, SampleEvent, SampleResult, ThreadIdentity,
-    VariableSnapshot, WallTimestamp,
+    TimestampSource, VariableSnapshot, WallTimestamp,
 };
 
 /// One decoded CSV field, retaining whether the source token was quoted.
@@ -32,6 +32,12 @@ pub struct CsvEncoder<'a, W> {
     finished: bool,
     written_samples: usize,
     output_bytes: usize,
+    output_policy: JtlOutputPolicy,
+    /// True only for the private per-event scratch encoder.  A scratch
+    /// encoder applies the streaming policy to its event-local byte count;
+    /// the caller-owned encoder never applies that bound to its persistent
+    /// stream.
+    staging: bool,
 }
 
 /// Compatibility name for [`CsvEncoder`].
@@ -50,6 +56,8 @@ impl<'a, W: Write> CsvEncoder<'a, W> {
             finished: false,
             written_samples: 0,
             output_bytes: 0,
+            output_policy: JtlOutputPolicy::default(),
+            staging: false,
         })
     }
 
@@ -58,6 +66,34 @@ impl<'a, W: Write> CsvEncoder<'a, W> {
         limits.validate()?;
         self.limits = limits;
         Ok(self)
+    }
+
+    /// Creates a CSV encoder in streaming mode with the default finite
+    /// per-event staging bound.
+    pub fn streaming(writer: W, configuration: SampleSaveConfiguration) -> Result<Self, JtlError> {
+        Self::new(writer, configuration)?.with_output_policy(JtlOutputPolicy::streaming_default())
+    }
+
+    /// Selects the output policy for this encoder.
+    pub fn with_output_policy(mut self, policy: JtlOutputPolicy) -> Result<Self, JtlError> {
+        policy.validate()?;
+        self.output_policy = policy;
+        Ok(self)
+    }
+
+    /// Returns the policy currently applied to output bytes.
+    pub const fn output_policy(&self) -> JtlOutputPolicy {
+        self.output_policy
+    }
+
+    /// Returns the checked number of bytes published so far.
+    pub const fn bytes_written(&self) -> usize {
+        self.output_bytes
+    }
+
+    /// Returns the checked number of result rows published so far.
+    pub const fn samples_written(&self) -> usize {
+        self.written_samples
     }
 
     /// Installs a Java-date-format adapter for `TimestampFormat::JavaDateFormat`.
@@ -116,13 +152,7 @@ impl<'a, W: Write> CsvEncoder<'a, W> {
     pub fn write_event(&mut self, event: &SampleEvent) -> Result<(), JtlError> {
         event.validate_wire(self.configuration_limits())?;
         let rows = result_node_count(event.result(), self.configuration.save_subresults())?;
-        let total =
-            self.written_samples
-                .checked_add(rows)
-                .ok_or_else(|| JtlError::Unsupported {
-                    feature: "csv-sample-limit",
-                    value: "sample count overflow".to_owned(),
-                })?;
+        let total = checked_counter_add(self.written_samples, rows, JtlCounter::Samples)?;
         if total > self.limits.max_samples {
             return Err(JtlError::Unsupported {
                 feature: "csv-sample-limit",
@@ -136,15 +166,19 @@ impl<'a, W: Write> CsvEncoder<'a, W> {
         let mut staged = CsvEncoder::new(Vec::new(), self.configuration.clone())?;
         staged.limits = self.limits;
         staged.date_provider = self.date_provider;
+        staged.output_policy = self.output_policy;
+        staged.staging = true;
         staged.wrote_header = self.wrote_header;
         staged.written_samples = self.written_samples;
-        staged.output_bytes = self.output_bytes;
+        staged.output_bytes = match self.output_policy {
+            JtlOutputPolicy::BoundedAggregate => self.output_bytes,
+            JtlOutputPolicy::Streaming { .. } => 0,
+        };
         staged.write_event_parts(event)?;
         let bytes = staged.writer;
         self.write_bytes(&bytes, "write CSV event")?;
         self.wrote_header = staged.wrote_header;
         self.written_samples = staged.written_samples;
-        self.output_bytes = staged.output_bytes;
         if self.configuration.autoflush() {
             self.writer.flush().map_err(|error| JtlError::Io {
                 operation: "flush CSV output",
@@ -157,13 +191,7 @@ impl<'a, W: Write> CsvEncoder<'a, W> {
     fn write_event_parts(&mut self, event: &SampleEvent) -> Result<(), JtlError> {
         event.validate_wire(self.configuration_limits())?;
         let rows = result_node_count(event.result(), self.configuration.save_subresults())?;
-        let total =
-            self.written_samples
-                .checked_add(rows)
-                .ok_or_else(|| JtlError::Unsupported {
-                    feature: "csv-sample-limit",
-                    value: "sample count overflow".to_owned(),
-                })?;
+        let total = checked_counter_add(self.written_samples, rows, JtlCounter::Samples)?;
         if total > self.limits.max_samples {
             return Err(JtlError::Unsupported {
                 feature: "csv-sample-limit",
@@ -172,7 +200,7 @@ impl<'a, W: Write> CsvEncoder<'a, W> {
         }
         self.write_header()?;
         self.write_result_row(event, event.result(), None, true)?;
-        self.written_samples += 1;
+        self.written_samples = checked_counter_add(self.written_samples, 1, JtlCounter::Samples)?;
         if self.configuration.save_subresults() {
             self.write_subresult_rows(event, event.result())?;
         }
@@ -202,6 +230,11 @@ impl<'a, W: Write> CsvEncoder<'a, W> {
     /// Returns the underlying writer without flushing.
     pub fn into_inner(self) -> W {
         self.writer
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_output_bytes_for_test(&mut self, value: usize) {
+        self.output_bytes = value;
     }
 
     fn configuration_limits(&self) -> crate::ValidationLimits {
@@ -236,8 +269,13 @@ impl<'a, W: Write> CsvEncoder<'a, W> {
             } else {
                 Some(format!("{parent_label}-{index}"))
             };
-            self.write_result_row(event, result, label.as_deref(), false)?;
-            self.written_samples += 1;
+            // CSVSaveService passes the same SampleEvent to every flattened
+            // sub-result row, so configured event variables are available on
+            // root and nested rows alike.  A sub-result's wire snapshot still
+            // takes precedence when present.
+            self.write_result_row(event, result, label.as_deref(), true)?;
+            self.written_samples =
+                checked_counter_add(self.written_samples, 1, JtlCounter::Samples)?;
             let current_label = label
                 .as_deref()
                 .unwrap_or_else(|| result.label())
@@ -298,7 +336,14 @@ impl<'a, W: Write> CsvEncoder<'a, W> {
                 value.to_owned()
             }
             CsvColumn::Field(field) => match field {
-                CsvField::Timestamp => self.format_timestamp(result.timestamp())?,
+                CsvField::Timestamp => {
+                    let source = if self.configuration.timestamp_start() {
+                        TimestampSource::Start
+                    } else {
+                        TimestampSource::End
+                    };
+                    self.format_timestamp(result.timing().timestamp_for(source))?
+                }
                 CsvField::Elapsed => result
                     .elapsed()
                     .map(|value| value.as_millis().to_string())
@@ -425,14 +470,29 @@ impl<'a, W: Write> CsvEncoder<'a, W> {
     }
 
     fn write_bytes(&mut self, bytes: &[u8], operation: &'static str) -> Result<(), JtlError> {
-        let total =
-            self.output_bytes
-                .checked_add(bytes.len())
-                .ok_or_else(|| JtlError::Unsupported {
-                    feature: "output-limit",
-                    value: "aggregate output length overflow".to_owned(),
-                })?;
-        if total > self.limits.max_output_bytes {
+        let total = checked_counter_add(self.output_bytes, bytes.len(), JtlCounter::OutputBytes)?;
+        if self.staging {
+            match self.output_policy {
+                JtlOutputPolicy::BoundedAggregate if total > self.limits.max_output_bytes => {
+                    return Err(JtlError::Unsupported {
+                        feature: "output-limit",
+                        value: format!(
+                            "{total} output bytes exceeds {}",
+                            self.limits.max_output_bytes
+                        ),
+                    });
+                }
+                JtlOutputPolicy::Streaming { max_event_bytes } if total > max_event_bytes => {
+                    return Err(JtlError::Unsupported {
+                        feature: "csv-event-staging-limit",
+                        value: format!("{total} event bytes exceeds {max_event_bytes}"),
+                    });
+                }
+                _ => {}
+            }
+        } else if matches!(self.output_policy, JtlOutputPolicy::BoundedAggregate)
+            && total > self.limits.max_output_bytes
+        {
             return Err(JtlError::Unsupported {
                 feature: "output-limit",
                 value: format!(
@@ -516,7 +576,17 @@ impl<R: Read> CsvDecoder<R> {
                 record: 1,
                 detail: "CSV header is missing".to_owned(),
             })?;
-            decoder.columns = parse_header(&header, decoder.limits.max_columns)?;
+            match parse_header(&header, decoder.limits.max_columns) {
+                Ok(columns) => decoder.columns = columns,
+                Err(error) if is_fatal_header_error(&error) => return Err(error),
+                Err(_) => {
+                    // CSVSaveService treats an unrecognised header as data:
+                    // it resets to the configured save layout and replays the
+                    // first record. This also avoids guessing a field mapping
+                    // for out-of-order or duplicate labels.
+                    decoder.pending_record = Some(header);
+                }
+            }
         } else if let Some(first) = decoder.next_record()? {
             // JMeter's reader accepts a field-name row even when the writer
             // switch is disabled.  Detect only canonical headers; ordinary
@@ -639,10 +709,11 @@ impl<R: Read> CsvDecoder<R> {
                 break;
             }
         }
-        let suggests_tab = header_suggests_tab(first_record.make_contiguous());
+        let suggested_delimiter =
+            header_suggests_delimiter(first_record.make_contiguous(), self.limits.max_columns);
         self.prefix = first_record;
-        if suggests_tab {
-            self.configuration.set_delimiter('\t')?;
+        if let Some(delimiter) = suggested_delimiter {
+            self.configuration.set_delimiter(delimiter)?;
         }
         Ok(())
     }
@@ -845,16 +916,20 @@ impl<R: Read> CsvDecoder<R> {
     }
 
     fn decode_record(&self, record: &[CsvToken]) -> Result<SampleEvent, JtlError> {
-        if record.len() != self.columns.len() {
+        if record.len() < self.columns.len() {
             return Err(JtlError::Csv {
                 record: self.record_number,
                 detail: format!(
-                    "expected {} columns, got {}",
+                    "expected at least {} columns, got {}",
                     self.columns.len(),
                     record.len()
                 ),
             });
         }
+        // CSVSaveService.makeResultFromDelimitedString consumes the enabled
+        // columns and logs that trailing fields were ignored. Keep the same
+        // compatibility behavior; unknown *named* columns remain represented
+        // by CsvColumn::Variable when present in a valid header.
         let mut result = SampleResult::without_label();
         if !self
             .columns
@@ -1051,10 +1126,7 @@ fn result_node_count(result: &SampleResult, include_subresults: bool) -> Result<
     let mut count = 0usize;
     let mut pending = vec![result];
     while let Some(node) = pending.pop() {
-        count = count.checked_add(1).ok_or_else(|| JtlError::Unsupported {
-            feature: "csv-sample-limit",
-            value: "sample count overflow".to_owned(),
-        })?;
+        count = checked_counter_add(count, 1, JtlCounter::Samples)?;
         pending.extend(node.sub_results().iter());
     }
     Ok(count)
@@ -1174,13 +1246,6 @@ fn parse_header(record: &[CsvToken], maximum: usize) -> Result<Vec<CsvColumn>, J
                     ),
                 });
             }
-            if previous_order.is_some_and(|previous| field.order() <= previous) {
-                return Err(JtlError::Csv {
-                    record: 1,
-                    detail: format!("field {} is out of canonical order", field.name()),
-                });
-            }
-            previous_order = Some(field.order());
             if columns
                 .iter()
                 .any(|column| matches!(column, CsvColumn::Field(existing) if *existing == field))
@@ -1190,6 +1255,13 @@ fn parse_header(record: &[CsvToken], maximum: usize) -> Result<Vec<CsvColumn>, J
                     detail: format!("duplicate field {}", field.name()),
                 });
             }
+            if previous_order.is_some_and(|previous| field.order() <= previous) {
+                return Err(JtlError::Csv {
+                    record: 1,
+                    detail: format!("field {} is out of canonical order", field.name()),
+                });
+            }
+            previous_order = Some(field.order());
             columns.push(CsvColumn::Field(field));
         } else {
             if token.value.is_empty() {
@@ -1213,21 +1285,163 @@ fn parse_header(record: &[CsvToken], maximum: usize) -> Result<Vec<CsvColumn>, J
     Ok(columns)
 }
 
-fn header_suggests_tab(input: &[u8]) -> bool {
+/// Returns whether a header failure is itself malformed input rather than a
+/// compatibility layout mismatch.  JMeter accepts older/out-of-order headers
+/// by replaying the first row with the configured layout, but an empty or
+/// duplicate column cannot identify a deterministic layout and must fail
+/// before any sample is yielded.
+fn is_fatal_header_error(error: &JtlError) -> bool {
+    matches!(
+        error,
+        JtlError::Csv { detail, .. }
+            if detail.contains("duplicate") || detail.contains("must not be empty")
+    )
+}
+
+/// Infers an alternate delimiter from a header-shaped first record.
+///
+/// JMeter first tries the configured delimiter and then uses the header to
+/// discover a single non-word separator. Candidate counting is quote-aware,
+/// so punctuation in a quoted sample-variable name cannot be mistaken for
+/// the separator. Requiring at least two built-ins (or one built-in and a
+/// quoted variable) prevents a headerless data row such as `label|200` from
+/// changing the delimiter.
+fn header_suggests_delimiter(input: &[u8], maximum: usize) -> Option<char> {
     let end = input
         .iter()
         .position(|byte| *byte == b'\n' || *byte == b'\r')
         .unwrap_or(input.len());
     let line = &input[..end];
-    if !line.contains(&b'\t') || line.contains(&b',') {
-        return false;
+    let mut counts = [0usize; 128];
+    let mut quoted = false;
+    let mut index = 0usize;
+    while index < line.len() {
+        let byte = line[index];
+        if quoted {
+            if byte == b'"' {
+                if line.get(index + 1) == Some(&b'"') {
+                    index += 2;
+                    continue;
+                }
+                quoted = false;
+            }
+            index += 1;
+            continue;
+        }
+        if byte == b'"' {
+            quoted = true;
+        } else if is_header_delimiter_candidate(byte) {
+            counts[usize::from(byte)] += 1;
+        }
+        index += 1;
     }
-    line.split(|byte| *byte == b'\t').any(|token| {
-        std::str::from_utf8(token)
-            .ok()
-            .and_then(|value| CsvField::parse(value.trim_matches('"')))
-            .is_some()
-    })
+    if quoted {
+        return None;
+    }
+
+    let mut best = None;
+    for byte in 0_u8..=127 {
+        let count = counts[usize::from(byte)];
+        if count == 0 {
+            continue;
+        }
+        let Some(tokens) = split_header_candidate(line, byte, maximum) else {
+            continue;
+        };
+        let Ok(columns) = parse_header(&tokens, maximum) else {
+            continue;
+        };
+        let built_in_count = columns
+            .iter()
+            .filter(|column| matches!(column, CsvColumn::Field(_)))
+            .count();
+        let quoted_variable_count = tokens
+            .iter()
+            .zip(&columns)
+            .filter(|(token, column)| token.quoted && matches!(column, CsvColumn::Variable(_)))
+            .count();
+        if !(built_in_count >= 2 || (built_in_count >= 1 && quoted_variable_count >= 1)) {
+            continue;
+        }
+        if best.is_none_or(|(best_count, best_byte)| {
+            count > best_count || (count == best_count && byte < best_byte)
+        }) {
+            best = Some((count, byte));
+        }
+    }
+    best.map(|(_, byte)| char::from(byte))
+}
+
+fn is_header_delimiter_candidate(byte: u8) -> bool {
+    byte == b'\t'
+        || byte == b' '
+        || (byte.is_ascii_graphic() && !byte.is_ascii_alphanumeric() && byte != b'"')
+}
+
+/// Splits one physical header line with a candidate delimiter using the same
+/// quote rules as the streaming parser. It is bounded by the configured
+/// column limit because this runs before the normal record parser.
+fn split_header_candidate(input: &[u8], delimiter: u8, maximum: usize) -> Option<Vec<CsvToken>> {
+    let mut record = Vec::new();
+    let mut field = Vec::new();
+    let mut quoted = false;
+    let mut was_quoted = false;
+    let mut closed_quote = false;
+    let mut at_field_start = true;
+    let mut index = 0usize;
+    while index < input.len() {
+        let byte = input[index];
+        if quoted {
+            if byte == b'"' {
+                if input.get(index + 1) == Some(&b'"') {
+                    field.push(b'"');
+                    index += 2;
+                    continue;
+                }
+                quoted = false;
+                closed_quote = true;
+            } else {
+                field.push(byte);
+            }
+            index += 1;
+            continue;
+        }
+        if closed_quote && byte != delimiter && byte != b'\n' && byte != b'\r' {
+            return None;
+        }
+        match byte {
+            b'"' if at_field_start => {
+                quoted = true;
+                was_quoted = true;
+                at_field_start = false;
+            }
+            byte if byte == delimiter => {
+                record.push(CsvToken {
+                    value: String::from_utf8(std::mem::take(&mut field)).ok()?,
+                    quoted: was_quoted,
+                });
+                if record.len() > maximum {
+                    return None;
+                }
+                was_quoted = false;
+                closed_quote = false;
+                at_field_start = true;
+            }
+            _ => {
+                field.push(byte);
+                at_field_start = false;
+            }
+        }
+        index += 1;
+    }
+    if quoted {
+        return None;
+    }
+    record.push(CsvToken {
+        value: String::from_utf8(field).ok()?,
+        quoted: was_quoted,
+    });
+    (record.len() <= maximum).then_some(record)
 }
 
 fn looks_like_header(record: &[CsvToken], columns: &[CsvColumn], configured: &[CsvColumn]) -> bool {
@@ -1460,6 +1674,45 @@ mod tests {
     }
 
     #[test]
+    fn timestamp_column_uses_the_configured_sample_endpoint() {
+        let mut result = SampleResult::new("endpoint");
+        result
+            .set_start_time(Some(crate::WallTimestamp::from_millis(100)))
+            .expect("start");
+        result
+            .set_end_time(Some(crate::WallTimestamp::from_millis(107)))
+            .expect("end");
+        result.set_timestamp(Some(crate::WallTimestamp::from_millis(999)));
+        let event = SampleEvent::new(
+            result,
+            "run",
+            ThreadIdentity::new("thread"),
+            "host",
+            VariableSnapshot::new(),
+        );
+
+        let mut end_config = no_field_config();
+        end_config.set_print_field_names(false);
+        end_config.set_timestamp(true);
+        end_config.set_timestamp_start(false);
+        let mut output = Vec::new();
+        let mut encoder = CsvEncoder::new(&mut output, end_config).expect("end encoder");
+        encoder.write_event(&event).expect("end write");
+        encoder.finish().expect("end finish");
+        assert_eq!(String::from_utf8(output).expect("UTF-8"), "107\n");
+
+        let mut start_config = no_field_config();
+        start_config.set_print_field_names(false);
+        start_config.set_timestamp(true);
+        start_config.set_timestamp_start(true);
+        let mut output = Vec::new();
+        let mut encoder = CsvEncoder::new(&mut output, start_config).expect("start encoder");
+        encoder.write_event(&event).expect("start write");
+        encoder.finish().expect("start finish");
+        assert_eq!(String::from_utf8(output).expect("UTF-8"), "100\n");
+    }
+
+    #[test]
     fn decode_all_with_limit_bounds_retained_event_count() {
         let mut config = no_field_config();
         config.set_label(true);
@@ -1525,6 +1778,209 @@ mod tests {
     }
 
     #[test]
+    fn alternate_header_delimiters_are_inferred_and_values_are_quoted() {
+        for delimiter in ['\t', '|', ';'] {
+            let mut writer_config = no_field_config();
+            writer_config.set_print_field_names(true);
+            writer_config.set_label(true);
+            writer_config.set_response_code(true);
+            writer_config.set_delimiter(delimiter).expect("delimiter");
+            let mut result = SampleResult::new(format!("left{delimiter}right"));
+            result.set_response_code_text("200");
+            let event = SampleEvent::new(
+                result,
+                "run",
+                ThreadIdentity::new("thread"),
+                "host",
+                VariableSnapshot::new(),
+            );
+            let mut output = Vec::new();
+            let mut encoder = CsvEncoder::new(&mut output, writer_config).expect("encoder");
+            encoder.write_event(&event).expect("write");
+            encoder.finish().expect("finish");
+
+            // The reader starts with JMeter's comma default. Header inference
+            // must select the actual separator before parsing the first row.
+            let events = CsvDecoder::new(output.as_slice(), no_field_config())
+                .expect("decoder")
+                .decode_all()
+                .expect("alternate delimiter");
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].result().label(), format!("left{delimiter}right"));
+            assert_eq!(events[0].result().response_code(), Some("200"));
+        }
+    }
+
+    #[test]
+    fn unknown_header_columns_are_retained_as_variables() {
+        let mut config = no_field_config();
+        config.set_print_field_names(true);
+        config.set_timestamp(true);
+        config.set_time(true);
+        config.set_label(true);
+        let events = CsvDecoder::new(
+            b"timeStamp,elapsed,label,pluginField\n1700000000000,1,sample,opaque\n".as_slice(),
+            config,
+        )
+        .expect("decoder")
+        .decode_all()
+        .expect("unknown CSV column");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].result().label(), "sample");
+        assert_eq!(
+            events[0]
+                .variables()
+                .get("pluginField")
+                .and_then(|value| value.as_str()),
+            Some("opaque")
+        );
+    }
+
+    #[test]
+    fn jmeter_default_header_order_is_canonical() {
+        let mut configuration = SampleSaveConfiguration::default();
+        configuration.set_filename(true);
+        configuration.set_encoding(true);
+        configuration.set_sample_count(true);
+        configuration.set_hostname(true);
+        let names = configuration
+            .columns()
+            .into_iter()
+            .map(|column| match column {
+                CsvColumn::Field(field) => field.name().to_owned(),
+                CsvColumn::Variable(name) => name,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec![
+                "timeStamp",
+                "elapsed",
+                "label",
+                "responseCode",
+                "responseMessage",
+                "threadName",
+                "dataType",
+                "success",
+                "failureMessage",
+                "bytes",
+                "sentBytes",
+                "grpThreads",
+                "allThreads",
+                "URL",
+                "Filename",
+                "Latency",
+                "Encoding",
+                "SampleCount",
+                "ErrorCount",
+                "Hostname",
+                "IdleTime",
+                "Connect",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn trailing_row_fields_are_ignored_like_jmeter() {
+        let mut config = no_field_config();
+        config.set_print_field_names(true);
+        config.set_label(true);
+        config.set_response_code(true);
+        let events = CsvDecoder::new(
+            b"label,responseCode\nsample,200,field-from-newer-writer\n".as_slice(),
+            config,
+        )
+        .expect("decoder")
+        .decode_all()
+        .expect("JMeter ignores trailing fields");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].result().label(), "sample");
+        assert_eq!(events[0].result().response_code(), Some("200"));
+    }
+
+    #[test]
+    fn invalid_header_falls_back_to_configured_layout_without_remapping_rows() {
+        let mut config = no_field_config();
+        config.set_print_field_names(true);
+        config.set_label(true);
+        config.set_response_code(true);
+        // responseCode before label is not canonical. JMeter warns, resets to
+        // the configured layout, and replays the first line as data.
+        let events = CsvDecoder::new(b"responseCode,label\nactual,200\n".as_slice(), config)
+            .expect("decoder")
+            .decode_all()
+            .expect("fallback layout");
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].result().label(), "responseCode");
+        assert_eq!(events[0].result().response_code(), Some("label"));
+        assert_eq!(events[1].result().label(), "actual");
+        assert_eq!(events[1].result().response_code(), Some("200"));
+    }
+
+    #[test]
+    fn duplicate_or_empty_header_columns_are_strict_errors() {
+        for input in [
+            b"label,label\nsample,200\n".as_slice(),
+            b"label,,responseCode\nsample,,200\n".as_slice(),
+            b"\"sampleVar\",\"sampleVar\"\nvalue,value\n".as_slice(),
+        ] {
+            let mut config = no_field_config();
+            config.set_print_field_names(true);
+            config.set_label(true);
+            config.set_response_code(true);
+            assert!(
+                matches!(
+                    CsvDecoder::new(input, config),
+                    Err(JtlError::Csv { detail, .. })
+                        if detail.contains("duplicate") || detail.contains("must not be empty")
+                ),
+                "unexpected header result for {input:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn short_rows_remain_an_explicit_csv_error() {
+        let mut config = no_field_config();
+        config.set_print_field_names(true);
+        config.set_label(true);
+        config.set_response_code(true);
+        assert!(matches!(
+            CsvDecoder::new(b"label,responseCode\nsample\n".as_slice(), config)
+                .expect("decoder")
+                .decode_all(),
+            Err(JtlError::Csv { .. })
+        ));
+    }
+
+    #[test]
+    fn legacy_timestamp_patterns_are_utc_and_strict() {
+        let expected = 1_700_000_000_000;
+        assert_eq!(
+            parse_legacy_timestamp("2023/11/14 22:13:20"),
+            Some(expected)
+        );
+        assert_eq!(
+            parse_legacy_timestamp("2023/11/14 22:13:20.123"),
+            Some(expected + 123)
+        );
+        assert_eq!(
+            parse_legacy_timestamp("2023-11-14 22:13:20"),
+            Some(expected)
+        );
+        assert_eq!(
+            parse_legacy_timestamp("2023-11-14 22:13:20.123"),
+            Some(expected + 123)
+        );
+        assert_eq!(parse_legacy_timestamp("11/14/23 22:13:20"), Some(expected));
+        assert_eq!(parse_legacy_timestamp("2023/02/29 22:13:20"), None);
+        assert_eq!(parse_legacy_timestamp("2023/11/14 22:13:20x"), None);
+    }
+
+    #[test]
     fn literal_crlf_fixture_round_trips_as_crlf_records() {
         let mut config = no_field_config();
         config.set_print_field_names(true);
@@ -1546,6 +2002,21 @@ mod tests {
         encoder.write_event(&events[0]).expect("write");
         encoder.finish().expect("finish");
         assert_eq!(output, fixture);
+    }
+
+    #[test]
+    fn classic_cr_line_endings_are_records_not_data_bytes() {
+        let mut config = no_field_config();
+        config.set_print_field_names(true);
+        config.set_label(true);
+        config.set_response_code(true);
+        let events = CsvDecoder::new(b"label,responseCode\rsample,200\r".as_slice(), config)
+            .expect("decoder")
+            .decode_all()
+            .expect("CR records");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].result().label(), "sample");
+        assert_eq!(events[0].result().response_code(), Some("200"));
     }
 
     #[test]
@@ -1976,7 +2447,7 @@ mod tests {
     }
 
     #[test]
-    fn nested_csv_variables_do_not_fall_back_to_root_event_scope() {
+    fn nested_csv_variables_use_the_same_event_scope_as_jmeter() {
         let mut root = SampleResult::new("root");
         root.add_sub_result(
             SampleResult::new("child"),
@@ -2002,6 +2473,6 @@ mod tests {
         encoder.write_event(&event).expect("write");
         let output = String::from_utf8(encoder.finish().expect("finish").to_vec()).expect("UTF-8");
         let rows = output.lines().collect::<Vec<_>>();
-        assert_eq!(rows, ["root,root-value", "root-0,"]);
+        assert_eq!(rows, ["root,root-value", "root-0,root-value"]);
     }
 }

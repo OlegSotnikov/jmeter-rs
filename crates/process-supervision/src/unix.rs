@@ -14,7 +14,207 @@ use crate::spec::LaunchSpec;
 use rustix::process::{Pid, Signal, WaitId, WaitIdOptions, getpgid, kill_process_group, waitid};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
+use std::sync::OnceLock;
 use std::time::Instant;
+
+/// The only signal state accepted by the retained-root protocol.
+///
+/// The application/bootstrap boundary owns this contract.  The supervisor
+/// deliberately does not install a process-global handler or change a
+/// caller-owned mask.  In particular, `SA_NOCLDWAIT` must be proven absent;
+/// observing a default-looking `/proc` disposition is not enough because
+/// `/proc` does not expose that flag.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SigchldState {
+    disposition: SigchldDisposition,
+    blocked: bool,
+    /// `Some(false)` is the only accepted value.  `None` means the target
+    /// could not expose `SA_NOCLDWAIT` through a safe API.
+    no_cldwait: Option<bool>,
+}
+
+impl SigchldState {
+    const fn accepted() -> Self {
+        Self {
+            disposition: SigchldDisposition::Default,
+            blocked: false,
+            no_cldwait: Some(false),
+        }
+    }
+}
+
+/// Disposition classes observable without installing a handler.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SigchldDisposition {
+    Default,
+    Ignored,
+    Caught,
+}
+
+/// A point at which the sole-reaper contract must be revalidated.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ContractOperation {
+    Initialization,
+    Observation,
+    GroupValidation,
+    GroupSignal,
+    ExactChildSignal,
+    FinalReap,
+}
+
+impl ContractOperation {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Initialization => "initialization",
+            Self::Observation => "exact-root observation",
+            Self::GroupValidation => "process-group validation",
+            Self::GroupSignal => "process-group signal",
+            Self::ExactChildSignal => "exact-child signal",
+            Self::FinalReap => "final exact-root reap",
+        }
+    }
+}
+
+/// Safe signal-state reads can fail independently of `waitid`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ContractReadError {
+    Unreadable,
+    Echild,
+    Os(i32),
+}
+
+/// Recorded process-global contract for one retained root.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ReaperContract {
+    expected: SigchldState,
+}
+
+impl ReaperContract {
+    /// Captures the explicitly accepted application/bootstrap state.  No
+    /// process-global signal disposition is installed here.
+    fn capture() -> Result<Self, SupervisionError> {
+        let expected = SigchldState::accepted();
+        let observed = read_sigchld_state();
+        verify_sigchld_state(expected, observed, ContractOperation::Initialization)?;
+        Ok(Self { expected })
+    }
+
+    fn verify_current(self, operation: ContractOperation) -> Result<(), SupervisionError> {
+        verify_sigchld_state(self.expected, read_sigchld_state(), operation)
+    }
+}
+
+static PROCESS_REAPER_CONTRACT: OnceLock<Result<ReaperContract, SupervisionError>> =
+    OnceLock::new();
+
+fn process_reaper_contract() -> Result<ReaperContract, SupervisionError> {
+    PROCESS_REAPER_CONTRACT
+        .get_or_init(ReaperContract::capture)
+        .clone()
+}
+
+fn verify_root_contract(
+    root: &RootHandle,
+    operation: ContractOperation,
+) -> Result<(), SupervisionError> {
+    root.contract.verify_current(operation)
+}
+
+/// Converts a signal-state read into the existing stable reaper error.  The
+/// diagnostic names the operation but never includes unbounded OS text.
+fn contract_lost(operation: ContractOperation, detail: &'static str) -> SupervisionError {
+    SupervisionError::new(
+        ErrorCode::ReaperContractLost,
+        ErrorCategory::Reaping,
+        false,
+        format!("{detail} before {}", operation.as_str()),
+    )
+}
+
+/// Compares a read state with the explicitly owned contract.  This pure seam
+/// is used by failure-injection tests so a lost contract can be proven to
+/// block an operation without creating a process or sending a signal.
+fn verify_sigchld_state(
+    expected: SigchldState,
+    observed: Result<SigchldState, ContractReadError>,
+    operation: ContractOperation,
+) -> Result<(), SupervisionError> {
+    match observed {
+        Ok(state) if state == expected => Ok(()),
+        Ok(SigchldState {
+            no_cldwait: None, ..
+        }) => Err(contract_lost(
+            operation,
+            "SA_NOCLDWAIT state is unreadable through the safe platform API",
+        )),
+        Ok(_) => Err(contract_lost(
+            operation,
+            "SIGCHLD disposition, SA_NOCLDWAIT, or mask changed",
+        )),
+        Err(ContractReadError::Echild) => Err(contract_lost(
+            operation,
+            "SIGCHLD contract read observed ECHILD",
+        )
+        .with_os_error(rustix::io::Errno::CHILD.raw_os_error())),
+        Err(ContractReadError::Unreadable) => {
+            Err(contract_lost(operation, "SIGCHLD contract is unreadable"))
+        }
+        Err(ContractReadError::Os(error)) => {
+            Err(contract_lost(operation, "SIGCHLD contract read failed").with_os_error(error))
+        }
+    }
+}
+
+/// Reads the calling supervisor thread's SIGCHLD state without changing it.
+///
+/// Linux exposes disposition classes and the blocked mask in `/proc`, but it
+/// does not expose `SA_NOCLDWAIT`.  We return `None` for that field so the
+/// explicit comparison above rejects the state.  rustix 1.1.4's only
+/// sigaction inspection API is its unsafe experimental runtime API; enabling
+/// it here would violate the crate's no-unsafe policy.  Non-Linux Unix has no
+/// equivalent safe public API in the pinned dependency and fails closed.
+#[cfg(target_os = "linux")]
+fn read_sigchld_state() -> Result<SigchldState, ContractReadError> {
+    let status = std::fs::read_to_string("/proc/thread-self/status")
+        .map_err(|error| ContractReadError::Os(error.raw_os_error().unwrap_or(0)))?;
+    let blocked = signal_bit(&status, "SigBlk")?;
+    let ignored = signal_bit(&status, "SigIgn")?;
+    let caught = signal_bit(&status, "SigCgt")?;
+    let disposition = match (ignored, caught) {
+        (true, false) => SigchldDisposition::Ignored,
+        (false, true) => SigchldDisposition::Caught,
+        (false, false) => SigchldDisposition::Default,
+        (true, true) => return Err(ContractReadError::Unreadable),
+    };
+    Ok(SigchldState {
+        disposition,
+        blocked,
+        no_cldwait: None,
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn read_sigchld_state() -> Result<SigchldState, ContractReadError> {
+    Err(ContractReadError::Unreadable)
+}
+
+#[cfg(target_os = "linux")]
+fn signal_bit(status: &str, field: &str) -> Result<bool, ContractReadError> {
+    let value = status
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            (name == field).then_some(value.trim())
+        })
+        .ok_or(ContractReadError::Unreadable)?;
+    let mask = u128::from_str_radix(value, 16).map_err(|_| ContractReadError::Unreadable)?;
+    let bit =
+        usize::try_from(Signal::CHILD.as_raw() - 1).map_err(|_| ContractReadError::Unreadable)?;
+    if bit >= u128::BITS as usize {
+        return Err(ContractReadError::Unreadable);
+    }
+    Ok((mask & (1u128 << bit)) != 0)
+}
 
 /// Root process and its exact identity.  The `Child` remains in this cell
 /// until rustix has reaped it; it never crosses the slot capability boundary.
@@ -25,21 +225,22 @@ pub(crate) struct UnixRoot {
     pub(crate) waitable: bool,
     pub(crate) reaped: bool,
     pub(crate) exit: Option<ExitInfo>,
+    contract: ReaperContract,
 }
 
 /// A validated process-group token.  Construction is private and requires
 /// equality with the still-owned root PID and a value greater than one.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Debug, Eq, Hash, PartialEq)]
 pub(crate) struct ValidatedProcessGroup(i32);
 
 impl ValidatedProcessGroup {
-    pub(crate) fn raw(self) -> i32 {
+    pub(crate) fn raw(&self) -> i32 {
         self.0
     }
 }
 
 /// Unix process-group ownership stored in the slot.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Debug, Eq, Hash, PartialEq)]
 pub(crate) struct UnixProcessGroupToken {
     pub(crate) root_pid: u32,
     pub(crate) group: ValidatedProcessGroup,
@@ -58,6 +259,10 @@ pub(crate) fn create_root(
     spec: &LaunchSpec,
 ) -> Result<(RootHandle, Option<PlatformToken>), CreateFailure> {
     spec.validate()?;
+    // The application/bootstrap boundary must establish the accepted
+    // process-global state before any supervisor child is created.  No
+    // handler or mask is installed implicitly here.
+    let contract = process_reaper_contract()?;
     let mut command = Command::new(spec.executable.as_str());
     command.args(spec.arguments.iter());
     command.current_dir(spec.working_root.as_str());
@@ -91,6 +296,7 @@ pub(crate) fn create_root(
         waitable: false,
         reaped: false,
         exit: None,
+        contract,
     };
     Ok((root, None))
 }
@@ -102,6 +308,7 @@ pub(crate) fn validate(
     token: &mut Option<PlatformToken>,
     kind: PolicyKind,
 ) -> Result<(), SupervisionError> {
+    verify_root_contract(root, ContractOperation::Observation)?;
     if kind == PolicyKind::ExactChild {
         return Ok(());
     }
@@ -117,6 +324,10 @@ pub(crate) fn validate(
             ));
         }
     }
+    // The group lookup and identity validation are one contract-sensitive
+    // sequence.  Revalidate immediately before either numeric group value is
+    // accepted for the retained token.
+    verify_root_contract(root, ContractOperation::GroupValidation)?;
     let group = getpgid_for_root(root_pid)?;
     let validated = validate_group_id(group, root.pid)?;
     *token = Some(UnixProcessGroupToken {
@@ -128,11 +339,16 @@ pub(crate) fn validate(
 
 /// Observes the exact root with `WNOWAIT`, preserving its PID/PGID identity.
 pub(crate) fn observe(root: &mut RootHandle) -> Result<RootObservation, SupervisionError> {
+    verify_root_contract(root, ContractOperation::Observation)?;
     if root.reaped || root.waitable {
-        return Ok(RootObservation::Waitable(root.exit.unwrap_or(ExitInfo {
-            code: 0,
-            signaled: false,
-        })));
+        return root.exit.map(RootObservation::Waitable).ok_or_else(|| {
+            SupervisionError::new(
+                ErrorCode::InvariantViolation,
+                ErrorCategory::Internal,
+                false,
+                "waitable exact root has no cached exit status",
+            )
+        });
     }
     let pid = pid_for_root(root.pid)?;
     let options = WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT;
@@ -191,6 +407,9 @@ fn cleanup_exact(root: &mut RootHandle, deadline: Instant) -> CleanupAttempt {
         Ok(RootObservation::Live) => {}
         Err(error) => return CleanupAttempt::retained(error),
     }
+    if let Err(error) = verify_root_contract(root, ContractOperation::ExactChildSignal) {
+        return CleanupAttempt::retained(error);
+    }
     if let Err(error) = root.child.kill() {
         let signal_error = SupervisionError::new(
             ErrorCode::ExactChildSignalFailed,
@@ -218,7 +437,7 @@ fn cleanup_tree(
     token: &mut Option<PlatformToken>,
     deadline: Instant,
 ) -> CleanupAttempt {
-    let Some(token_value) = token.as_ref().copied() else {
+    let Some(token_value) = token.as_ref() else {
         // Containment setup can fail before a token is installed.  The exact
         // Child remains in the slot and is still eligible for the safe
         // waitid/Child fallback; preserve the tree failure separately.
@@ -259,6 +478,12 @@ fn cleanup_tree(
         Err(error) => return CleanupAttempt::retained(error),
     }
     if let Err(error) = validate_group_against_root(root, token_value) {
+        if error.code() == ErrorCode::ReaperContractLost {
+            // A sole-reaper contract failure is stronger than ordinary
+            // containment loss: do not fall back to a numeric exact-child
+            // signal while ownership/reaping is uncertain.
+            return CleanupAttempt::retained(error);
+        }
         return fallback_exact(root, deadline, error);
     }
     // Adjacent exact-root observation immediately before the only group
@@ -274,7 +499,10 @@ fn cleanup_tree(
             preserve(tree, reap_root(root, deadline))
         }
         Ok(RootObservation::Live) => {
-            match pid_for_group(token_value.group).and_then(|group| {
+            if let Err(error) = verify_root_contract(root, ContractOperation::GroupSignal) {
+                return CleanupAttempt::retained(error);
+            }
+            match pid_for_group(&token_value.group).and_then(|group| {
                 kill_process_group(group, Signal::KILL).map_err(|error| {
                     SupervisionError::new(
                         ErrorCode::ProcessGroupSignalFailed,
@@ -299,15 +527,12 @@ fn wait_after_group_signal(root: &mut RootHandle, deadline: Instant) -> CleanupA
             Ok(RootObservation::Waitable(_)) => {
                 let reaped = reap_root(root, deadline);
                 return match reaped.state {
-                    CleanupState::Reaped => CleanupAttempt {
-                        state: CleanupState::Reaped,
-                        error: Some(SupervisionError::new(
-                            ErrorCode::GroupCleanupCompleted,
-                            ErrorCategory::Containment,
-                            false,
-                            "validated observed process group cleanup reaped the root",
-                        )),
-                    },
+                    // A validated group cleanup is a successful operation.
+                    // Capability grade belongs in diagnostics/telemetry, not
+                    // in the lifecycle result: surfacing a success marker as
+                    // an error would make callers report a reaped child as a
+                    // failed cleanup and would block terminal acknowledgment.
+                    CleanupState::Reaped => CleanupAttempt::reaped(),
                     CleanupState::Retained => reaped,
                 };
             }
@@ -329,49 +554,75 @@ fn reap_root(root: &mut RootHandle, deadline: Instant) -> CleanupAttempt {
     if root.reaped {
         return CleanupAttempt::reaped();
     }
+    // Establish the WNOWAIT ownership barrier before the destructive reap,
+    // including after an exact-child kill.  A direct WNOHANG reap without a
+    // prior waitable observation could allow an external reaper or a changed
+    // SIGCHLD contract to invalidate the retained identity.
+    loop {
+        match observe(root) {
+            Ok(RootObservation::Waitable(_)) => break,
+            Ok(RootObservation::Live) if Instant::now() < deadline => {
+                std::thread::yield_now();
+            }
+            Ok(RootObservation::Live) => {
+                return CleanupAttempt::retained(SupervisionError::cleanup(
+                    ErrorCode::CleanupTimedOut,
+                    "exact-root observation deadline expired before reap",
+                ));
+            }
+            Err(error) => return CleanupAttempt::retained(error),
+        }
+    }
+
     let pid = match pid_for_root(root.pid) {
         Ok(pid) => pid,
         Err(error) => return CleanupAttempt::retained(error),
     };
-    loop {
-        let options = WaitIdOptions::EXITED | WaitIdOptions::NOHANG;
-        match waitid(WaitId::Pid(pid), options) {
-            Ok(Some(status)) => {
-                root.waitable = true;
-                root.exit = Some(exit_info(
-                    status.exited(),
-                    status.exit_status().unwrap_or(0),
-                ));
-                root.reaped = true;
-                return CleanupAttempt::reaped();
-            }
-            Ok(None) if Instant::now() < deadline => std::thread::yield_now(),
-            Ok(None) => {
-                return CleanupAttempt::retained(SupervisionError::cleanup(
-                    ErrorCode::CleanupTimedOut,
-                    "exact-root reap deadline expired",
-                ));
-            }
-            Err(error) if error == rustix::io::Errno::CHILD => {
+    // This check is deliberately adjacent to the destructive exact reap;
+    // the earlier WNOWAIT observation alone cannot prove that the caller has
+    // not changed the SIGCHLD contract in the meantime.
+    if let Err(error) = verify_root_contract(root, ContractOperation::FinalReap) {
+        return CleanupAttempt::retained(error);
+    }
+    let options = WaitIdOptions::EXITED | WaitIdOptions::NOHANG;
+    match waitid(WaitId::Pid(pid), options) {
+        Ok(Some(status)) => {
+            let observed = exit_info(status.exited(), status.exit_status().unwrap_or(0));
+            if root.exit != Some(observed) {
                 return CleanupAttempt::retained(SupervisionError::new(
                     ErrorCode::ReaperContractLost,
                     ErrorCategory::Reaping,
                     false,
-                    "exact-root reap returned ECHILD",
+                    "exact-root reap status differed from the retained observation",
                 ));
             }
-            Err(error) => {
-                return CleanupAttempt::retained(
-                    SupervisionError::new(
-                        ErrorCode::WaitFailed,
-                        ErrorCategory::Reaping,
-                        true,
-                        "exact-root reap failed",
-                    )
-                    .with_os_error(error.raw_os_error()),
-                );
-            }
+            root.waitable = true;
+            root.reaped = true;
+            CleanupAttempt::reaped()
         }
+        Ok(None) => CleanupAttempt::retained(SupervisionError::new(
+            ErrorCode::WaitFailed,
+            ErrorCategory::Reaping,
+            true,
+            "exact-root reap returned no retained waitable status",
+        )),
+        Err(error) if error == rustix::io::Errno::CHILD => {
+            CleanupAttempt::retained(SupervisionError::new(
+                ErrorCode::ReaperContractLost,
+                ErrorCategory::Reaping,
+                false,
+                "exact-root reap returned ECHILD",
+            ))
+        }
+        Err(error) => CleanupAttempt::retained(
+            SupervisionError::new(
+                ErrorCode::WaitFailed,
+                ErrorCategory::Reaping,
+                true,
+                "exact-root reap failed",
+            )
+            .with_os_error(error.raw_os_error()),
+        ),
     }
 }
 
@@ -380,9 +631,17 @@ fn fallback_exact(
     deadline: Instant,
     tree_error: SupervisionError,
 ) -> CleanupAttempt {
+    if tree_error.code() == ErrorCode::ReaperContractLost {
+        // A changed/unreadable SIGCHLD contract quarantines the retained root;
+        // even an exact-child fallback must not use a numeric signal or reap.
+        return CleanupAttempt::retained(tree_error);
+    }
     match observe(root) {
         Ok(RootObservation::Waitable(_)) => preserve(tree_error, reap_root(root, deadline)),
         Ok(RootObservation::Live) => {
+            if let Err(error) = verify_root_contract(root, ContractOperation::ExactChildSignal) {
+                return CleanupAttempt::retained(tree_error.with_secondary(error));
+            }
             if let Err(error) = root.child.kill() {
                 let exact = SupervisionError::new(
                     ErrorCode::ExactChildSignalFailed,
@@ -453,8 +712,9 @@ fn getpgid_for_root(root_pid: i32) -> Result<i32, SupervisionError> {
 
 fn validate_group_against_root(
     root: &RootHandle,
-    token: UnixProcessGroupToken,
+    token: &UnixProcessGroupToken,
 ) -> Result<(), SupervisionError> {
+    verify_root_contract(root, ContractOperation::GroupValidation)?;
     let root_pid = validate_process_group_id(root.pid)?;
     if token.root_pid != root.pid {
         return Err(SupervisionError::new(
@@ -489,7 +749,7 @@ fn pid_for_root(root_pid: u32) -> Result<Pid, SupervisionError> {
     })
 }
 
-fn pid_for_group(group: ValidatedProcessGroup) -> Result<Pid, SupervisionError> {
+fn pid_for_group(group: &ValidatedProcessGroup) -> Result<Pid, SupervisionError> {
     Pid::from_raw(group.raw()).ok_or_else(|| {
         SupervisionError::new(
             ErrorCode::InvalidProcessGroupId,
@@ -505,6 +765,17 @@ fn exit_info(exited: bool, code: i32) -> ExitInfo {
         code,
         signaled: !exited,
     }
+}
+
+#[cfg(test)]
+fn run_if_contract_valid<T>(
+    expected: SigchldState,
+    observed: Result<SigchldState, ContractReadError>,
+    operation: ContractOperation,
+    action: impl FnOnce() -> T,
+) -> Result<T, SupervisionError> {
+    verify_sigchld_state(expected, observed, operation)?;
+    Ok(action())
 }
 
 /// Validates a root PID without issuing an OS operation.
@@ -555,6 +826,97 @@ pub(crate) fn validate_group_id(
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn changed_contract_blocks_observation_group_validation_signal_and_reap() {
+        let expected = SigchldState::accepted();
+        let changed_states = [
+            SigchldState {
+                disposition: SigchldDisposition::Caught,
+                blocked: false,
+                no_cldwait: Some(false),
+            },
+            SigchldState {
+                disposition: SigchldDisposition::Default,
+                blocked: true,
+                no_cldwait: Some(false),
+            },
+        ];
+        let operations = [
+            ContractOperation::Observation,
+            ContractOperation::GroupValidation,
+            ContractOperation::GroupSignal,
+            ContractOperation::FinalReap,
+        ];
+        for changed in changed_states {
+            for operation in operations {
+                let mut attempted = false;
+                let error = run_if_contract_valid(expected, Ok(changed), operation, || {
+                    attempted = true;
+                })
+                .expect_err("changed SIGCHLD contract must fail closed");
+                assert_eq!(error.code(), ErrorCode::ReaperContractLost);
+                assert!(!attempted, "{operation:?} reached its numeric operation");
+            }
+        }
+    }
+
+    #[test]
+    fn unreadable_and_echild_contract_reads_block_every_numeric_operation() {
+        let expected = SigchldState::accepted();
+        let operations = [
+            ContractOperation::Observation,
+            ContractOperation::GroupValidation,
+            ContractOperation::GroupSignal,
+            ContractOperation::FinalReap,
+        ];
+        for read_error in [ContractReadError::Unreadable, ContractReadError::Echild] {
+            for operation in operations {
+                let mut attempted = false;
+                let error = run_if_contract_valid(expected, Err(read_error), operation, || {
+                    attempted = true;
+                })
+                .expect_err("lost SIGCHLD contract must fail closed");
+                assert_eq!(error.code(), ErrorCode::ReaperContractLost);
+                if read_error == ContractReadError::Echild {
+                    assert_eq!(
+                        error.os_error(),
+                        Some(rustix::io::Errno::CHILD.raw_os_error())
+                    );
+                }
+                assert!(!attempted, "{operation:?} reached its numeric operation");
+            }
+        }
+    }
+
+    #[test]
+    fn unavailable_no_cldwait_state_is_unreadable_and_fails_closed() {
+        let expected = SigchldState::accepted();
+        let observed = SigchldState {
+            disposition: SigchldDisposition::Default,
+            blocked: false,
+            no_cldwait: None,
+        };
+        let error = verify_sigchld_state(expected, Ok(observed), ContractOperation::Initialization)
+            .expect_err("SA_NOCLDWAIT must be proven before accepting the contract");
+        assert_eq!(error.code(), ErrorCode::ReaperContractLost);
+        assert!(error.message().contains("unreadable"));
+    }
+
+    #[test]
+    fn accepted_contract_allows_the_pure_operation_gate() {
+        let mut attempted = false;
+        run_if_contract_valid(
+            SigchldState::accepted(),
+            Ok(SigchldState::accepted()),
+            ContractOperation::Observation,
+            || {
+                attempted = true;
+            },
+        )
+        .expect("accepted SIGCHLD contract");
+        assert!(attempted);
+    }
 
     #[test]
     fn reserved_and_mismatched_group_values_are_rejected_without_os_calls() {

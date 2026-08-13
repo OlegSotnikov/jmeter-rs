@@ -138,6 +138,42 @@ impl ClockSnapshot {
     pub const fn monotonic_time(self) -> MonotonicInstant {
         self.monotonic
     }
+
+    /// Returns the elapsed monotonic duration from `earlier`.
+    ///
+    /// Wall time is deliberately not used for elapsed-time calculations.  A
+    /// fixture may move wall time independently (for example, to model an
+    /// NTP correction) while deadlines and timer ordering continue to use
+    /// this monotonic axis.
+    pub fn checked_duration_since(self, earlier: Self) -> Result<Duration, ClockError> {
+        self.monotonic
+            .checked_duration_since(earlier.monotonic)
+            .ok_or(ClockError::MovedBackward {
+                current: earlier.monotonic,
+                requested: self.monotonic,
+            })
+    }
+
+    /// Checks progress between two observations without consulting the host
+    /// clock or sleeping.
+    ///
+    /// `Ok(None)` is an intentional fixture stall when work is marked
+    /// `runnable` and the monotonic value did not change.  A non-runnable
+    /// observation may remain equal and returns `Ok(Some(Duration::ZERO))`.
+    /// A reversal is always an error.  This keeps a stalled source distinct
+    /// from a source that moved backwards without adding a polling heuristic.
+    pub fn checked_progress_since(
+        self,
+        earlier: Self,
+        runnable: bool,
+    ) -> Result<Option<Duration>, ClockError> {
+        let elapsed = self.checked_duration_since(earlier)?;
+        if runnable && elapsed.is_zero() {
+            Ok(None)
+        } else {
+            Ok(Some(elapsed))
+        }
+    }
 }
 
 /// The part of a clock state that overflowed.
@@ -240,6 +276,50 @@ impl VirtualClock {
     #[must_use]
     pub fn from_system_time(wall: SystemTime) -> Self {
         Self::new(WallTime::from_system_time(wall), MonotonicInstant::ZERO)
+    }
+
+    /// Replaces the paired reading without validating monotonic order.
+    ///
+    /// This is intentionally a fault-injection seam for tests of consumers
+    /// that observe an unreliable provider.  Normal timer tests should use
+    /// [`VirtualClock::advance`] or [`VirtualClock::advance_to`], both of
+    /// which reject reversals and overflow atomically.
+    pub fn set_unchecked(&self, snapshot: ClockSnapshot) {
+        let mut state = recover_lock(&self.state);
+        state.wall = snapshot.wall;
+        state.monotonic = snapshot.monotonic;
+    }
+
+    /// Replaces only the wall-clock component and returns the resulting
+    /// paired reading.
+    ///
+    /// Wall time is allowed to jump in either direction because it is a
+    /// timestamp, not a deadline source.  Monotonic time is unchanged, so
+    /// timer ordering and elapsed durations remain stable across the jump.
+    pub fn set_wall_time(&self, wall: WallTime) -> ClockSnapshot {
+        let mut state = recover_lock(&self.state);
+        state.wall = wall;
+        ClockSnapshot {
+            wall: state.wall,
+            monotonic: state.monotonic,
+        }
+    }
+
+    /// Observes this clock relative to `previous` without sleeping.
+    ///
+    /// See [`ClockSnapshot::checked_progress_since`] for the meaning of the
+    /// optional result.  Consumers can use `None` to report a provider stall
+    /// and avoid extending a deadline while still accepting equal samples for
+    /// explicitly quiescent work.
+    pub fn observe(
+        &self,
+        previous: ClockSnapshot,
+        runnable: bool,
+    ) -> Result<Option<ClockSnapshot>, ClockError> {
+        let current = self.snapshot();
+        current
+            .checked_progress_since(previous, runnable)
+            .map(|progress| progress.map(|_| current))
     }
 
     /// Returns a clone sharing this clock's state.
@@ -1406,6 +1486,58 @@ mod tests {
     }
 
     #[test]
+    fn wall_adjustment_does_not_change_monotonic_elapsed_time() {
+        let clock = VirtualClock::new(
+            WallTime::from_unix_duration(Duration::from_secs(20)).unwrap(),
+            MonotonicInstant::from_duration(Duration::from_secs(3)),
+        );
+        let before = clock.snapshot();
+        let adjusted =
+            clock.set_wall_time(WallTime::from_unix_duration(Duration::from_secs(5)).unwrap());
+
+        assert_eq!(adjusted.monotonic, before.monotonic);
+        assert_eq!(
+            adjusted.wall,
+            WallTime::from_unix_duration(Duration::from_secs(5)).unwrap()
+        );
+        assert_eq!(adjusted.checked_duration_since(before), Ok(Duration::ZERO));
+
+        let after = clock.advance(Duration::from_secs(2)).unwrap();
+        assert_eq!(
+            after.wall.checked_duration_since(adjusted.wall),
+            Some(Duration::from_secs(2))
+        );
+        assert_eq!(
+            after.monotonic.checked_duration_since(adjusted.monotonic),
+            Some(Duration::from_secs(2))
+        );
+    }
+
+    #[test]
+    fn progress_observation_distinguishes_quiescence_stall_and_reversal() {
+        let clock = VirtualClock::at_epoch();
+        let first = clock.snapshot();
+        assert_eq!(clock.observe(first, false), Ok(Some(first)));
+        assert_eq!(clock.observe(first, true), Ok(None));
+
+        clock.advance(Duration::from_secs(1)).unwrap();
+        let second = clock.snapshot();
+        assert_eq!(clock.observe(first, true), Ok(Some(second)));
+
+        clock.set_unchecked(ClockSnapshot {
+            wall: second.wall,
+            monotonic: MonotonicInstant::from_duration(Duration::from_millis(500)),
+        });
+        assert_eq!(
+            clock.observe(second, true),
+            Err(ClockError::MovedBackward {
+                current: second.monotonic,
+                requested: MonotonicInstant::from_duration(Duration::from_millis(500)),
+            })
+        );
+    }
+
+    #[test]
     fn clock_rejects_backwards_target_without_mutation() {
         let clock = VirtualClock::at_epoch();
         clock.advance(Duration::from_secs(2)).unwrap();
@@ -1426,6 +1558,24 @@ mod tests {
         let before = clock.snapshot();
         let error = clock.advance(Duration::from_nanos(1)).unwrap_err();
         assert_eq!(error.code(), ErrorCode::ClockOverflow);
+        assert_eq!(clock.snapshot(), before);
+    }
+
+    #[test]
+    fn unchecked_fault_injection_does_not_bypass_checked_advance() {
+        let clock = VirtualClock::at_epoch();
+        clock.set_unchecked(ClockSnapshot {
+            wall: WallTime::UNIX_EPOCH,
+            monotonic: MonotonicInstant::from_duration(Duration::from_secs(4)),
+        });
+        let before = clock.snapshot();
+        assert_eq!(
+            clock.advance_to(MonotonicInstant::from_duration(Duration::from_secs(3))),
+            Err(ClockError::MovedBackward {
+                current: before.monotonic,
+                requested: MonotonicInstant::from_duration(Duration::from_secs(3)),
+            })
+        );
         assert_eq!(clock.snapshot(), before);
     }
 
@@ -1472,6 +1622,39 @@ mod tests {
         sleeper.advance_by(Duration::from_secs(1)).unwrap();
         assert_eq!(ready.state(), TimerState::Consumed);
         assert!(!ready.cancel().unwrap());
+    }
+
+    #[test]
+    fn direct_clock_advance_requires_explicit_poll_and_cancel_wins_before_wake() {
+        let clock = VirtualClock::at_epoch();
+        let sleeper = FakeSleeper::new(clock.clone(), 2);
+        let timer = sleeper.sleep_for(Duration::from_secs(1)).unwrap();
+
+        clock.advance(Duration::from_secs(1)).unwrap();
+        assert_eq!(timer.state(), TimerState::Pending);
+        assert_eq!(sleeper.ready_count(), 0);
+        assert!(timer.cancel().unwrap());
+        assert_eq!(timer.state(), TimerState::Cancelled);
+        assert_eq!(sleeper.poll_ready(), None);
+        assert_eq!(sleeper.registered_count(), 0);
+    }
+
+    #[test]
+    fn direct_clock_advance_then_poll_preserves_deadline_and_sequence_order() {
+        let clock = VirtualClock::at_epoch();
+        let sleeper = FakeSleeper::new(clock.clone(), 4);
+        let later = sleeper.sleep_for(Duration::from_secs(2)).unwrap();
+        let earlier = sleeper.sleep_for(Duration::from_secs(1)).unwrap();
+
+        clock.advance(Duration::from_secs(2)).unwrap();
+        assert_eq!(
+            sleeper.drain_ready(),
+            vec![earlier.registration(), later.registration()]
+        );
+        assert_eq!(
+            sleeper.clock().snapshot().monotonic,
+            MonotonicInstant::from_duration(Duration::from_secs(2))
+        );
     }
 
     #[test]

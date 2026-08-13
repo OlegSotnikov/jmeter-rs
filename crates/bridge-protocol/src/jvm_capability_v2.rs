@@ -12,7 +12,7 @@
 use core::fmt;
 use core::num::{NonZeroU32, NonZeroU64};
 use sha2::{Digest as ShaDigest, Sha256};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The negotiated operation schema name.
 pub const JVM_CAPABILITY_V2_SCHEMA: &str = "jvm-capability/2";
@@ -24,8 +24,8 @@ pub const JVM_CAPABILITY_V2_MAGIC: [u8; 4] = *b"JVC2";
 pub const JVM_CAPABILITY_V2_HEADER_LEN: usize = 224;
 /// The outer-frame ceiling also bounds a complete inner message.
 pub const JVM_CAPABILITY_V2_OUTER_FRAME_MAX_BYTES: usize = 16 * 1024 * 1024;
-/// The initial complete JVC2-message ceiling.
-pub const JVM_CAPABILITY_V2_MAX_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
+/// The complete JVC2-message ceiling, including the fixed envelope.
+pub const JVM_CAPABILITY_V2_MAX_MESSAGE_BYTES: usize = JVM_CAPABILITY_V2_OUTER_FRAME_MAX_BYTES;
 /// The maximum canonical field value.
 pub const JVM_CAPABILITY_V2_MAX_FIELD_BYTES: usize = 1024 * 1024;
 /// The maximum number of semantic fields in one message body.
@@ -52,7 +52,20 @@ const DOMAIN_CHAIN_RESPONSE: &[u8] = b"jvc2/chain/response\0";
 const DOMAIN_CHAIN_CONTROL: &[u8] = b"jvc2/chain/control\0";
 const DOMAIN_TRANSCRIPT: &[u8] = b"jvc2/hello-transcript\0";
 const DOMAIN_IDENTITY: &[u8] = b"jvc2/identity\0";
-const DOMAIN_REPLY: &[u8] = b"jvc2/reply\0";
+const DOMAIN_PROPOSAL: &[u8] = b"jvc2/proposal\0";
+
+const MAX_OPERATIONS: usize = 65_536;
+const MAX_PHASE_OUTCOMES: usize = 16_384;
+const MAX_CALLBACKS: usize = 16_384;
+const MAX_REFERENCES: usize = 16_384;
+const MAX_DIAGNOSTICS: usize = 1_024;
+const MAX_CAPABILITIES: usize = 256;
+const MAX_HELLO_TEXT_BYTES: usize = 4 * 1024;
+const MAX_VALUE_DEPTH: usize = 32;
+const MAX_VALUE_NODES: usize = 8_192;
+const MAX_ACTIVE_HANDLES: usize = 8_192;
+const MAX_HANDLES_PER_RUN: usize = 65_536;
+const MAX_LEASE_OPERATIONS: usize = 1_024;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[repr(u16)]
@@ -119,7 +132,7 @@ impl V2Error {
 
     pub fn with_detail(code: V2ErrorCode, detail: impl Into<String>) -> Self {
         let mut detail = detail.into();
-        detail.truncate(JVM_CAPABILITY_V2_MAX_TEXT_BYTES);
+        truncate_utf8(&mut detail, JVM_CAPABILITY_V2_MAX_TEXT_BYTES);
         Self {
             code,
             detail: Some(detail),
@@ -666,18 +679,18 @@ impl Default for JvmCapabilityV2Limits {
             max_field_bytes: JVM_CAPABILITY_V2_MAX_FIELD_BYTES,
             max_text_bytes: JVM_CAPABILITY_V2_MAX_TEXT_BYTES,
             max_script_bytes: JVM_CAPABILITY_V2_MAX_SCRIPT_BYTES,
-            max_operations: 65_536,
-            max_phase_outcomes: 16_384,
-            max_callbacks: 16_384,
-            max_references: 16_384,
-            max_diagnostics: 1_024,
-            max_capabilities: 256,
-            max_hello_text_bytes: 4 * 1024,
-            max_value_depth: 32,
-            max_value_nodes: 8_192,
-            max_active_handles: 8_192,
-            max_handles_per_run: 65_536,
-            max_lease_operations: 1_024,
+            max_operations: MAX_OPERATIONS,
+            max_phase_outcomes: MAX_PHASE_OUTCOMES,
+            max_callbacks: MAX_CALLBACKS,
+            max_references: MAX_REFERENCES,
+            max_diagnostics: MAX_DIAGNOSTICS,
+            max_capabilities: MAX_CAPABILITIES,
+            max_hello_text_bytes: MAX_HELLO_TEXT_BYTES,
+            max_value_depth: MAX_VALUE_DEPTH,
+            max_value_nodes: MAX_VALUE_NODES,
+            max_active_handles: MAX_ACTIVE_HANDLES,
+            max_handles_per_run: MAX_HANDLES_PER_RUN,
+            max_lease_operations: MAX_LEASE_OPERATIONS,
         }
     }
 }
@@ -697,29 +710,58 @@ impl JvmCapabilityV2Limits {
             && self.max_script_bytes > 0
             && self.max_script_bytes <= JVM_CAPABILITY_V2_MAX_SCRIPT_BYTES
             && self.max_operations > 0
-            && self.max_operations <= 65_536
+            && self.max_operations <= MAX_OPERATIONS
             && self.max_phase_outcomes > 0
+            && self.max_phase_outcomes <= MAX_PHASE_OUTCOMES
             && self.max_callbacks > 0
+            && self.max_callbacks <= MAX_CALLBACKS
             && self.max_references > 0
+            && self.max_references <= MAX_REFERENCES
             && self.max_diagnostics > 0
+            && self.max_diagnostics <= MAX_DIAGNOSTICS
             && self.max_capabilities > 0
+            && self.max_capabilities <= MAX_CAPABILITIES
             && self.max_hello_text_bytes > 0
             && self.max_hello_text_bytes <= self.max_text_bytes
+            && self.max_hello_text_bytes <= MAX_HELLO_TEXT_BYTES
             && self.max_value_depth > 0
             && self.max_value_depth <= 32
             && self.max_value_nodes > 0
             && self.max_value_nodes <= 8_192
             && self.max_active_handles > 0
-            && self.max_active_handles <= 8_192
+            && self.max_active_handles <= MAX_ACTIVE_HANDLES
             && self.max_handles_per_run > 0
-            && self.max_handles_per_run <= 65_536
+            && self.max_handles_per_run <= MAX_HANDLES_PER_RUN
             && self.max_lease_operations > 0
-            && self.max_lease_operations <= 1_024;
+            && self.max_lease_operations <= MAX_LEASE_OPERATIONS;
         if valid {
             Ok(())
         } else {
             Err(V2Error::new(V2ErrorCode::Limit))
         }
+    }
+
+    /// Returns whether `selected` is a valid lower negotiated projection of
+    /// these offered limits. A worker may narrow a limit, never increase it.
+    pub fn contains(self, selected: Self) -> bool {
+        selected.max_message_bytes <= self.max_message_bytes
+            && selected.max_fields <= self.max_fields
+            && selected.max_extensions <= self.max_extensions
+            && selected.max_field_bytes <= self.max_field_bytes
+            && selected.max_text_bytes <= self.max_text_bytes
+            && selected.max_script_bytes <= self.max_script_bytes
+            && selected.max_operations <= self.max_operations
+            && selected.max_phase_outcomes <= self.max_phase_outcomes
+            && selected.max_callbacks <= self.max_callbacks
+            && selected.max_references <= self.max_references
+            && selected.max_diagnostics <= self.max_diagnostics
+            && selected.max_capabilities <= self.max_capabilities
+            && selected.max_hello_text_bytes <= self.max_hello_text_bytes
+            && selected.max_value_depth <= self.max_value_depth
+            && selected.max_value_nodes <= self.max_value_nodes
+            && selected.max_active_handles <= self.max_active_handles
+            && selected.max_handles_per_run <= self.max_handles_per_run
+            && selected.max_lease_operations <= self.max_lease_operations
     }
 }
 
@@ -756,12 +798,23 @@ impl fmt::Debug for HelperIdentity {
 
 impl ProfileIdentity {
     pub fn validate(&self, limits: JvmCapabilityV2Limits) -> Result<(), V2Error> {
+        if self.id.is_empty() || self.version == 0 || self.sha256.is_zero() {
+            return Err(V2Error::new(V2ErrorCode::Identity));
+        }
         validate_text(&self.id, limits.max_hello_text_bytes)
     }
 }
 
 impl HelperIdentity {
     pub fn validate(&self, limits: JvmCapabilityV2Limits) -> Result<(), V2Error> {
+        if self.source_sha256.is_zero()
+            || self.build_sha256.is_zero()
+            || self.schema_sha256.is_zero()
+            || self.module_digest.is_zero()
+            || self.compiler.is_empty()
+        {
+            return Err(V2Error::new(V2ErrorCode::Identity));
+        }
         validate_text(&self.compiler, limits.max_hello_text_bytes)
     }
 
@@ -850,9 +903,11 @@ impl ObjectHandle {
         if self.id == ObjectHandleId::ZERO
             || self.owner.session_id == SessionId::ZERO
             || self.owner.run_id == RunId::ZERO
+            || self.owner.worker_id == 0
             || self.owner.allocation_ordinal.get() == 0
             || self.lease_operations == 0
             || self.lease_operations as usize > limits.max_lease_operations
+            || self.class_identity_sha256.is_zero()
             || HandleRights::from_bits(self.rights.bits()).is_none()
         {
             return Err(V2Error::new(V2ErrorCode::Handle));
@@ -863,7 +918,7 @@ impl ObjectHandle {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HandleLedger {
-    active: BTreeSet<ObjectHandleId>,
+    active: BTreeMap<ObjectHandleId, ObjectHandle>,
     allocated: usize,
 }
 
@@ -876,7 +931,7 @@ impl Default for HandleLedger {
 impl HandleLedger {
     pub const fn new() -> Self {
         Self {
-            active: BTreeSet::new(),
+            active: BTreeMap::new(),
             allocated: 0,
         }
     }
@@ -889,10 +944,11 @@ impl HandleLedger {
         handle.validate(limits)?;
         if self.active.len() >= limits.max_active_handles
             || self.allocated >= limits.max_handles_per_run
-            || !self.active.insert(handle.id)
+            || self.active.contains_key(&handle.id)
         {
             return Err(V2Error::new(V2ErrorCode::Handle));
         }
+        self.active.insert(handle.id, handle.clone());
         self.allocated = self
             .allocated
             .checked_add(1)
@@ -901,10 +957,22 @@ impl HandleLedger {
     }
 
     pub fn release(&mut self, id: ObjectHandleId) -> Result<(), V2Error> {
-        if id == ObjectHandleId::ZERO || !self.active.remove(&id) {
+        if id == ObjectHandleId::ZERO || self.active.remove(&id).is_none() {
             return Err(V2Error::new(V2ErrorCode::Handle));
         }
         Ok(())
+    }
+
+    /// Releases a handle only when the complete identity matches the active
+    /// lease. Numeric IDs alone are not sufficient across runs or loader
+    /// generations.
+    pub fn release_scoped(&mut self, handle: &ObjectHandle) -> Result<(), V2Error> {
+        handle.validate(JvmCapabilityV2Limits::default())?;
+        if self.active.get(&handle.id) == Some(handle) {
+            self.release(handle.id)
+        } else {
+            Err(V2Error::new(V2ErrorCode::Handle))
+        }
     }
 
     pub fn active_count(&self) -> usize {
@@ -916,7 +984,7 @@ impl HandleLedger {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct SecretReference {
     pub handle: ObjectHandleId,
     pub provider_digest: Sha256Digest,
@@ -925,9 +993,22 @@ pub struct SecretReference {
     pub rights: HandleRights,
 }
 
+impl fmt::Debug for SecretReference {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SecretReference")
+            .field("handle", &self.handle)
+            .field("provider_digest", &self.provider_digest)
+            .field("purpose", &"<redacted>")
+            .field("expiry_budget", &self.expiry_budget)
+            .field("rights", &self.rights)
+            .finish()
+    }
+}
+
 impl SecretReference {
     pub fn validate(&self, limits: JvmCapabilityV2Limits) -> Result<(), V2Error> {
-        if self.handle == ObjectHandleId::ZERO {
+        if self.handle == ObjectHandleId::ZERO || self.provider_digest.is_zero() {
             return Err(V2Error::new(V2ErrorCode::Handle));
         }
         validate_text(&self.purpose, limits.max_text_bytes)?;
@@ -938,7 +1019,7 @@ impl SecretReference {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum BindingValue {
     Null,
     Text(String),
@@ -1004,6 +1085,37 @@ impl BindingValue {
     }
 }
 
+impl fmt::Debug for BindingValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Null => formatter.write_str("Null"),
+            Self::Text(value) => formatter
+                .debug_struct("Text")
+                .field("bytes", &value.len())
+                .field("value", &"<redacted>")
+                .finish(),
+            Self::Bytes(value) => formatter
+                .debug_struct("Bytes")
+                .field("reference", value)
+                .finish(),
+            Self::Bool(value) => formatter.debug_tuple("Bool").field(value).finish(),
+            Self::I32(_) => formatter.write_str("I32(<redacted>)"),
+            Self::I64(_) => formatter.write_str("I64(<redacted>)"),
+            Self::F64Bits(_) => formatter.write_str("F64Bits(<redacted>)"),
+            Self::Secret(value) => formatter.debug_tuple("Secret").field(value).finish(),
+            Self::Object(value) => formatter.debug_tuple("Object").field(value).finish(),
+            Self::List(values) => formatter
+                .debug_struct("List")
+                .field("len", &values.len())
+                .finish(),
+            Self::Map(values) => formatter
+                .debug_struct("Map")
+                .field("len", &values.len())
+                .finish(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Presence<T> {
     Absent,
@@ -1052,14 +1164,38 @@ impl ContextSnapshot {
             || self.variables.len() > 4_096
             || self.properties.len() > 4_096
             || self.handles.len() > limits.max_active_handles
+            || self.snapshot_digest.is_zero()
         {
             return Err(V2Error::new(V2ErrorCode::Limit));
         }
         validate_bindings(&self.variables, limits)?;
         validate_bindings(&self.properties, limits)?;
+        if self
+            .variables
+            .len()
+            .checked_add(self.properties.len())
+            .is_none_or(|count| count > limits.max_value_nodes)
+        {
+            return Err(V2Error::new(V2ErrorCode::Limit));
+        }
         let mut ledger = HandleLedger::new();
         for handle in &self.handles {
+            if handle.owner.run_id != self.run_id
+                || handle.owner.run_generation != self.run_generation
+            {
+                return Err(V2Error::new(V2ErrorCode::Handle));
+            }
             ledger.allocate(handle, limits)?;
+        }
+        if let Presence::Present(digest) = self.current_result
+            && digest.is_zero()
+        {
+            return Err(V2Error::new(V2ErrorCode::Digest));
+        }
+        if let Presence::Present(digest) = self.previous_result
+            && digest.is_zero()
+        {
+            return Err(V2Error::new(V2ErrorCode::Digest));
         }
         Ok(())
     }
@@ -1106,6 +1242,9 @@ impl HelloOffer {
         self.offered_limits.validate()?;
         self.profile.validate(self.offered_limits)?;
         self.helper.validate(self.offered_limits)?;
+        if self.helper.role != self.role || self.matrix_digest.is_zero() {
+            return Err(V2Error::new(V2ErrorCode::Identity));
+        }
         if self.client_nonce == Nonce::ZERO
             || self.capabilities.len() > self.offered_limits.max_capabilities
         {
@@ -1147,17 +1286,29 @@ impl HelloOffer {
 }
 
 impl HelloAck {
-    pub fn validate(&self) -> Result<(), V2Error> {
+    fn validate_without_transcript(&self) -> Result<(), V2Error> {
         self.selected_limits.validate()?;
         self.helper.validate(self.selected_limits)?;
-        if self.server_nonce == Nonce::ZERO {
+        if self.helper.role != self.role
+            || self.server_nonce == Nonce::ZERO
+            || self.matrix_digest.is_zero()
+            || self.request_body_digest.is_zero()
+        {
+            return Err(V2Error::new(V2ErrorCode::Identity));
+        }
+        Ok(())
+    }
+
+    pub fn validate(&self) -> Result<(), V2Error> {
+        self.validate_without_transcript()?;
+        if self.transcript_digest.is_zero() {
             return Err(V2Error::new(V2ErrorCode::Identity));
         }
         Ok(())
     }
 
     fn fields_without_transcript(&self) -> Result<Vec<Field>, V2Error> {
-        self.validate()?;
+        self.validate_without_transcript()?;
         let mut helper = WireWriter::new();
         encode_helper_identity(&self.helper, &mut helper)?;
         Ok(vec![
@@ -1171,6 +1322,7 @@ impl HelloAck {
     }
 
     pub fn fields(&self) -> Result<Vec<Field>, V2Error> {
+        self.validate()?;
         let mut fields = self.fields_without_transcript()?;
         fields.push(Field::new(7, self.transcript_digest.as_bytes().to_vec())?);
         Ok(fields)
@@ -1190,7 +1342,16 @@ impl HelloTranscript {
         acknowledgement_body_digest_without_transcript: Sha256Digest,
     ) -> Result<Self, V2Error> {
         offer.validate()?;
-        ack.validate()?;
+        ack.validate_without_transcript()?;
+        if ack.role != offer.role
+            || ack.matrix_digest != offer.matrix_digest
+            || ack.request_body_digest != request_body_digest
+        {
+            return Err(V2Error::new(V2ErrorCode::Identity));
+        }
+        if !offer.offered_limits.contains(ack.selected_limits) {
+            return Err(V2Error::new(V2ErrorCode::Limit));
+        }
         let mut writer = WireWriter::new();
         encode_hello_transcript_material(
             offer,
@@ -1213,11 +1374,13 @@ pub struct Field {
 
 impl Field {
     pub fn new(tag: u16, value: Vec<u8>) -> Result<Self, V2Error> {
-        if tag == 0
-            || tag == 0x7fff
-            || tag == 0xffff
-            || value.len() > JVM_CAPABILITY_V2_MAX_FIELD_BYTES
-        {
+        if tag == 0 || tag == 0x7fff || tag == 0xffff {
+            return Err(V2Error::new(V2ErrorCode::Limit));
+        }
+        if tag >= JVM_CAPABILITY_V2_EXTENSION_TAG_MIN {
+            return Err(V2Error::new(V2ErrorCode::UnknownField));
+        }
+        if value.len() > JVM_CAPABILITY_V2_MAX_FIELD_BYTES {
             return Err(V2Error::new(V2ErrorCode::Limit));
         }
         Ok(Self { tag, value })
@@ -1229,7 +1392,10 @@ impl Field {
         {
             return Err(V2Error::new(V2ErrorCode::UnknownField));
         }
-        Self::new(tag, value)
+        if value.len() > JVM_CAPABILITY_V2_MAX_FIELD_BYTES {
+            return Err(V2Error::new(V2ErrorCode::Limit));
+        }
+        Ok(Self { tag, value })
     }
 }
 
@@ -1571,6 +1737,12 @@ fn validate_header(envelope: &Envelope) -> Result<(), V2Error> {
     }
     let hello = envelope.phase == WirePhase::Hello;
     if hello {
+        if !matches!(
+            envelope.message_kind,
+            MessageKind::Request | MessageKind::Response
+        ) {
+            return Err(V2Error::new(V2ErrorCode::Phase));
+        }
         if envelope.operation != OperationKind::Hello
             || envelope.transaction_id != TransactionId::ZERO
             || envelope.run_id != RunId::ZERO
@@ -1589,6 +1761,7 @@ fn validate_header(envelope: &Envelope) -> Result<(), V2Error> {
     } else if envelope.operation == OperationKind::Hello
         || envelope.session_id == SessionId::ZERO
         || envelope.request_id == 0
+        || envelope.run_id == RunId::ZERO
     {
         return Err(V2Error::new(V2ErrorCode::Identity));
     }
@@ -1605,6 +1778,14 @@ fn validate_header(envelope: &Envelope) -> Result<(), V2Error> {
     );
     if transactional_phase != (envelope.transaction_id != TransactionId::ZERO) {
         return Err(V2Error::new(V2ErrorCode::Transaction));
+    }
+    if envelope.operation.is_transactional() != transactional_phase {
+        return Err(V2Error::new(V2ErrorCode::Phase));
+    }
+    if (envelope.phase == WirePhase::Open && envelope.operation != OperationKind::OpenRun)
+        || (envelope.phase == WirePhase::Close && envelope.operation != OperationKind::CloseRun)
+    {
+        return Err(V2Error::new(V2ErrorCode::Phase));
     }
     validate_phase_matrix(
         envelope.message_kind,
@@ -1757,18 +1938,17 @@ fn encode_hello_transcript_material(
     acknowledgement_body_digest_without_transcript: Sha256Digest,
     writer: &mut WireWriter,
 ) -> Result<(), V2Error> {
-    writer.u8(offer.role as u8);
-    writer.u8(ack.role as u8);
     writer.bytes(&offer.client_nonce.as_bytes());
     writer.bytes(&ack.server_nonce.as_bytes());
-    writer.bytes(&offer.helper.canonical_digest()?.as_bytes());
-    writer.bytes(&ack.helper.canonical_digest()?.as_bytes());
-    writer.bytes(&offer.matrix_digest.as_bytes());
-    writer.bytes(&ack.matrix_digest.as_bytes());
-    writer.bytes(&request_body_digest.as_bytes());
-    writer.bytes(&acknowledgement_body_digest_without_transcript.as_bytes());
+    writer.u8(offer.role as u8);
+    writer.bytes(&offer.helper.module_digest.as_bytes());
+    writer.u8(ack.role as u8);
+    writer.bytes(&ack.helper.module_digest.as_bytes());
     writer.blob(&encode_limits(&offer.offered_limits)?)?;
     writer.blob(&encode_limits(&ack.selected_limits)?)?;
+    writer.bytes(&offer.matrix_digest.as_bytes());
+    writer.bytes(&request_body_digest.as_bytes());
+    writer.bytes(&acknowledgement_body_digest_without_transcript.as_bytes());
     Ok(())
 }
 
@@ -1820,11 +2000,16 @@ fn validate_string_list(values: &[String], limit: usize, text_limit: usize) -> R
         return Err(V2Error::new(V2ErrorCode::Limit));
     }
     let mut seen = BTreeSet::new();
+    let mut previous: Option<&str> = None;
     for value in values {
         validate_text(value, text_limit)?;
         if !seen.insert(value) {
             return Err(V2Error::new(V2ErrorCode::Identity));
         }
+        if previous.is_some_and(|item| item >= value.as_str()) {
+            return Err(V2Error::new(V2ErrorCode::Identity));
+        }
+        previous = Some(value);
     }
     Ok(())
 }
@@ -1835,6 +2020,19 @@ fn validate_text(value: &str, limit: usize) -> Result<(), V2Error> {
     } else {
         Ok(())
     }
+}
+
+fn truncate_utf8(value: &mut String, limit: usize) {
+    if value.len() <= limit {
+        return;
+    }
+    let end = value
+        .char_indices()
+        .take_while(|(index, _)| *index < limit)
+        .map(|(index, _)| index)
+        .last()
+        .unwrap_or(0);
+    value.truncate(end);
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1860,6 +2058,9 @@ pub struct DomainQualifiedNode {
 
 impl DomainQualifiedNode {
     pub fn validate(&self) -> Result<(), V2Error> {
+        if self.domain.is_empty() {
+            return Err(V2Error::new(V2ErrorCode::Identity));
+        }
         validate_text(&self.domain, JVM_CAPABILITY_V2_MAX_TEXT_BYTES)
     }
 }
@@ -1879,6 +2080,20 @@ pub enum ResultReference {
     },
 }
 
+impl ResultReference {
+    fn validate(self) -> Result<(), V2Error> {
+        if let Self::Present {
+            result_ordinal,
+            projection_sha256,
+        } = self
+            && (result_ordinal.get() == 0 || projection_sha256.is_zero())
+        {
+            return Err(V2Error::new(V2ErrorCode::Reply));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DiagnosticReference {
     Absent,
@@ -1886,6 +2101,20 @@ pub enum DiagnosticReference {
         diagnostic_ordinal: NonZeroU32,
         diagnostic_sha256: Sha256Digest,
     },
+}
+
+impl DiagnosticReference {
+    fn validate(self) -> Result<(), V2Error> {
+        if let Self::Present {
+            diagnostic_ordinal,
+            diagnostic_sha256,
+        } = self
+            && (diagnostic_ordinal.get() == 0 || diagnostic_sha256.is_zero())
+        {
+            return Err(V2Error::new(V2ErrorCode::Reply));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1898,11 +2127,20 @@ pub struct HandleFreeReference {
 
 impl HandleFreeReference {
     pub fn validate(&self) -> Result<(), V2Error> {
-        if self.byte_length as usize > JVM_CAPABILITY_V2_MAX_FIELD_BYTES {
+        if self.byte_length as usize > JVM_CAPABILITY_V2_MAX_FIELD_BYTES || self.sha256.is_zero() {
             Err(V2Error::new(V2ErrorCode::Limit))
         } else {
             Ok(())
         }
+    }
+}
+
+impl FinalSnapshot {
+    fn validate(self) -> Result<(), V2Error> {
+        if self.snapshot_digest.is_zero() {
+            return Err(V2Error::new(V2ErrorCode::Digest));
+        }
+        Ok(())
     }
 }
 
@@ -1934,6 +2172,16 @@ pub struct CallbackSnapshot {
     pub artifact_count: u16,
 }
 
+impl CallbackSnapshot {
+    fn validate(&self) -> Result<(), V2Error> {
+        if self.selected_variables_digest.is_zero() {
+            return Err(V2Error::new(V2ErrorCode::Digest));
+        }
+        self.result_reference.validate()?;
+        self.diagnostic_reference.validate()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DiagnosticRecord {
     pub ordinal: NonZeroU32,
@@ -1945,6 +2193,15 @@ pub struct DiagnosticRecord {
 pub struct Observation {
     pub ordinal: NonZeroU32,
     pub observation_digest: Sha256Digest,
+}
+
+impl Observation {
+    fn validate(self) -> Result<(), V2Error> {
+        if self.observation_digest.is_zero() {
+            return Err(V2Error::new(V2ErrorCode::Digest));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2000,6 +2257,7 @@ impl ExecutionReply {
         match self {
             Self::SemanticComplete {
                 phase_outcomes,
+                final_snapshot,
                 event_snapshots,
                 result_graph,
                 observations,
@@ -2020,11 +2278,22 @@ impl ExecutionReply {
                 validate_contiguous_ordinals(
                     event_snapshots.iter().map(|value| value.callback_ordinal),
                 )?;
+                validate_contiguous_ordinals(result_graph.iter().map(|value| value.ordinal))?;
+                validate_contiguous_ordinals(observations.iter().map(|value| value.ordinal))?;
+                final_snapshot.validate()?;
                 for reference in result_graph {
                     reference.validate()?;
                 }
+                for callback in event_snapshots {
+                    callback.validate()?;
+                    validate_result_reference_bound(callback.result_reference, result_graph.len())?;
+                }
+                for observation in observations {
+                    observation.validate()?;
+                }
                 for outcome in phase_outcomes {
                     validate_phase_outcome(outcome)?;
+                    validate_result_reference_bound(outcome.result_reference, result_graph.len())?;
                 }
                 Ok(())
             }
@@ -2034,6 +2303,12 @@ impl ExecutionReply {
                 }
                 validate_contiguous_ordinals(diagnostics.iter().map(|value| value.ordinal))?;
                 for diagnostic in diagnostics {
+                    if diagnostic.ordinal.get() == 0
+                        || diagnostic.code.is_empty()
+                        || diagnostic.diagnostic_sha256.is_zero()
+                    {
+                        return Err(V2Error::new(V2ErrorCode::Reply));
+                    }
                     validate_text(&diagnostic.code, limits.max_text_bytes)?;
                 }
                 Ok(())
@@ -2046,8 +2321,21 @@ impl ExecutionReply {
         limits: JvmCapabilityV2Limits,
     ) -> Result<ProposalDigest, V2Error> {
         let bytes = encode_execution_reply(self, limits)?;
-        Ok(domain_digest(DOMAIN_REPLY, &bytes))
+        Ok(domain_digest(DOMAIN_PROPOSAL, &bytes))
     }
+}
+
+fn validate_result_reference_bound(
+    reference: ResultReference,
+    result_count: usize,
+) -> Result<(), V2Error> {
+    reference.validate()?;
+    if let ResultReference::Present { result_ordinal, .. } = reference
+        && result_ordinal.get() as usize > result_count
+    {
+        return Err(V2Error::new(V2ErrorCode::Reply));
+    }
+    Ok(())
 }
 
 fn validate_contiguous_ordinals<I>(ordinals: I) -> Result<(), V2Error>
@@ -2067,24 +2355,16 @@ where
 }
 
 fn validate_phase_outcome(value: &PhaseOutcome) -> Result<(), V2Error> {
+    if value.phase_ordinal.get() == 0 {
+        return Err(V2Error::new(V2ErrorCode::Reply));
+    }
     if let NodeReference::Present(node) = value.source_node
         && node.get() == 0
     {
         return Err(V2Error::new(V2ErrorCode::Identity));
     }
-    if let ResultReference::Present { result_ordinal, .. } = value.result_reference
-        && result_ordinal.get() == 0
-    {
-        return Err(V2Error::new(V2ErrorCode::Reply));
-    }
-    if let DiagnosticReference::Present {
-        diagnostic_ordinal, ..
-    } = value.diagnostic_reference
-        && diagnostic_ordinal.get() == 0
-    {
-        return Err(V2Error::new(V2ErrorCode::Reply));
-    }
-    Ok(())
+    value.result_reference.validate()?;
+    value.diagnostic_reference.validate()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -3046,7 +3326,11 @@ fn decode_fields(
             return Err(V2Error::new(V2ErrorCode::UnknownField));
         }
         previous = tag;
-        let field = Field::new(tag, reader.take(length)?.to_vec())?;
+        let field = if index < known_count {
+            Field::new(tag, reader.take(length)?.to_vec())?
+        } else {
+            Field::extension(tag, reader.take(length)?.to_vec())?
+        };
         if index < known_count {
             if tag >= JVM_CAPABILITY_V2_EXTENSION_TAG_MIN {
                 return Err(V2Error::new(V2ErrorCode::UnknownField));
@@ -3185,11 +3469,11 @@ mod tests {
         let request = build_hello_request(&offer, 1000).expect("hello request");
         assert_eq!(
             request.body_digest.to_string(),
-            "d7de8e0f8cb54883b9192186c87c500b375a9b277e54dd15787275a24010191e"
+            "954077121e155f8225c1b31cc34b2c81a036225cc9452ee908bdce44b9881550"
         );
         assert_eq!(
             request.chain_digest.to_string(),
-            "3657865c7fa11ec0a04c64f82ab3ef5ff5c7281a3efd16e98c265035b33cf1bc"
+            "0299fa922b8a84cab432fcf53a2d9be2ffcc2e415d2dd09f8b5f248c0a66032f"
         );
         assert_eq!(&request.encode().expect("encode")[..4], b"JVC2");
         let decoded = Envelope::decode(
@@ -3441,7 +3725,18 @@ mod tests {
             .allocate(&handle, JvmCapabilityV2Limits::default())
             .expect("allocate");
         assert_eq!(ledger.active_count(), 1);
-        assert_eq!(ledger.release(handle.id), Ok(()));
+        let mut wrong_generation = handle.clone();
+        wrong_generation.owner.run_generation = 9;
+        assert_eq!(
+            ledger
+                .release_scoped(&wrong_generation)
+                .expect_err("stale handle"),
+            V2Error::new(V2ErrorCode::Handle)
+        );
+        assert_eq!(ledger.active_count(), 1);
+        ledger
+            .release_scoped(&handle)
+            .expect("matching handle release");
         assert_eq!(ledger.active_count(), 0);
 
         let snapshot = ContextSnapshot {
@@ -3569,5 +3864,43 @@ mod tests {
                 .code(),
             V2ErrorCode::Conflict
         );
+    }
+
+    #[test]
+    fn negotiated_limits_only_narrow_and_debug_redacts_secret_values() {
+        let mut offer = offer();
+        offer.offered_limits.max_message_bytes = JVM_CAPABILITY_V2_HEADER_LEN;
+        let ack = HelloAck {
+            role: Role::Capability,
+            helper: helper(Role::Capability),
+            server_nonce: Nonce::from_bytes([40; 32]),
+            selected_limits: JvmCapabilityV2Limits::default(),
+            matrix_digest: offer.matrix_digest,
+            request_body_digest: Sha256Digest::from_bytes([41; 32]),
+            transcript_digest: Sha256Digest::ZERO,
+        };
+        assert_eq!(
+            HelloTranscript::compute(
+                &offer,
+                &ack,
+                ack.request_body_digest,
+                Sha256Digest::from_bytes([42; 32]),
+            )
+            .expect_err("widened limit")
+            .code(),
+            V2ErrorCode::Limit
+        );
+
+        let secret = BindingValue::Text("secret-source".to_owned());
+        let debug = format!("{secret:?}");
+        assert!(!debug.contains("secret-source"));
+        let reference = SecretReference {
+            handle: ObjectHandleId::from_bytes([43; 16]),
+            provider_digest: Sha256Digest::from_bytes([44; 32]),
+            purpose: "private-purpose".to_owned(),
+            expiry_budget: DeadlineBudget::from_millis(10).expect("budget"),
+            rights: HandleRights::READ,
+        };
+        assert!(!format!("{reference:?}").contains("private-purpose"));
     }
 }

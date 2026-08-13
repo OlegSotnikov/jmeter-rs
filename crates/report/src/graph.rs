@@ -17,6 +17,11 @@ use crate::metrics::{SampleMetadata, represented_counts, validate_label};
 pub struct GraphSample {
     timestamp: WallTimestamp,
     elapsed_millis: Option<u64>,
+    /// Exact elapsed total represented by this row.  `elapsed_millis` is the
+    /// effective per-row value exposed to legacy graph callers, while this
+    /// value keeps a statistical row's wire total lossless when it is added
+    /// to a weighted bucket (for example, 5 ms over 2 samples).
+    elapsed_total_millis: Option<u128>,
     elapsed_present: bool,
     latency_millis: Option<u64>,
     connect_millis: Option<u64>,
@@ -47,6 +52,21 @@ pub enum GraphTimestampPolicy {
     End,
 }
 
+/// Count semantics selected when projecting a result into a graph row.
+///
+/// Listener aggregates use represented (weighted) counts for statistical
+/// samples, while dashboard graph consumers operate on source rows.  Keeping
+/// this choice explicit prevents a dashboard row from silently becoming a
+/// weighted listener observation.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum GraphSampleCountMode {
+    /// Preserve `SampleCount`/`ErrorCount` as represented weights.
+    #[default]
+    Weighted,
+    /// Treat one serialized result row as one graph observation.
+    Row,
+}
+
 impl GraphSample {
     /// Creates a graph observation.  A missing elapsed value contributes to
     /// counts/rates but not response-time statistics.
@@ -60,6 +80,10 @@ impl GraphSample {
         Self {
             timestamp,
             elapsed_millis,
+            elapsed_total_millis: match elapsed_millis {
+                Some(value) => Some(value as u128),
+                None => None,
+            },
             elapsed_present: elapsed_millis.is_some(),
             latency_millis: None,
             connect_millis: None,
@@ -200,6 +224,10 @@ impl GraphSample {
     pub const fn with_counts(mut self, sample_count: u64, error_count: u64) -> Self {
         self.sample_count = sample_count;
         self.error_count = error_count;
+        self.elapsed_total_millis = match self.elapsed_millis {
+            Some(elapsed) => Some((elapsed as u128) * (sample_count as u128)),
+            None => None,
+        };
         self
     }
 
@@ -221,6 +249,17 @@ impl GraphSample {
     /// represented-count input as a typed report error.
     pub fn try_from_result(result: &SampleResult) -> Result<Option<Self>, ReportError> {
         Self::try_from_result_with_timestamp(result, GraphTimestampPolicy::End)
+    }
+
+    /// Projects one serialized result row without applying statistical sample
+    /// weights.  This is the mode used by dashboard graph consumers; listener
+    /// totals should continue to use [`Self::try_from_result`].
+    pub fn try_from_result_as_row(result: &SampleResult) -> Result<Option<Self>, ReportError> {
+        Self::try_from_result_with_count_mode(
+            result,
+            GraphSampleCountMode::Row,
+            GraphTimestampPolicy::End,
+        )
     }
 
     /// Projects one result using explicit event metadata.  Result and event
@@ -248,6 +287,20 @@ impl GraphSample {
         Self::try_from_result_with_metadata_and_timestamp(result, SampleMetadata::sampler(), policy)
     }
 
+    /// Projects one result with explicit count semantics and timestamp policy.
+    pub fn try_from_result_with_count_mode(
+        result: &SampleResult,
+        mode: GraphSampleCountMode,
+        policy: GraphTimestampPolicy,
+    ) -> Result<Option<Self>, ReportError> {
+        Self::try_from_result_with_metadata_and_timestamp_and_count_mode(
+            result,
+            SampleMetadata::sampler(),
+            policy,
+            mode,
+        )
+    }
+
     /// Projects one result using both explicit event metadata and a timestamp
     /// policy.  A missing timestamp is a typed error; it is never silently
     /// omitted from a graph stream.
@@ -256,7 +309,30 @@ impl GraphSample {
         metadata: SampleMetadata,
         policy: GraphTimestampPolicy,
     ) -> Result<Option<Self>, ReportError> {
-        let counts = represented_counts(result, crate::metrics::CountMode::Weighted)?;
+        Self::try_from_result_with_metadata_and_timestamp_and_count_mode(
+            result,
+            metadata,
+            policy,
+            GraphSampleCountMode::Weighted,
+        )
+    }
+
+    /// Projects one result with explicit event metadata, timestamp policy, and
+    /// count semantics.  The result/event wire models do not carry controller
+    /// identity, so metadata remains an independent input.
+    pub fn try_from_result_with_metadata_and_timestamp_and_count_mode(
+        result: &SampleResult,
+        metadata: SampleMetadata,
+        policy: GraphTimestampPolicy,
+        mode: GraphSampleCountMode,
+    ) -> Result<Option<Self>, ReportError> {
+        let counts = represented_counts(
+            result,
+            match mode {
+                GraphSampleCountMode::Weighted => crate::metrics::CountMode::Weighted,
+                GraphSampleCountMode::Row => crate::metrics::CountMode::Unweighted,
+            },
+        )?;
         let timestamp = match policy {
             GraphTimestampPolicy::Start => result
                 .start_time()
@@ -279,6 +355,7 @@ impl GraphSample {
         let sample = Self {
             timestamp,
             elapsed_millis: Some(elapsed_millis),
+            elapsed_total_millis: result.elapsed().map(|value| u128::from(value.as_millis())),
             elapsed_present,
             latency_millis: result.latency().map(|value| value.as_millis()),
             connect_millis: result.connect_time().map(|value| value.as_millis()),
@@ -321,6 +398,16 @@ impl GraphSample {
     /// Returns optional elapsed milliseconds.
     pub const fn elapsed_millis(&self) -> Option<u64> {
         self.elapsed_millis
+    }
+
+    /// Returns the exact elapsed total represented by this observation.
+    ///
+    /// A normal row has a total equal to its elapsed value.  A weighted row
+    /// retains the original wire total instead of reconstructing it from an
+    /// integer-divided per-row value.  The wider integer type makes the
+    /// representation lossless for every pair of `u64` elapsed/count fields.
+    pub const fn elapsed_total_millis(&self) -> Option<u128> {
+        self.elapsed_total_millis
     }
 
     /// Returns the elapsed value only when the source row carried an elapsed
@@ -683,16 +770,26 @@ impl Bucket {
                 .ok_or(ReportError::Overflow {
                     field: ReportField::SentBytes,
                 })?;
-        if sample.sample_count() == 0 {
-            return Ok(());
-        }
         if let Some(active_threads) = sample.active_threads() {
             self.active_threads = Some(
                 self.active_threads
                     .map_or(active_threads, |current| current.max(active_threads)),
             );
         }
-        let Some(elapsed) = sample.elapsed_millis() else {
+        if sample.sample_count() == 0 {
+            return Ok(());
+        }
+        // The generic listener graph keeps the historical zero fallback for a
+        // serialized row whose elapsed field is absent, while specialized
+        // response-time consumers use `elapsed_wire_millis` and reject that
+        // row.  Rows built directly with `None` have no fallback and remain
+        // absent from elapsed statistics.
+        let elapsed_total = if sample.elapsed_was_present() {
+            sample.elapsed_total_millis()
+        } else {
+            sample.elapsed_millis().map(u128::from)
+        };
+        let Some(elapsed_total) = elapsed_total else {
             return Ok(());
         };
         let new_count = self
@@ -702,9 +799,9 @@ impl Bucket {
                 field: ReportField::ElapsedCount,
             })?;
         let weight = sample.sample_count() as f64;
-        let elapsed = elapsed as f64;
-        let sum = self.sum + elapsed * weight;
-        let sum_of_squares = self.sum_of_squares + elapsed * elapsed * weight;
+        let elapsed = elapsed_total as f64;
+        let sum = self.sum + elapsed;
+        let sum_of_squares = self.sum_of_squares + elapsed * elapsed / weight;
         let mean = sum / new_count as f64;
         let variance_numerator = sum_of_squares - sum * sum / new_count as f64;
         if !sum.is_finite()
@@ -849,6 +946,24 @@ mod tests {
     }
 
     #[test]
+    fn graph_bucket_order_uses_absolute_euclidean_floors() {
+        let interval = ReportInterval::from_millis(-500, 2_001)
+            .unwrap_or_else(|_| panic!("valid test interval"));
+        let samples = [
+            GraphSample::new(WallTimestamp::from_millis(1), Some(20), false, 0, 0),
+            GraphSample::new(WallTimestamp::from_millis(-1), Some(10), false, 0, 0),
+        ];
+        let points = aggregate_graph_samples(&samples, interval, 2_000, 4)
+            .unwrap_or_else(|_| panic!("valid graph samples"));
+        assert_eq!(points.len(), 2);
+        assert_eq!(points[0].start().as_millis(), -2_000);
+        assert_eq!(points[0].end().as_millis(), 0);
+        assert_eq!(points[0].sample_count(), 1);
+        assert_eq!(points[1].start().as_millis(), 0);
+        assert_eq!(points[1].sample_count(), 1);
+    }
+
+    #[test]
     fn graph_point_bound_failure_is_typed() {
         let interval = ReportInterval::from_millis(0, 5_000).unwrap();
         let samples = [
@@ -894,6 +1009,70 @@ mod tests {
             .unwrap_or_else(|_| panic!("valid result"))
             .unwrap_or_else(|| panic!("timestamp present"));
         assert_eq!(absent.elapsed_millis(), Some(0));
+
+        let interval = ReportInterval::from_millis(1_704_067_204_000, 1_704_067_206_000)
+            .unwrap_or_else(|_| panic!("valid test interval"));
+        let points = aggregate_graph_samples(&[absent], interval, 2_000, 1)
+            .unwrap_or_else(|_| panic!("valid graph samples"));
+        assert_eq!(points[0].sample_count(), 1);
+        assert_eq!(points[0].elapsed_count(), 1);
+        assert_eq!(points[0].elapsed_sum_millis(), Some(0.0));
+    }
+
+    #[test]
+    fn weighted_projection_retains_non_divisible_elapsed_total() {
+        let mut result = SampleResult::new("fractional");
+        result.set_timestamp(Some(WallTimestamp::from_millis(1_000)));
+        assert!(
+            result
+                .set_elapsed(Some(ElapsedTime::from_millis(5)))
+                .is_ok()
+        );
+        result.set_successful(true);
+        result.set_sample_count(Some(SampleCount::from_u64(2)));
+        result.set_error_count(Some(ErrorCount::ZERO));
+
+        let sample = GraphSample::try_from_result(&result)
+            .unwrap_or_else(|_| panic!("valid weighted result"))
+            .unwrap_or_else(|| panic!("timestamp present"));
+        assert_eq!(sample.elapsed_millis(), Some(2));
+        assert_eq!(sample.elapsed_total_millis(), Some(5));
+
+        let interval =
+            ReportInterval::from_millis(0, 2_000).unwrap_or_else(|_| panic!("valid test interval"));
+        let points = aggregate_graph_samples(&[sample], interval, 2_000, 1)
+            .unwrap_or_else(|_| panic!("valid graph samples"));
+        assert_eq!(points[0].elapsed_count(), 2);
+        assert_eq!(points[0].elapsed_sum_millis(), Some(5.0));
+        assert_eq!(points[0].elapsed_mean(), Some(2.5));
+    }
+
+    #[test]
+    fn row_projection_keeps_dashboard_row_identity() {
+        let mut result = SampleResult::new("dashboard-row");
+        result.set_timestamp(Some(WallTimestamp::from_millis(1_000)));
+        assert!(
+            result
+                .set_elapsed(Some(ElapsedTime::from_millis(600)))
+                .is_ok()
+        );
+        result.set_successful(false);
+        result.set_sample_count(Some(SampleCount::from_u64(2)));
+        result.set_error_count(Some(ErrorCount::from_u64(1)));
+
+        let weighted = GraphSample::try_from_result(&result)
+            .unwrap_or_else(|_| panic!("valid weighted result"))
+            .unwrap_or_else(|| panic!("timestamp present"));
+        let row = GraphSample::try_from_result_as_row(&result)
+            .unwrap_or_else(|_| panic!("valid row result"))
+            .unwrap_or_else(|| panic!("timestamp present"));
+        assert_eq!(weighted.sample_count(), 2);
+        assert_eq!(weighted.error_count(), 1);
+        assert_eq!(weighted.elapsed_millis(), Some(300));
+        assert_eq!(row.sample_count(), 1);
+        assert_eq!(row.error_count(), 1);
+        assert_eq!(row.elapsed_millis(), Some(600));
+        assert_eq!(row.elapsed_total_millis(), Some(600));
     }
 
     #[test]
@@ -982,6 +1161,20 @@ mod tests {
         assert_eq!(points[0].start().as_millis(), 2_000);
         assert_eq!(points[0].sample_count(), 1);
         assert_eq!(points[0].received_bytes(), 20);
+    }
+
+    #[test]
+    fn zero_count_rows_still_preserve_active_thread_observations() {
+        let interval =
+            ReportInterval::from_millis(0, 2_000).unwrap_or_else(|_| panic!("valid test interval"));
+        let sample = GraphSample::new(WallTimestamp::from_millis(1_000), None, false, 0, 0)
+            .with_counts(0, 0)
+            .with_active_threads(Some(7));
+        let points = aggregate_graph_samples(&[sample], interval, 2_000, 1)
+            .unwrap_or_else(|_| panic!("valid graph samples"));
+        assert_eq!(points[0].sample_count(), 0);
+        assert_eq!(points[0].elapsed_count(), 0);
+        assert_eq!(points[0].active_threads(), Some(7));
     }
 
     #[test]

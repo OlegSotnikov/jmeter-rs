@@ -854,7 +854,6 @@ impl<S: SampleStore> SampleSender<S> {
                 "disk sender requires an injected persistent sample store",
             ));
         }
-        self.flush_if_time_due();
         if let Some(previous) = self.seen.get(&sample.key()) {
             if previous == &sample {
                 return Ok(SendOutcome::Duplicate);
@@ -933,9 +932,7 @@ impl<S: SampleStore> SampleSender<S> {
             SampleSenderMode::Standard | SampleSenderMode::Stripped => {
                 self.ensure_queue_space()?;
                 self.ensure_retained(retained)?;
-                self.seen.insert(original.key(), original);
-                self.retained_bytes = retained;
-                self.delivered_bytes =
+                let delivered_bytes =
                     self.delivered_bytes
                         .checked_add(encoded_size)
                         .ok_or_else(|| {
@@ -945,6 +942,9 @@ impl<S: SampleStore> SampleSender<S> {
                                 "sender delivered-byte accounting overflowed",
                             )
                         })?;
+                self.seen.insert(original.key(), original);
+                self.retained_bytes = retained;
+                self.delivered_bytes = delivered_bytes;
                 self.delivered.push(sample);
                 Ok(SendOutcome::Delivered)
             }
@@ -953,9 +953,7 @@ impl<S: SampleStore> SampleSender<S> {
             | SampleSenderMode::StrippedBatch { .. } => {
                 self.ensure_queue_space()?;
                 self.ensure_retained(retained)?;
-                self.seen.insert(original.key(), original);
-                self.retained_bytes = retained;
-                self.pending_bytes =
+                let pending_bytes =
                     self.pending_bytes
                         .checked_add(encoded_size)
                         .ok_or_else(|| {
@@ -965,13 +963,14 @@ impl<S: SampleStore> SampleSender<S> {
                                 "sender pending-byte accounting overflowed",
                             )
                         })?;
+                self.seen.insert(original.key(), original);
+                self.retained_bytes = retained;
+                self.pending_bytes = pending_bytes;
                 self.pending.push(sample);
-                if self.batch_started_at_ms.is_none() {
-                    self.batch_started_at_ms = Some(self.clock_ms);
-                }
+                self.start_batch_timer_if_needed();
                 let flush = self.batch_count_due() || self.batch_time_due();
                 if flush {
-                    self.flush_pending();
+                    self.flush_pending_for_threshold();
                     Ok(SendOutcome::QueuedAndFlushed)
                 } else {
                     Ok(SendOutcome::Queued)
@@ -983,9 +982,7 @@ impl<S: SampleStore> SampleSender<S> {
             SampleSenderMode::Asynch { .. } | SampleSenderMode::StrippedAsynch { .. } => {
                 self.ensure_queue_space()?;
                 self.ensure_retained(retained)?;
-                self.seen.insert(original.key(), original);
-                self.retained_bytes = retained;
-                self.pending_bytes =
+                let pending_bytes =
                     self.pending_bytes
                         .checked_add(encoded_size)
                         .ok_or_else(|| {
@@ -995,10 +992,11 @@ impl<S: SampleStore> SampleSender<S> {
                                 "sender pending-byte accounting overflowed",
                             )
                         })?;
+                self.seen.insert(original.key(), original);
+                self.retained_bytes = retained;
+                self.pending_bytes = pending_bytes;
                 self.pending.push(sample);
-                if self.batch_started_at_ms.is_none() {
-                    self.batch_started_at_ms = Some(self.clock_ms);
-                }
+                self.start_batch_timer_if_needed();
                 // An asynchronous sender only requests a scheduler poll.  It
                 // does not create a thread or flush inline, which keeps queue
                 // order deterministic and makes full-queue backpressure
@@ -1012,9 +1010,7 @@ impl<S: SampleStore> SampleSender<S> {
                 self.seen.insert(original.key(), original);
                 self.retained_bytes = retained;
                 self.pending_bytes = self.store.bytes();
-                if self.batch_started_at_ms.is_none() {
-                    self.batch_started_at_ms = Some(self.clock_ms);
-                }
+                self.start_batch_timer_if_needed();
                 Ok(SendOutcome::Queued)
             }
         }
@@ -1158,6 +1154,19 @@ impl<S: SampleStore> SampleSender<S> {
         incoming_size: usize,
     ) -> Result<SendOutcome, RemoteError> {
         let key = self.statistical_key(&original);
+        // Compute every fallible accounting step before mutating the sender.
+        // This keeps a rejected aggregate update retryable and preserves the
+        // no-partial-admission invariant at the u64 boundary.
+        let next_statistical_sample_count = self
+            .statistical_sample_count
+            .checked_add(1)
+            .ok_or_else(|| {
+                RemoteError::new(
+                    RemoteErrorCode::ResourceLimit,
+                    false,
+                    "statistical sample count overflowed",
+                )
+            })?;
         if let Some(&index) = self.statistical_groups.get(&key) {
             let previous = self.pending.get(index).ok_or_else(|| {
                 RemoteError::new(
@@ -1190,8 +1199,7 @@ impl<S: SampleStore> SampleSender<S> {
                     )
                 })?;
             self.ensure_retained(retained)?;
-            self.pending[index] = aggregate;
-            self.pending_bytes = self
+            let pending_bytes = self
                 .pending_bytes
                 .checked_sub(previous_size)
                 .and_then(|value| value.checked_add(aggregate_size))
@@ -1202,6 +1210,8 @@ impl<S: SampleStore> SampleSender<S> {
                         "statistical pending-byte accounting underflowed",
                     )
                 })?;
+            self.pending[index] = aggregate;
+            self.pending_bytes = pending_bytes;
             self.seen.insert(original.key(), original);
             self.retained_bytes = retained;
         } else {
@@ -1225,21 +1235,10 @@ impl<S: SampleStore> SampleSender<S> {
             self.seen.insert(original.key(), original);
             self.retained_bytes = retained;
         }
-        if self.batch_started_at_ms.is_none() {
-            self.batch_started_at_ms = Some(self.clock_ms);
-        }
-        self.statistical_sample_count =
-            self.statistical_sample_count
-                .checked_add(1)
-                .ok_or_else(|| {
-                    RemoteError::new(
-                        RemoteErrorCode::ResourceLimit,
-                        false,
-                        "statistical sample count overflowed",
-                    )
-                })?;
+        self.start_batch_timer_if_needed();
+        self.statistical_sample_count = next_statistical_sample_count;
         if self.batch_count_due() || self.batch_time_due() {
-            self.flush_pending();
+            self.flush_pending_for_threshold();
             Ok(SendOutcome::QueuedAndFlushed)
         } else {
             Ok(SendOutcome::Queued)
@@ -1304,15 +1303,41 @@ impl<S: SampleStore> SampleSender<S> {
         ) {
             return false;
         }
+        // JMeter checks the elapsed threshold when a sample arrives.  An
+        // empty batch has nothing to deliver and must not be flushed merely
+        // because its previous deadline elapsed.
+        if self.pending.is_empty() {
+            return false;
+        }
         self.config.batch_time_ms.is_some_and(|threshold| {
             self.batch_started_at_ms
-                .is_some_and(|started| self.clock_ms.saturating_sub(started) >= threshold)
+                // BatchSampleSender and StatisticalSampleSender use the
+                // strict source condition `batchSendTime < now`, so a tick
+                // exactly on the deadline does not flush yet.
+                .is_some_and(|started| self.clock_ms.saturating_sub(started) > threshold)
         })
     }
 
     fn flush_if_time_due(&mut self) {
         if self.batch_time_due() {
-            self.flush_pending();
+            self.flush_pending_for_threshold();
+        }
+    }
+
+    fn start_batch_timer_if_needed(&mut self) {
+        if self.batch_started_at_ms.is_none() {
+            self.batch_started_at_ms = Some(self.clock_ms);
+        }
+    }
+
+    /// Flushes a threshold-triggered batch and starts the next timer from the
+    /// flush instant. JMeter resets the time threshold after either the count
+    /// or time threshold fires, even when no later sample arrives until after
+    /// that deadline.
+    fn flush_pending_for_threshold(&mut self) {
+        self.flush_pending();
+        if self.config.batch_time_ms.is_some() {
+            self.batch_started_at_ms = Some(self.clock_ms);
         }
     }
 }
@@ -1440,7 +1465,11 @@ fn aggregate_samples(
     };
     let start = minimum_timestamp(first.start_time(), second.start_time());
     let end = maximum_timestamp(first.end_time(), second.end_time());
-    let timestamp = maximum_timestamp(first.timestamp(), second.timestamp()).or(end);
+    // StatisticalSampleResult overrides getTimeStamp() to return the
+    // aggregate end time.  Do not carry through the source samples' saved
+    // timestamp mode (which may be start-time based or an explicitly loaded
+    // legacy value).
+    let timestamp = end;
     let timing = SampleTiming::from_wire_parts(
         timestamp,
         start,
@@ -1478,9 +1507,12 @@ fn aggregate_samples(
         previous.event().run().clone(),
         previous.event().thread().clone(),
         previous.event().host().clone(),
-        previous.event().variables().clone(),
-    )
-    .with_transaction_state(previous.event().transaction_state());
+        // StatisticalSampleSender creates its wrapper with the two-argument
+        // SampleEvent constructor. It therefore has no sampled-variable
+        // values and is not marked as a transaction event, even when the
+        // source event that first created the aggregate was one.
+        jmeter_rs_results::VariableSnapshot::new(),
+    );
     Ok(RemoteSample::new(
         previous.run_id(),
         previous.worker(),
@@ -1523,6 +1555,14 @@ fn strip_sample(
     strip_also_on_error: bool,
 ) -> Result<RemoteSample, RemoteError> {
     let event = sample.event();
+    // DataStrippingSampleSender decides whether to invoke stripContent once,
+    // from the root result. If an unsuccessful root is retained by policy,
+    // its successful/failed descendants are retained as well; the policy is
+    // not evaluated independently for each result node. We still walk the
+    // unstripped tree so protocol encoding canonicalizes fallback fields
+    // (for example, an absent error count derived from `successful=false`)
+    // without returning an unsupported wire-metadata error.
+    let should_strip = strip_also_on_error || event.result().success().unwrap_or(true);
     let limits = ValidationLimits::new(max_depth, max_nodes).map_err(|error| {
         RemoteError::new(RemoteErrorCode::InvalidSample, false, error.to_string())
     })?;
@@ -1532,7 +1572,7 @@ fn strip_sample(
         limits,
         1,
         strip_depth,
-        strip_also_on_error,
+        should_strip,
         &mut nodes,
     )?;
     result.validate_wire_with_limits(limits).map_err(|error| {
@@ -1559,7 +1599,7 @@ fn strip_result_owned(
     limits: ValidationLimits,
     depth: usize,
     strip_depth: usize,
-    strip_also_on_error: bool,
+    strip_payloads: bool,
     nodes: &mut usize,
 ) -> Result<SampleResult, RemoteError> {
     if depth > limits.max_depth() {
@@ -1602,8 +1642,7 @@ fn strip_result_owned(
     // received-byte counter. The default traversal is the root plus three
     // descendant levels; deeper children remain structurally intact.
     result.set_request_data(source.request_data().cloned());
-    let strip_payload = strip_also_on_error || source.success().unwrap_or(true);
-    if strip_payload && depth <= strip_depth {
+    if strip_payloads && depth <= strip_depth {
         result.set_response_data(Some(SampleData::empty()));
     } else {
         result.set_response_data(source.response_data().cloned());
@@ -1613,7 +1652,17 @@ fn strip_result_owned(
     result.set_sampler_data(source.sampler_data().map(str::to_owned));
     result.set_response_file(source.response_file().map(str::to_owned));
     result.set_url(source.url().map(str::to_owned));
-    result.set_received_bytes(source.received_bytes());
+    // SampleResult#getBytesAsLong() returns zero when no byte count was set,
+    // and stripResponse writes that value back as a present field.
+    if strip_payloads {
+        result.set_received_bytes(Some(
+            source
+                .received_bytes()
+                .unwrap_or_else(|| ByteCount::from_u64(0)),
+        ));
+    } else {
+        result.set_received_bytes(source.received_bytes());
+    }
     result.set_sent_bytes(source.sent_bytes());
     result.set_group_threads(source.group_threads());
     result.set_all_threads(source.all_threads());
@@ -1635,15 +1684,8 @@ fn strip_result_owned(
 
     let mut children = Vec::with_capacity(source.sub_results().len());
     for child in source.sub_results() {
-        let child = if depth < strip_depth {
-            strip_result_owned(
-                child,
-                limits,
-                depth + 1,
-                strip_depth,
-                strip_also_on_error,
-                nodes,
-            )?
+        let child = if !strip_payloads || depth < strip_depth {
+            strip_result_owned(child, limits, depth + 1, strip_depth, strip_payloads, nodes)?
         } else {
             child.clone()
         };
@@ -1835,6 +1877,13 @@ mod tests {
             b"parent request"
         );
         assert_eq!(
+            result
+                .received_bytes()
+                .expect("stripping materializes bytes")
+                .as_u64(),
+            0
+        );
+        assert_eq!(
             result.response_data().expect("present response").as_bytes(),
             b""
         );
@@ -1884,9 +1933,69 @@ mod tests {
         let mut sender = SampleSender::new(config);
         assert_eq!(sender.send_at(sample(1), 5), Ok(SendOutcome::Queued));
         assert!(sender.tick(14).expect("tick").is_empty());
-        let flushed = sender.tick(15).expect("threshold");
+        // JMeter's source check is strict (`batchSendTime < now`), so the
+        // exact deadline is still part of the current batch.
+        assert!(sender.tick(15).expect("exact deadline").is_empty());
+        let flushed = sender.tick(16).expect("threshold");
         assert_eq!(flushed.len(), 1);
         assert_eq!(flushed[0].sequence(), 1);
+    }
+
+    #[test]
+    fn batch_time_expiry_includes_the_arriving_sample() {
+        let config = SenderConfig::new(SampleSenderMode::Batch { size: 10 }, 10, 1000)
+            .expect("config")
+            .with_batch_time_ms(10)
+            .expect("time threshold");
+        let mut sender = SampleSender::new(config);
+        assert_eq!(sender.send_at(sample(1), 0), Ok(SendOutcome::Queued));
+
+        // BatchSampleSender appends the event before checking its absolute
+        // deadline, so an event that arrives after expiry is delivered with
+        // the prior batch rather than causing a pre-admission flush.
+        assert_eq!(
+            sender.send_at(sample(2), 11),
+            Ok(SendOutcome::QueuedAndFlushed)
+        );
+        assert_eq!(
+            sender
+                .drain_delivered()
+                .iter()
+                .map(RemoteSample::sequence)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+    }
+
+    #[test]
+    fn batch_timer_resets_after_count_flush() {
+        let config = SenderConfig::new(SampleSenderMode::Batch { size: 2 }, 2, 1000)
+            .expect("config")
+            .with_batch_time_ms(10)
+            .expect("time threshold");
+        let mut sender = SampleSender::new(config);
+        assert_eq!(sender.send_at(sample(1), 0), Ok(SendOutcome::Queued));
+        assert_eq!(
+            sender.send_at(sample(2), 5),
+            Ok(SendOutcome::QueuedAndFlushed)
+        );
+        assert_eq!(sender.drain_delivered().len(), 2);
+
+        // The count-triggered flush starts the next deadline at t=5. A
+        // sample arriving at t=20 therefore flushes immediately; restarting
+        // from that sample would incorrectly retain it until t=30.
+        assert_eq!(
+            sender.send_at(sample(3), 20),
+            Ok(SendOutcome::QueuedAndFlushed)
+        );
+        assert_eq!(
+            sender
+                .drain_delivered()
+                .iter()
+                .map(RemoteSample::sequence)
+                .collect::<Vec<_>>(),
+            vec![3]
+        );
     }
 
     #[test]
@@ -1998,6 +2107,105 @@ mod tests {
                 .as_u64(),
             0
         );
+    }
+
+    #[test]
+    fn statistical_timestamp_is_aggregate_end_not_source_timestamp() {
+        let config = SenderConfig::new(SampleSenderMode::Statistical { size: 2 }, 2, 1000)
+            .expect("bounded config");
+        let mut first_result = SampleResult::new("sample");
+        first_result.set_timing_from_wire(SampleTiming::from_wire_parts(
+            Some(WallTimestamp::from_millis(10_000)),
+            Some(WallTimestamp::from_millis(100)),
+            Some(WallTimestamp::from_millis(150)),
+            Some(ElapsedTime::from_millis(50)),
+            Some(Latency::from_millis(5)),
+            Some(ConnectTime::from_millis(2)),
+            None,
+        ));
+        let mut second_result = SampleResult::new("sample");
+        second_result.set_timing_from_wire(SampleTiming::from_wire_parts(
+            Some(WallTimestamp::from_millis(20_000)),
+            Some(WallTimestamp::from_millis(200)),
+            Some(WallTimestamp::from_millis(300)),
+            Some(ElapsedTime::from_millis(100)),
+            Some(Latency::from_millis(7)),
+            Some(ConnectTime::from_millis(3)),
+            None,
+        ));
+        let first = RemoteSample::new(
+            1,
+            WorkerId::new(1),
+            1,
+            SampleEvent::new(
+                first_result,
+                "run",
+                ThreadIdentity::new("thread"),
+                "worker",
+                VariableSnapshot::new(),
+            ),
+        );
+        let second = RemoteSample::new(
+            1,
+            WorkerId::new(1),
+            2,
+            SampleEvent::new(
+                second_result,
+                "run",
+                ThreadIdentity::new("thread"),
+                "worker",
+                VariableSnapshot::new(),
+            ),
+        );
+        let mut sender = SampleSender::new(config);
+        assert_eq!(sender.send(first), Ok(SendOutcome::Queued));
+        assert_eq!(sender.send(second), Ok(SendOutcome::QueuedAndFlushed));
+        assert_eq!(
+            sender
+                .delivered()
+                .first()
+                .expect("aggregate")
+                .event()
+                .result()
+                .timestamp()
+                .map(WallTimestamp::as_millis),
+            Some(300)
+        );
+    }
+
+    #[test]
+    fn statistical_wrapper_drops_sample_variables_and_transaction_marker() {
+        let config = SenderConfig::new(SampleSenderMode::Statistical { size: 2 }, 2, 1000)
+            .expect("bounded config");
+        let mut variables = VariableSnapshot::new();
+        variables.insert("selected", "first");
+        let first_event = SampleEvent::new(
+            SampleResult::new("sample"),
+            "run",
+            ThreadIdentity::new("thread"),
+            "worker",
+            variables,
+        )
+        .with_transaction_state(Some(jmeter_rs_results::TransactionState::Start));
+        let second_event = SampleEvent::new(
+            SampleResult::new("sample"),
+            "run",
+            ThreadIdentity::new("thread"),
+            "worker",
+            VariableSnapshot::new(),
+        );
+        let mut sender = SampleSender::new(config);
+        assert_eq!(
+            sender.send(RemoteSample::new(1, WorkerId::new(1), 1, first_event)),
+            Ok(SendOutcome::Queued)
+        );
+        assert_eq!(
+            sender.send(RemoteSample::new(1, WorkerId::new(1), 2, second_event)),
+            Ok(SendOutcome::QueuedAndFlushed)
+        );
+        let aggregate = sender.delivered().first().expect("aggregate");
+        assert!(aggregate.event().variables().is_empty());
+        assert_eq!(aggregate.event().transaction_state(), None);
     }
 
     #[test]
@@ -2197,6 +2405,7 @@ mod tests {
     fn stripped_sender_honors_strip_on_error_property() {
         let mut result = SampleResult::new("failed");
         result.set_successful(false);
+        result.set_error_count(Some(ErrorCount::from_u64(1)));
         result.set_response_data(Some(SampleData::new(b"error body".to_vec())));
         let event = SampleEvent::new(
             result,
@@ -2210,7 +2419,8 @@ mod tests {
             .expect("bounded config")
             .with_strip_also_on_error(false);
         let mut sender = SampleSender::new(config);
-        assert_eq!(sender.send(sample), Ok(SendOutcome::Delivered));
+        let sent = sender.send(sample);
+        assert_eq!(sent, Ok(SendOutcome::Delivered));
         let delivered = sender.drain_delivered().pop().expect("sample");
         assert_eq!(
             delivered
@@ -2224,12 +2434,14 @@ mod tests {
     }
 
     #[test]
-    fn stripped_sender_applies_error_policy_per_result_node() {
+    fn stripped_sender_applies_error_policy_from_root() {
         let mut child = SampleResult::new("failed-child");
         child.set_successful(false);
+        child.set_error_count(Some(ErrorCount::from_u64(1)));
         child.set_response_data(Some(SampleData::new(b"child error".to_vec())));
         let mut root = SampleResult::new("successful-root");
         root.set_successful(true);
+        root.set_error_count(Some(ErrorCount::from_u64(0)));
         root.set_response_data(Some(SampleData::new(b"root body".to_vec())));
         root.try_add_sub_result_raw(child, ValidationLimits::new(8, 8).expect("limits"))
             .expect("child");
@@ -2249,7 +2461,8 @@ mod tests {
             .expect("bounded config")
             .with_strip_also_on_error(false);
         let mut sender = SampleSender::new(config);
-        assert_eq!(sender.send(sample), Ok(SendOutcome::Delivered));
+        let sent = sender.send(sample);
+        assert_eq!(sent, Ok(SendOutcome::Delivered));
         let result = sender
             .drain_delivered()
             .pop()
@@ -2268,7 +2481,61 @@ mod tests {
                 .response_data()
                 .expect("child payload")
                 .as_bytes(),
-            b"child error"
+            b""
+        );
+    }
+
+    #[test]
+    fn stripped_sender_retains_failed_root_tree_when_error_stripping_is_disabled() {
+        let mut child = SampleResult::new("successful-child");
+        child.set_successful(true);
+        child.set_error_count(Some(ErrorCount::from_u64(0)));
+        child.set_response_data(Some(SampleData::new(b"child body".to_vec())));
+        let mut root = SampleResult::new("failed-root");
+        root.set_successful(false);
+        root.set_error_count(Some(ErrorCount::from_u64(1)));
+        root.set_response_data(Some(SampleData::new(b"root error".to_vec())));
+        root.try_add_sub_result_raw(child, ValidationLimits::new(8, 8).expect("limits"))
+            .expect("child");
+        let original = RemoteSample::new(
+            1,
+            WorkerId::new(1),
+            1,
+            SampleEvent::new(
+                root,
+                "run",
+                ThreadIdentity::new("thread"),
+                "worker",
+                VariableSnapshot::new(),
+            ),
+        );
+        let config = SenderConfig::new(SampleSenderMode::Stripped, 2, 10_000)
+            .expect("config")
+            .with_strip_also_on_error(false);
+        let mut sender = SampleSender::new(config);
+        let sent = sender.send(original.clone());
+        assert_eq!(sent, Ok(SendOutcome::Delivered));
+        let retained = sender.drain_delivered().pop().expect("sample");
+        assert_eq!(
+            retained
+                .event()
+                .result()
+                .response_data()
+                .expect("root error payload")
+                .as_bytes(),
+            b"root error"
+        );
+        assert_eq!(
+            retained
+                .event()
+                .result()
+                .sub_results()
+                .first()
+                .expect("child")
+                .response_data()
+                .expect("child payload")
+                .as_bytes(),
+            b"child body"
         );
     }
 

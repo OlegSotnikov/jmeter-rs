@@ -74,8 +74,11 @@ compatibility.
    makes state global. JMeter properties are run-scoped shared state.
 7. Graceful stop, immediate stop, thread stop, next-loop, and sample failure
    are distinct typed signals.
-8. Result events are append-only snapshots. Listener delivery cannot mutate an
-   already-persisted event or become an implicit scheduling dependency.
+8. Result events are append-only snapshots. Before each source-position
+   observer captures its revision, a bounded typed listener effect may mutate
+   the generation-tracked live result as defined by Decision 0016. No listener
+   can mutate an already-captured or persisted revision, and asynchronous sink
+   work cannot determine later listener semantics.
 9. External and plugin protocols are versioned, bounded, cancellable, and
    crash-isolated. Rust's unstable native ABI is not a plugin contract.
 10. No compatibility row becomes `verified` from a unit test alone; it needs
@@ -97,6 +100,7 @@ architecture decision record.
 | `crates/runtime` | Scope compiler, execution packages, controller state machines, virtual-user lifecycle |
 | `crates/results` | Sample/result model, events, JTL CSV/XML, aggregation primitives |
 | `crates/http` | HTTP sampler and explicit cookie/cache/auth/header/proxy/TLS state |
+| `crates/http-native` | Native sockets, explicit DNS, rustls, proxy handshakes, pooling, streaming and concrete decompression |
 | `crates/report` | Listener aggregates, dashboard data model and report generation |
 | `crates/remote` | Rust-native remote protocol and orchestration; never presented as Java RMI |
 | `crates/bridge-protocol` | Versioned, bounded wire messages shared with external workers |
@@ -115,6 +119,7 @@ model <- jmx
 model <- expr
 model + expr + results <- runtime
 runtime + results <- http/report/remote/java-bridge/plugin-host
+http <- http-native
 process-supervision <- java-bridge/plugin-host/jmeter-oracle
 all required libraries <- apps/jmeter-rs
 test-support <- tests and tools only
@@ -207,7 +212,9 @@ The execution phase protocol is fixed:
 
 ```text
 configuration -> preprocessors -> summed timers -> sampler
-              -> postprocessors -> assertions -> listeners/results
+              -> postprocessors -> assertions
+              -> source-ordered listener effects/observer snapshots
+              -> control consumption/results
 ```
 
 A sampler may return no result; in that case the downstream result phases are
@@ -219,6 +226,26 @@ ownership follows
 [`Decision 0008`](decisions/0008-processors-extractors-and-mutation.md).
 Runtime owns the dependency-free domain contracts; HTTP and bridge protocols
 consume versioned projections and never become dependencies of runtime.
+
+Sample monitors and sample-local interruption follow
+[`Decision 0014`](decisions/0014-sample-monitor-and-interruptible-sampler-lifecycle.md).
+They form a distinct lifecycle category immediately around sampler invocation;
+they are not preprocessors, timers, or run-control cancellation signals.
+
+Listener mutation and observation follow
+[`Decision 0016`](decisions/0016-source-ordered-listener-effects.md). Runtime
+walks one source-ordered listener program after assertions. Typed effects may
+atomically update the live result/control generation; each observer captures
+its own immutable revision at its exact position. Control is consumed only
+after the chain and router admissions complete.
+
+Expression evaluation and stateful built-ins follow
+[`Decision 0017`](decisions/0017-expression-sessions-and-function-state.md).
+One run-owned authority creates identity-bound ordered sessions at each
+component getter/lifecycle boundary; it is not cloned per user or replaced by
+an immutable snapshot resolver. Capability effects are journaled,
+transactional, or explicitly irreversible, and uncertain external effects
+poison the exact run rather than becoming a false rollback or fallback.
 
 ## 6. Runtime and scheduling
 
@@ -249,9 +276,33 @@ Components receive cancellation and deadlines explicitly. Every bounded queue
 has documented full and closed behavior. Cancellation must release permits,
 files, sockets, tasks, and child processes.
 
+Production time and future driving follow
+[`Decision 0011`](decisions/0011-runtime-progress-and-wait-driving.md). The
+application supplies one run-owned bounded clock/sleeper/scheduler driver;
+epoch/immediate capabilities remain deterministic test defaults only. Pending
+production futures register finite absolute waits, while the current-thread
+executor applies progress-relative stall budgets. Long representable schedules
+are valid, cumulative work is not mistaken for a stall, and schedule arithmetic
+never saturates silently.
+
+The application composes plan admission, native providers, production time,
+result staging, and reporting as the consuming ownership state machine in
+[`Decision 0012`](decisions/0012-standalone-run-ownership-transaction.md).
+Feature-specific decoders and factories remain narrow registered modules;
+the runner owns their effect order and exact reverse finalization, but does not
+become an ambient service locator or duplicate their parsing logic. Visible
+result/report publication is possible only from a successfully finalized run.
+
 Engine lifecycle preserves setup, main, and teardown phases; serialized thread
 groups are an execution policy, not a special controller. Exact start/end and
 failure ordering remains oracle-gated until traced by fixtures.
+
+Run diagnostics and production result delivery are separate contracts under
+[`Decision 0010`](decisions/0010-run-observation-retention.md). The standalone
+runtime uses a constant-memory checked summary and retains no per-sample event
+trace. Ordered full traces are an explicit, count-and-byte-bounded test/debug
+capability; no mode may silently truncate compatibility observations or replace
+the result router.
 
 ## 7. Results and persistence
 
@@ -281,6 +332,13 @@ modes, and executor adapters. A collector or output writer is never silently
 cloned per virtual user, an accepted event is never silently dropped, and an
 output conflict is resolved only by profile-proven behavior.
 
+Cross-thread sink completion and operation deadlines follow
+[`Decision 0015`](decisions/0015-result-sink-operation-liveness.md). One
+run-owned authority shares cancellation and retry accounting, while each
+semantic sink operation owns one finite non-refreshing lease and one exact
+RAII wait registration whenever it is pending. This bounds blocked writers
+without imposing an arbitrary maximum duration on a healthy load test.
+
 ## 8. Protocols, JVM behavior, and extensions
 
 HTTP owns request construction and per-user cookie/cache/authentication state
@@ -292,6 +350,53 @@ proxy, recorder, and mirror boundaries follow
 [`Decision 0006`](decisions/0006-http-transport-tls-proxy-boundaries.md). A
 native transport is never an implicit fallback for a JMX-selected JMeter
 implementation.
+
+For the bootstrap standalone executable, native HTTP is selected only by one
+explicit direct command-line property whose value is the exact
+`http.native/1` or `http.native/2` identity. This plan-wide operator choice may
+substitute the independently named native provider for preserved JMX
+`HttpClient4` or `Java` selections, but the compiled manifest and evidence keep
+both identities and make no Java-provider compatibility claim. Without that
+selector, the JMX/default provider remains authoritative and requires its
+optional pack. Selection and complete feature admission occur before network,
+logging, result, report, or runtime side effects.
+
+The bootstrap `NativeV1` provider is a bounded synchronous HTTP/1.1 edge. It
+uses exact-pinned Mio only to create and readiness-poll one nonblocking connect
+attempt, with an `Arc<Waker>` for prompt cancellation; post-connect I/O and the
+repository framing implementation remain synchronous. Repeated short
+`connect_timeout` calls are forbidden because they create multiple attempts.
+The application runs the complete operation only through a bounded blocking
+worker pool, so runtime future polling never performs DNS or socket I/O inline.
+Queue saturation, cancellation, deadline expiry, readiness events, shutdown,
+and result delivery are typed and finite. A general async transport, pooling,
+and HTTP/2 remain separate versioned provider increments, not silent
+implementation swaps.
+
+`http.native/2` is a distinct direct HTTP/1.1 increment for hostname HTTP and
+rustls HTTPS. Its first policy is deliberately explicit: hostname plans supply
+one direct bounded numeric-nameserver property and HTTPS plans supply one
+direct root-contained PEM CA-file property. The application owns one bounded
+resolver lifetime and one immutable TLS configuration for the run; DNS/TLS
+work remains inside the bounded HTTP worker path. URL authority, HTTP Host,
+TLS server name, and numeric peer address are separate domain values. Platform
+DNS, platform roots, embedded web roots, proxies, pooling, decompression, and
+HTTP/2 require separately named capabilities and never alter `/1` or `/2`
+silently.
+
+The ordinary-CLI single-binary path follows
+[`Decision 0013`](decisions/0013-native-http-v3-and-drop-in-resolution.md).
+`http.native/3` is a new capability rather than an expansion of `/1` or `/2`.
+It may add bodies, scoped managers, redirects, decompression, pooling, and
+explicit proxies after those behaviors pass their own bounded implementation
+and evidence gates. A versioned `http.execution/auto/1` resolver may translate
+an otherwise-supported JMX Java/default/HttpClient4 selection to `/3` without
+an extra CLI property only after every enabled HTTP feature is covered by the
+closed `/3` manifest and the pinned differential matrix passes. The manifest
+and results retain both the source provider and executed native provider.
+Auto-resolution never means that native wire behavior is relabeled as Java or
+HttpClient4 behavior, and any uncovered field rejects the whole plan before
+side effects.
 
 The JVM bridge and plugin host use subprocesses by default. Their framed
 protocol includes protocol version, profile/capability set, request ID,

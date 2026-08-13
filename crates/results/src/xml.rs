@@ -12,14 +12,15 @@
 //! event currently being yielded; it does not first materialize the complete
 //! input or event list.
 
-use std::borrow::Borrow;
+use std::borrow::{Borrow, Cow};
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 
 use crate::jtl::{
-    CsvField, JtlError, JtlLimits, MAX_DECODE_ALL_EVENTS, SampleSaveConfiguration,
-    XmlSampleElement, escape_xml, parse_bool, parse_xml_optional_i64, parse_xml_optional_u64,
-    response_text_bytes, sanitize_xml_attribute_name, timing_from_wire, validate_xml_characters,
+    CsvField, JtlCounter, JtlError, JtlLimits, JtlOutputPolicy, MAX_DECODE_ALL_EVENTS,
+    SampleSaveConfiguration, XmlSampleElement, checked_counter_add, escape_xml, parse_bool,
+    parse_xml_optional_i64, parse_xml_optional_u64, response_text_bytes,
+    sanitize_xml_attribute_name, timing_from_wire, validate_xml_characters, xml_attribute_name,
 };
 use crate::result::{XmlOpaqueChild, XmlOpaquePart};
 use crate::{
@@ -43,6 +44,11 @@ pub struct XmlEncoder<W> {
     root_metadata_written: bool,
     /// Aggregate bytes already emitted, including declaration and root.
     output_bytes: usize,
+    output_policy: JtlOutputPolicy,
+    /// True only for the private per-event scratch encoder.  In streaming
+    /// mode this switches the byte check from the persistent stream counter
+    /// to the finite event-local staging counter.
+    staging: bool,
 }
 
 struct XmlWriteFrame<'a> {
@@ -72,6 +78,8 @@ impl<W: Write> XmlEncoder<W> {
             written_samples: 0,
             root_metadata_written: false,
             output_bytes: 0,
+            output_policy: JtlOutputPolicy::default(),
+            staging: false,
         })
     }
 
@@ -80,6 +88,34 @@ impl<W: Write> XmlEncoder<W> {
         limits.validate()?;
         self.limits = limits;
         Ok(self)
+    }
+
+    /// Creates an XML encoder in streaming mode with the default finite
+    /// per-event staging bound.
+    pub fn streaming(writer: W, configuration: SampleSaveConfiguration) -> Result<Self, JtlError> {
+        Self::new(writer, configuration)?.with_output_policy(JtlOutputPolicy::streaming_default())
+    }
+
+    /// Selects the output policy for this encoder.
+    pub fn with_output_policy(mut self, policy: JtlOutputPolicy) -> Result<Self, JtlError> {
+        policy.validate()?;
+        self.output_policy = policy;
+        Ok(self)
+    }
+
+    /// Returns the policy currently applied to output bytes.
+    pub const fn output_policy(&self) -> JtlOutputPolicy {
+        self.output_policy
+    }
+
+    /// Returns the checked number of bytes published so far.
+    pub const fn bytes_written(&self) -> usize {
+        self.output_bytes
+    }
+
+    /// Returns the checked number of root result events published so far.
+    pub const fn samples_written(&self) -> usize {
+        self.written_samples
     }
 
     /// Returns the configuration used by this writer.
@@ -92,16 +128,7 @@ impl<W: Write> XmlEncoder<W> {
         if self.started {
             return Ok(());
         }
-        let mut staged = XmlEncoder::new(Vec::new(), self.configuration.clone())?;
-        staged.limits = self.limits;
-        staged.output_bytes = self.output_bytes;
-        staged.write_header_with_attributes(&[])?;
-        let bytes = staged.writer;
-        self.commit_bytes(&bytes, "write XML header")?;
-        self.started = staged.started;
-        self.node_count = staged.node_count;
-        self.output_bytes = staged.output_bytes;
-        Ok(())
+        self.write_header_with_attributes(&[])
     }
 
     fn write_header_with_attributes(
@@ -153,6 +180,7 @@ impl<W: Write> XmlEncoder<W> {
                 });
             }
             validate_xml_characters(value)?;
+            self.ensure_attribute_value_bound(value)?;
             root.push(' ');
             root.push_str(name);
             root.push_str("=\"");
@@ -184,12 +212,12 @@ impl<W: Write> XmlEncoder<W> {
                     })?,
             )
             .map_err(JtlError::from)?;
-        if self.written_samples >= self.limits.max_samples {
+        let next_sample = checked_counter_add(self.written_samples, 1, JtlCounter::Samples)?;
+        if next_sample > self.limits.max_samples {
             return Err(JtlError::Unsupported {
                 feature: "xml-sample-limit",
                 value: format!(
-                    "{} root samples exceeds {}",
-                    self.written_samples + 1,
+                    "{next_sample} root samples exceeds {}",
                     self.limits.max_samples
                 ),
             });
@@ -200,12 +228,17 @@ impl<W: Write> XmlEncoder<W> {
         // parent has been written would otherwise publish a partial event.
         let mut staged = XmlEncoder::new(Vec::new(), self.configuration.clone())?;
         staged.limits = self.limits;
+        staged.output_policy = self.output_policy;
+        staged.staging = true;
         staged.started = self.started;
         staged.finished = self.finished;
         staged.node_count = self.node_count;
         staged.written_samples = self.written_samples;
         staged.root_metadata_written = self.root_metadata_written;
-        staged.output_bytes = self.output_bytes;
+        staged.output_bytes = match self.output_policy {
+            JtlOutputPolicy::BoundedAggregate => self.output_bytes,
+            JtlOutputPolicy::Streaming { .. } => 0,
+        };
         staged.write_event_parts(event)?;
         let bytes = staged.writer;
         self.commit_bytes(&bytes, "write XML event")?;
@@ -214,7 +247,6 @@ impl<W: Write> XmlEncoder<W> {
         self.node_count = staged.node_count;
         self.written_samples = staged.written_samples;
         self.root_metadata_written = staged.root_metadata_written;
-        self.output_bytes = staged.output_bytes;
         if self.configuration.autoflush() {
             self.writer.flush().map_err(|error| JtlError::Io {
                 operation: "flush XML output",
@@ -234,12 +266,12 @@ impl<W: Write> XmlEncoder<W> {
                     })?,
             )
             .map_err(JtlError::from)?;
-        if self.written_samples >= self.limits.max_samples {
+        let next_sample = checked_counter_add(self.written_samples, 1, JtlCounter::Samples)?;
+        if next_sample > self.limits.max_samples {
             return Err(JtlError::Unsupported {
                 feature: "xml-sample-limit",
                 value: format!(
-                    "{} root samples exceeds {}",
-                    self.written_samples + 1,
+                    "{next_sample} root samples exceeds {}",
                     self.limits.max_samples
                 ),
             });
@@ -247,7 +279,7 @@ impl<W: Write> XmlEncoder<W> {
         let result_stats = xml_result_node_stats(
             event.result(),
             self.configuration.save_subresults(),
-            self.configuration.assertion_results(),
+            self.configuration.assertion_selection(),
             &self.configuration,
         )?;
         let root_before_stats = opaque_node_stats(event.result().wire_xml_root_children(), 2)?;
@@ -298,7 +330,7 @@ impl<W: Write> XmlEncoder<W> {
         if !event.result().wire_xml_root_children_after().is_empty() {
             self.write_opaque_children(event.result().wire_xml_root_children_after(), 2)?;
         }
-        self.written_samples += 1;
+        self.written_samples = checked_counter_add(self.written_samples, 1, JtlCounter::Samples)?;
         Ok(())
     }
 
@@ -319,11 +351,16 @@ impl<W: Write> XmlEncoder<W> {
         if !self.finished {
             let mut staged = XmlEncoder::new(Vec::new(), self.configuration.clone())?;
             staged.limits = self.limits;
+            staged.output_policy = self.output_policy;
+            staged.staging = true;
             staged.started = self.started;
             staged.node_count = self.node_count;
             staged.written_samples = self.written_samples;
             staged.root_metadata_written = self.root_metadata_written;
-            staged.output_bytes = self.output_bytes;
+            staged.output_bytes = match self.output_policy {
+                JtlOutputPolicy::BoundedAggregate => self.output_bytes,
+                JtlOutputPolicy::Streaming { .. } => 0,
+            };
             staged.write_header_with_attributes(&[])?;
             let closing = format!("</testResults>{}", staged.line_ending());
             staged.ensure_output_bound(closing.len())?;
@@ -334,7 +371,6 @@ impl<W: Write> XmlEncoder<W> {
             self.node_count = staged.node_count;
             self.written_samples = staged.written_samples;
             self.root_metadata_written = staged.root_metadata_written;
-            self.output_bytes = staged.output_bytes;
             self.writer.flush().map_err(|error| JtlError::Io {
                 operation: "flush XML output",
                 message: error.to_string(),
@@ -373,7 +409,7 @@ impl<W: Write> XmlEncoder<W> {
                     frame.result,
                     frame.label_override.as_deref(),
                     frame.element,
-                    frame.depth == 2,
+                    true,
                 )?;
                 let child_depth =
                     frame
@@ -476,12 +512,14 @@ impl<W: Write> XmlEncoder<W> {
         let mut output = String::new();
         output.push('<');
         output.push_str(name);
-        let attr = |output: &mut String, key: &str, value: &str| {
+        let attr = |output: &mut String, key: &str, value: &str| -> Result<(), JtlError> {
+            self.ensure_attribute_value_bound(value)?;
             output.push(' ');
             output.push_str(key);
             output.push_str("=\"");
             output.push_str(&escape_xml(value, true));
             output.push('"');
+            Ok(())
         };
         if self.configuration.saves(CsvField::Elapsed) {
             attr(
@@ -492,7 +530,7 @@ impl<W: Write> XmlEncoder<W> {
                     .map(|value| value.as_millis())
                     .unwrap_or(0)
                     .to_string(),
-            );
+            )?;
         }
         if self.configuration.saves(CsvField::IdleTime) {
             attr(
@@ -503,7 +541,7 @@ impl<W: Write> XmlEncoder<W> {
                     .map(|value| value.as_millis())
                     .unwrap_or(0)
                     .to_string(),
-            );
+            )?;
         }
         if self.configuration.saves(CsvField::Latency) {
             attr(
@@ -514,7 +552,7 @@ impl<W: Write> XmlEncoder<W> {
                     .map(|value| value.as_millis())
                     .unwrap_or(0)
                     .to_string(),
-            );
+            )?;
         }
         if self.configuration.saves(CsvField::Connect) {
             attr(
@@ -525,7 +563,7 @@ impl<W: Write> XmlEncoder<W> {
                     .map(|value| value.as_millis())
                     .unwrap_or(0)
                     .to_string(),
-            );
+            )?;
         }
         // XML save-service output always writes milliseconds when timestamps
         // are enabled.  CSV's timestamp_format must not suppress or format
@@ -543,35 +581,35 @@ impl<W: Write> XmlEncoder<W> {
                     .map(|value| value.as_millis())
                     .unwrap_or(0)
                     .to_string(),
-            );
+            )?;
         }
         if self.configuration.saves(CsvField::Success) {
             attr(
                 &mut output,
                 "s",
                 &result.success().unwrap_or(true).to_string(),
-            );
+            )?;
         }
         if self.configuration.saves(CsvField::Label) {
             attr(
                 &mut output,
                 "lb",
                 label_override.unwrap_or_else(|| result.label()),
-            );
+            )?;
         }
         if self.configuration.saves(CsvField::ResponseCode) {
             attr(
                 &mut output,
                 "rc",
                 result.response_code().unwrap_or_default(),
-            );
+            )?;
         }
         if self.configuration.saves(CsvField::ResponseMessage) {
             attr(
                 &mut output,
                 "rm",
                 result.response_message().unwrap_or_default(),
-            );
+            )?;
         }
         if self.configuration.saves(CsvField::ThreadName) {
             let value = match result.wire_xml_sample_element() {
@@ -583,7 +621,7 @@ impl<W: Write> XmlEncoder<W> {
                 None => Some(event.thread().name()),
             };
             if let Some(value) = value {
-                attr(&mut output, "tn", value);
+                attr(&mut output, "tn", value)?;
             }
         }
         if self.configuration.saves(CsvField::DataType) {
@@ -595,7 +633,7 @@ impl<W: Write> XmlEncoder<W> {
                     .map(ToString::to_string)
                     .as_deref()
                     .unwrap_or("text"),
-            );
+            )?;
         }
         if self.configuration.saves(CsvField::Encoding)
             && let Some(value) = result
@@ -603,7 +641,7 @@ impl<W: Write> XmlEncoder<W> {
                 .map(|value| value.as_str())
                 .or_else(|| self.configuration.default_encoding())
         {
-            attr(&mut output, "de", value);
+            attr(&mut output, "de", value)?;
         }
         if self.configuration.saves(CsvField::Bytes) {
             attr(
@@ -614,7 +652,7 @@ impl<W: Write> XmlEncoder<W> {
                     .map(|value| value.as_u64())
                     .unwrap_or(0)
                     .to_string(),
-            );
+            )?;
         }
         if self.configuration.saves(CsvField::SentBytes) {
             attr(
@@ -625,7 +663,7 @@ impl<W: Write> XmlEncoder<W> {
                     .map(|value| value.as_u64())
                     .unwrap_or(0)
                     .to_string(),
-            );
+            )?;
         }
         if self.configuration.saves(CsvField::SampleCount) {
             attr(
@@ -636,7 +674,7 @@ impl<W: Write> XmlEncoder<W> {
                     .map(|value| value.as_u64())
                     .unwrap_or(1)
                     .to_string(),
-            );
+            )?;
         }
         if self.configuration.saves(CsvField::ErrorCount) {
             attr(
@@ -647,7 +685,7 @@ impl<W: Write> XmlEncoder<W> {
                     .map(|value| value.as_u64())
                     .unwrap_or(0)
                     .to_string(),
-            );
+            )?;
         }
         if self.configuration.saves(CsvField::GroupThreads) {
             attr(
@@ -658,7 +696,7 @@ impl<W: Write> XmlEncoder<W> {
                     .map(|value| value.as_u64())
                     .unwrap_or(0)
                     .to_string(),
-            );
+            )?;
             attr(
                 &mut output,
                 "na",
@@ -667,7 +705,7 @@ impl<W: Write> XmlEncoder<W> {
                     .map(|value| value.as_u64())
                     .unwrap_or(0)
                     .to_string(),
-            );
+            )?;
         }
         if self.configuration.saves(CsvField::Hostname) {
             let value = match result.wire_xml_sample_element() {
@@ -676,23 +714,17 @@ impl<W: Write> XmlEncoder<W> {
                 None => Some(event.host().as_str()),
             };
             if let Some(value) = value {
-                attr(&mut output, "hn", value);
+                attr(&mut output, "hn", value)?;
             }
         }
         for variable in self.configuration.sample_variables() {
-            // JMeter 5.6.3 writes configured sample-variable names exactly as
-            // supplied.  The decoder still accepts the doubled-underscore
-            // spelling used by an older Rust extension variant, but that
-            // compatibility alias must not be emitted by the JTL writer.
-            if !crate::jtl::is_xml_name(variable) {
-                return Err(JtlError::InvalidConfiguration {
-                    field: "sample_variables",
-                    detail: format!("invalid XML attribute name {variable:?}"),
-                });
-            }
+            // JMeter's XML converter emits configured sample-variable names
+            // literally.  Keep the exact configured spelling on the wire;
+            // underscore doubling is only a Rust extension-reader alias.
+            let wire_name = xml_attribute_name(variable)?;
             let value = sample_variable_value(event, result, variable, allow_event_variables);
             if let Some(value) = value {
-                attr(&mut output, variable, value);
+                attr(&mut output, &wire_name, value)?;
             }
         }
         for (name, value) in result.wire_xml_attributes() {
@@ -703,7 +735,7 @@ impl<W: Write> XmlEncoder<W> {
                 });
             }
             validate_xml_characters(value)?;
-            attr(&mut output, name, value);
+            attr(&mut output, name, value)?;
         }
         output.push('>');
         output.push_str(self.line_ending());
@@ -725,24 +757,54 @@ impl<W: Write> XmlEncoder<W> {
         Ok(())
     }
 
+    fn ensure_attribute_value_bound(&self, value: &str) -> Result<(), JtlError> {
+        if value.len() > self.limits.max_attribute_bytes {
+            return Err(JtlError::Unsupported {
+                feature: "xml-attribute-bytes-limit",
+                value: format!(
+                    "{} bytes exceeds {}",
+                    value.len(),
+                    self.limits.max_attribute_bytes
+                ),
+            });
+        }
+        Ok(())
+    }
+
     fn write_bytes(&mut self, bytes: &[u8], operation: &'static str) -> Result<(), JtlError> {
         self.ensure_output_bound(bytes.len())?;
         self.commit_bytes(bytes, operation)
     }
 
     /// Publishes bytes that were rendered and record-validated in a scratch
-    /// encoder.  The aggregate bound still applies, but the combined event
-    /// may contain many individually valid XML fragments whose total size is
-    /// larger than `max_record_bytes`.
+    /// encoder.  The bounded policy applies its aggregate ceiling here.  A
+    /// streaming scratch encoder applies its finite event-local staging bound
+    /// instead, while the caller-owned streaming encoder only checks counter
+    /// overflow.
     fn commit_bytes(&mut self, bytes: &[u8], operation: &'static str) -> Result<(), JtlError> {
-        let total =
-            self.output_bytes
-                .checked_add(bytes.len())
-                .ok_or_else(|| JtlError::Unsupported {
-                    feature: "output-limit",
-                    value: "aggregate output length overflow".to_owned(),
-                })?;
-        if total > self.limits.max_output_bytes {
+        let total = checked_counter_add(self.output_bytes, bytes.len(), JtlCounter::OutputBytes)?;
+        if self.staging {
+            match self.output_policy {
+                JtlOutputPolicy::BoundedAggregate if total > self.limits.max_output_bytes => {
+                    return Err(JtlError::Unsupported {
+                        feature: "output-limit",
+                        value: format!(
+                            "{total} output bytes exceeds {}",
+                            self.limits.max_output_bytes
+                        ),
+                    });
+                }
+                JtlOutputPolicy::Streaming { max_event_bytes } if total > max_event_bytes => {
+                    return Err(JtlError::Unsupported {
+                        feature: "xml-event-staging-limit",
+                        value: format!("{total} event bytes exceeds {max_event_bytes}"),
+                    });
+                }
+                _ => {}
+            }
+        } else if matches!(self.output_policy, JtlOutputPolicy::BoundedAggregate)
+            && total > self.limits.max_output_bytes
+        {
             return Err(JtlError::Unsupported {
                 feature: "output-limit",
                 value: format!(
@@ -763,13 +825,7 @@ impl<W: Write> XmlEncoder<W> {
                 value: format!("depth {depth} exceeds {}", self.limits.max_depth),
             });
         }
-        self.node_count = self
-            .node_count
-            .checked_add(1)
-            .ok_or_else(|| JtlError::Unsupported {
-                feature: "xml-node-limit",
-                value: "node count overflow".to_owned(),
-            })?;
+        self.node_count = checked_counter_add(self.node_count, 1, JtlCounter::Nodes)?;
         if self.node_count > self.limits.max_nodes {
             return Err(JtlError::Unsupported {
                 feature: "xml-node-limit",
@@ -788,10 +844,10 @@ impl<W: Write> XmlEncoder<W> {
         depth: usize,
     ) -> Result<(), JtlError> {
         if !matches!(
-            self.configuration.assertion_results(),
+            self.configuration.assertion_selection(),
             crate::AssertionResults::None
         ) {
-            let count = match self.configuration.assertion_results() {
+            let count = match self.configuration.assertion_selection() {
                 crate::AssertionResults::None => 0,
                 crate::AssertionResults::First => result.assertions().len().min(1),
                 crate::AssertionResults::All => result.assertions().len(),
@@ -834,24 +890,8 @@ impl<W: Write> XmlEncoder<W> {
             .configuration
             .should_save_response_data(result.success())
         {
-            if matches!(result.data_type(), Some(DataType::Binary))
-                && result.response_data().is_some_and(|data| !data.is_empty())
-            {
-                return Err(JtlError::Unsupported {
-                    feature: "xml-binary-response-data",
-                    value: "binary responseData requires an explicit binary adapter".to_owned(),
-                });
-            }
-            let value = match result.response_data() {
-                Some(data) => std::str::from_utf8(data.as_bytes()).map_err(|_| {
-                    JtlError::Unsupported {
-                        feature: "xml-binary-response-data",
-                        value: "responseData is not valid UTF-8; use responseFile or an explicit binary adapter".to_owned(),
-                    }
-                })?,
-                None => "",
-            };
-            self.write_text_element("responseData", value, true, depth)?;
+            let value = xml_response_data_text(result, self.configuration.default_encoding())?;
+            self.write_text_element("responseData", &value, true, depth)?;
         }
         if self.configuration.save_file_name() {
             self.write_text_element(
@@ -861,7 +901,9 @@ impl<W: Write> XmlEncoder<W> {
                 depth,
             )?;
         }
-        if self.configuration.save_sampler_data()
+        if self
+            .configuration
+            .should_save_sampler_data(result.success())
             && let Some(value) = result.sampler_data()
         {
             self.write_text_element("samplerData", value, true, depth)?;
@@ -920,6 +962,7 @@ impl<W: Write> XmlEncoder<W> {
                         });
                     }
                     validate_xml_characters(value)?;
+                    self.ensure_attribute_value_bound(value)?;
                     output.push(' ');
                     output.push_str(name);
                     output.push_str("=\"");
@@ -1014,6 +1057,7 @@ impl<W: Write> XmlEncoder<W> {
                 });
             }
             validate_xml_characters(value)?;
+            self.ensure_attribute_value_bound(value)?;
             output.push(' ');
             output.push_str(name);
             output.push_str("=\"");
@@ -1186,6 +1230,73 @@ fn sample_variable_value<'a>(
     None
 }
 
+/// Projects response bytes using JMeter's XML converter policy.
+///
+/// `SampleResultConverter` deliberately does not write binary response bytes
+/// into a text-only XML child. It emits a diagnostic string instead, keeping
+/// the result file well-formed while making the loss explicit. Text payloads
+/// use Java's replacement behavior for malformed UTF-8 when the selected
+/// encoding is UTF-8.  The small built-in ASCII and ISO-8859-1 mappings cover
+/// common JTL values; other charset names return an explicit capability error
+/// instead of guessing from the host environment.
+fn xml_response_data_text<'a>(
+    result: &'a SampleResult,
+    default_encoding: Option<&str>,
+) -> Result<Cow<'a, str>, JtlError> {
+    if result
+        .data_type()
+        .is_some_and(|data_type| !data_type.is_text())
+    {
+        let data_type = result
+            .data_type()
+            .map(ToString::to_string)
+            .unwrap_or_default();
+        return Ok(Cow::Owned(format!(
+            "Non-TEXT response data, cannot record: ({data_type})"
+        )));
+    }
+    let bytes = result
+        .response_data()
+        .map(|data| data.as_bytes())
+        .unwrap_or_default();
+    let encoding = result
+        .data_encoding()
+        .map(|value| value.as_str())
+        .or(default_encoding);
+    match encoding {
+        None => Ok(String::from_utf8_lossy(bytes)),
+        Some(value) if value.eq_ignore_ascii_case("utf-8") => Ok(String::from_utf8_lossy(bytes)),
+        Some(value) if value.eq_ignore_ascii_case("utf8") => Ok(String::from_utf8_lossy(bytes)),
+        Some(value)
+            if value.eq_ignore_ascii_case("ascii") || value.eq_ignore_ascii_case("us-ascii") =>
+        {
+            if !bytes.iter().all(u8::is_ascii) {
+                return Err(JtlError::Unsupported {
+                    feature: "xml-response-encoding",
+                    value: value.to_owned(),
+                });
+            }
+            Ok(Cow::Owned(
+                bytes.iter().map(|byte| char::from(*byte)).collect(),
+            ))
+        }
+        Some(value)
+            if value.eq_ignore_ascii_case("iso-8859-1")
+                || value.eq_ignore_ascii_case("iso8859-1")
+                || value.eq_ignore_ascii_case("latin-1")
+                || value.eq_ignore_ascii_case("latin1") =>
+        {
+            Ok(Cow::Owned(
+                bytes.iter().map(|byte| char::from(*byte)).collect(),
+            ))
+        }
+        Some(value) => Err(JtlError::Unsupported {
+            feature: "xml-response-encoding",
+            value: value.to_owned(),
+        }),
+    }
+}
+
 /// A bounded streaming XML decoder exposing parsed events one at a time.
 pub struct XmlDecoder<R = std::io::Empty> {
     scanner: XmlStreamScanner<R>,
@@ -1204,12 +1315,12 @@ pub struct XmlDecoder<R = std::io::Empty> {
 
 /// Input-side XML policy for sample-variable attributes and extensions.
 ///
-/// The decoder accepts exact configured variable names and the doubled-
-/// underscore spelling used by an older Rust extension variant.  It cannot
-/// safely infer the original name from an arbitrary attribute, because that
-/// transform is not injective over unknown plugin attributes.  Unknown
-/// attributes are preserved opaquely by default; callers that need a strict
-/// schema can explicitly enable rejection.
+/// The decoder accepts exact configured variable names.  For compatibility
+/// with an older Rust-only extension it also recognizes the doubled-
+/// underscore spelling as an alias when no exact configured attribute matches.
+/// It cannot safely infer the original name from an arbitrary attribute, so
+/// unknown attributes are preserved opaquely by default; callers that need a
+/// strict schema can explicitly enable rejection.
 #[derive(Clone, Default, Eq, Hash, PartialEq)]
 pub struct XmlDecodeConfiguration {
     sample_variables: Vec<String>,
@@ -1245,10 +1356,9 @@ impl XmlDecodeConfiguration {
         S: Into<String>,
     {
         let mut values = Vec::new();
-        let mut encoded = Vec::new();
         for variable in variables {
             let variable = variable.into();
-            let wire_name = sanitize_xml_attribute_name(&variable)?;
+            let wire_name = xml_attribute_name(&variable)?;
             if [
                 "t", "it", "lt", "ct", "ts", "s", "lb", "rc", "rs", "rm", "tn", "dt", "de", "by",
                 "sby", "sc", "ec", "ng", "na", "hn",
@@ -1260,14 +1370,9 @@ impl XmlDecodeConfiguration {
                     detail: format!("variable {variable:?} collides with a sample attribute"),
                 });
             }
-            if values.iter().any(|existing: &String| {
-                existing == &variable
-                    || existing == &wire_name
-                    || sanitize_xml_attribute_name(existing)
-                        .is_ok_and(|encoded| encoded == wire_name)
-            }) || encoded
+            if values
                 .iter()
-                .any(|existing: &String| existing == &wire_name || *existing == variable)
+                .any(|existing: &String| existing == &wire_name)
             {
                 return Err(JtlError::InvalidConfiguration {
                     field: "xml_sample_variables",
@@ -1275,7 +1380,6 @@ impl XmlDecodeConfiguration {
                 });
             }
             values.push(variable);
-            encoded.push(wire_name);
         }
         self.sample_variables = values;
         Ok(())
@@ -1778,7 +1882,7 @@ fn known_payload_count(configuration: &SampleSaveConfiguration, result: &SampleR
     if configuration.save_file_name() {
         count = count.saturating_add(1);
     }
-    if configuration.save_sampler_data() && result.sampler_data().is_some() {
+    if configuration.should_save_sampler_data(result.success()) && result.sampler_data().is_some() {
         count = count.saturating_add(1);
     }
     if configuration.save_url() && result.url().is_some() {
@@ -2388,7 +2492,6 @@ struct SampleFrame {
     host: Option<String>,
     variables: VariableSnapshot,
     seen_text: Vec<TextKind>,
-    last_child_rank: Option<u8>,
 }
 
 #[derive(Clone, Debug)]
@@ -2400,7 +2503,6 @@ struct AssertionFrame {
     error_message: Option<String>,
     unknown_attributes: Vec<(String, String)>,
     unknown_children: Vec<XmlOpaqueChild>,
-    last_child_rank: Option<u8>,
 }
 
 #[derive(Clone, Debug)]
@@ -2622,13 +2724,6 @@ fn start_node(
         stack.push(OpenFrame::Opaque(OpaqueFrame { node }));
         return Ok(());
     }
-    let parent_is_sample = matches!(stack.last(), Some(OpenFrame::Sample(_)));
-    let parent_is_assertion = matches!(stack.last(), Some(OpenFrame::Assertion(_)));
-    if parent_is_sample {
-        record_sample_child_order(stack, &name, offset)?;
-    } else if parent_is_assertion {
-        record_assertion_child_order(stack, &name, offset)?;
-    }
     let Some(parent) = stack.last() else {
         return Err(JtlError::Xml {
             offset,
@@ -2666,7 +2761,6 @@ fn start_node(
                 host,
                 variables,
                 seen_text: Vec::new(),
-                last_child_rank: None,
             };
             stack.push(OpenFrame::Sample(Box::new(frame)));
             if empty {
@@ -2713,7 +2807,6 @@ fn start_node(
                     .cloned()
                     .collect(),
                 unknown_children: Vec::new(),
-                last_child_rank: None,
             };
             stack.push(OpenFrame::Assertion(frame));
             if empty {
@@ -2877,17 +2970,6 @@ fn close_node(
                     }
                 })?,
             )?;
-            if matches!(sample.result.data_type(), Some(DataType::Binary))
-                && sample
-                    .result
-                    .response_data()
-                    .is_some_and(|data| !data.is_empty())
-            {
-                return Err(JtlError::Unsupported {
-                    feature: "xml-binary-response-data",
-                    value: "binary responseData requires an explicit binary adapter".to_owned(),
-                });
-            }
             if let Some(OpenFrame::Sample(parent)) = stack.last_mut() {
                 parent
                     .result
@@ -3036,67 +3118,6 @@ fn attach_opaque(
             detail: "opaque XML child has an invalid parent".to_owned(),
         }),
     }
-}
-
-fn record_sample_child_order(
-    stack: &mut [OpenFrame],
-    name: &str,
-    offset: usize,
-) -> Result<(), JtlError> {
-    let rank = match name {
-        "assertionResult" => 0,
-        "sample" | "httpSample" => 1,
-        "responseHeader" => 2,
-        "requestHeader" => 3,
-        "responseData" => 4,
-        "responseFile" => 5,
-        "samplerData" => 6,
-        "java.net.URL" | "url" => 7,
-        _ => 8,
-    };
-    let Some(OpenFrame::Sample(sample)) = stack.last_mut() else {
-        return Ok(());
-    };
-    if sample
-        .last_child_rank
-        .is_some_and(|previous| rank < previous)
-    {
-        return Err(JtlError::Unsupported {
-            feature: "xml-child-order",
-            value: format!("sample child <{name}> is out of canonical order at byte {offset}"),
-        });
-    }
-    sample.last_child_rank = Some(rank);
-    Ok(())
-}
-
-fn record_assertion_child_order(
-    stack: &mut [OpenFrame],
-    name: &str,
-    offset: usize,
-) -> Result<(), JtlError> {
-    let rank = match name {
-        "name" => 0,
-        "failure" => 1,
-        "error" => 2,
-        "failureMessage" => 3,
-        "errorMessage" => 4,
-        _ => 5,
-    };
-    let Some(OpenFrame::Assertion(assertion)) = stack.last_mut() else {
-        return Ok(());
-    };
-    if assertion
-        .last_child_rank
-        .is_some_and(|previous| rank < previous)
-    {
-        return Err(JtlError::Unsupported {
-            feature: "xml-child-order",
-            value: format!("assertion child <{name}> is out of canonical order at byte {offset}"),
-        });
-    }
-    assertion.last_child_rank = Some(rank);
-    Ok(())
 }
 
 fn push_text(
@@ -3256,9 +3277,12 @@ fn attach_text(
                 TextKind::RequestHeader => sample
                     .result
                     .set_request_headers(Some(HeaderBlock::new(value))),
-                TextKind::ResponseData => sample
-                    .result
-                    .set_response_data(Some(response_text_bytes(value))),
+                TextKind::ResponseData => {
+                    let encoding = sample.result.data_encoding().map(|value| value.as_str());
+                    sample
+                        .result
+                        .set_response_data(Some(response_text_bytes(value, encoding)?));
+                }
                 TextKind::ResponseFile => sample.result.set_response_file(Some(value)),
                 TextKind::SamplerData => sample.result.set_sampler_data(Some(value)),
                 TextKind::Url => sample.result.set_url(Some(value)),
@@ -3387,11 +3411,20 @@ fn parse_sample_attributes(
     }
     for (name, value) in attributes {
         if !known.contains(&name.as_str()) {
-            let configured = configuration.sample_variables().iter().find(|variable| {
-                variable.as_str() == name
-                    || sanitize_xml_attribute_name(variable)
-                        .is_ok_and(|wire_name| wire_name == *name)
-            });
+            // Prefer an exact JMeter wire name.  Only if no exact configured
+            // name exists do we recognize the legacy doubled-underscore Rust
+            // alias; this keeps configurations containing both spellings
+            // deterministic and lossless.
+            let configured = configuration
+                .sample_variables()
+                .iter()
+                .find(|variable| variable.as_str() == name)
+                .or_else(|| {
+                    configuration.sample_variables().iter().find(|variable| {
+                        sanitize_xml_attribute_name(variable)
+                            .is_ok_and(|wire_name| wire_name == *name)
+                    })
+                });
             let variable = match configured {
                 Some(variable) => variable.clone(),
                 None if configuration.reject_unknown_attributes() => {
@@ -3564,7 +3597,7 @@ mod tests {
         assert!(text.contains("<testResults version=\"1.2\">"));
         assert!(text.contains("<httpSample"));
         assert!(text.contains("case_id=\"jtl-fields\""));
-        assert!(!text.contains("case__id=\"jtl-fields\""));
+        assert!(text.contains("comma_value=\"left,right\""));
         assert!(text.contains("&amp;"));
         let decoded = XmlDecoder::with_sample_variables(
             text.as_bytes(),
@@ -3758,6 +3791,34 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn xml_writer_enforces_attribute_value_limit_before_sample_output() {
+        let event = SampleEvent::new(
+            SampleResult::new("label-too-long"),
+            "run",
+            ThreadIdentity::new("thread"),
+            "host",
+            VariableSnapshot::new(),
+        );
+        let limits = JtlLimits {
+            max_attribute_bytes: 4,
+            ..JtlLimits::default()
+        };
+        let mut output = Vec::new();
+        let mut encoder = XmlEncoder::new(&mut output, SampleSaveConfiguration::xml())
+            .expect("encoder")
+            .with_limits(limits)
+            .expect("limits");
+        assert!(matches!(
+            encoder.write_event(&event),
+            Err(JtlError::Unsupported {
+                feature: "xml-attribute-bytes-limit",
+                ..
+            })
+        ));
+        assert!(output.is_empty(), "failed events must not publish XML");
     }
 
     #[test]
@@ -4125,44 +4186,51 @@ mod tests {
     }
 
     #[test]
-    fn noncanonical_known_and_opaque_child_order_is_rejected() {
+    fn noncanonical_known_and_opaque_child_order_is_accepted() {
         let sample_order =
             br#"<testResults version="1.2"><sample><responseData/><assertionResult/></sample></testResults>"#;
-        assert!(matches!(
-            decode_xml(sample_order.as_slice(), JtlLimits::default()),
-            Err(JtlError::Unsupported {
-                feature: "xml-child-order",
-                ..
-            })
-        ));
+        let events = decode_xml(sample_order.as_slice(), JtlLimits::default())
+            .expect("JMeter accepts known children in any order");
+        assert_eq!(events[0].result().assertions().len(), 1);
+        assert_eq!(
+            events[0]
+                .result()
+                .response_data()
+                .map(|data| data.as_bytes()),
+            Some([].as_slice())
+        );
 
         let assertion_order = br#"<testResults version="1.2"><sample><assertionResult><error>false</error><name>late</name></assertionResult></sample></testResults>"#;
-        assert!(matches!(
-            decode_xml(assertion_order.as_slice(), JtlLimits::default()),
-            Err(JtlError::Unsupported {
-                feature: "xml-child-order",
-                ..
-            })
-        ));
+        let events = decode_xml(assertion_order.as_slice(), JtlLimits::default())
+            .expect("assertion children are order independent on read");
+        assert_eq!(events[0].result().assertions()[0].name(), "late");
 
         let opaque_order = br#"<testResults version="1.2"><sample><pluginData/><responseData/></sample></testResults>"#;
-        assert!(matches!(
-            decode_xml(opaque_order.as_slice(), JtlLimits::default()),
-            Err(JtlError::Unsupported {
-                feature: "xml-child-order",
-                ..
-            })
-        ));
+        let events = decode_xml(opaque_order.as_slice(), JtlLimits::default())
+            .expect("unknown children are retained regardless of position");
+        let mut output = Vec::new();
+        let mut configuration = SampleSaveConfiguration::xml();
+        configuration.set_response_data(true);
+        let mut encoder = XmlEncoder::new(&mut output, configuration).expect("encoder");
+        encoder.write_event(&events[0]).expect("write");
+        encoder.finish().expect("finish");
+        let output = String::from_utf8(output).expect("UTF-8");
+        assert!(output.contains("<pluginData/>"));
+        assert!(
+            output.find("<responseData").expect("response data")
+                < output.find("<pluginData").expect("plugin data")
+        );
     }
 
     #[test]
-    fn invalid_controls_and_binary_response_data_are_explicit_errors() {
+    fn invalid_controls_and_binary_response_data_are_explicitly_projected() {
         let invalid = b"<testResults version=\"1.2\"><sample lb=\"bad\x01value\"/></testResults>";
         assert!(matches!(
             decode_xml(invalid.as_slice(), JtlLimits::default()),
             Err(JtlError::Xml { .. })
         ));
         let mut result = SampleResult::new("binary");
+        result.set_data_type_wire("bin");
         result.set_response_data(Some(SampleData::new(vec![0xff])));
         let event = SampleEvent::new(
             result,
@@ -4175,18 +4243,42 @@ mod tests {
         configuration.set_response_data(true);
         let mut output = Vec::new();
         let mut encoder = XmlEncoder::new(&mut output, configuration).expect("encoder");
-        assert!(matches!(
-            encoder.write_event(&event),
-            Err(JtlError::Unsupported {
-                feature: "xml-binary-response-data",
-                ..
-            })
-        ));
+        encoder
+            .write_event(&event)
+            .expect("binary response is projected to a diagnostic");
+        encoder.finish().expect("finish");
+        let output = String::from_utf8(output).expect("UTF-8");
+        assert!(output.contains("Non-TEXT response data, cannot record: (bin)"));
         let binary_input = br#"<testResults version="1.2"><sample dt="bin"><responseData>not-a-binary-adapter</responseData></sample></testResults>"#;
+        let events = decode_xml(binary_input.as_slice(), JtlLimits::default())
+            .expect("binary response text remains readable");
+        assert_eq!(events[0].result().data_type(), Some(&DataType::Binary));
+        assert_eq!(
+            events[0]
+                .result()
+                .response_data()
+                .map(|data| data.as_bytes()),
+            Some("not-a-binary-adapter".as_bytes())
+        );
+    }
+
+    #[test]
+    fn response_data_reader_uses_the_declared_charset() {
+        let input = "<testResults version=\"1.2\"><sample dt=\"text\" de=\"ISO-8859-1\"><responseData>caf\u{00e9}</responseData></sample></testResults>";
+        let events = decode_xml(input.as_bytes(), JtlLimits::default()).expect("decode");
+        assert_eq!(
+            events[0]
+                .result()
+                .response_data()
+                .map(|value| value.as_bytes()),
+            Some(&[0x63, 0x61, 0x66, 0xe9][..])
+        );
+
+        let unsupported = br#"<testResults version="1.2"><sample dt="text" de="x-unknown"><responseData>body</responseData></sample></testResults>"#;
         assert!(matches!(
-            decode_xml(binary_input.as_slice(), JtlLimits::default()),
+            decode_xml(unsupported.as_slice(), JtlLimits::default()),
             Err(JtlError::Unsupported {
-                feature: "xml-binary-response-data",
+                feature: "xml-response-encoding",
                 ..
             })
         ));
@@ -4592,7 +4684,7 @@ mod tests {
     }
 
     #[test]
-    fn nested_xml_variables_do_not_fall_back_to_root_event_scope() {
+    fn nested_xml_variables_use_the_event_scope() {
         let mut root = SampleResult::new("root");
         root.add_sub_result(
             SampleResult::new("child"),
@@ -4617,13 +4709,13 @@ mod tests {
         encoder.write_event(&event).expect("write");
         encoder.finish().expect("finish");
         let text = String::from_utf8(output).expect("UTF-8");
-        assert_eq!(text.matches("shared=\"root-value\"").count(), 1);
+        assert_eq!(text.matches("shared=\"root-value\"").count(), 2);
         let child = text.find("lb=\"root-0\"").expect("child");
-        assert!(!text[child..].contains("shared=\"root-value\""));
+        assert!(text[child..].contains("shared=\"root-value\""));
     }
 
     #[test]
-    fn response_data_on_error_does_not_enable_sampler_data() {
+    fn response_data_on_error_enables_sampler_data_like_jmeter() {
         let mut result = SampleResult::new("failed");
         result.set_successful(false);
         result.set_response_data(Some(SampleData::from("body")));
@@ -4644,7 +4736,7 @@ mod tests {
         encoder.finish().expect("finish");
         let text = String::from_utf8(output).expect("UTF-8");
         assert!(text.contains("<responseData"));
-        assert!(!text.contains("<samplerData"));
+        assert!(text.contains("<samplerData class=\"java.lang.String\">request</samplerData>"));
     }
 
     #[test]

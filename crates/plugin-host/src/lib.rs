@@ -26,14 +26,23 @@ pub use discovery::{
     HARD_MAX_DISCOVERY_PATH_TOTAL_BYTES, MAX_EXECUTABLE_IDENTITY_BYTES,
     MAX_EXECUTABLE_IDENTITY_READS, PluginDescriptor, PluginRegistry,
 };
-pub use error::{PluginError, PluginErrorCode};
+pub use error::{
+    MAX_ERROR_DETAIL_BYTES, MAX_ERROR_PATH_BYTES, MAX_ERROR_SECONDARY_ERRORS,
+    MAX_PLUGIN_ERROR_DETAIL_BYTES, MAX_PLUGIN_ERROR_PATH_BYTES, MAX_PLUGIN_ERROR_SECONDARY_ERRORS,
+    MAX_SECONDARY_ERRORS, PluginError, PluginErrorCode, Retryability,
+};
 pub use manifest::{
-    CapabilityDeclaration, CapabilityDeclarations, CapabilityKind, CapabilityReference,
-    HARD_MAX_MESSAGE_BYTES, HARD_MAX_OUTPUT_BYTES, JmxElementMetadata, JmxProperties,
-    MANIFEST_SCHEMA_VERSION, MAX_CAPABILITY_ID_LEN, MAX_DECLARED_CAPABILITIES,
-    MAX_JMX_PROPERTY_NAME_LEN, MAX_PLUGIN_ID_LEN, PluginId, PluginManifest, PluginRequest,
-    PluginResponse, PluginVersion, PreservationContract, ProtocolRange, ResourceLimits,
-    UnknownJmxProperty,
+    ArtifactIdentity, CapabilityDeclaration, CapabilityDeclarations, CapabilityKind,
+    CapabilityReference, DependencyIdentity, HARD_MAX_MESSAGE_BYTES, HARD_MAX_OUTPUT_BYTES,
+    JmxElementMetadata, JmxProperties, LicenseNoticeStatus, MANIFEST_SCHEMA_VERSION,
+    MAX_CAPABILITY_ALIASES, MAX_CAPABILITY_ID_LEN, MAX_DECLARED_CAPABILITIES,
+    MAX_DECLARED_CAPABILITY_NAMES, MAX_DECLARED_PROFILES, MAX_EXTENSION_KEY_BYTES,
+    MAX_IDENTITY_TEXT_BYTES, MAX_JMX_EXTENSIONS, MAX_JMX_METADATA_TEXT_LEN, MAX_JMX_PROPERTIES,
+    MAX_JMX_PROPERTY_NAME_LEN, MAX_MANIFEST_EXTENSIONS, MAX_PLUGIN_ARTIFACT_BYTES,
+    MAX_PLUGIN_DEPENDENCIES, MAX_PLUGIN_ID_LEN, MAX_PLUGIN_VERSION_LEN, MAX_RAW_JMX_SUBTREE_BYTES,
+    MAX_UNKNOWN_JMX_PROPERTY_BYTES, PluginArtifact, PluginDependency, PluginId, PluginManifest,
+    PluginRequest, PluginResponse, PluginVersion, PreservationContract, ProtocolRange,
+    ResourceLimits, SHA256_HEX_LEN, Sha256Digest, UnknownJmxProperty,
 };
 pub use protocol::{HandshakeInfo, decode_handshake, encode_handshake, encode_response};
 pub use supervisor::{

@@ -1,0 +1,681 @@
+# SPDX-License-Identifier: Apache-2.0
+
+name: Standalone native pre-release evidence
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+# This workflow only builds and retains experimental/pre-release CI artifacts.
+# It deliberately has no release, package, registry, repository-write, or OIDC
+# permissions, and it never claims JMeter conformance.
+permissions:
+  contents: read
+
+concurrency:
+  group: standalone-release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_NET_RETRY: "3"
+  CARGO_TERM_COLOR: always
+  LANG: C
+  LC_ALL: C
+  RUST_BACKTRACE: short
+  RUST_TOOLCHAIN: "1.97.1"
+  TZ: UTC
+
+jobs:
+  checker-self-test:
+    name: standalone artifact checker / self-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # actions/checkout v7.0.1; tag verified against the official repository.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Python syntax and deterministic checker tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile .github/scripts/check-standalone-artifact.py
+          python3 .github/scripts/check-standalone-artifact.py --self-test
+
+  standalone-policy:
+    name: standalone native dependency and notice policy
+    needs: checker-self-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CARGO_HOME: ${{ runner.temp }}/standalone-policy-cargo-home
+      CARGO_TARGET_DIR: ${{ runner.temp }}/standalone-policy-target
+    steps:
+      # actions/checkout v7.0.1; tag verified against the official repository.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # actions-rust-lang/setup-rust-toolchain v1.17.0; tag verified against the official repository.
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: 1.97.1
+          cache: false
+          rustflags: ""
+      - name: Validate locked standalone dependency boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run --locked --package xtask -- profile-check
+          cargo run --locked --package xtask -- policy-check
+
+  build:
+    name: standalone / ${{ matrix.target }} / ${{ matrix.execution_evidence }}
+    needs:
+      - checker-self-test
+      - standalone-policy
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The release matrix is intentionally explicit.  A native-runtime
+          # row must run on a host with the exact target triple.  A missing
+          # self-hosted runner remains a required, failing/blocked row; it is
+          # never replaced by a cross-build and never marked as runtime proof.
+          - target: x86_64-unknown-linux-gnu
+            runner: '["ubuntu-24.04"]'
+            expected_host: x86_64-unknown-linux-gnu
+            execution_evidence: native-runtime
+            archive_format: tar.gz
+            static_expected: "false"
+            runtime_smoke: "true"
+          - target: aarch64-unknown-linux-gnu
+            runner: '["self-hosted", "Linux", "ARM64"]'
+            expected_host: aarch64-unknown-linux-gnu
+            execution_evidence: native-runtime
+            archive_format: tar.gz
+            static_expected: "false"
+            runtime_smoke: "true"
+          - target: x86_64-unknown-linux-musl
+            runner: '["ubuntu-24.04"]'
+            expected_host: x86_64-unknown-linux-gnu
+            execution_evidence: cross-compile-only
+            archive_format: tar.gz
+            static_expected: "true"
+            runtime_smoke: "false"
+          - target: x86_64-pc-windows-msvc
+            runner: '["windows-2025"]'
+            expected_host: x86_64-pc-windows-msvc
+            execution_evidence: native-runtime
+            archive_format: zip
+            static_expected: "false"
+            runtime_smoke: "true"
+          - target: aarch64-pc-windows-msvc
+            runner: '["self-hosted", "Windows", "ARM64"]'
+            expected_host: aarch64-pc-windows-msvc
+            execution_evidence: native-runtime
+            archive_format: zip
+            static_expected: "false"
+            runtime_smoke: "true"
+          - target: x86_64-apple-darwin
+            # Existing automation uses the exact self-hosted X64 label for
+            # this target.  Do not silently use an ARM runner or cross-link.
+            runner: '["self-hosted", "macOS", "X64"]'
+            expected_host: x86_64-apple-darwin
+            execution_evidence: native-runtime
+            archive_format: tar.gz
+            static_expected: "false"
+            runtime_smoke: "true"
+          - target: aarch64-apple-darwin
+            runner: '["self-hosted", "macOS", "ARM64"]'
+            expected_host: aarch64-apple-darwin
+            execution_evidence: native-runtime
+            archive_format: tar.gz
+            static_expected: "false"
+            runtime_smoke: "true"
+
+    # No continue-on-error is permitted: an unavailable target runner must
+    # block the required release evidence instead of producing a false claim.
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    timeout-minutes: 45
+    env:
+      CARGO_HOME: ${{ runner.temp }}/standalone-cargo-home
+      CARGO_TARGET_DIR: ${{ runner.temp }}/standalone-target
+      TARGET: ${{ matrix.target }}
+      EXPECTED_HOST: ${{ matrix.expected_host }}
+      EXECUTION_EVIDENCE: ${{ matrix.execution_evidence }}
+      ARCHIVE_FORMAT: ${{ matrix.archive_format }}
+      STATIC_EXPECTED: ${{ matrix.static_expected }}
+      RUNTIME_SMOKE: ${{ matrix.runtime_smoke }}
+      EVIDENCE_ROOT: ${{ runner.temp }}/standalone-evidence/${{ matrix.target }}
+
+    steps:
+      # actions/checkout v7.0.1; tag verified against the official repository.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # actions-rust-lang/setup-rust-toolchain v1.17.0; tag verified against the official repository.
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: 1.97.1
+          cache: false
+          rustflags: ""
+      - name: Resolve Python and reproducibility identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python_bin="$(command -v python3 || command -v python)"
+          test -n "$python_bin"
+          echo "PYTHON_BIN=$python_bin" >> "$GITHUB_ENV"
+          source_commit="$(git rev-parse HEAD)"
+          test -n "$source_commit"
+          dirty_state="$(git status --porcelain=v1 --untracked-files=all)"
+          test -z "$dirty_state"
+          source_date_epoch="$(git show -s --format=%ct HEAD)"
+          test "$source_date_epoch" -gt 0
+          echo "SOURCE_COMMIT=$source_commit" >> "$GITHUB_ENV"
+          echo "SOURCE_DATE_EPOCH=$source_date_epoch" >> "$GITHUB_ENV"
+          echo "DIRTY_TREE=clean" >> "$GITHUB_ENV"
+      - name: Install exact target standard library
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup target add --toolchain "$RUST_TOOLCHAIN" "$TARGET"
+      - name: Install pinned musl linker
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The release lane is fail-closed on the system linker as well as
+          # Cargo.lock.  Do not silently accept a moving package version.
+          musl_version="1.2.4-2"
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends "musl-tools=$musl_version"
+          dpkg-query --showformat='${Version}\n' --show musl-tools | grep -Fx "$musl_version"
+          echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc" >> "$GITHUB_ENV"
+      - name: Verify host/target boundary and record toolchain evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_host="$(rustc "+$RUST_TOOLCHAIN" -vV | sed -n 's/^host: //p')"
+          test "$actual_host" = "$EXPECTED_HOST"
+          if [[ "$EXECUTION_EVIDENCE" = native-runtime ]]; then
+            test "$actual_host" = "$TARGET"
+          else
+            test "$EXECUTION_EVIDENCE" = cross-compile-only
+            test "$actual_host" != "$TARGET"
+          fi
+          {
+            echo "### TEST-005 / Decision 0009 standalone target evidence"
+            echo "- target: $TARGET"
+            echo "- host target: $actual_host"
+            echo "- execution evidence: $EXECUTION_EVIDENCE"
+            echo "- runner: $RUNNER_OS/$RUNNER_ARCH"
+            echo "- source commit: $SOURCE_COMMIT"
+            echo "- dirty tree: $DIRTY_TREE"
+            echo "- source date epoch: $SOURCE_DATE_EPOCH"
+            rustc "+$RUST_TOOLCHAIN" -vV
+            cargo "+$RUST_TOOLCHAIN" -V
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Build locked standalone executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Build only the application package.  Its closed native dependency
+          # allowlist is checked separately by the repository policy lane.
+          cargo "+$RUST_TOOLCHAIN" build \
+            --package jmeter-rs \
+            --release \
+            --locked \
+            --target "$TARGET"
+      - name: Capture target-specific Cargo closure evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_ROOT"
+          # Metadata is the machine-readable resolve graph; cargo tree is an
+          # independent, human-readable normal-edge projection.  Both are
+          # target-specific and retained as bounded release evidence.
+          cargo "+$RUST_TOOLCHAIN" metadata \
+            --locked \
+            --format-version=1 \
+            --filter-platform "$TARGET" \
+            > "$EVIDENCE_ROOT/cargo-metadata.json"
+          cargo "+$RUST_TOOLCHAIN" tree \
+            --locked \
+            --package jmeter-rs \
+            --target "$TARGET" \
+            --edges normal \
+            --no-dedupe \
+            --prefix depth \
+            > "$EVIDENCE_ROOT/cargo-tree.txt"
+          test -s "$EVIDENCE_ROOT/cargo-metadata.json"
+          test -s "$EVIDENCE_ROOT/cargo-tree.txt"
+          test "$(wc -c < "$EVIDENCE_ROOT/cargo-metadata.json")" -le 8388608
+          test "$(wc -c < "$EVIDENCE_ROOT/cargo-tree.txt")" -le 8388608
+          echo "CARGO_METADATA_EVIDENCE=$EVIDENCE_ROOT/cargo-metadata.json" >> "$GITHUB_ENV"
+          echo "CARGO_TREE_EVIDENCE=$EVIDENCE_ROOT/cargo-tree.txt" >> "$GITHUB_ENV"
+      - name: Inspect target executable linkage against system-library policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="$CARGO_TARGET_DIR/$TARGET/release/jmeter-rs"
+          if [[ "$RUNNER_OS" = Windows ]]; then
+            binary="$binary.exe"
+          fi
+          test -f "$binary"
+          raw="$EVIDENCE_ROOT/linkage.raw"
+          tool=""
+          kind=""
+          if [[ "$TARGET" = *-linux-* ]]; then
+            command -v readelf >/dev/null
+            readelf -d "$binary" > "$raw"
+            tool="readelf"
+            kind="elf-dt-needed"
+          elif [[ "$TARGET" = *-apple-darwin ]]; then
+            command -v otool >/dev/null
+            otool -L "$binary" > "$raw"
+            tool="otool"
+            kind="macho-otool"
+          elif [[ "$TARGET" = *-windows-msvc ]]; then
+            if command -v dumpbin >/dev/null 2>&1; then
+              dumpbin /DEPENDENTS "$binary" > "$raw"
+              tool="dumpbin"
+            elif command -v llvm-objdump >/dev/null 2>&1; then
+              llvm-objdump -p "$binary" > "$raw"
+              tool="llvm-objdump"
+            elif command -v objdump >/dev/null 2>&1; then
+              objdump -p "$binary" > "$raw"
+              tool="objdump"
+            else
+              echo "No safe PE import inspector is available for $TARGET" >&2
+              exit 1
+            fi
+            kind="pe-imports"
+          else
+            echo "No executable linkage policy is available for $TARGET" >&2
+            exit 1
+          fi
+          test -s "$raw"
+          "$PYTHON_BIN" - "$EVIDENCE_ROOT/linkage.json" "$TARGET" "$binary" "$kind" "$tool" "$raw" <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          import sys
+
+          # Keep argument handling explicit so a malformed CI invocation
+          # fails without exposing a command line or workspace path.
+          destination = Path(sys.argv[1])
+          target = sys.argv[2]
+          binary = Path(sys.argv[3])
+          kind = sys.argv[4]
+          tool = sys.argv[5]
+          raw = Path(sys.argv[6])
+          output = raw.read_text(encoding="utf-8", errors="replace")
+          if len(output.encode("utf-8")) > 8 * 1024 * 1024:
+              raise SystemExit("linkage inspection output exceeds the evidence bound")
+          value = {
+              "schema_id": "jmeter-rs.standalone-linkage-evidence",
+              "schema_version": 1,
+              "target": target,
+              "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+              "kind": kind,
+              "tool": tool,
+              "output": output,
+          }
+          destination.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+          test -s "$EVIDENCE_ROOT/linkage.json"
+          echo "LINKAGE_EVIDENCE=$EVIDENCE_ROOT/linkage.json" >> "$GITHUB_ENV"
+      - name: Verify musl executable is static
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="$CARGO_TARGET_DIR/$TARGET/release/jmeter-rs"
+          test -f "$binary"
+          file_output="$(file "$binary")"
+          echo "$file_output"
+          grep -Eiq 'statically linked|static-pie linked' <<<"$file_output"
+      - name: Run isolated Java-free version and DebugSampler smoke
+        if: matrix.runtime_smoke == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="$CARGO_TARGET_DIR/$TARGET/release/jmeter-rs"
+          if [[ "$RUNNER_OS" = Windows ]]; then
+            binary="$binary.exe"
+          fi
+          test -x "$binary" || test -f "$binary"
+          runtime_root="$RUNNER_TEMP/standalone-runtime/$TARGET"
+          mkdir -p "$runtime_root/bin"
+          cp "$binary" "$runtime_root/bin/"
+          cp compat/fixtures/jmeter-5.6.3/lifecycle-debug/plan.jmx "$runtime_root/debug-plan.jmx"
+          version_output="$runtime_root/version.stdout"
+          version_error="$runtime_root/version.stderr"
+          fixture_output="$runtime_root/fixture.stdout"
+          fixture_error="$runtime_root/fixture.stderr"
+          result_file="$runtime_root/debug.jtl"
+          trace_version="$runtime_root/version.trace"
+          trace_fixture="$runtime_root/fixture.trace"
+          if [[ "$RUNNER_OS" = Windows ]]; then
+            clean_env=(env -i "PATH=$runtime_root/bin:/c/Windows/System32" "SystemRoot=${SystemRoot:-C:\\Windows}" LANG=C LC_ALL=C TZ=UTC)
+          else
+            clean_env=(env -i "PATH=$runtime_root/bin" LANG=C LC_ALL=C TZ=UTC)
+          fi
+          run_clean() { "${clean_env[@]}" "$@"; }
+          trace_status="missing-gate"
+          trace_method="none"
+          trace_reason="platform-native-tracer-unavailable"
+          if [[ "$RUNNER_OS" = Linux ]] && command -v strace >/dev/null 2>&1; then
+            trace_status="candidate"
+            trace_method="linux-strace-execve"
+            trace_reason=""
+          elif [[ "$RUNNER_OS" = macOS ]] && command -v dtruss >/dev/null 2>&1; then
+            trace_status="candidate"
+            trace_method="macos-dtruss-execve"
+            trace_reason=""
+          fi
+          run_smoke() {
+            local trace_file="$1"
+            local stdout_file="$2"
+            local stderr_file="$3"
+            shift 3
+            if [[ "$trace_status" = candidate ]]; then
+              local status=0
+              set +e
+              if [[ "$trace_method" = linux-strace-execve ]]; then
+                "${clean_env[@]}" strace -f -e trace=execve -o "$trace_file" "$@" >"$stdout_file" 2>"$stderr_file"
+                status=$?
+              else
+                "${clean_env[@]}" dtruss -f -t execve -o "$trace_file" "$@" >"$stdout_file" 2>"$stderr_file"
+                status=$?
+              fi
+              set -e
+              if [[ "$status" -ne 0 ]]; then
+                trace_status="missing-gate"
+                trace_method="none"
+                trace_reason="platform-native-tracer-failed"
+                run_clean "$@" >"$stdout_file" 2>"$stderr_file"
+              else
+                local exec_count
+                exec_count="$(grep -c 'execve(' "$trace_file" || true)"
+                if [[ "$exec_count" -ne 1 ]]; then
+                  echo "child executable launch observed in native smoke trace" >&2
+                  return 1
+                fi
+              fi
+            else
+              run_clean "$@" >"$stdout_file" 2>"$stderr_file"
+            fi
+          }
+          run_smoke "$trace_version" "$version_output" "$version_error" "$runtime_root/bin/$(basename "$binary")" --version
+          grep -F "5.6.3" "$version_output" >/dev/null
+          run_smoke "$trace_fixture" "$fixture_output" "$fixture_error" \
+            "$runtime_root/bin/$(basename "$binary")" -n -t "$runtime_root/debug-plan.jmx" -l "$result_file"
+          test -s "$result_file"
+          if [[ "$trace_status" = candidate ]]; then
+            exec_count="$(grep -c 'execve(' "$trace_fixture" || true)"
+            if [[ "$exec_count" -ne 1 ]]; then
+              echo "child executable launch observed in DebugSampler smoke trace" >&2
+              exit 1
+            fi
+            trace_status="verified-no-child-exec"
+          fi
+          "$PYTHON_BIN" - "$EVIDENCE_ROOT/runtime.json" "$TARGET" "$binary" "$EXECUTION_EVIDENCE" "$trace_status" "$trace_method" "$trace_reason" "$version_output" "$result_file" <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          import sys
+
+          destination = Path(sys.argv[1])
+          target = sys.argv[2]
+          binary = Path(sys.argv[3])
+          execution_evidence = sys.argv[4]
+          trace_status = sys.argv[5]
+          trace_method = sys.argv[6]
+          trace_reason = sys.argv[7]
+          version_output = Path(sys.argv[8])
+          result_file = Path(sys.argv[9])
+          value = {
+              "schema_id": "jmeter-rs.standalone-runtime-evidence",
+              "schema_version": 1,
+              "target": target,
+              "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+              "execution_evidence": execution_evidence,
+              "version": {
+                  "status": "passed",
+                  "exit_code": 0,
+                  "output_sha256": hashlib.sha256(version_output.read_bytes()).hexdigest(),
+              },
+              "fixture": {
+                  "id": "debug-sampler/native-local",
+                  "network_fixture": False,
+                  "status": "passed",
+                  "exit_code": 0,
+                  "result_sha256": hashlib.sha256(result_file.read_bytes()).hexdigest(),
+              },
+              "environment": {
+                  "allowlist": ["LANG=C", "LC_ALL=C", "PATH=<runtime-bin>", "SystemRoot=<windows-loader-root>", "TZ=UTC"],
+                  "forbidden_absent": True,
+                  "forbidden_environment_names": sorted({
+                      "ALL_PROXY", "CLASSPATH", "HTTP_PROXY", "HTTPS_PROXY", "JAVA_HOME", "JDK_HOME",
+                      "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "JMETER_HOME", "JRE_HOME",
+                      "JVM_HOME", "MAVEN_OPTS", "NO_PROXY", "all_proxy", "classpath", "http_proxy",
+                      "https_proxy", "java_home", "jdk_home", "jmeter_home", "jre_home", "jvm_home", "no_proxy",
+                  }),
+              },
+              "child_executable_launch": {
+                  "status": trace_status,
+                  "method": trace_method,
+                  "reason": trace_reason,
+                  "traced_invocations": 2 if trace_status == "verified-no-child-exec" else None,
+              },
+          }
+          destination.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+          test -s "$EVIDENCE_ROOT/runtime.json"
+          echo "RUNTIME_EVIDENCE=$EVIDENCE_ROOT/runtime.json" >> "$GITHUB_ENV"
+      - name: Record cross-compile-only runtime boundary
+        if: matrix.runtime_smoke == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="$CARGO_TARGET_DIR/$TARGET/release/jmeter-rs"
+          test -f "$binary"
+          "$PYTHON_BIN" - "$EVIDENCE_ROOT/runtime.json" "$TARGET" "$binary" "$EXECUTION_EVIDENCE" <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          import sys
+
+          destination = Path(sys.argv[1])
+          target = sys.argv[2]
+          binary = Path(sys.argv[3])
+          execution_evidence = sys.argv[4]
+          value = {
+              "schema_id": "jmeter-rs.standalone-runtime-evidence",
+              "schema_version": 1,
+              "target": target,
+              "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+              "execution_evidence": execution_evidence,
+              "version": {"status": "not-run-cross-compile"},
+              "fixture": {"id": "debug-sampler/native-local", "network_fixture": False, "status": "not-run-cross-compile"},
+              "environment": {
+                  "allowlist": ["LANG=C", "LC_ALL=C", "PATH=<runtime-bin>", "TZ=UTC"],
+                  "forbidden_absent": True,
+                  "forbidden_environment_names": sorted({
+                      "ALL_PROXY", "CLASSPATH", "HTTP_PROXY", "HTTPS_PROXY", "JAVA_HOME", "JDK_HOME",
+                      "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "JMETER_HOME", "JRE_HOME",
+                      "JVM_HOME", "MAVEN_OPTS", "NO_PROXY", "all_proxy", "classpath", "http_proxy",
+                      "https_proxy", "java_home", "jdk_home", "jmeter_home", "jre_home", "jvm_home", "no_proxy",
+                  }),
+              },
+              "child_executable_launch": {"status": "not-run-cross-compile", "reason": "target-not-executable-on-host"},
+          }
+          destination.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+          test -s "$EVIDENCE_ROOT/runtime.json"
+          echo "RUNTIME_EVIDENCE=$EVIDENCE_ROOT/runtime.json" >> "$GITHUB_ENV"
+      - name: Stage exact standalone archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="$CARGO_TARGET_DIR/$TARGET/release/jmeter-rs"
+          if [[ "$RUNNER_OS" = Windows ]]; then
+            binary="$binary.exe"
+          fi
+          test -f "$binary"
+          stage="$RUNNER_TEMP/standalone-stage/$TARGET/jmeter-rs-$TARGET"
+          archive_dir="$RUNNER_TEMP/standalone-artifacts/$TARGET"
+          # These are exact, runner-temporary paths; no generated output is
+          # written into the checkout.
+          rm -rf -- "$stage" "$archive_dir"
+          mkdir -p "$stage/docs" "$archive_dir"
+          cp "$binary" "$stage/$(basename "$binary")"
+          cp LICENSE NOTICE README.md "$stage/"
+          cp docs/architecture.md docs/third-party-provenance.md "$stage/docs/"
+          archive="$archive_dir/jmeter-rs-$TARGET"
+          if [[ "$ARCHIVE_FORMAT" = zip ]]; then
+            archive+=".zip"
+          else
+            archive+=".tar.gz"
+          fi
+          "$PYTHON_BIN" - "$stage" "$archive" "$ARCHIVE_FORMAT" "$SOURCE_DATE_EPOCH" <<'PY'
+          import gzip
+          import os
+          from pathlib import Path
+          import stat
+          import sys
+          import tarfile
+          import time
+          import zipfile
+
+          stage = Path(sys.argv[1])
+          archive_path = Path(sys.argv[2])
+          archive_format = sys.argv[3]
+          epoch = int(sys.argv[4])
+          root = stage.name
+          files = sorted(path for path in stage.rglob("*") if path.is_file())
+          if archive_format == "zip":
+              timestamp = time.gmtime(max(epoch, 315532800))[:6]
+              with zipfile.ZipFile(
+                  archive_path,
+                  "w",
+                  compression=zipfile.ZIP_DEFLATED,
+                  compresslevel=9,
+              ) as output:
+                  for path in files:
+                      relative = path.relative_to(stage).as_posix()
+                      info = zipfile.ZipInfo(f"{root}/{relative}", timestamp)
+                      info.compress_type = zipfile.ZIP_DEFLATED
+                      mode = stat.S_IMODE(path.stat().st_mode)
+                      info.external_attr = (stat.S_IFREG | mode) << 16
+                      output.writestr(info, path.read_bytes())
+          elif archive_format == "tar.gz":
+              with archive_path.open("wb") as stream:
+                  with gzip.GzipFile(fileobj=stream, mode="wb", mtime=epoch) as compressed:
+                      with tarfile.open(fileobj=compressed, mode="w") as output:
+                          for path in files:
+                              relative = path.relative_to(stage).as_posix()
+                              info = tarfile.TarInfo(f"{root}/{relative}")
+                              info.size = path.stat().st_size
+                              info.mode = stat.S_IMODE(path.stat().st_mode)
+                              info.mtime = epoch
+                              with path.open("rb") as source:
+                                  output.addfile(info, source)
+          else:
+              raise SystemExit(f"unsupported archive format: {archive_format}")
+          os.chmod(archive_path, 0o644)
+          PY
+          test -s "$archive"
+          echo "STANDALONE_ARCHIVE=$archive" >> "$GITHUB_ENV"
+      - name: Validate archive and write manifest/provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest="${STANDALONE_ARCHIVE}.manifest.json"
+          host_target="$(rustc "+$RUST_TOOLCHAIN" -vV | sed -n 's/^host: //p')"
+          rustc_version="$(rustc "+$RUST_TOOLCHAIN" --version)"
+          profile_sha256="$(sha256sum compat/profiles/jmeter-5.6.3.json | awk '{print $1}')"
+          cargo_lock_sha256="$(sha256sum Cargo.lock | awk '{print $1}')"
+          common_args=(
+            "$STANDALONE_ARCHIVE"
+            --target "$TARGET"
+            --manifest "$manifest"
+            --source-commit "$SOURCE_COMMIT"
+            --dirty-tree "$DIRTY_TREE"
+            --profile-sha256 "$profile_sha256"
+            --rust-toolchain "$RUST_TOOLCHAIN"
+            --rustc-version "$rustc_version"
+            --cargo-lock-sha256 "$cargo_lock_sha256"
+            --host-target "$host_target"
+            --execution-evidence "$EXECUTION_EVIDENCE"
+            --runner-os "$RUNNER_OS"
+            --runner-arch "$RUNNER_ARCH"
+            --source-date-epoch "$SOURCE_DATE_EPOCH"
+            --cargo-metadata "$CARGO_METADATA_EVIDENCE"
+            --cargo-tree "$CARGO_TREE_EVIDENCE"
+            --linkage-evidence "$LINKAGE_EVIDENCE"
+            --runtime-evidence "$RUNTIME_EVIDENCE"
+          )
+          if [[ "$STATIC_EXPECTED" = true ]]; then
+            "$PYTHON_BIN" .github/scripts/check-standalone-artifact.py \
+              "${common_args[@]}" --static-expected
+          else
+            "$PYTHON_BIN" .github/scripts/check-standalone-artifact.py "${common_args[@]}"
+          fi
+          test -s "$manifest"
+          cp "$EVIDENCE_ROOT"/* "$(dirname "$STANDALONE_ARCHIVE")/"
+          echo "STANDALONE_MANIFEST=$manifest" >> "$GITHUB_ENV"
+          {
+            echo "### standalone archive inventory"
+            echo "- release channel: experimental-pre-release (no conformance claim)"
+            echo "- archive: $(basename "$STANDALONE_ARCHIVE")"
+            echo "- manifest: $(basename "$manifest")"
+            echo "- archive SHA-256: $("$PYTHON_BIN" -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$STANDALONE_ARCHIVE")"
+            echo "- execution evidence: $EXECUTION_EVIDENCE"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Confirm generated output stayed outside checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(git status --porcelain=v1 --untracked-files=all)"
+          if [[ -n "$status" ]]; then
+            echo "standalone release generated output escaped RUNNER_TEMP" >&2
+            printf '%s\n' "$status" >&2
+            exit 1
+          fi
+      # actions/upload-artifact v7.0.1; this retains CI evidence only and does
+      # not create a GitHub Release or publish a package/registry artifact.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: standalone-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/standalone-artifacts/${{ matrix.target }}/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release-gate:
+    name: standalone release gate / all required targets
+    if: ${{ always() }}
+    needs:
+      - checker-self-test
+      - standalone-policy
+      - build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Fail closed on any missing or failed target evidence
+        shell: bash
+        env:
+          CHECKER_RESULT: ${{ needs['checker-self-test'].result }}
+          POLICY_RESULT: ${{ needs['standalone-policy'].result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          set -euo pipefail
+          test "$CHECKER_RESULT" = success
+          test "$POLICY_RESULT" = success
+          test "$BUILD_RESULT" = success
+          echo "All standalone-native TEST-005 target artifacts were built, checked, and retained."

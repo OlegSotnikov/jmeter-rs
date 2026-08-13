@@ -65,20 +65,31 @@ impl DecodeOptions {
         self.apply_upgrades = false;
         self
     }
+
+    /// Validates caller-supplied resource budgets before parsing or semantic
+    /// allocation begins. Product maxima are rejected explicitly; values are
+    /// never silently clamped to a smaller budget.
+    pub fn validate(&self) -> crate::Result<()> {
+        self.limits.validate()
+    }
 }
 
 /// Resource limits applied while mapping syntax events to semantic values.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DecodeLimits {
-    /// Maximum number of semantic test-element nodes.
+    /// Maximum number of semantic test-element nodes. The product ceiling is
+    /// [`Self::MAX_ELEMENTS`].
     pub max_elements: usize,
-    /// Maximum number of persistent properties across the document.
+    /// Maximum number of persistent properties across the document. The
+    /// product ceiling is [`Self::MAX_PROPERTIES`].
     pub max_properties: usize,
-    /// Maximum nested property depth.
+    /// Maximum nested property depth. The product ceiling is
+    /// [`Self::MAX_PROPERTY_DEPTH`].
     pub max_property_depth: usize,
     /// Maximum alternating semantic hashTree depth.  This is separate from
     /// the XML parser's nesting bound because a caller may construct or pass
-    /// a syntax document with a much larger structural tree.
+    /// a syntax document with a much larger structural tree. The product
+    /// ceiling is [`Self::MAX_TREE_DEPTH`].
     pub max_tree_depth: usize,
     /// Maximum aggregate bytes retained in opaque/lexical semantic storage.
     ///
@@ -90,22 +101,34 @@ pub struct DecodeLimits {
     /// and a child extension retain overlapping source bytes, they are still
     /// separate owned payloads and are charged separately.  Auxiliary index
     /// bookkeeping is not charged a second time for the same payload slot.
+    /// The product ceiling is [`Self::MAX_OPAQUE_BYTES`].
     pub max_opaque_bytes: usize,
 }
 
 impl Default for DecodeLimits {
     fn default() -> Self {
         Self {
-            max_elements: 100_000,
-            max_properties: 500_000,
-            max_property_depth: 256,
-            max_tree_depth: 256,
-            max_opaque_bytes: 8 * 1024 * 1024,
+            max_elements: Self::MAX_ELEMENTS,
+            max_properties: Self::MAX_PROPERTIES,
+            max_property_depth: Self::MAX_PROPERTY_DEPTH,
+            max_tree_depth: Self::MAX_TREE_DEPTH,
+            max_opaque_bytes: Self::MAX_OPAQUE_BYTES,
         }
     }
 }
 
 impl DecodeLimits {
+    /// Product maximum for semantic test-element nodes.
+    pub const MAX_ELEMENTS: usize = 100_000;
+    /// Product maximum for persistent semantic properties.
+    pub const MAX_PROPERTIES: usize = 500_000;
+    /// Product maximum for nested property values.
+    pub const MAX_PROPERTY_DEPTH: usize = 256;
+    /// Product maximum for alternating element/hashTree depth.
+    pub const MAX_TREE_DEPTH: usize = 256;
+    /// Product maximum for retained opaque and lexical payload bytes.
+    pub const MAX_OPAQUE_BYTES: usize = 8 * 1024 * 1024;
+
     /// A conservative limit set for unit tests and small plans.
     pub const fn small() -> Self {
         Self {
@@ -115,6 +138,59 @@ impl DecodeLimits {
             max_tree_depth: 64,
             max_opaque_bytes: 512 * 1024,
         }
+    }
+
+    /// Validates that every caller-selected budget stays within the product
+    /// hard ceiling. A zero budget remains valid and rejects input that needs
+    /// any allocation; only values above the hard ceilings are configuration
+    /// errors.
+    pub fn validate(&self) -> crate::Result<()> {
+        if self.max_elements > Self::MAX_ELEMENTS {
+            return Err(Self::limit_configuration_error(
+                "max_elements",
+                self.max_elements,
+                Self::MAX_ELEMENTS,
+            ));
+        }
+        if self.max_properties > Self::MAX_PROPERTIES {
+            return Err(Self::limit_configuration_error(
+                "max_properties",
+                self.max_properties,
+                Self::MAX_PROPERTIES,
+            ));
+        }
+        if self.max_property_depth > Self::MAX_PROPERTY_DEPTH {
+            return Err(Self::limit_configuration_error(
+                "max_property_depth",
+                self.max_property_depth,
+                Self::MAX_PROPERTY_DEPTH,
+            ));
+        }
+        if self.max_tree_depth > Self::MAX_TREE_DEPTH {
+            return Err(Self::limit_configuration_error(
+                "max_tree_depth",
+                self.max_tree_depth,
+                Self::MAX_TREE_DEPTH,
+            ));
+        }
+        if self.max_opaque_bytes > Self::MAX_OPAQUE_BYTES {
+            return Err(Self::limit_configuration_error(
+                "max_opaque_bytes",
+                self.max_opaque_bytes,
+                Self::MAX_OPAQUE_BYTES,
+            ));
+        }
+        Ok(())
+    }
+
+    fn limit_configuration_error(name: &str, requested: usize, maximum: usize) -> Error {
+        Error::semantic(
+            SemanticErrorKind::Limit,
+            None,
+            format!(
+                "semantic decode limit {name} exceeds product maximum {maximum}: requested {requested}"
+            ),
+        )
     }
 }
 
@@ -413,6 +489,10 @@ struct ObjectPropertyShape {
 pub struct SemanticDocument {
     /// Root metadata retained from the source document.
     pub root: SemanticRootMetadata,
+    /// Exact source XML declaration bytes, when the input supplied one.
+    xml_declaration: Option<Vec<u8>>,
+    /// Whether the source began with a UTF-8 byte-order mark.
+    has_utf8_bom: bool,
     /// Ordered identity tree of test elements.
     pub tree: ElementTree,
     /// Pinned alias/upgrade registry used to decode this document.
@@ -449,6 +529,9 @@ pub struct SemanticDocument {
     element_items: BTreeMap<NodeId, Vec<ElementItem>>,
     /// Wire property tags and attributes keyed by semantic property path.
     wire_properties: BTreeMap<PropertyPath, WireProperty>,
+    /// Duplicate source paths may reuse their raw winning occurrence while
+    /// still permitting a later edit to canonicalize the model value.
+    duplicate_property_paths: BTreeSet<PropertyPath>,
     /// Decoded source values keyed by semantic property path.  This guards
     /// raw XML reuse after a caller edits an opaque property value.
     original_property_values: BTreeMap<PropertyPath, PropertyValue>,
@@ -485,6 +568,8 @@ impl SemanticDocument {
     pub fn new(root: SemanticRootMetadata, tree: ElementTree) -> Self {
         Self {
             root,
+            xml_declaration: None,
+            has_utf8_bom: false,
             tree,
             registry: JmxRegistry::default(),
             element_info: BTreeMap::new(),
@@ -499,6 +584,7 @@ impl SemanticDocument {
             hash_tree_events: BTreeMap::new(),
             element_items: BTreeMap::new(),
             wire_properties: BTreeMap::new(),
+            duplicate_property_paths: BTreeSet::new(),
             original_property_values: BTreeMap::new(),
             property_spans: BTreeMap::new(),
             nested_metadata: BTreeMap::new(),
@@ -519,6 +605,7 @@ impl SemanticDocument {
 
     /// Decodes syntax with explicit limits, source label, and registry.
     pub fn decode_with_options(document: &Document, options: DecodeOptions) -> crate::Result<Self> {
+        options.validate()?;
         Decoder::new(document, options).decode()
     }
 
@@ -530,6 +617,7 @@ impl SemanticDocument {
 
     /// Parses and decodes a complete JMX byte slice with options.
     pub fn from_bytes_with_options(source: &[u8], options: DecodeOptions) -> crate::Result<Self> {
+        options.validate()?;
         let document = crate::Parser::new().parse(source)?;
         Self::decode_with_options(&document, options)
     }
@@ -538,6 +626,18 @@ impl SemanticDocument {
     #[must_use]
     pub fn root(&self) -> &SemanticRootMetadata {
         &self.root
+    }
+
+    /// Returns the exact source XML declaration bytes, when present.
+    #[must_use]
+    pub fn xml_declaration(&self) -> Option<&[u8]> {
+        self.xml_declaration.as_deref()
+    }
+
+    /// Returns whether the source carried a UTF-8 byte-order mark.
+    #[must_use]
+    pub const fn has_utf8_bom(&self) -> bool {
+        self.has_utf8_bom
     }
 
     /// Returns retained non-element XML events directly inside the wrapper.
@@ -609,21 +709,19 @@ impl SemanticDocument {
         &mut self.tree
     }
 
-    /// Returns the document-local IDs in deterministic preorder.
+    /// Returns document-local IDs in deterministic preorder.
     ///
-    /// The legacy infallible accessor returns an empty vector when a
-    /// programmatically constructed tree exceeds the semantic encoder's node
-    /// budget.  Call [`Self::try_node_ids`] when the limit must be observed by
-    /// the caller rather than treated as an unavailable inventory.
-    #[must_use]
-    pub fn node_ids(&self) -> Vec<NodeId> {
-        self.try_node_ids().unwrap_or_default()
+    /// Traversal is bounded even for programmatically constructed semantic
+    /// documents. Oversized trees return a typed limit error; callers must not
+    /// treat an empty inventory as evidence that a tree was empty.
+    pub fn node_ids(&self) -> crate::Result<Vec<NodeId>> {
+        bounded_preorder_ids(&self.tree, MAX_ENCODER_NODES)
     }
 
-    /// Returns document-local IDs in deterministic preorder with an explicit
-    /// allocation/limit error for oversized programmatic trees.
+    /// Compatibility alias for callers that prefer an explicitly fallible
+    /// inventory name.
     pub fn try_node_ids(&self) -> crate::Result<Vec<NodeId>> {
-        bounded_preorder_ids(&self.tree, MAX_ENCODER_NODES)
+        self.node_ids()
     }
 
     /// Returns the source tag for a semantic node.
@@ -794,7 +892,9 @@ impl SemanticDocument {
         if !self.try_semantic_eq(other)? {
             return Ok(false);
         }
-        Ok(self.element_info.len() == other.element_info.len()
+        Ok(self.xml_declaration == other.xml_declaration
+            && self.has_utf8_bom == other.has_utf8_bom
+            && self.element_info.len() == other.element_info.len()
             && self.element_info.iter().all(|(id, info)| {
                 other.element_info.get(id).is_some_and(|rhs| {
                     info.tag == rhs.tag
@@ -1185,6 +1285,7 @@ impl SemanticDocument {
             || self.hash_tree_events != other.hash_tree_events
             || self.element_items != other.element_items
             || self.wire_properties != other.wire_properties
+            || self.duplicate_property_paths != other.duplicate_property_paths
         {
             return Ok(false);
         }
@@ -1400,6 +1501,8 @@ struct Decoder<'a> {
     document: &'a Document,
     options: DecodeOptions,
     arena: XmlArena,
+    xml_declaration: Option<Vec<u8>>,
+    has_utf8_bom: bool,
     tree: ElementTree,
     root: SemanticRootMetadata,
     source_name: Option<String>,
@@ -1416,6 +1519,7 @@ struct Decoder<'a> {
     hash_tree_events: BTreeMap<Option<NodeId>, Vec<SemanticEvent>>,
     element_items: BTreeMap<NodeId, Vec<ElementItem>>,
     wire_properties: BTreeMap<PropertyPath, WireProperty>,
+    duplicate_property_paths: BTreeSet<PropertyPath>,
     original_property_values: BTreeMap<PropertyPath, PropertyValue>,
     property_spans: BTreeMap<PropertyPath, Span>,
     nested_metadata: BTreeMap<PropertyPath, NestedMetadata>,
@@ -1454,6 +1558,8 @@ impl<'a> Decoder<'a> {
             registry: options.registry.clone(),
             options,
             arena,
+            xml_declaration: None,
+            has_utf8_bom: false,
             tree: ElementTree::new(),
             root,
             element_info: BTreeMap::new(),
@@ -1468,6 +1574,7 @@ impl<'a> Decoder<'a> {
             hash_tree_events: BTreeMap::new(),
             element_items: BTreeMap::new(),
             wire_properties: BTreeMap::new(),
+            duplicate_property_paths: BTreeSet::new(),
             original_property_values: BTreeMap::new(),
             property_spans: BTreeMap::new(),
             nested_metadata: BTreeMap::new(),
@@ -1492,6 +1599,8 @@ impl<'a> Decoder<'a> {
             ));
         }
         self.arena = XmlArena::build(self.document)?;
+        self.has_utf8_bom = self.document.source().starts_with(&[0xEF, 0xBB, 0xBF]);
+        self.xml_declaration = self.decode_xml_declaration()?;
         self.leading_extensions =
             self.decode_external_extensions(&self.arena.leading_extensions.clone())?;
         self.trailing_extensions =
@@ -1511,7 +1620,10 @@ impl<'a> Decoder<'a> {
                 "jmeterTestPlan is missing required version metadata",
             ));
         }
-        if !matches!(attr(&root_node.attributes, "version"), Some("1.0" | "1.2")) {
+        if !matches!(
+            attr(&root_node.attributes, "version"),
+            Some("1.0" | "1.1" | "1.2")
+        ) {
             return Err(self.semantic_error(
                 SemanticErrorKind::RootMetadata,
                 self.arena.root,
@@ -1543,6 +1655,8 @@ impl<'a> Decoder<'a> {
         })?;
         Ok(SemanticDocument {
             root: self.root,
+            xml_declaration: self.xml_declaration,
+            has_utf8_bom: self.has_utf8_bom,
             tree: self.tree,
             registry: self.registry,
             element_info: self.element_info,
@@ -1557,6 +1671,7 @@ impl<'a> Decoder<'a> {
             hash_tree_events: self.hash_tree_events,
             element_items: self.element_items,
             wire_properties: self.wire_properties,
+            duplicate_property_paths: self.duplicate_property_paths,
             original_property_values: self.original_property_values,
             property_spans: self.property_spans,
             nested_metadata: self.nested_metadata,
@@ -1568,6 +1683,22 @@ impl<'a> Decoder<'a> {
             diagnostics: self.diagnostics,
             source_name: self.source_name,
         })
+    }
+
+    /// Retains the source declaration as a lexical sidecar.  The parser has
+    /// already validated XML declaration ordering, version, encoding, and
+    /// standalone values; this method only accounts and copies its exact
+    /// source span for round-trip output.
+    fn decode_xml_declaration(&mut self) -> crate::Result<Option<Vec<u8>>> {
+        let span = self.document.events().iter().find_map(|event| {
+            matches!(event.kind, EventKind::XmlDeclaration(_)).then_some(event.span)
+        });
+        let Some(span) = span else {
+            return Ok(None);
+        };
+        let raw = self.raw_span(span, 0)?;
+        self.retain_opaque(raw.len(), 0)?;
+        Ok(Some(raw))
     }
 
     fn decode_external_extensions(
@@ -1748,22 +1879,30 @@ impl<'a> Decoder<'a> {
                 "test element testname metadata decodes to an empty value",
             ));
         }
-        let (test_class, gui_class) = self.resolve_special_classes(raw_testclass, raw_gui);
-        // The serialized element tag is a wire alias, but `testclass` is the
-        // authoritative component identity.  A plugin or malformed document
-        // must not become executable merely by borrowing a built-in tag.
-        let test_class_identity = self.upgraded_class_identity(raw_testclass, raw_gui);
-        let tag_class_identity = self.upgraded_class_identity(&node.name, raw_gui);
-        let known_test_class = self.registry.aliases.resolve(raw_testclass).is_known()
-            || self.registry.aliases.resolve(&test_class).is_known();
-        // The testclass attribute is authoritative.  A profile-known class
-        // under an unknown/non-matching wire tag is still retained, but must
-        // remain opaque: canonicalizing the tag to a built-in alias would
-        // silently reinterpret plugin or malformed input.
-        let known = known_test_class
-            && tag_class_identity
-                .as_deref()
-                .is_some_and(|tag| Some(tag) == test_class_identity.as_deref());
+        // SaveService's TestElementConverter uses an explicit `class`
+        // attribute as the instantiation identity.  Without that override,
+        // the wire tag and `testclass` metadata must agree before a built-in
+        // node is materialized; a known testclass under an unknown tag stays
+        // opaque instead of being silently reinterpreted.
+        let explicit_class = attr(&node.attributes, "class");
+        let wire_identity = explicit_class.unwrap_or(&node.name);
+        let (test_class, gui_class) =
+            self.resolve_special_classes(explicit_class.unwrap_or(raw_testclass), raw_gui);
+        let wire_class_identity = self.upgraded_class_identity(wire_identity, raw_gui);
+        let known = if explicit_class.is_some() {
+            // An unknown explicit class is preservation-only, even if its XML
+            // tag happens to use a built-in alias.
+            wire_class_identity.is_some()
+        } else {
+            let test_class_identity = self.upgraded_class_identity(raw_testclass, raw_gui);
+            let tag_class_identity = self.upgraded_class_identity(&node.name, raw_gui);
+            let known_test_class = self.registry.aliases.resolve(raw_testclass).is_known()
+                || self.registry.aliases.resolve(&test_class).is_known();
+            known_test_class
+                && tag_class_identity
+                    .as_deref()
+                    .is_some_and(|tag| Some(tag) == test_class_identity.as_deref())
+        };
         let metadata = jmeter_rs_model::ElementMetadata::new(test_class, gui_class, original_name);
         let mut element = TestElement::new(metadata);
         element.set_enabled(enabled);
@@ -1802,6 +1941,7 @@ impl<'a> Decoder<'a> {
             opaque: !known,
             span: node.span,
         };
+        let is_opaque = info.opaque;
         if !known {
             let raw = self.raw_span(node.span, index)?;
             self.retain_opaque(raw.len(), index)?;
@@ -1820,6 +1960,16 @@ impl<'a> Decoder<'a> {
         let child_indices = self.arena.nodes[index].children.clone();
         for child in child_indices {
             let XmlChild::Element(property_index) = child else {
+                // Unknown/plugin elements are preservation-first.  A plugin
+                // payload is allowed to contain direct character data (or a
+                // CDATA section) rather than only SaveService property
+                // children.  Retain the exact event span so editing the
+                // opaque element's metadata cannot silently discard that
+                // payload.  Known elements remain strict and continue to
+                // reject direct non-whitespace content below.
+                if is_opaque && self.retain_opaque_element_text(id, index, &child)? {
+                    continue;
+                }
                 self.retain_non_element_child(id, index, child)?;
                 continue;
             };
@@ -1833,7 +1983,7 @@ impl<'a> Decoder<'a> {
             }
             let path = PropertyPath::new(id);
             let decoded = self.decode_property(property_index, id, path)?;
-            if let Some((name, value, wire, raw_opaque)) = decoded {
+            if let Some((name, value, mut wire, raw_opaque)) = decoded {
                 if let Some((raw, type_name)) = raw_opaque {
                     self.push_element_item(
                         id,
@@ -1852,6 +2002,33 @@ impl<'a> Decoder<'a> {
                     continue;
                 }
                 self.reserve_property(property_index)?;
+                let duplicate = self
+                    .tree
+                    .element(id)
+                    .map_err(|error| {
+                        Error::semantic(
+                            SemanticErrorKind::Topology,
+                            Some(position(self.document, node.span.start)),
+                            error.to_string(),
+                        )
+                    })?
+                    .properties
+                    .contains(&name);
+                let source_has_raw_wire = duplicate && wire.raw_xml.is_some();
+                if duplicate {
+                    // JMeter's TestElementConverter uses setProperty: the
+                    // last occurrence wins in the typed model while the
+                    // earlier source slot still remains observable to a
+                    // lossless editor. Preserve that earlier subtree as an
+                    // ordered opaque slot before replacing the model value.
+                    self.preserve_duplicate_property_slot(id, &name, property_index)?;
+                    if wire.raw_xml.is_none() {
+                        let raw =
+                            self.raw_span(self.arena.nodes[property_index].span, property_index)?;
+                        self.retain_opaque(raw.len(), property_index)?;
+                        wire.raw_xml = Some(raw);
+                    }
+                }
                 let element = self.tree.lookup_mut(id).map_err(|error| {
                     Error::semantic(
                         SemanticErrorKind::Topology,
@@ -1859,36 +2036,20 @@ impl<'a> Decoder<'a> {
                         error.to_string(),
                     )
                 })?;
-                if element.value().properties.contains(&name) {
-                    return Err(self.semantic_error(
-                        SemanticErrorKind::DuplicateProperty,
-                        property_index,
-                        "duplicate property metadata",
-                    ));
-                }
                 element
                     .value_mut()
                     .properties
-                    .try_insert(name.clone(), value.clone())
-                    .map_err(|error| {
-                        Error::semantic(
-                            SemanticErrorKind::DuplicateProperty,
-                            Some(position(
-                                self.document,
-                                self.arena.nodes[property_index].span.start,
-                            )),
-                            error.to_string(),
-                        )
-                    })?;
+                    .insert(name.clone(), value.clone());
                 self.property_count = self.property_count.saturating_add(1);
-                self.wire_properties
-                    .insert(PropertyPath::new(id).child(&name), wire);
+                let property_path = PropertyPath::new(id).child(&name);
+                if duplicate && !source_has_raw_wire {
+                    self.duplicate_property_paths.insert(property_path.clone());
+                }
+                self.wire_properties.insert(property_path.clone(), wire);
                 self.original_property_values
-                    .insert(PropertyPath::new(id).child(&name), value.clone());
-                self.property_spans.insert(
-                    PropertyPath::new(id).child(&name),
-                    self.arena.nodes[property_index].span,
-                );
+                    .insert(property_path.clone(), value.clone());
+                self.property_spans
+                    .insert(property_path, self.arena.nodes[property_index].span);
                 self.push_element_item(id, ElementItem::Property(name), property_index)?;
             }
         }
@@ -1903,6 +2064,69 @@ impl<'a> Decoder<'a> {
             })?),
         );
         Ok(id)
+    }
+
+    /// Retains direct text/CDATA in an opaque element as a raw child slot.
+    ///
+    /// The model's ordinary opaque extension writer wraps non-XML payloads in
+    /// a synthetic element.  That is correct for extension values, but would
+    /// change a plugin's direct text payload.  `xml:raw` is therefore an
+    /// internal wire-slot marker: the encoder emits its bytes directly while
+    /// still exposing the bytes through the normal bounded extension
+    /// inventory.  Opaque/plugin content has no known formatting contract, so
+    /// whitespace is retained too; editing such mixed content returns an
+    /// explicit unsupported error rather than dropping it.
+    fn retain_opaque_element_text(
+        &mut self,
+        owner: NodeId,
+        parent_index: usize,
+        child: &XmlChild,
+    ) -> crate::Result<bool> {
+        let event_index = match child {
+            XmlChild::Text { event_index, .. } | XmlChild::CData { event_index, .. } => {
+                *event_index
+            }
+            XmlChild::Element(_) | XmlChild::Other { .. } => return Ok(false),
+        };
+        let event = self.document.events().get(event_index).ok_or_else(|| {
+            self.semantic_error(
+                SemanticErrorKind::Topology,
+                parent_index,
+                "opaque element text event is outside the source document",
+            )
+        })?;
+        let raw = self.raw_span(event.span, parent_index)?;
+        self.retain_opaque(raw.len(), parent_index)?;
+        let type_name = "xml:raw";
+        let tree_node = match self.tree.lookup_mut(owner) {
+            Ok(node) => node,
+            Err(error) => {
+                return Err(self.semantic_error(
+                    SemanticErrorKind::Topology,
+                    parent_index,
+                    error.to_string(),
+                ));
+            }
+        };
+        tree_node
+            .value_mut()
+            .push_opaque_extension(OpaqueValue::new(type_name, raw.clone()));
+        let occurrence = self.element_items.get(&owner).map_or(0, |items| {
+            items
+                .iter()
+                .filter(|item| matches!(item, ElementItem::Opaque { .. }))
+                .count()
+        });
+        self.push_element_item(
+            owner,
+            ElementItem::Opaque {
+                raw,
+                type_name: type_name.to_owned(),
+                occurrence,
+            },
+            parent_index,
+        )?;
+        Ok(true)
     }
 
     /// Decodes the wrapper's ordered children while identifying its one root
@@ -2063,6 +2287,20 @@ impl<'a> Decoder<'a> {
         }
     }
 
+    fn property_class_matches(&self, node: &XmlNode, tag: &str) -> bool {
+        let Some(raw_class) = attr(&node.attributes, "class") else {
+            return true;
+        };
+        let Some(expected_class) = self.registry.aliases.resolve(tag).class_name else {
+            return false;
+        };
+        self.registry
+            .aliases
+            .resolve(raw_class)
+            .class_name
+            .is_some_and(|class_name| class_name == expected_class)
+    }
+
     fn decode_property(
         &mut self,
         index: usize,
@@ -2199,9 +2437,25 @@ impl<'a> Decoder<'a> {
             };
             return Ok(Some((name, value, wire, None)));
         }
+        if !self.property_class_matches(&node, &tag) {
+            // An explicit property `class` attribute is also authoritative in
+            // XStream.  Preserve a mismatching/unknown class as an opaque
+            // named property rather than decoding it under a guessed core
+            // converter.
+            let raw = self.raw_span(node.span, index)?;
+            self.retain_opaque(raw.len(), index)?;
+            let payload = self
+                .text_content_bytes(index)
+                .unwrap_or_else(|_| raw.clone());
+            let value = PropertyValue::Opaque(OpaqueValue::new(tag.clone(), payload));
+            wire.raw_xml = Some(raw);
+            return Ok(Some((name, value, wire, None)));
+        }
         let value = self.decode_property_value(index, owner, path, &tag)?;
         let value = self.apply_value_upgrade(&class_name, &name, value);
-        if self.has_lexical_extension(index) {
+        if self.has_lexical_extension(index)
+            || (tag == "FloatProperty" && self.has_nonwhitespace_text(index))
+        {
             let raw = self.raw_span(node.span, index)?;
             self.retain_opaque(raw.len(), index)?;
             wire.raw_xml = Some(raw);
@@ -2292,6 +2546,7 @@ impl<'a> Decoder<'a> {
                 })?;
                 Ok(PropertyValue::Float(value))
             }
+            "FloatProperty" => self.decode_float_property(index),
             "doubleProp" => {
                 let text = self.text_content(index)?;
                 let value = parse_java_f64(text.trim()).ok_or_else(|| {
@@ -2313,6 +2568,38 @@ impl<'a> Decoder<'a> {
                 "unsupported property node",
             )),
         }
+    }
+
+    /// Decodes the capitalized SaveService alias used by the pinned
+    /// `FloatProperty` class. Unlike the lowercase `floatProp` node, this
+    /// wire form stores its current value as an XML attribute and may carry a
+    /// second `savedValue` attribute used by JMeter's running-version state.
+    /// The semantic model has one typed float slot; all other attributes stay
+    /// in `WireProperty.extra_attributes` so they survive canonical output
+    /// and edits.
+    fn decode_float_property(&self, index: usize) -> crate::Result<PropertyValue> {
+        let node = &self.arena.nodes[index];
+        let raw_value = if let Some(value) = attr(&node.attributes, "value") {
+            value.to_owned()
+        } else {
+            let text = self.text_content(index)?;
+            if text.trim().is_empty() {
+                return Err(self.semantic_error(
+                    SemanticErrorKind::InvalidPropertyValue,
+                    index,
+                    "FloatProperty is missing its value attribute or text value",
+                ));
+            }
+            text
+        };
+        let value = parse_java_f32(raw_value.trim()).ok_or_else(|| {
+            self.semantic_error(
+                SemanticErrorKind::InvalidPropertyValue,
+                index,
+                "FloatProperty value is not a 32-bit floating-point number",
+            )
+        })?;
+        Ok(PropertyValue::Float(value))
     }
 
     fn decode_multi_property(
@@ -2409,7 +2696,16 @@ impl<'a> Decoder<'a> {
                 ),
                 raw_xml: None,
             };
-            let value = if child_tag == "elementProp" && raw_child_name.is_none() {
+            let value = if !self.property_class_matches(&self.arena.nodes[child_index], &child_tag)
+            {
+                let raw = self.raw_span(self.arena.nodes[child_index].span, child_index)?;
+                self.retain_opaque(raw.len(), child_index)?;
+                let payload = self
+                    .text_content_bytes(child_index)
+                    .unwrap_or_else(|_| raw.clone());
+                wire.raw_xml = Some(raw);
+                PropertyValue::Opaque(OpaqueValue::new(child_tag.clone(), payload))
+            } else if child_tag == "elementProp" && raw_child_name.is_none() {
                 self.decode_element_property_named(
                     child_index,
                     owner,
@@ -2473,10 +2769,9 @@ impl<'a> Decoder<'a> {
             ));
         };
         let class_name = attr(&node.attributes, "elementType").map(str::to_owned);
-        let mut nested = ElementProperty::new(name.clone());
-        if let Some(class_name) = class_name {
-            nested = nested.with_class_name(class_name);
-        }
+        let is_header =
+            class_name.as_deref() == Some("org.apache.jmeter.protocol.http.control.Header");
+        let mut nested = ElementProperty::from_optional_class_name(name.clone(), class_name);
         let nested_meta = NestedMetadata {
             extra_attributes: non_special_attributes(&node.attributes, &["name", "elementType"]),
             items: Vec::new(),
@@ -2514,43 +2809,70 @@ impl<'a> Decoder<'a> {
                     "nested property is missing name",
                 ));
             };
-            let child_name = self.decode_legacy(raw_child_name, child_index)?;
+            let decoded_child_name = self.decode_legacy(raw_child_name, child_index)?;
+            // This is the explicit compatibility rewrite in JMeter's
+            // TestElementPropertyConverter.  It applies only when the wire
+            // elementType is the full Header class name, matching the pinned
+            // 5.6.3 converter rather than guessing from a tag or plugin alias.
+            let child_name = if is_header && decoded_child_name == "TestElement.name" {
+                "Header.name".to_owned()
+            } else {
+                decoded_child_name
+            };
             let child_path = path.child_occurrence(&child_name, 0);
             self.reserve_property(child_index)?;
-            let value =
-                self.decode_property_value(child_index, owner, child_path.clone(), &child_tag)?;
+            let mut raw_wire = None;
+            let value = if !self.property_class_matches(&self.arena.nodes[child_index], &child_tag)
+            {
+                let raw = self.raw_span(self.arena.nodes[child_index].span, child_index)?;
+                self.retain_opaque(raw.len(), child_index)?;
+                let payload = self
+                    .text_content_bytes(child_index)
+                    .unwrap_or_else(|_| raw.clone());
+                raw_wire = Some(raw);
+                PropertyValue::Opaque(OpaqueValue::new(child_tag.clone(), payload))
+            } else {
+                self.decode_property_value(child_index, owner, child_path.clone(), &child_tag)?
+            };
             let mut wire = WireProperty {
-                tag: child_tag,
+                tag: child_tag.clone(),
                 extra_attributes: non_special_attributes(
                     &self.arena.nodes[child_index].attributes,
                     &["name"],
                 ),
-                raw_xml: None,
+                raw_xml: raw_wire,
             };
-            if self.has_lexical_extension(child_index) {
+            if wire.raw_xml.is_none() && self.has_lexical_extension(child_index) {
                 let raw = self.raw_span(self.arena.nodes[child_index].span, child_index)?;
                 self.retain_opaque(raw.len(), child_index)?;
                 wire.raw_xml = Some(raw);
             }
-            if nested.properties.contains(&child_name) {
-                return Err(self.semantic_error(
-                    SemanticErrorKind::DuplicateProperty,
+            let duplicate = nested.properties.contains(&child_name);
+            let source_has_raw_wire = duplicate && wire.raw_xml.is_some();
+            if duplicate {
+                // `addProperty` in the upstream converter replaces the
+                // existing property value in place.  Keep the earlier wire
+                // subtree as an opaque nested slot so an unchanged source is
+                // still lossless; the current occurrence remains the model's
+                // authoritative value.
+                self.preserve_duplicate_nested_property(
+                    &mut nested,
+                    &child_name,
+                    &path,
                     child_index,
-                    "duplicate nested property metadata",
-                ));
+                )?;
+                if wire.raw_xml.is_none() {
+                    let raw = self.raw_span(self.arena.nodes[child_index].span, child_index)?;
+                    self.retain_opaque(raw.len(), child_index)?;
+                    wire.raw_xml = Some(raw);
+                }
             }
-            nested
-                .properties
-                .try_insert(child_name.clone(), value.clone())
-                .map_err(|error| {
-                    self.semantic_error(
-                        SemanticErrorKind::DuplicateProperty,
-                        child_index,
-                        error.to_string(),
-                    )
-                })?;
+            nested.properties.insert(child_name.clone(), value.clone());
             if let Some(meta) = self.nested_metadata.get_mut(&path) {
                 meta.items.push(NestedItem::Property(child_name.clone()));
+            }
+            if duplicate && !source_has_raw_wire {
+                self.duplicate_property_paths.insert(child_path.clone());
             }
             self.wire_properties.insert(child_path.clone(), wire);
             self.original_property_values
@@ -2924,6 +3246,15 @@ impl<'a> Decoder<'a> {
             })
     }
 
+    fn has_nonwhitespace_text(&self, index: usize) -> bool {
+        self.arena.nodes[index].children.iter().any(|child| {
+            matches!(
+                child,
+                XmlChild::Text { value, .. } if !value.chars().all(char::is_whitespace)
+            )
+        })
+    }
+
     fn raw_span(&self, span: Span, index: usize) -> crate::Result<Vec<u8>> {
         self.document
             .span_bytes(span)
@@ -3001,6 +3332,160 @@ impl<'a> Decoder<'a> {
         Ok(())
     }
 
+    /// Converts the previous wire slot for a duplicate top-level property
+    /// into an ordered opaque extension.  The model has one value per name,
+    /// matching JMeter's last-write `setProperty` behavior, while the source
+    /// tree retains every earlier duplicate for lossless unedited output and
+    /// explicit no-drop editing.
+    fn preserve_duplicate_property_slot(
+        &mut self,
+        id: NodeId,
+        name: &str,
+        index: usize,
+    ) -> crate::Result<()> {
+        let path = PropertyPath::new(id).child(name);
+        let (slot_index, occurrence) = self
+            .element_items
+            .get(&id)
+            .and_then(|items| {
+                let slot = items.iter().rposition(
+                    |item| matches!(item, ElementItem::Property(property) if property == name),
+                )?;
+                let occurrence = items
+                    .iter()
+                    .filter(|item| matches!(item, ElementItem::Opaque { .. }))
+                    .count();
+                Some((slot, occurrence))
+            })
+            .ok_or_else(|| {
+                self.semantic_error(
+                    SemanticErrorKind::Topology,
+                    index,
+                    "duplicate property has no previous wire slot",
+                )
+            })?;
+
+        let previous_wire = self.wire_properties.get(&path);
+        let already_charged = previous_wire.is_some_and(|wire| wire.raw_xml.is_some());
+        let previous_raw = if let Some(raw) = previous_wire.and_then(|wire| wire.raw_xml.clone()) {
+            raw
+        } else {
+            let Some(span) = self.property_spans.get(&path).copied() else {
+                return Err(self.semantic_error(
+                    SemanticErrorKind::Topology,
+                    index,
+                    "duplicate property previous wire bytes are unavailable",
+                ));
+            };
+            self.raw_span(span, index)?
+        };
+        if !already_charged {
+            self.retain_opaque(previous_raw.len(), index)?;
+        }
+
+        let type_name = "xml:duplicate-property";
+        let node = self.tree.lookup_mut(id).map_err(|error| {
+            Error::semantic(
+                SemanticErrorKind::Topology,
+                Some(position(self.document, self.arena.nodes[index].span.start)),
+                error.to_string(),
+            )
+        })?;
+        node.value_mut()
+            .push_opaque_extension(OpaqueValue::new(type_name, previous_raw.clone()));
+
+        let Some(items) = self.element_items.get_mut(&id) else {
+            return Err(self.semantic_error(
+                SemanticErrorKind::Topology,
+                index,
+                "duplicate property element item list disappeared",
+            ));
+        };
+        let Some(item) = items.get_mut(slot_index) else {
+            return Err(self.semantic_error(
+                SemanticErrorKind::Topology,
+                index,
+                "duplicate property wire slot disappeared",
+            ));
+        };
+        *item = ElementItem::Opaque {
+            raw: previous_raw,
+            type_name: type_name.to_owned(),
+            occurrence,
+        };
+        Ok(())
+    }
+
+    fn preserve_duplicate_nested_property(
+        &mut self,
+        nested: &mut ElementProperty,
+        name: &str,
+        parent_path: &PropertyPath,
+        index: usize,
+    ) -> crate::Result<()> {
+        let (slot_index, occurrence) = self
+            .nested_metadata
+            .get(parent_path)
+            .and_then(|metadata| {
+                let slot = metadata.items.iter().rposition(
+                    |item| matches!(item, NestedItem::Property(property) if property == name),
+                )?;
+                let occurrence = metadata
+                    .items
+                    .iter()
+                    .filter(|item| matches!(item, NestedItem::Opaque { .. }))
+                    .count();
+                Some((slot, occurrence))
+            })
+            .ok_or_else(|| {
+                self.semantic_error(
+                    SemanticErrorKind::Topology,
+                    index,
+                    "duplicate nested property has no previous wire slot",
+                )
+            })?;
+        let path = parent_path.child(name);
+        let previous_wire = self.wire_properties.get(&path);
+        let already_charged = previous_wire.is_some_and(|wire| wire.raw_xml.is_some());
+        let previous_raw = if let Some(raw) = previous_wire.and_then(|wire| wire.raw_xml.clone()) {
+            raw
+        } else {
+            let Some(span) = self.property_spans.get(&path).copied() else {
+                return Err(self.semantic_error(
+                    SemanticErrorKind::Topology,
+                    index,
+                    "duplicate nested property previous wire bytes are unavailable",
+                ));
+            };
+            self.raw_span(span, index)?
+        };
+        if !already_charged {
+            self.retain_opaque(previous_raw.len(), index)?;
+        }
+        let type_name = "xml:duplicate-property";
+        nested.push_opaque(OpaqueValue::new(type_name, previous_raw.clone()));
+        let Some(metadata) = self.nested_metadata.get_mut(parent_path) else {
+            return Err(self.semantic_error(
+                SemanticErrorKind::Topology,
+                index,
+                "duplicate nested property metadata disappeared",
+            ));
+        };
+        let Some(item) = metadata.items.get_mut(slot_index) else {
+            return Err(self.semantic_error(
+                SemanticErrorKind::Topology,
+                index,
+                "duplicate nested property wire slot disappeared",
+            ));
+        };
+        *item = NestedItem::Opaque {
+            raw: previous_raw,
+            type_name: type_name.to_owned(),
+            occurrence,
+        };
+        Ok(())
+    }
+
     fn push_element_item(
         &mut self,
         id: NodeId,
@@ -3056,6 +3541,7 @@ fn is_property_tag(tag: &str) -> bool {
             | "intProp"
             | "longProp"
             | "floatProp"
+            | "FloatProperty"
             | "doubleProp"
             | "collectionProp"
             | "mapProp"
@@ -3226,7 +3712,16 @@ impl<'a, W: Write> Encoder<'a, W> {
 
     fn write_document(&mut self) -> crate::Result<()> {
         self.validate_document()?;
-        self.write_raw(b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")?;
+        if self.document.has_utf8_bom {
+            self.write_raw(b"\xEF\xBB\xBF")?;
+        }
+        if let Some(declaration) = self.document.xml_declaration.as_deref() {
+            self.account_opaque_bytes(declaration.len())?;
+            self.write_raw(declaration)?;
+            self.write_raw(b"\n")?;
+        } else {
+            self.write_raw(b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")?;
+        }
         self.write_extensions(0, &self.document.leading_extensions)?;
         self.write_indent(0)?;
         self.write_raw(b"<")?;
@@ -3317,6 +3812,23 @@ impl<'a, W: Write> Encoder<'a, W> {
         };
         let emit_opaque_raw =
             snapshot_matches && self.document.opaque_element_bytes.contains_key(&id);
+        let has_direct_raw_slot = element
+            .opaque_extensions
+            .iter()
+            .any(|extension| extension.type_name == "xml:raw");
+        if has_direct_raw_slot && !snapshot_matches {
+            // Direct plugin text/CDATA is not a SaveService property and the
+            // semantic model cannot safely rebuild arbitrary mixed content
+            // after an edit. Refuse the edit explicitly rather than
+            // inserting formatting or dropping bytes from the opaque
+            // payload. An unchanged opaque subtree still takes the exact
+            // raw-span path immediately below.
+            return Err(Error::semantic(
+                SemanticErrorKind::Unsupported,
+                None,
+                "edited opaque element contains direct raw text that cannot be normalized safely",
+            ));
+        }
         if emit_opaque_raw {
             self.write_indent(indent)?;
             if let Some(raw) = self.document.opaque_element_bytes.get(&id) {
@@ -3422,9 +3934,36 @@ impl<'a, W: Write> Encoder<'a, W> {
                         continue;
                     }
                     emitted_extensions[extension_index] = true;
+                    let duplicate_name = (type_name == "xml:duplicate-property")
+                        .then(|| self.duplicate_property_name(raw))
+                        .transpose()?;
+                    if duplicate_name.is_some_and(|name| {
+                        !current_properties.iter().any(|entry| entry.name == name)
+                    }) {
+                        // Earlier duplicate occurrences are retained while
+                        // their winning property exists.  If the caller
+                        // explicitly removes that property, omit the stale
+                        // source occurrence so it cannot resurrect on a
+                        // subsequent decode.
+                        continue;
+                    }
                     self.write_indent(indent + 1)?;
                     let extension = &element.opaque_extensions[extension_index];
-                    self.write_opaque_xml(&extension.type_name, &extension.raw)?;
+                    if extension.type_name == "xml:raw" {
+                        // `xml:raw` is an internal slot used for direct text
+                        // or CDATA inside an opaque/plugin element.  Emit it
+                        // byte-for-byte; wrapping it would change plugin
+                        // payload semantics and violate the no-drop
+                        // invariant.  Other opaque extension kinds retain
+                        // the established synthetic-wrapper behavior for
+                        // non-XML payloads.
+                        self.account_entries(1)?;
+                        self.validate_opaque_raw(&extension.raw)?;
+                        self.account_opaque_bytes(extension.raw.len())?;
+                        self.write_raw(&extension.raw)?;
+                    } else {
+                        self.write_opaque_xml(&extension.type_name, &extension.raw)?;
+                    }
                     self.write_raw(b"\n")?;
                 }
             }
@@ -3435,7 +3974,14 @@ impl<'a, W: Write> Encoder<'a, W> {
         for (extension_index, extension) in element.opaque_extensions.iter().enumerate() {
             if !emitted_extensions[extension_index] {
                 self.write_indent(indent + 1)?;
-                self.write_opaque_xml(&extension.type_name, &extension.raw)?;
+                if extension.type_name == "xml:raw" {
+                    self.account_entries(1)?;
+                    self.validate_opaque_raw(&extension.raw)?;
+                    self.account_opaque_bytes(extension.raw.len())?;
+                    self.write_raw(&extension.raw)?;
+                } else {
+                    self.write_opaque_xml(&extension.type_name, &extension.raw)?;
+                }
                 self.write_raw(b"\n")?;
             }
         }
@@ -3637,7 +4183,13 @@ impl<'a, W: Write> Encoder<'a, W> {
             self.write_raw(b"\n")?;
             return Ok(());
         }
-        if !unchanged && wire.and_then(|item| item.raw_xml.as_deref()).is_some() {
+        if !unchanged
+            && wire.and_then(|item| item.raw_xml.as_deref()).is_some()
+            && !self
+                .document
+                .duplicate_property_paths
+                .contains(&metadata_path)
+        {
             return Err(Error::semantic(
                 SemanticErrorKind::Unsupported,
                 None,
@@ -3795,6 +4347,21 @@ impl<'a, W: Write> Encoder<'a, W> {
         self.check_depth(indent, "property value encoding depth")?;
         let path = source_path.clone();
         let extras = wire.map_or(&[][..], |item| item.extra_attributes.as_slice());
+        if tag == "FloatProperty" {
+            let preserve_wire_value = self
+                .document
+                .original_property_values
+                .get(source_path)
+                .is_some_and(|original| property_values_equal(original, value));
+            return self.write_float_property_node(
+                name,
+                value,
+                extras,
+                indent,
+                include_name,
+                preserve_wire_value,
+            );
+        }
         match value {
             PropertyValue::Element(element) => {
                 self.write_indent(indent)?;
@@ -3873,6 +4440,14 @@ impl<'a, W: Write> Encoder<'a, W> {
                                     continue;
                                 }
                                 emitted_extensions[extension_index] = true;
+                                let duplicate_name = (type_name == "xml:duplicate-property")
+                                    .then(|| self.duplicate_property_name(raw))
+                                    .transpose()?;
+                                if duplicate_name.is_some_and(|name| {
+                                    !current_properties.iter().any(|entry| entry.name == name)
+                                }) {
+                                    continue;
+                                }
                                 self.write_indent(indent + 1)?;
                                 let extension = &element.opaque_extensions[extension_index];
                                 self.write_opaque_xml(&extension.type_name, &extension.raw)?;
@@ -4098,6 +4673,63 @@ impl<'a, W: Write> Encoder<'a, W> {
         Ok(())
     }
 
+    /// Emits the capitalized SaveService `FloatProperty` form. Its value is
+    /// an attribute rather than element text; retain `savedValue` and any
+    /// other source attributes while replacing only the typed current value
+    /// after an edit.
+    fn write_float_property_node(
+        &mut self,
+        name: &str,
+        value: &PropertyValue,
+        extras: &[SemanticAttribute],
+        indent: usize,
+        include_name: bool,
+        preserve_wire_value: bool,
+    ) -> crate::Result<()> {
+        let PropertyValue::Float(value) = value else {
+            return Err(Error::semantic(
+                SemanticErrorKind::Encode,
+                None,
+                "FloatProperty wire tag requires a float semantic value",
+            ));
+        };
+        self.write_indent(indent)?;
+        self.write_raw(b"<FloatProperty")?;
+        let mut seen = BTreeSet::new();
+        if include_name {
+            self.write_legacy_attribute("name", name)?;
+            seen.insert("name");
+        }
+        let mut wrote_value = false;
+        for attribute in extras {
+            if attribute.name == "name" {
+                continue;
+            }
+            if !seen.insert(attribute.name.as_str()) {
+                return Err(Error::semantic(
+                    SemanticErrorKind::DuplicateMetadata,
+                    None,
+                    "duplicate FloatProperty XML attribute during canonical encoding",
+                ));
+            }
+            if attribute.name == "value" {
+                let output = if preserve_wire_value {
+                    attribute.value.clone()
+                } else {
+                    java_float_text(*value)
+                };
+                self.write_attribute("value", &output)?;
+                wrote_value = true;
+            } else {
+                self.write_attribute(&attribute.name, &attribute.value)?;
+            }
+        }
+        if !wrote_value {
+            self.write_attribute("value", &java_float_text(*value))?;
+        }
+        self.write_raw(b"/>\n")
+    }
+
     fn write_object_value(
         &mut self,
         object: &jmeter_rs_model::ObjectProperty,
@@ -4179,7 +4811,7 @@ impl<'a, W: Write> Encoder<'a, W> {
             }
         }
         if let Some(version) = self.document.root.version() {
-            if !matches!(version, "1.0" | "1.2") {
+            if !matches!(version, "1.0" | "1.1" | "1.2") {
                 return Err(Error::semantic(
                     SemanticErrorKind::RootMetadata,
                     None,
@@ -4414,6 +5046,39 @@ impl<'a, W: Write> Encoder<'a, W> {
         self.write_attribute(name, &encoded)
     }
 
+    fn duplicate_property_name(&self, raw: &[u8]) -> crate::Result<String> {
+        let document = crate::Parser::new().parse(raw).map_err(|_| {
+            Error::semantic(
+                SemanticErrorKind::Encode,
+                None,
+                "retained duplicate property wire bytes are not valid XML",
+            )
+        })?;
+        let Some(raw_name) = document
+            .root()
+            .attributes
+            .iter()
+            .find(|attribute| attribute.name.raw() == "name")
+            .map(|attribute| attribute.value())
+        else {
+            return Err(Error::semantic(
+                SemanticErrorKind::Encode,
+                None,
+                "retained duplicate property is missing its name attribute",
+            ));
+        };
+        if self.document.root.version() == Some("1.0") {
+            return percent_decode(raw_name).map_err(|_| {
+                Error::semantic(
+                    SemanticErrorKind::Encode,
+                    None,
+                    "retained duplicate property name has invalid legacy encoding",
+                )
+            });
+        }
+        Ok(raw_name.to_owned())
+    }
+
     fn write_opaque_xml(&mut self, type_name: &str, raw: &[u8]) -> crate::Result<()> {
         self.account_entries(1)?;
         self.validate_opaque_raw(raw)?;
@@ -4624,6 +5289,7 @@ fn wire_tag_compatible(tag: &str, value: &PropertyValue) -> bool {
         "intProp" => matches!(value, PropertyValue::Integer(_)),
         "longProp" => matches!(value, PropertyValue::Long(_)),
         "floatProp" => matches!(value, PropertyValue::Float(_)),
+        "FloatProperty" => matches!(value, PropertyValue::Float(_)),
         "doubleProp" => matches!(value, PropertyValue::Double(_)),
         "collectionProp" => matches!(
             value,
@@ -4820,6 +5486,87 @@ mod tests {
     }
 
     #[test]
+    fn opaque_elements_retain_direct_text_and_cdata_without_loss() {
+        let source = br#"<jmeterTestPlan version="1.2"><hashTree><MysteryPlugin guiclass="MysteryGui" testclass="com.example.Mystery" testname="unknown" enabled="true">raw &amp; text<![CDATA[<plugin-payload>]]></MysteryPlugin><hashTree/></hashTree></jmeterTestPlan>"#;
+        let document = SemanticDocument::from_bytes(source)
+            .expect("unknown plugin direct payload is preservable");
+        assert!(document.is_opaque(NodeId::new(1)));
+        let element = document
+            .tree()
+            .element(NodeId::new(1))
+            .expect("opaque element");
+        assert_eq!(
+            element
+                .opaque_extensions
+                .iter()
+                .filter(|extension| extension.type_name == "xml:raw")
+                .map(|extension| extension.raw.as_slice())
+                .collect::<Vec<_>>(),
+            vec![
+                b"raw &amp; text".as_slice(),
+                b"<![CDATA[<plugin-payload>]]>".as_slice()
+            ]
+        );
+        let output = document.to_canonical_bytes().expect("opaque raw span");
+        let output_text = String::from_utf8(output.clone()).expect("UTF-8 output");
+        assert!(output_text.contains("raw &amp; text<![CDATA[<plugin-payload>]]>"));
+        assert_eq!(
+            document,
+            SemanticDocument::from_bytes(&output).expect("canonical payload reparses")
+        );
+
+        // The typed model cannot rebuild arbitrary mixed plugin content after
+        // an edit. Refuse such an edit rather than dropping payload bytes.
+        let mut edited = document;
+        edited
+            .tree_mut()
+            .lookup_mut(NodeId::new(1))
+            .expect("opaque element")
+            .value_mut()
+            .metadata
+            .name = "edited".to_owned();
+        let error = edited
+            .to_canonical_bytes()
+            .expect_err("direct opaque text edit is unsupported");
+        assert_eq!(error.code(), "jmx.semantic.unsupported");
+    }
+
+    #[test]
+    fn xml_declaration_and_bom_are_retained_across_canonical_encoding() {
+        let source = b"\xEF\xBB\xBF<?xml version='1.1' standalone='yes' encoding='UTF-8'?>\n<jmeterTestPlan version=\"1.2\"><hashTree/></jmeterTestPlan>";
+        let declaration_len = b"<?xml version='1.1' standalone='yes' encoding='UTF-8'?>".len();
+        let error = SemanticDocument::from_bytes_with_options(
+            source,
+            DecodeOptions {
+                limits: DecodeLimits {
+                    max_opaque_bytes: declaration_len - 1,
+                    ..DecodeLimits::default()
+                },
+                ..DecodeOptions::default()
+            },
+        )
+        .expect_err("XML declaration bytes participate in the opaque budget");
+        assert_eq!(error.code(), "jmx.semantic.limit");
+        let document = SemanticDocument::from_bytes(source).expect("declaration source");
+        assert!(document.has_utf8_bom());
+        assert_eq!(
+            document.xml_declaration(),
+            Some(&b"<?xml version='1.1' standalone='yes' encoding='UTF-8'?>"[..])
+        );
+        let output = document
+            .to_canonical_bytes()
+            .expect("canonical declaration output");
+        assert!(
+            output.starts_with(
+                b"\xEF\xBB\xBF<?xml version='1.1' standalone='yes' encoding='UTF-8'?>\n"
+            )
+        );
+        let reparsed = SemanticDocument::from_bytes(&output).expect("canonical output reparses");
+        assert_eq!(document, reparsed);
+        assert!(document.wire_eq(&reparsed));
+    }
+
+    #[test]
     fn malformed_topology_and_properties_have_stable_codes() {
         let missing_pair = br#"<jmeterTestPlan version="1.2"><hashTree><TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="x" enabled="true"/></hashTree></jmeterTestPlan>"#;
         let error = SemanticDocument::from_bytes(missing_pair).expect_err("missing hashTree pair");
@@ -4934,6 +5681,57 @@ mod tests {
     }
 
     #[test]
+    fn capitalized_float_property_is_typed_and_editable_without_dropping_saved_value() {
+        let source = br#"<jmeterTestPlan version="1.2"><hashTree><TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="x" enabled="true"><FloatProperty name="threshold" value="1.250" savedValue="0.750" source="fixture"/></TestPlan><hashTree/></hashTree></jmeterTestPlan>"#;
+        let mut document = SemanticDocument::from_bytes(source).expect("FloatProperty decodes");
+        assert_eq!(
+            document
+                .tree()
+                .element(NodeId::new(1))
+                .expect("element")
+                .property("threshold"),
+            Some(&PropertyValue::Float(1.25))
+        );
+        let untouched = String::from_utf8(
+            document
+                .to_canonical_bytes()
+                .expect("untouched FloatProperty output"),
+        )
+        .expect("UTF-8 output");
+        assert!(
+            untouched.contains(
+                "<FloatProperty name=\"threshold\" value=\"1.250\" savedValue=\"0.750\" source=\"fixture\"/>"
+            ),
+            "unexpected untouched output: {untouched}"
+        );
+
+        document
+            .tree_mut()
+            .lookup_mut(NodeId::new(1))
+            .expect("element")
+            .value_mut()
+            .set_property("threshold", PropertyValue::Float(2.5));
+        let edited = String::from_utf8(
+            document
+                .to_canonical_bytes()
+                .expect("edited FloatProperty output"),
+        )
+        .expect("UTF-8 output");
+        assert!(edited.contains(
+            "<FloatProperty name=\"threshold\" value=\"2.5\" savedValue=\"0.750\" source=\"fixture\"/>"
+        ));
+        let reparsed = SemanticDocument::from_bytes(edited.as_bytes()).expect("output reparses");
+        assert_eq!(
+            reparsed
+                .tree()
+                .element(NodeId::new(1))
+                .expect("element")
+                .property("threshold"),
+            Some(&PropertyValue::Float(2.5))
+        );
+    }
+
+    #[test]
     fn topology_preserves_duplicate_names_root_metadata_and_hash_tree_attributes() {
         let source = br#"<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3" profile="fixture"><hashTree root-extra="yes"><TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="same" enabled="true"/><hashTree child-extra="first"/><TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="same" enabled="false"/><hashTree/></hashTree></jmeterTestPlan>"#;
         let document = SemanticDocument::from_bytes(source).expect("topology decodes");
@@ -4966,6 +5764,133 @@ mod tests {
         assert_eq!(
             reparsed.tree().preorder_ids(),
             document.tree().preorder_ids()
+        );
+    }
+
+    #[test]
+    fn duplicate_top_level_properties_follow_last_write_and_preserve_wire_slots() {
+        let source = br#"<jmeterTestPlan version="1.2"><hashTree><TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="x" enabled="true"><stringProp name="same">first</stringProp><boolProp name="same">true</boolProp><stringProp name="other">value</stringProp></TestPlan><hashTree/></hashTree></jmeterTestPlan>"#;
+        let mut document =
+            SemanticDocument::from_bytes(source).expect("duplicate properties decode");
+        let element = document.tree().element(NodeId::new(1)).expect("element");
+        assert_eq!(
+            element.property("same"),
+            Some(&PropertyValue::Boolean(true))
+        );
+        assert_eq!(
+            element.properties.keys().collect::<Vec<_>>(),
+            ["same", "other"]
+        );
+
+        let untouched = String::from_utf8(document.to_canonical_bytes().expect("canonical output"))
+            .expect("UTF-8 output");
+        assert!(untouched.contains("<stringProp name=\"same\">first</stringProp>"));
+        assert!(untouched.contains("<boolProp name=\"same\">true</boolProp>"));
+        assert_eq!(untouched.matches("name=\"same\"").count(), 2);
+        assert_eq!(
+            document,
+            SemanticDocument::from_bytes(untouched.as_bytes()).expect("reparse")
+        );
+
+        document
+            .tree_mut()
+            .lookup_mut(NodeId::new(1))
+            .expect("element")
+            .value_mut()
+            .set_property("same", PropertyValue::Boolean(false));
+        let edited = String::from_utf8(document.to_canonical_bytes().expect("edited output"))
+            .expect("UTF-8 output");
+        assert!(edited.contains("<stringProp name=\"same\">first</stringProp>"));
+        assert!(edited.contains("<boolProp name=\"same\">false</boolProp>"));
+        let reparsed = SemanticDocument::from_bytes(edited.as_bytes()).expect("edited reparse");
+        assert_eq!(
+            reparsed
+                .tree()
+                .element(NodeId::new(1))
+                .expect("element")
+                .property("same"),
+            Some(&PropertyValue::Boolean(false))
+        );
+    }
+
+    #[test]
+    fn duplicate_nested_properties_follow_last_write_and_preserve_wire_slots() {
+        let source = br#"<jmeterTestPlan version="1.2"><hashTree><TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="x" enabled="true"><elementProp name="nested" elementType="fixture.Type"><stringProp name="same">first</stringProp><boolProp name="same">true</boolProp></elementProp></TestPlan><hashTree/></hashTree></jmeterTestPlan>"#;
+        let document =
+            SemanticDocument::from_bytes(source).expect("nested duplicate properties decode");
+        let element = document.tree().element(NodeId::new(1)).expect("element");
+        let PropertyValue::Element(nested) = element.property("nested").expect("nested") else {
+            panic!("nested element property expected");
+        };
+        assert_eq!(
+            nested.properties.get("same"),
+            Some(&PropertyValue::Boolean(true))
+        );
+        let output = String::from_utf8(document.to_canonical_bytes().expect("canonical output"))
+            .expect("UTF-8 output");
+        assert!(output.contains("<stringProp name=\"same\">first</stringProp>"));
+        assert!(output.contains("<boolProp name=\"same\">true</boolProp>"));
+        assert_eq!(
+            document,
+            SemanticDocument::from_bytes(output.as_bytes()).expect("reparse")
+        );
+    }
+
+    #[test]
+    fn header_nested_name_upgrade_matches_pinned_converter() {
+        let source = br#"<jmeterTestPlan version="1.2"><hashTree><TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="x" enabled="true"><elementProp name="header" elementType="org.apache.jmeter.protocol.http.control.Header"><stringProp name="TestElement.name">User-Agent</stringProp><stringProp name="Header.value">fixture</stringProp></elementProp></TestPlan><hashTree/></hashTree></jmeterTestPlan>"#;
+        let document =
+            SemanticDocument::from_bytes(source).expect("Header element property decodes");
+        let element = document.tree().element(NodeId::new(1)).expect("element");
+        let PropertyValue::Element(header) = element.property("header").expect("header") else {
+            panic!("Header element property expected");
+        };
+        assert_eq!(
+            header.properties.get("Header.name"),
+            Some(&PropertyValue::String("User-Agent".to_owned()))
+        );
+        assert!(header.properties.get("TestElement.name").is_none());
+        let output = String::from_utf8(document.to_canonical_bytes().expect("canonical output"))
+            .expect("UTF-8 output");
+        assert!(output.contains("name=\"Header.name\""));
+        assert!(!output.contains("name=\"TestElement.name\""));
+        assert_eq!(
+            document,
+            SemanticDocument::from_bytes(output.as_bytes()).expect("reparse")
+        );
+    }
+
+    #[test]
+    fn explicit_class_overrides_keep_mismatches_opaque() {
+        let source = br#"<jmeterTestPlan version="1.2"><hashTree><TestPlan class="com.example.PluginPlan" guiclass="TestPlanGui" testclass="TestPlan" testname="plugin" enabled="true"><stringProp name="x">raw</stringProp></TestPlan><hashTree/><TestPlan class="org.apache.jmeter.testelement.TestPlan" guiclass="TestPlanGui" testclass="com.example.LegacySpelling" testname="known" enabled="true"><stringProp name="x" class="com.example.PluginProperty">raw</stringProp></TestPlan><hashTree/></hashTree></jmeterTestPlan>"#;
+        let document = SemanticDocument::from_bytes(source).expect("class overrides decode");
+        assert!(document.is_opaque(NodeId::new(1)));
+        assert!(!document.is_opaque(NodeId::new(2)));
+        assert_eq!(
+            document
+                .tree()
+                .element(NodeId::new(2))
+                .expect("known element")
+                .test_class(),
+            "TestPlan"
+        );
+        assert!(matches!(
+            document
+                .tree()
+                .element(NodeId::new(2))
+                .expect("known element")
+                .property("x"),
+            Some(PropertyValue::Opaque(_))
+        ));
+        let output = document.to_canonical_bytes().expect("canonical output");
+        assert!(
+            output
+                .windows(b"com.example.PluginPlan".len())
+                .any(|window| { window == b"com.example.PluginPlan" })
+        );
+        assert_eq!(
+            document,
+            SemanticDocument::from_bytes(&output).expect("reparse")
         );
     }
 
@@ -5046,6 +5971,68 @@ mod tests {
         assert!(output.contains("<stringProp name=\"known\">after</stringProp>"));
         let reparsed = SemanticDocument::from_bytes(output.as_bytes()).expect("reparse");
         assert!(reparsed.is_opaque(NodeId::new(1)));
+    }
+
+    #[test]
+    fn decode_limit_configuration_has_exact_product_bounds_and_rejects_oversize_before_parse() {
+        let source = br#"<jmeterTestPlan version="1.2"><hashTree/></jmeterTestPlan>"#;
+        let exact = DecodeLimits {
+            max_elements: DecodeLimits::MAX_ELEMENTS,
+            max_properties: DecodeLimits::MAX_PROPERTIES,
+            max_property_depth: DecodeLimits::MAX_PROPERTY_DEPTH,
+            max_tree_depth: DecodeLimits::MAX_TREE_DEPTH,
+            max_opaque_bytes: DecodeLimits::MAX_OPAQUE_BYTES,
+        };
+        SemanticDocument::from_bytes_with_options(
+            source,
+            DecodeOptions {
+                limits: exact,
+                ..DecodeOptions::default()
+            },
+        )
+        .expect("exact product limits are accepted");
+
+        macro_rules! assert_oversize {
+            ($field:ident, $maximum:expr) => {{
+                let mut limits = DecodeLimits::default();
+                limits.$field = $maximum.saturating_add(1);
+                let error = SemanticDocument::from_bytes_with_options(
+                    source,
+                    DecodeOptions {
+                        limits,
+                        ..DecodeOptions::default()
+                    },
+                )
+                .expect_err("limit above product maximum must be rejected");
+                assert_eq!(error.code(), "jmx.semantic.limit");
+                assert!(
+                    error.to_string().contains(stringify!($field)),
+                    "missing field name in bounded configuration error: {error}"
+                );
+            }};
+        }
+        assert_oversize!(max_elements, DecodeLimits::MAX_ELEMENTS);
+        assert_oversize!(max_properties, DecodeLimits::MAX_PROPERTIES);
+        assert_oversize!(max_property_depth, DecodeLimits::MAX_PROPERTY_DEPTH);
+        assert_oversize!(max_tree_depth, DecodeLimits::MAX_TREE_DEPTH);
+        assert_oversize!(max_opaque_bytes, DecodeLimits::MAX_OPAQUE_BYTES);
+
+        // Validation precedes syntax parsing, so an invalid/hostile byte
+        // slice cannot force parser work when the caller supplied an invalid
+        // budget. This is a configuration error, never a silent clamp.
+        let limits = DecodeLimits {
+            max_elements: DecodeLimits::MAX_ELEMENTS.saturating_add(1),
+            ..DecodeLimits::default()
+        };
+        let error = SemanticDocument::from_bytes_with_options(
+            &[0xff],
+            DecodeOptions {
+                limits,
+                ..DecodeOptions::default()
+            },
+        )
+        .expect_err("oversized configuration must fail before UTF-8 parsing");
+        assert_eq!(error.code(), "jmx.semantic.limit");
     }
 
     #[test]
@@ -5475,6 +6462,10 @@ mod tests {
             ),
             tree,
         );
+        let inventory_error = document
+            .node_ids()
+            .expect_err("oversized node inventory must return a typed limit");
+        assert_eq!(inventory_error.code(), "jmx.semantic.limit");
         let error = document
             .to_canonical_bytes()
             .expect_err("oversized tree must be bounded before validation");
@@ -5529,6 +6520,19 @@ mod tests {
         let empty_metadata = br#"<jmeterTestPlan version="1.2"><hashTree><TestPlan guiclass="" testclass="TestPlan" testname="x" enabled="true"/><hashTree/></hashTree></jmeterTestPlan>"#;
         let error = SemanticDocument::from_bytes(empty_metadata).expect_err("metadata is nonempty");
         assert_eq!(error.code(), "jmx.semantic.missing_metadata");
+    }
+
+    #[test]
+    fn wrapper_version_1_1_is_accepted_and_canonicalized() {
+        let source = br#"<jmeterTestPlan version="1.1"><hashTree/></jmeterTestPlan>"#;
+        let document = SemanticDocument::from_bytes(source).expect("version 1.1 is supported");
+        assert_eq!(document.root().version(), Some("1.1"));
+        let output = document.to_canonical_bytes().expect("version 1.1 output");
+        assert!(
+            String::from_utf8(output)
+                .expect("UTF-8 output")
+                .contains("version=\"1.1\"")
+        );
     }
 
     #[test]
@@ -6190,10 +7194,10 @@ mod tests {
         let duplicate = format!(
             r#"<jmeterTestPlan version="1.2"><hashTree><TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="x" enabled="true"><stringProp name="{identifier_secret}">one</stringProp><stringProp name="{identifier_secret}">two</stringProp></TestPlan><hashTree/></hashTree></jmeterTestPlan>"#
         );
-        let error = SemanticDocument::from_bytes(duplicate.as_bytes())
-            .expect_err("duplicate user-controlled property identifier");
-        assert!(!error.to_string().contains(identifier_secret));
-        assert!(!format!("{error:?}").contains(identifier_secret));
+        let document = SemanticDocument::from_bytes(duplicate.as_bytes())
+            .expect("duplicate properties follow JMeter last-write semantics");
+        let output = document.to_canonical_bytes().expect("duplicate output");
+        assert!(String::from_utf8_lossy(&output).contains(identifier_secret));
 
         const IO_SECRET: &str = "super-secret-io-context";
         struct SecretWriter;

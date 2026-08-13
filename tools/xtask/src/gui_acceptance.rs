@@ -18,6 +18,7 @@ use std::path::{Component, Path, PathBuf};
 
 const GUI_FEATURES: [&str; 3] = ["GUI-001", "GUI-002", "GUI-003"];
 const GUI_FAMILY: &str = "FX-GUI-001";
+const STANDALONE_PROJECTION: &str = "compat/capability-sets/standalone-native.json";
 const GUI_BOUNDARIES: [&str; 3] = ["EXT-JVM-001", "EXT-PLUGIN-001", "EXT-OS-001"];
 const DIRECT_BOUNDARIES: [&str; 2] = ["EXT-JVM-001", "EXT-OS-001"];
 const TARGET_TRIPLES: [&str; 6] = [
@@ -35,6 +36,7 @@ const GUI_ROUTES: [&str; 4] = [
     "gui-platform",
     "gui-capability-error",
 ];
+const STATIC_DESCRIPTOR_ROUTE: &str = "static-descriptor";
 const MAX_GUI_FILE_BYTES: u64 = 64 * 1024 * 1024;
 const SHA256_HEX_LENGTH: usize = 64;
 
@@ -56,6 +58,7 @@ pub(crate) fn check(
     );
 
     validate_profile_scope(root, profile, &gui_root, &mut diagnostics);
+    validate_standalone_projection(root, &mut diagnostics);
 
     let Some(case_dirs) = gui_case_dirs(root, &gui_root, &mut diagnostics) else {
         diagnostics.sort_deterministically();
@@ -65,6 +68,7 @@ pub(crate) fn check(
     let mut seen_features = BTreeSet::new();
     let mut family_boundaries = BTreeSet::new();
     let mut routes = BTreeSet::new();
+    let mut seen_case_ids = BTreeSet::new();
     let mut case_states = Vec::new();
     let mut platform_case = None;
 
@@ -120,6 +124,26 @@ pub(crate) fn check(
             continue;
         };
 
+        // A GUI descriptor is never an input to the standalone-native
+        // projection.  Keep this prohibition at the acceptance boundary so a
+        // future report cannot turn a static GUI row into native evidence by
+        // merely copying its feature IDs.
+        validate_standalone_exclusion(
+            case_object,
+            &format!("{case_display}.case"),
+            &mut diagnostics,
+        );
+        validate_standalone_exclusion(
+            expected_object,
+            &format!("{case_display}.expected"),
+            &mut diagnostics,
+        );
+        validate_standalone_exclusion(
+            provenance_object,
+            &format!("{case_display}.provenance"),
+            &mut diagnostics,
+        );
+
         let state = validate_case(
             root,
             &gui_root,
@@ -135,11 +159,26 @@ pub(crate) fn check(
             &mut diagnostics,
         );
         if let Some(state) = state {
+            if !seen_case_ids.insert(state.case_id.clone()) {
+                acceptance(
+                    &mut diagnostics,
+                    &case_display,
+                    format!("duplicate GUI case_id {}", state.case_id),
+                );
+            }
             seen_features.extend(state.features.iter().cloned());
             family_boundaries.extend(state.boundaries.iter().cloned());
             routes.insert(state.route.to_owned());
             if state.is_platform {
-                platform_case = Some((case_dir.clone(), case_object.clone()));
+                if platform_case.is_some() {
+                    acceptance(
+                        &mut diagnostics,
+                        &case_display,
+                        "exactly one GUI-003 platform-settings case is allowed",
+                    );
+                } else {
+                    platform_case = Some((case_dir.clone(), case_object.clone()));
+                }
             }
             case_states.push(state);
         }
@@ -188,7 +227,7 @@ pub(crate) fn check(
         );
     }
 
-    if let Some((platform_dir, platform_case)) = platform_case {
+    let platform_lanes_ready = if let Some((platform_dir, platform_case)) = platform_case {
         validate_platform_matrix(
             root,
             &platform_dir,
@@ -196,22 +235,30 @@ pub(crate) fn check(
             profile_hash.as_deref(),
             lock_hash.as_deref(),
             &mut diagnostics,
-        );
+        )
     } else {
         acceptance(
             &mut diagnostics,
             &display_path(root, &gui_root),
             "a GUI-003 platform-settings case is required",
         );
-    }
+        false
+    };
 
-    validate_acceptance_readiness(root, &gui_root, &case_states, &mut diagnostics);
+    validate_acceptance_readiness(
+        root,
+        &gui_root,
+        &case_states,
+        platform_lanes_ready,
+        &mut diagnostics,
+    );
     diagnostics.sort_deterministically();
     diagnostics
 }
 
 #[derive(Clone, Debug)]
 struct CaseState {
+    case_id: String,
     features: BTreeSet<String>,
     boundaries: BTreeSet<String>,
     route: &'static str,
@@ -234,6 +281,35 @@ fn validate_profile_scope(
                 format!("active profile is missing required feature {feature}"),
             );
         }
+    }
+    // Decision 0002 also names TEST-005 as the cross-platform/performance
+    // evidence boundary.  Check its profile references here so GUI-003 cannot
+    // accidentally be treated as a substitute for the independent TEST-005
+    // matrix.
+    if !profile.feature_ids.contains("TEST-005") {
+        acceptance(
+            diagnostics,
+            &display_path(root, gui_root),
+            "active profile is missing required TEST-005 cross-platform evidence row",
+        );
+    }
+    if !profile.fixture_ids.contains("FX-CROSS-PLATFORM-001") {
+        acceptance(
+            diagnostics,
+            &display_path(root, gui_root),
+            "active profile is missing FX-CROSS-PLATFORM-001 for TEST-005",
+        );
+    }
+    if profile
+        .feature_fixture_ids
+        .get("TEST-005")
+        .is_none_or(|fixtures| !fixtures.contains("FX-CROSS-PLATFORM-001"))
+    {
+        acceptance(
+            diagnostics,
+            &display_path(root, gui_root),
+            "TEST-005 must require FX-CROSS-PLATFORM-001",
+        );
     }
     let expected_feature_boundaries: BTreeMap<&str, BTreeSet<String>> = BTreeMap::from([
         (
@@ -279,6 +355,182 @@ fn validate_profile_scope(
             diagnostics,
             &display_path(root, gui_root),
             "active profile FX-GUI-001 boundary scope is not the Decision 0002 union",
+        );
+    }
+}
+
+fn validate_standalone_exclusion(
+    object: &Map<String, Value>,
+    path: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    // The standalone report is a separate projection (Decision 0009), not a
+    // GUI-aware interpretation of these descriptors.  A descriptor may state
+    // that it is excluded, but must never claim native support or a passing
+    // standalone result.
+    for field in [
+        "standalone_status",
+        "standalone_projection",
+        "capability_set",
+    ] {
+        let Some(value) = object.get(field) else {
+            continue;
+        };
+        let text = value
+            .as_str()
+            .map(str::to_owned)
+            .or_else(|| value.get("name").and_then(Value::as_str).map(str::to_owned));
+        if text.as_deref().is_some_and(|text| {
+            text.eq_ignore_ascii_case("supported")
+                || text.eq_ignore_ascii_case("verified")
+                || text.eq_ignore_ascii_case("standalone-native")
+        }) {
+            acceptance(
+                diagnostics,
+                &format!("{path}.{field}"),
+                "GUI descriptors cannot claim standalone-native support",
+            );
+        }
+    }
+    if object.get("standalone_native").and_then(Value::as_bool) == Some(true) {
+        acceptance(
+            diagnostics,
+            &format!("{path}.standalone_native"),
+            "GUI descriptors are excluded from the standalone-native projection",
+        );
+    }
+}
+
+fn validate_standalone_projection(root: &Path, diagnostics: &mut Diagnostics) {
+    let path = root.join(STANDALONE_PROJECTION);
+    let display = display_path(root, &path);
+    let Some(value) = read_json(root, &path, diagnostics) else {
+        return;
+    };
+    let Some(projection) = value.as_object() else {
+        schema(
+            diagnostics,
+            &display,
+            "standalone capability projection must be a JSON object",
+        );
+        return;
+    };
+    if projection.get("capability_set_id").and_then(Value::as_str) != Some("standalone-native") {
+        acceptance(
+            diagnostics,
+            &display,
+            "GUI acceptance requires the Decision 0009 standalone-native projection",
+        );
+    }
+    let counts = projection.get("counts").and_then(Value::as_object);
+    for field in ["promoted_parent_rows", "verified_parent_rows"] {
+        if counts
+            .and_then(|counts| counts.get(field))
+            .and_then(Value::as_u64)
+            != Some(0)
+        {
+            acceptance(
+                diagnostics,
+                &format!("{display}.counts.{field}"),
+                "GUI rows cannot be promoted or counted as verified in standalone-native",
+            );
+        }
+    }
+    let gui_policy = projection
+        .get("standalone_constraints")
+        .and_then(Value::as_object)
+        .and_then(|constraints| constraints.get("gui"))
+        .and_then(Value::as_object);
+    if gui_policy
+        .and_then(|gui| gui.get("standalone_native_counted"))
+        .and_then(Value::as_bool)
+        != Some(false)
+    {
+        acceptance(
+            diagnostics,
+            &format!("{display}.standalone_constraints.gui.standalone_native_counted"),
+            "GUI runtime must be explicitly excluded from standalone-native counts",
+        );
+    }
+
+    let mut gui_feature_ids = BTreeSet::new();
+    if let Some(features) = projection.get("features").and_then(Value::as_array) {
+        for (index, value) in features.iter().enumerate() {
+            let Some(feature) = value.as_object() else {
+                continue;
+            };
+            let Some(id) = feature.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            if !GUI_FEATURES.contains(&id) {
+                continue;
+            }
+            gui_feature_ids.insert(id.to_owned());
+            if feature.get("claim_status").and_then(Value::as_str) != Some("not-promoted") {
+                acceptance(
+                    diagnostics,
+                    &format!("{display}.features[{index}].claim_status"),
+                    "GUI feature rows cannot be promoted by standalone-native",
+                );
+            }
+        }
+    } else {
+        schema(
+            diagnostics,
+            &format!("{display}.features"),
+            "standalone-native feature rows are required",
+        );
+    }
+    let expected_gui_features = GUI_FEATURES
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    if gui_feature_ids != expected_gui_features {
+        acceptance(
+            diagnostics,
+            &format!("{display}.features"),
+            "standalone-native must retain all GUI rows without promoting them",
+        );
+    }
+
+    if let Some(cases) = projection.get("cases").and_then(Value::as_array) {
+        for (index, value) in cases.iter().enumerate() {
+            let Some(case) = value.as_object() else {
+                continue;
+            };
+            let Some(feature_id) = case.get("feature_id").and_then(Value::as_str) else {
+                continue;
+            };
+            if !GUI_FEATURES.contains(&feature_id) {
+                continue;
+            }
+            if case.get("claim_status").and_then(Value::as_str) != Some("not-promoted") {
+                acceptance(
+                    diagnostics,
+                    &format!("{display}.cases[{index}].claim_status"),
+                    "GUI cases cannot promote standalone-native compatibility",
+                );
+            }
+            if case.get("partition").and_then(Value::as_str) == Some("native")
+                && (case.get("capability_id").and_then(Value::as_str)
+                    != Some("native.jmx.semantic@1")
+                    || !case
+                        .get("scope")
+                        .and_then(Value::as_str)
+                        .is_some_and(|scope| scope.to_ascii_lowercase().contains("headless")))
+            {
+                acceptance(
+                    diagnostics,
+                    &format!("{display}.cases[{index}]"),
+                    "native GUI projection cases may cover only headless preservation, never GUI runtime",
+                );
+            }
+        }
+    } else {
+        schema(
+            diagnostics,
+            &format!("{display}.cases"),
+            "standalone-native case records are required",
         );
     }
 }
@@ -511,6 +763,7 @@ fn validate_case(
     }
     let _ = (profile_hash, lock_hash);
     Some(CaseState {
+        case_id,
         features,
         boundaries,
         route,
@@ -815,6 +1068,11 @@ fn validate_route(
     case_display: &str,
     diagnostics: &mut Diagnostics,
 ) {
+    let comparator_route = expected
+        .get("validation_contract")
+        .and_then(Value::as_object)
+        .and_then(|contract| contract.get("comparator_route"))
+        .and_then(Value::as_str);
     let declared = expected
         .get("gui_route")
         .and_then(Value::as_str)
@@ -826,35 +1084,39 @@ fn validate_route(
                 .and_then(|contract| contract.get("gui_route"))
                 .and_then(Value::as_str)
         });
-    if declared.is_none() {
+    if declared.is_none() && comparator_route != Some(STATIC_DESCRIPTOR_ROUTE) {
         schema(
             diagnostics,
             &format!("{case_display}.expected.gui_route"),
             "GUI expected descriptors must declare their dedicated comparator route",
         );
     }
-    if let Some(declared) = declared {
-        if !GUI_ROUTES.contains(&declared) || declared != expected_route {
-            acceptance(
-                diagnostics,
-                &format!("{case_display}.expected.route"),
-                format!("route must be {expected_route}, found {declared}"),
-            );
-        }
-    }
-    if let Some(comparator_route) = expected
-        .get("validation_contract")
-        .and_then(Value::as_object)
-        .and_then(|contract| contract.get("comparator_route"))
-        .and_then(Value::as_str)
-        && comparator_route != "static-descriptor"
-        && !GUI_ROUTES.contains(&comparator_route)
+    if let Some(declared) = declared
+        && (!GUI_ROUTES.contains(&declared) || declared != expected_route)
     {
         acceptance(
             diagnostics,
-            &format!("{case_display}.expected.validation_contract.comparator_route"),
-            "generic/non-GUI comparator routes are forbidden for GUI acceptance",
+            &format!("{case_display}.expected.route"),
+            format!("route must be {expected_route}, found {declared}"),
         );
+    }
+    match comparator_route {
+        None => schema(
+            diagnostics,
+            &format!("{case_display}.expected.validation_contract.comparator_route"),
+            "GUI expected descriptors must declare a static or dedicated comparator route",
+        ),
+        Some(comparator_route)
+            if comparator_route != STATIC_DESCRIPTOR_ROUTE
+                && !GUI_ROUTES.contains(&comparator_route) =>
+        {
+            acceptance(
+                diagnostics,
+                &format!("{case_display}.expected.validation_contract.comparator_route"),
+                "generic/non-GUI comparator routes are forbidden for GUI acceptance",
+            );
+        }
+        Some(_) => {}
     }
 }
 
@@ -906,11 +1168,30 @@ fn validate_evidence_honesty(
         .and_then(Value::as_object)
         .and_then(|execution| execution.get("performed"))
         .and_then(Value::as_bool);
+    let comparator_id = contract
+        .and_then(|contract| contract.get("comparator_id"))
+        .and_then(Value::as_str);
+    let comparator_result = contract
+        .and_then(|contract| contract.get("comparator_result"))
+        .and_then(Value::as_str)
+        .or_else(|| {
+            expected
+                .get("evidence")
+                .and_then(Value::as_object)
+                .and_then(|evidence| evidence.get("comparator_result"))
+                .and_then(Value::as_str)
+        });
+    let provenance_complete = ["inputs", "oracle", "runtime", "oracle_execution"]
+        .into_iter()
+        .all(|field| provenance.get(field).is_some_and(Value::is_object));
+    let comparator_id_valid = comparator_id.is_some_and(|id| !id.trim().is_empty());
     match status {
         "not-run" => {
             if comparator == Some(true)
                 || runtime_observations == Some(true)
                 || oracle_performed == Some(true)
+                || comparator_id.is_some()
+                || comparator_result.is_some()
             {
                 acceptance(
                     diagnostics,
@@ -923,11 +1204,27 @@ fn validate_evidence_honesty(
             if comparator != Some(true)
                 || runtime_observations != Some(true)
                 || oracle_performed != Some(true)
+                || !comparator_id_valid
+                || comparator_result != Some("pass")
+                || !provenance_complete
             {
                 acceptance(
                     diagnostics,
                     path,
-                    "observed GUI evidence requires runtime observations, oracle execution, and comparator_enforced=true",
+                    "observed GUI evidence requires complete provenance, runtime observations, oracle execution, comparator identity, comparator_result=pass, and comparator_enforced=true",
+                );
+            }
+            if contract
+                .and_then(|contract| contract.get("comparator_route"))
+                .and_then(Value::as_str)
+                != Some(expected_route)
+            {
+                acceptance(
+                    diagnostics,
+                    path,
+                    format!(
+                        "observed GUI evidence must declare dedicated comparator route {expected_route}"
+                    ),
                 );
             }
             let route = expected
@@ -935,7 +1232,13 @@ fn validate_evidence_honesty(
                 .and_then(Value::as_object)
                 .and_then(|evidence| evidence.get("route"))
                 .and_then(Value::as_str)
-                .or_else(|| expected.get("gui_route").and_then(Value::as_str));
+                .or_else(|| expected.get("gui_route").and_then(Value::as_str))
+                .or_else(|| expected.get("route").and_then(Value::as_str))
+                .or_else(|| {
+                    contract
+                        .and_then(|contract| contract.get("gui_route"))
+                        .and_then(Value::as_str)
+                });
             if route != Some(expected_route) {
                 acceptance(
                     diagnostics,
@@ -996,6 +1299,12 @@ fn validate_plugin_case(
         );
         return;
     };
+    let static_descriptor = expected
+        .get("validation_contract")
+        .and_then(Value::as_object)
+        .and_then(|contract| contract.get("comparator_route"))
+        .and_then(Value::as_str)
+        == Some(STATIC_DESCRIPTOR_ROUTE);
     for name in ["positive", "unavailable"] {
         let Some(route) = contract.get(name).and_then(Value::as_object) else {
             schema(
@@ -1014,7 +1323,9 @@ fn validate_plugin_case(
                     .filter_map(Value::as_str)
                     .collect::<BTreeSet<_>>()
             });
-        if route_boundaries != Some(BTreeSet::from(GUI_BOUNDARIES)) {
+        if route_boundaries != Some(BTreeSet::from(GUI_BOUNDARIES))
+            && !(static_descriptor && name == "unavailable" && route_boundaries.is_none())
+        {
             acceptance(
                 diagnostics,
                 &format!(
@@ -1033,7 +1344,8 @@ fn validate_platform_matrix(
     profile_hash: Option<&str>,
     lock_hash: Option<&str>,
     diagnostics: &mut Diagnostics,
-) {
+) -> bool {
+    let mut valid = true;
     let matrix_path = platform_dir.join("matrix.json");
     let expected_path = platform_case
         .get("execution")
@@ -1042,7 +1354,7 @@ fn validate_platform_matrix(
         .and_then(Value::as_str)
         .map(|path| platform_dir.join(path));
     let Some(matrix) = read_json(root, &matrix_path, diagnostics) else {
-        return;
+        return false;
     };
     let Some(matrix_object) = matrix.as_object() else {
         schema(
@@ -1050,7 +1362,7 @@ fn validate_platform_matrix(
             &display_path(root, &matrix_path),
             "platform matrix must be an object",
         );
-        return;
+        return false;
     };
     let Some(expected_path) = expected_path else {
         schema(
@@ -1058,10 +1370,10 @@ fn validate_platform_matrix(
             &display_path(root, platform_dir),
             "platform case must declare an expected descriptor",
         );
-        return;
+        return false;
     };
     let Some(expected) = read_json(root, &expected_path, diagnostics) else {
-        return;
+        return false;
     };
     let Some(expected_object) = expected.as_object() else {
         schema(
@@ -1069,7 +1381,7 @@ fn validate_platform_matrix(
             &display_path(root, &expected_path),
             "platform expected descriptor must be an object",
         );
-        return;
+        return false;
     };
     let matrix_lanes = validate_target_lanes(
         matrix_object.get("target_lanes"),
@@ -1087,15 +1399,68 @@ fn validate_platform_matrix(
         true,
         diagnostics,
     );
-    if let (Some(matrix_lanes), Some(expected_lanes)) = (matrix_lanes, expected_lanes) {
-        if matrix_lanes != expected_lanes {
-            acceptance(
-                diagnostics,
-                &display_path(root, &expected_path),
-                "platform expected target rows do not match matrix target rows",
-            );
-        }
+    if !target_lane_evidence_ready(expected_object.get("target_lanes")) {
+        valid = false;
     }
+    if let (Some(matrix_lanes), Some(expected_lanes)) = (matrix_lanes, expected_lanes)
+        && matrix_lanes != expected_lanes
+    {
+        valid = false;
+        acceptance(
+            diagnostics,
+            &display_path(root, &expected_path),
+            "platform expected target rows do not match matrix target rows",
+        );
+    }
+    valid
+}
+
+fn target_lane_evidence_ready(value: Option<&Value>) -> bool {
+    let Some(rows) = value.and_then(Value::as_array) else {
+        return false;
+    };
+    rows.len() == 12
+        && rows.iter().all(|value| {
+            let Some(row) = value.as_object() else {
+                return false;
+            };
+            let status = row
+                .get("evidence_status")
+                .or_else(|| row.get("status"))
+                .and_then(Value::as_str);
+            let comparator = row
+                .get("comparator_enforced")
+                .and_then(Value::as_bool)
+                .or_else(|| {
+                    row.get("evidence")
+                        .and_then(Value::as_object)
+                        .and_then(|evidence| evidence.get("comparator_enforced"))
+                        .and_then(Value::as_bool)
+                });
+            let comparator_result = row
+                .get("comparator_result")
+                .and_then(Value::as_str)
+                .or_else(|| {
+                    row.get("evidence")
+                        .and_then(Value::as_object)
+                        .and_then(|evidence| evidence.get("comparator_result"))
+                        .and_then(Value::as_str)
+                });
+            let route = row
+                .get("gui_route")
+                .and_then(Value::as_str)
+                .or_else(|| row.get("route").and_then(Value::as_str))
+                .or_else(|| {
+                    row.get("evidence")
+                        .and_then(Value::as_object)
+                        .and_then(|evidence| evidence.get("route"))
+                        .and_then(Value::as_str)
+                });
+            status == Some("observed")
+                && comparator == Some(true)
+                && comparator_result == Some("pass")
+                && route == Some("gui-platform")
+        })
 }
 
 fn validate_target_lanes(
@@ -1132,6 +1497,11 @@ fn validate_target_lanes(
             schema(diagnostics, &row_path, "target lane must be an object");
             continue;
         };
+        let observed_lane = row
+            .get("evidence_status")
+            .or_else(|| row.get("status"))
+            .and_then(Value::as_str)
+            .is_some_and(|status| status == "observed");
         let lane_id = string(row, "lane_id", &row_path, diagnostics).unwrap_or_default();
         let triple = string(row, "target_triple", &row_path, diagnostics).unwrap_or_default();
         let java_major = row
@@ -1156,9 +1526,9 @@ fn validate_target_lanes(
             acceptance(diagnostics, &row_path, "duplicate target triple/Java row");
         }
         validate_fresh_roots(row, &lane_id, &row_path, diagnostics);
-        validate_display(row, &lane_id, &row_path, diagnostics);
-        validate_laf(row, &row_path, diagnostics);
-        validate_lane_image(row, &row_path, diagnostics);
+        validate_display(row, &lane_id, &row_path, observed_lane, diagnostics);
+        validate_laf(row, &row_path, observed_lane, diagnostics);
+        validate_lane_image(row, &row_path, observed_lane, diagnostics);
         let runtime_identity = row.get("runtime_identity").and_then(Value::as_object);
         if runtime_identity.is_none() {
             schema(
@@ -1175,6 +1545,7 @@ fn validate_target_lanes(
             "profile",
             &row_path,
             profile_hash,
+            observed_lane,
             diagnostics,
         );
         validate_identity(
@@ -1184,6 +1555,7 @@ fn validate_target_lanes(
             "lock",
             &row_path,
             lock_hash,
+            observed_lane,
             diagnostics,
         );
         validate_identity(
@@ -1191,6 +1563,7 @@ fn validate_target_lanes(
             "classpath",
             &row_path,
             None,
+            observed_lane,
             diagnostics,
         );
         if runtime_identity.get("plugins").is_none() {
@@ -1284,6 +1657,7 @@ fn validate_display(
     row: &Map<String, Value>,
     lane_id: &str,
     path: &str,
+    observed_lane: bool,
     diagnostics: &mut Diagnostics,
 ) {
     let Some(display) = row.get("display").and_then(Value::as_object) else {
@@ -1318,7 +1692,7 @@ fn validate_display(
         .get("scaling")
         .or_else(|| row.get("scaling"))
         .or_else(|| row.get("planned_scaling"));
-    if scaling.is_none() {
+    if scaling.is_none() && observed_lane {
         schema(
             diagnostics,
             &format!("{path}.display.scaling"),
@@ -1335,7 +1709,12 @@ fn validate_display(
     }
 }
 
-fn validate_laf(row: &Map<String, Value>, path: &str, diagnostics: &mut Diagnostics) {
+fn validate_laf(
+    row: &Map<String, Value>,
+    path: &str,
+    observed_lane: bool,
+    diagnostics: &mut Diagnostics,
+) {
     let Some(order) = row.get("laf_lookup_order").and_then(Value::as_array) else {
         schema(
             diagnostics,
@@ -1356,7 +1735,7 @@ fn validate_laf(row: &Map<String, Value>, path: &str, diagnostics: &mut Diagnost
         .or_else(|| row.get("planned_effective_laf"))
         .or_else(|| row.get("effective_laf"))
         .is_some();
-    if !has_laf {
+    if !has_laf && observed_lane {
         schema(
             diagnostics,
             &format!("{path}.effective_laf"),
@@ -1365,8 +1744,16 @@ fn validate_laf(row: &Map<String, Value>, path: &str, diagnostics: &mut Diagnost
     }
 }
 
-fn validate_lane_image(row: &Map<String, Value>, path: &str, diagnostics: &mut Diagnostics) {
+fn validate_lane_image(
+    row: &Map<String, Value>,
+    path: &str,
+    observed_lane: bool,
+    diagnostics: &mut Diagnostics,
+) {
     let Some(image) = row.get("os_image").or_else(|| row.get("os_image_identity")) else {
+        if !observed_lane {
+            return;
+        }
         schema(
             diagnostics,
             &format!("{path}.os_image"),
@@ -1397,16 +1784,19 @@ fn validate_identity(
     name: &str,
     row_path: &str,
     expected_hash: Option<&str>,
+    observed_lane: bool,
     diagnostics: &mut Diagnostics,
 ) {
     let path = format!("{row_path}.runtime_identity.{name}");
     let Some(value) = value else {
-        schema(diagnostics, &path, "identity declaration is required");
+        if observed_lane {
+            schema(diagnostics, &path, "identity declaration is required");
+        }
         return;
     };
     match value {
         Value::String(value) if !value.is_empty() => {
-            if expected_hash.is_some() && !is_planned_text(value) {
+            if expected_hash.is_some() && observed_lane && !is_planned_text(value) {
                 acceptance(
                     diagnostics,
                     &path,
@@ -1443,7 +1833,7 @@ fn validate_identity(
                         );
                     }
                 }
-            } else {
+            } else if observed_lane {
                 schema(
                     diagnostics,
                     &format!("{path}.sha256"),
@@ -1476,9 +1866,11 @@ fn validate_acceptance_readiness(
     root: &Path,
     gui_root: &Path,
     states: &[CaseState],
+    platform_lanes_ready: bool,
     diagnostics: &mut Diagnostics,
 ) {
     let not_ready = states.len() != 5
+        || !platform_lanes_ready
         || states
             .iter()
             .any(|state| state.evidence_status != "observed" || !state.comparator_enforced);
@@ -1730,7 +2122,7 @@ fn io(diagnostics: &mut Diagnostics, path: &str, message: impl Into<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     fn diagnostics_for_lane(row: Value) -> Diagnostics {
         let mut diagnostics = Diagnostics::default();
@@ -1812,6 +2204,186 @@ mod tests {
             diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic.code == "GUI-ACCEPTANCE-GATE")
+        );
+    }
+
+    #[test]
+    fn static_descriptor_route_is_allowed_only_for_not_run_evidence() {
+        let expected = json!({
+            "evidence_status": "not-run",
+            "validation_contract": {
+                "comparator_enforced": false,
+                "comparator_route": "static-descriptor"
+            }
+        });
+        let mut diagnostics = Diagnostics::default();
+        validate_route(
+            expected.as_object().expect("object"),
+            "gui-jmx-semantic",
+            "expected",
+            &mut diagnostics,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn observed_evidence_requires_passing_dedicated_comparator_and_provenance() {
+        let expected = json!({
+            "evidence_status": "observed",
+            "gui_route": "gui-jmx-semantic",
+            "source": {"runtime_observations": true},
+            "validation_contract": {
+                "comparator_enforced": true,
+                "comparator_id": "gui-jmx-semantic-v1",
+                "comparator_result": "pass",
+                "comparator_route": "gui-jmx-semantic"
+            }
+        });
+        let provenance = json!({
+            "inputs": {},
+            "oracle": {},
+            "runtime": {},
+            "oracle_execution": {"performed": true}
+        });
+        let mut diagnostics = Diagnostics::default();
+        let status = validate_evidence_honesty(
+            expected.as_object().expect("object"),
+            provenance.as_object().expect("object"),
+            "gui-jmx-semantic",
+            "expected",
+            &mut diagnostics,
+        );
+        assert_eq!(status, "observed");
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    }
+
+    #[test]
+    fn observed_static_descriptor_route_is_rejected() {
+        let expected = json!({
+            "evidence_status": "observed",
+            "gui_route": "gui-jmx-semantic",
+            "source": {"runtime_observations": true},
+            "validation_contract": {
+                "comparator_enforced": true,
+                "comparator_id": "gui-jmx-semantic-v1",
+                "comparator_result": "pass",
+                "comparator_route": "static-descriptor"
+            }
+        });
+        let provenance = json!({
+            "inputs": {},
+            "oracle": {},
+            "runtime": {},
+            "oracle_execution": {"performed": true}
+        });
+        let mut diagnostics = Diagnostics::default();
+        validate_evidence_honesty(
+            expected.as_object().expect("object"),
+            provenance.as_object().expect("object"),
+            "gui-jmx-semantic",
+            "expected",
+            &mut diagnostics,
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic.message.contains("dedicated comparator route") })
+        );
+    }
+
+    #[test]
+    fn platform_lanes_require_twelve_observed_passing_rows() {
+        let planned = json!({
+            "target_lanes": [{
+                "status": "planned; not observed",
+                "comparator_enforced": false,
+                "comparator_result": null,
+                "gui_route": null
+            }]
+        });
+        assert!(!target_lane_evidence_ready(planned.get("target_lanes")));
+
+        let observed_row = json!({
+            "status": "observed",
+            "comparator_enforced": true,
+            "comparator_result": "pass",
+            "gui_route": "gui-platform"
+        });
+        let observed = json!({
+            "target_lanes": std::iter::repeat_n(observed_row, 12).collect::<Vec<_>>()
+        });
+        assert!(target_lane_evidence_ready(observed.get("target_lanes")));
+    }
+
+    #[test]
+    fn observed_lane_controls_runtime_only_requirements() {
+        fn lane(status: &str) -> Value {
+            json!({
+                "lane_id": "linux-x86_64-java8",
+                "target_triple": "x86_64-unknown-linux-gnu",
+                "java_major": 8,
+                "status": status,
+                "workspace_root": "<temporary-root>/workspace/linux-x86_64-java8",
+                "output_root": "<temporary-root>/output/linux-x86_64-java8",
+                "preference_root": "<temporary-root>/prefs/linux-x86_64-java8",
+                "display_session_id": "display-linux-x86_64-java8",
+                "display": {"required": true, "fresh_session": true},
+                "laf_lookup_order": ["laf.command preference"],
+                "runtime_identity": {"plugins": []}
+            })
+        }
+
+        let planned_diagnostics = diagnostics_for_lane(lane("planned; not observed"));
+        for field in [
+            ".display.scaling",
+            ".effective_laf",
+            ".os_image",
+            ".runtime_identity.profile",
+            ".runtime_identity.lock",
+            ".runtime_identity.classpath",
+        ] {
+            assert!(
+                !planned_diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.path.contains(field))
+            );
+        }
+
+        let observed_diagnostics = diagnostics_for_lane(lane("observed"));
+        for field in [
+            ".display.scaling",
+            ".effective_laf",
+            ".os_image",
+            ".runtime_identity.profile",
+            ".runtime_identity.lock",
+            ".runtime_identity.classpath",
+        ] {
+            assert!(
+                observed_diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.path.contains(field))
+            );
+        }
+    }
+
+    #[test]
+    fn gui_descriptors_cannot_claim_standalone_native_support() {
+        let object = json!({
+            "capability_set": "standalone-native",
+            "standalone_native": true
+        });
+        let mut diagnostics = Diagnostics::default();
+        validate_standalone_exclusion(
+            object.as_object().expect("object"),
+            "descriptor",
+            &mut diagnostics,
+        );
+        assert_eq!(
+            diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "GUI-ACCEPTANCE-GATE")
+                .count(),
+            2
         );
     }
 

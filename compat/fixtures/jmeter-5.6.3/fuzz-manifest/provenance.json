@@ -62,25 +62,25 @@
     },
     "target_contract": {
       "path": "fuzz/README.md",
-      "sha256": "fefe067eb843e9fa9ba273b1d5ea57f2174bbdc41e950cc3efa20320b95085d5",
+      "sha256": "c19a6f4e0eefeadcacbff745731bd3268d10489439a9b3609f57d1c0a21b5781",
       "role": "canonical target names, input bounds, seed directories, and static validation policy; the local fixture additionally indexes the current Cargo target expansion"
     },
     "corpus_provenance": {
       "path": "fuzz/corpus/PROVENANCE.md",
-      "sha256": "4b8d30bb1a7ac53887ecddae65e975fa0f56a0ea9f911dde4fb4f199b0cd14af",
+      "sha256": "c7b4e7be441f3e75cebad1ffdf93855ce85f1aed81e2b64f2efffa04efe0dda0",
       "role": "original synthetic seed provenance and per-seed purpose/bounds; absent new-target directories are recorded as zero-seed by design"
     },
     "campaign_contract": {
       "schema_path": "fuzz/campaign/evidence.schema.json",
-      "schema_sha256": "e7f1ab943859b6006227d4c54d5860266c009a8eade00da7d2f2e3255605756d",
+      "schema_sha256": "aa35775ccbe140f3ab2b92abddafddb0b362b485009bb513eaf7f53b4a33f345",
       "example_path": "fuzz/campaign/evidence.example.json",
-      "example_sha256": "336ac3ea79195d5f10cfb5e4a5073117fec67831cad237ac7050a491c1401c25"
+      "example_sha256": "b0bc64a954e5ddf5b3b898a32fba945d53fc3f766c601b985a5aa262f6752449"
     },
     "fixture_contract": {
       "schema_path": "compat/fixtures/jmeter-5.6.3/fuzz-manifest/expected/campaign-evidence.schema.json",
       "schema_sha256": "e2f76943e5451d52f02f55f573d901a54894f7ee3b27e34c4aab2cbd7a7c3cea",
       "example_path": "compat/fixtures/jmeter-5.6.3/fuzz-manifest/expected/campaign-evidence.example.json",
-      "example_sha256": "2e563d168651d7565b7718b3003e51f9f33ddc4f3446c0fe6f105b65790e546a",
+      "example_sha256": "58755677e31fe60a491efdef90cc22d486bc0a3aad66943033e9ecdf89aa439e",
       "negative_vectors_path": "compat/fixtures/jmeter-5.6.3/fuzz-manifest/expected/campaign-evidence.negative.json",
       "negative_vectors_sha256": "eafdc65c0cb6a714609a6b5f9293539b4ca736c7475e3460340ec304b879de1b"
     }

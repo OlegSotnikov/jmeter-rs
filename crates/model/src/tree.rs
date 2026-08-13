@@ -200,14 +200,17 @@ impl TraversalOutcome {
 /// An iterative preorder iterator over one tree's nodes.
 ///
 /// The iterator uses a heap-backed explicit stack rather than recursive calls,
-/// so a deeply nested input document cannot overflow the Rust call stack.  It
-/// has no node/depth budget of its own and is therefore a trusted-tree
-/// convenience; input-facing code should use [`IdentityTree::traverse_bounded`]
-/// or [`IdentityTree::preorder_ids_bounded`] with caller-owned limits.
+/// so a deeply nested input document cannot overflow the Rust call stack.  A
+/// visited identity set also makes the convenience iterator terminate if a
+/// malformed tree contains a repeated link.  It has no node/depth budget of
+/// its own and is therefore a trusted-tree convenience; input-facing code
+/// should use [`IdentityTree::traverse_bounded`] or
+/// [`IdentityTree::preorder_ids_bounded`] with caller-owned limits.
 pub struct PreorderIter<'a, T> {
     tree: &'a IdentityTree<T>,
     next_root: usize,
     stack: Vec<PreorderFrame>,
+    visited: BTreeSet<NodeId>,
 }
 
 struct PreorderFrame {
@@ -229,13 +232,18 @@ impl<'a, T> Iterator for PreorderIter<'a, T> {
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if self.stack.is_empty() {
-                let id = *self.tree.roots.get(self.next_root)?;
-                self.next_root = self.next_root.saturating_add(1);
-                self.stack.push(PreorderFrame {
-                    id,
-                    next_child: 0,
-                    yielded: false,
-                });
+                loop {
+                    let id = *self.tree.roots.get(self.next_root)?;
+                    self.next_root = self.next_root.saturating_add(1);
+                    if self.visited.insert(id) {
+                        self.stack.push(PreorderFrame {
+                            id,
+                            next_child: 0,
+                            yielded: false,
+                        });
+                        break;
+                    }
+                }
             }
 
             let frame = self.stack.last_mut()?;
@@ -246,11 +254,13 @@ impl<'a, T> Iterator for PreorderIter<'a, T> {
             }
             if let Some(child) = node.children.get(frame.next_child).copied() {
                 frame.next_child = frame.next_child.saturating_add(1);
-                self.stack.push(PreorderFrame {
-                    id: child,
-                    next_child: 0,
-                    yielded: false,
-                });
+                if self.visited.insert(child) {
+                    self.stack.push(PreorderFrame {
+                        id: child,
+                        next_child: 0,
+                        yielded: false,
+                    });
+                }
             } else {
                 self.stack.pop();
             }
@@ -407,9 +417,18 @@ impl<T> IdentityTree<T> {
         if let Some(parent) = parent {
             self.require_parent(parent)?;
         }
+        let previous_next_id = self.next_id;
         let id = self.allocate_id()?;
-        self.insert_with_id(parent, id, value)?;
-        Ok(id)
+        match self.insert_with_id(parent, id, value) {
+            Ok(inserted) => Ok(inserted),
+            Err(error) => {
+                // Allocation is part of this mutation's observable state.  A
+                // failed insertion must not consume an ID, even if a future
+                // internal invariant check rejects the insertion.
+                self.next_id = previous_next_id;
+                Err(error)
+            }
+        }
     }
 
     /// Inserts a fresh root node.
@@ -445,17 +464,23 @@ impl<T> IdentityTree<T> {
         }
 
         let node = TreeNode::new(id, parent, value);
-        self.nodes.insert(id, node);
         if let Some(parent) = parent {
-            // The parent was checked above and the map entry is private, so a
-            // missing entry here would indicate an internal invariant failure.
+            // Resolve the parent before changing either side of the edge.  A
+            // missing entry is impossible after require_parent, but keeping
+            // this check fallible makes the operation atomic if that private
+            // invariant is ever changed.
             let Some(parent_node) = self.nodes.get_mut(&parent) else {
                 return Err(TreeError::InvariantViolation {
-                    detail: "validated parent disappeared during insertion",
+                    detail: "validated parent disappeared before insertion",
                 });
             };
             parent_node.children.push(id);
+            // The duplicate check above makes replacement impossible here;
+            // inserting after the parent edge has been validated leaves no
+            // fallible mutation path.
+            self.nodes.insert(id, node);
         } else {
+            self.nodes.insert(id, node);
             self.roots.push(id);
         }
         self.advance_allocator_past(id);
@@ -493,6 +518,11 @@ impl<T> IdentityTree<T> {
     /// Removes a node and all descendants, returning the removed node's value.
     pub fn remove_subtree(&mut self, id: NodeId) -> Result<T, TreeError> {
         self.lookup(id)?;
+        // Validate the complete topology before changing the parent edge or
+        // removing any map entries.  This keeps failure atomic even when a
+        // caller is holding a tree assembled by an older/incompatible model
+        // implementation.
+        self.validate()?;
         let ids = self.collect_subtree_ids(id)?;
         let parent = self
             .nodes
@@ -534,15 +564,24 @@ impl<T> IdentityTree<T> {
 
     /// Removes all descendants of a node and returns their count.
     pub fn clear_children(&mut self, id: NodeId) -> Result<usize, TreeError> {
+        self.lookup(id)?;
+        // Collect and validate every branch before removing the first one.  A
+        // malformed later sibling must not leave an earlier sibling deleted.
+        self.validate()?;
         let children = self.lookup(id)?.children.clone();
-        let mut removed = 0;
+        let mut ids = Vec::new();
         for child in children {
-            let subtree_size = self.collect_subtree_ids(child)?.len();
-            self.remove_subtree(child)?;
-            removed += subtree_size;
+            ids.extend(self.collect_subtree_ids(child)?);
         }
-        if let Some(node) = self.nodes.get_mut(&id) {
-            node.children.clear();
+        let removed = ids.len();
+        let Some(node) = self.nodes.get_mut(&id) else {
+            return Err(TreeError::InvariantViolation {
+                detail: "validated node disappeared while clearing children",
+            });
+        };
+        node.children.clear();
+        for current in ids {
+            self.nodes.remove(&current);
         }
         Ok(removed)
     }
@@ -554,6 +593,7 @@ impl<T> IdentityTree<T> {
             tree: self,
             next_root: 0,
             stack: Vec::new(),
+            visited: BTreeSet::new(),
         }
     }
 
@@ -578,18 +618,14 @@ impl<T> IdentityTree<T> {
     }
 
     /// Returns preorder IDs only when the result fits the caller's allocation
-    /// budget.  The iterator itself uses only depth-bounded stack space.
+    /// budget.  The iterator uses heap-backed stack and identity-tracking
+    /// storage, never the Rust call stack.
     pub fn preorder_ids_bounded(&self, max_nodes: usize) -> Result<Vec<NodeId>, TreeError> {
         let mut ids = Vec::with_capacity(max_nodes.min(self.nodes.len()));
-        for node in self.iter_preorder() {
-            if ids.len() == max_nodes {
-                return Err(TreeError::QueryLimitExceeded {
-                    operation: "preorder_ids",
-                    limit: max_nodes,
-                });
-            }
+        self.visit_preorder_checked(Some(("preorder_ids", max_nodes)), |node| {
             ids.push(node.id());
-        }
+            Ok(())
+        })?;
         Ok(ids)
     }
 
@@ -633,6 +669,7 @@ impl<T> IdentityTree<T> {
     {
         let mut next_root = 0usize;
         let mut stack = Vec::new();
+        let mut visited = BTreeSet::new();
         let mut events = 0usize;
         let mut entered = 0usize;
 
@@ -642,6 +679,11 @@ impl<T> IdentityTree<T> {
                     break;
                 };
                 next_root = next_root.saturating_add(1);
+                if !visited.insert(id) {
+                    return Err(TreeError::InvariantViolation {
+                        detail: "ordered topology references a node more than once",
+                    });
+                }
                 stack.push(TraversalFrame {
                     id,
                     depth: 0,
@@ -683,6 +725,11 @@ impl<T> IdentityTree<T> {
             };
 
             if let Some((child, depth)) = child {
+                if !visited.insert(child) {
+                    return Err(TreeError::InvariantViolation {
+                        detail: "ordered topology references a node more than once",
+                    });
+                }
                 stack.push(TraversalFrame {
                     id: child,
                     depth,
@@ -760,7 +807,7 @@ impl<T> IdentityTree<T> {
         F: FnMut(&TreeNode<T>) -> bool,
     {
         let mut ids = Vec::with_capacity(max_results.min(self.nodes.len()));
-        for node in self.iter_preorder() {
+        self.visit_preorder_checked(None, |node| {
             if predicate(node) {
                 if ids.len() == max_results {
                     return Err(TreeError::QueryLimitExceeded {
@@ -770,7 +817,8 @@ impl<T> IdentityTree<T> {
                 }
                 ids.push(node.id());
             }
-        }
+            Ok(())
+        })?;
         Ok(ids)
     }
 
@@ -950,15 +998,107 @@ impl<T> IdentityTree<T> {
 
     fn collect_subtree_ids(&self, root: NodeId) -> Result<Vec<NodeId>, TreeError> {
         let mut ids = Vec::new();
+        let mut seen = BTreeSet::new();
         let mut pending = vec![root];
         while let Some(id) = pending.pop() {
             let node = self.nodes.get(&id).ok_or(TreeError::InvariantViolation {
                 detail: "child link points to a missing node during removal",
             })?;
+            if !seen.insert(id) {
+                return Err(TreeError::InvariantViolation {
+                    detail: "subtree links contain a cycle or duplicate child",
+                });
+            }
             ids.push(id);
-            pending.extend(node.children.iter().copied());
+            for child in node.children.iter().rev().copied() {
+                let child_node = self
+                    .nodes
+                    .get(&child)
+                    .ok_or(TreeError::InvariantViolation {
+                        detail: "child link points to a missing node during removal",
+                    })?;
+                if child_node.parent != Some(id) {
+                    return Err(TreeError::InvariantViolation {
+                        detail: "child parent link is inconsistent during removal",
+                    });
+                }
+                pending.push(child);
+            }
         }
         Ok(ids)
+    }
+
+    /// Visits every node in checked preorder without using the call stack.
+    ///
+    /// The public iterator intentionally cannot report malformed links because
+    /// `Iterator::next` has no error channel.  Input-facing bounded queries
+    /// use this helper instead, so a missing node or repeated identity is
+    /// never silently omitted from a result.
+    fn visit_preorder_checked<F>(
+        &self,
+        node_limit: Option<(&'static str, usize)>,
+        mut visitor: F,
+    ) -> Result<usize, TreeError>
+    where
+        F: FnMut(&TreeNode<T>) -> Result<(), TreeError>,
+    {
+        let mut next_root = 0usize;
+        let mut stack = Vec::new();
+        let mut visited = BTreeSet::new();
+        let mut count = 0usize;
+
+        loop {
+            if stack.is_empty() {
+                let Some(id) = self.roots.get(next_root).copied() else {
+                    return Ok(count);
+                };
+                next_root = next_root.saturating_add(1);
+                if !visited.insert(id) {
+                    return Err(TreeError::InvariantViolation {
+                        detail: "ordered topology references a node more than once",
+                    });
+                }
+                stack.push(PreorderFrame {
+                    id,
+                    next_child: 0,
+                    yielded: false,
+                });
+            }
+
+            let frame = stack.last_mut().ok_or(TreeError::InvariantViolation {
+                detail: "preorder query frame stack unexpectedly empty",
+            })?;
+            let node = self
+                .nodes
+                .get(&frame.id)
+                .ok_or(TreeError::InvariantViolation {
+                    detail: "ordered link points to a missing node during preorder query",
+                })?;
+            if !frame.yielded {
+                frame.yielded = true;
+                if let Some((operation, limit)) = node_limit
+                    && count == limit
+                {
+                    return Err(TreeError::QueryLimitExceeded { operation, limit });
+                }
+                visitor(node)?;
+                count = count.saturating_add(1);
+            } else if let Some(child) = node.children.get(frame.next_child).copied() {
+                frame.next_child = frame.next_child.saturating_add(1);
+                if !visited.insert(child) {
+                    return Err(TreeError::InvariantViolation {
+                        detail: "ordered topology references a node more than once",
+                    });
+                }
+                stack.push(PreorderFrame {
+                    id: child,
+                    next_child: 0,
+                    yielded: false,
+                });
+            } else {
+                stack.pop();
+            }
+        }
     }
 }
 
@@ -1599,3 +1739,106 @@ impl HashTree<TestElement> {
 
 /// Short generic tree alias.
 pub type Tree<T = TestElement> = IdentityTree<T>;
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "deterministic tree tests assert successful setup before inspecting values"
+)]
+mod tests {
+    use super::*;
+
+    fn element(name: &str) -> TestElement {
+        TestElement::named("example.TestElement", "example.Gui", name)
+    }
+
+    #[test]
+    fn bounded_traversal_rejects_repeated_links_and_iterator_terminates() {
+        let mut tree = IdentityTree::<u32>::new();
+        let root = tree.insert_root(1).expect("root");
+        let child = tree.insert_child(root, 2).expect("child");
+        // A private-link corruption test: the public API cannot create this
+        // cycle, but input-facing traversals must still fail closed.
+        tree.nodes
+            .get_mut(&root)
+            .expect("root exists")
+            .children
+            .push(root);
+
+        assert!(matches!(
+            tree.traverse_bounded(usize::MAX, |_| TraversalControl::Continue),
+            Err(TreeError::InvariantViolation {
+                detail: "ordered topology references a node more than once"
+            })
+        ));
+        assert_eq!(tree.preorder_ids(), vec![root, child]);
+        assert!(matches!(
+            tree.preorder_ids_bounded(2),
+            Err(TreeError::InvariantViolation {
+                detail: "ordered topology references a node more than once"
+            })
+        ));
+    }
+
+    #[test]
+    fn destructive_mutations_are_atomic_on_invalid_parent_links() {
+        let mut tree = IdentityTree::<u32>::new();
+        let root = tree.insert_root(1).expect("root");
+        let first = tree.insert_child(root, 2).expect("first child");
+        let second = tree.insert_child(root, 3).expect("second child");
+        tree.nodes
+            .get_mut(&second)
+            .expect("second child exists")
+            .parent = Some(NodeId::new(99));
+        let corrupted = tree.clone();
+
+        assert!(matches!(
+            tree.clear_children(root),
+            Err(TreeError::InvariantViolation { .. })
+        ));
+        assert_eq!(tree, corrupted);
+        assert!(matches!(
+            tree.replace_subtree(root, 10),
+            Err(TreeError::InvariantViolation { .. })
+        ));
+        assert_eq!(tree, corrupted);
+        assert!(matches!(
+            tree.remove_subtree(first),
+            Err(TreeError::InvariantViolation { .. })
+        ));
+        assert_eq!(tree, corrupted);
+    }
+
+    #[test]
+    fn disabled_subtrees_remain_ordered_and_addressable() {
+        let mut tree = IdentityTree::new();
+        let root = tree.insert_root(element("root")).expect("root");
+        let mut disabled = element("disabled");
+        disabled.set_enabled(false);
+        let disabled_id = tree.insert_child(root, disabled).expect("disabled child");
+        let nested_id = tree
+            .insert_child(disabled_id, element("nested"))
+            .expect("nested child");
+        let sibling_id = tree
+            .insert_child(root, element("sibling"))
+            .expect("sibling");
+
+        assert_eq!(
+            tree.preorder_ids(),
+            vec![root, disabled_id, nested_id, sibling_id]
+        );
+        assert!(!tree.is_enabled(disabled_id).expect("disabled node"));
+        assert!(tree.contains(nested_id));
+        assert!(tree.validate().is_ok());
+
+        let cloned = tree.cloned();
+        assert_eq!(cloned.preorder_ids(), tree.preorder_ids());
+        assert!(!cloned.is_enabled(disabled_id).expect("disabled clone"));
+        assert_eq!(
+            cloned.children(root).expect("root children"),
+            &[disabled_id, sibling_id]
+        );
+    }
+}

@@ -8,13 +8,14 @@
 //! not installed in the active capability set.
 
 use super::{
-    ClockSource, EvaluationCapabilities, ExecutionContext, FileCapability, FunctionContext,
-    FunctionError, FunctionOccurrence, FunctionResolver, HostResolver, IterationIdentity, LogSink,
-    PropertySetter, RandomSource, ResponseExtractor, ScriptCapability, TestPlanNameResolver,
-    VariableSetter,
+    ClockSource, EffectClass, EvaluationCapabilities, ExecutionContext, FileCapability,
+    FunctionContext, FunctionError, FunctionOccurrence, FunctionResolver, HostResolver,
+    IterationIdentity, LogSink, PropertySetter, RandomSource, ResponseExtractor, ScriptCapability,
+    TestPlanNameResolver, VariableSetter,
 };
 use std::collections::BTreeMap;
 use std::fmt;
+use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 
 type CounterScopeKey = (bool, String, u64, u32, FunctionOccurrence);
@@ -42,6 +43,7 @@ const MAX_COUNTER_ENTRIES: usize = 16_384;
 pub const MAX_COUNTER_GROUP_BYTES: usize = 1_024;
 const MAX_RANDOM_VALUES: usize = 65_536;
 const MAX_RANDOM_REJECTIONS: usize = 1_024;
+const MAX_VARIABLE_UPDATES: usize = 65_536;
 
 /// Exact, case-sensitive JMeter 5.6.3 built-in function names.
 ///
@@ -109,6 +111,81 @@ pub const KNOWN_FUNCTION_NAMES: &[&str] = &[
 /// as unknown by the native resolver.
 pub const EXTENDED_FUNCTION_NAMES: &[&str] = &[];
 
+/// A capability that may be needed by one built-in invocation.
+///
+/// The requirements are derived from the already-expanded argument strings;
+/// deriving them never evaluates a function, reads a file, consults a clock,
+/// or mutates a variable/property store.  The more specific execution
+/// identities are intentional: an `ExecutionContext` object that has no
+/// sampler, group, or thread number is not sufficient for every information
+/// function.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum FunctionCapability {
+    /// A function writes one or more JMeter variables.
+    VariableMutation,
+    /// A function writes a JMeter property.
+    PropertyMutation,
+    /// A saved-plan-name provider is needed.
+    TestPlanName,
+    /// A deterministic random source is needed.
+    Random,
+    /// A deterministic wall-clock/date source is needed.
+    Clock,
+    /// A virtual-user thread number is needed.
+    ThreadIdentity,
+    /// An explicit virtual-user iteration identity is needed.
+    IterationIdentity,
+    /// A virtual-user thread-group name is needed.
+    ThreadGroupIdentity,
+    /// A current sampler name is needed.
+    SamplerIdentity,
+    /// A host identity provider is needed.
+    HostIdentity,
+    /// A log sink is needed.
+    Log,
+    /// File read/write access is needed.
+    Files,
+    /// A response extractor is needed.
+    Response,
+    /// An external script engine is needed.
+    Script,
+}
+
+/// Side-effect-free capability requirements for one built-in invocation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FunctionInvocationRequirements {
+    required: Box<[FunctionCapability]>,
+}
+
+impl FunctionInvocationRequirements {
+    fn new(mut required: Vec<FunctionCapability>) -> Self {
+        required.sort_unstable();
+        required.dedup();
+        Self {
+            required: required.into_boxed_slice(),
+        }
+    }
+
+    /// Returns the capabilities required by this invocation.
+    #[must_use]
+    pub fn required_capabilities(&self) -> &[FunctionCapability] {
+        &self.required
+    }
+
+    /// Returns whether this invocation requires `capability`.
+    #[must_use]
+    pub fn requires(&self, capability: FunctionCapability) -> bool {
+        self.required.binary_search(&capability).is_ok()
+    }
+
+    /// Returns whether this invocation is pure with respect to injected
+    /// capabilities.
+    #[must_use]
+    pub fn is_pure(&self) -> bool {
+        self.required.is_empty()
+    }
+}
+
 /// Active support state for one function name.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FunctionSupport {
@@ -167,6 +244,92 @@ impl Clone for BuiltinFunctions {
     }
 }
 
+/// Explicitly shared handle for one run-owned native function registry.
+///
+/// Cloning this handle shares counters and other registry-owned state.  A
+/// fresh registry is created with [`BuiltinFunctions::new`] or
+/// [`BuiltinFunctions::fresh_clone`]; ordinary `BuiltinFunctions::clone`
+/// remains a compatibility-preserving fresh copy and must not be used as a
+/// run-sharing operation.
+#[derive(Clone)]
+pub struct SharedBuiltinFunctions {
+    inner: Arc<BuiltinFunctions>,
+}
+
+/// Naming alias that makes the ownership distinction explicit at call sites.
+pub type SharedBuiltinRegistry = SharedBuiltinFunctions;
+
+impl fmt::Debug for SharedBuiltinFunctions {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SharedBuiltinFunctions")
+            .field("strong_count", &Arc::strong_count(&self.inner))
+            .field("registry", &self.inner)
+            .finish()
+    }
+}
+
+impl Deref for SharedBuiltinFunctions {
+    type Target = BuiltinFunctions;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl AsRef<BuiltinFunctions> for SharedBuiltinFunctions {
+    fn as_ref(&self) -> &BuiltinFunctions {
+        &self.inner
+    }
+}
+
+impl SharedBuiltinFunctions {
+    /// Creates a fresh shared registry for one independent run.
+    #[must_use]
+    pub fn new() -> Self {
+        BuiltinFunctions::new().into_shared()
+    }
+
+    /// Wraps an already allocated registry in an explicit shared handle.
+    #[must_use]
+    pub fn from_registry(registry: BuiltinFunctions) -> Self {
+        registry.into_shared()
+    }
+
+    /// Returns the number of handles sharing this registry.
+    #[must_use]
+    pub fn strong_count(&self) -> usize {
+        Arc::strong_count(&self.inner)
+    }
+
+    /// Returns the underlying `Arc` for runtime ownership wiring.
+    #[must_use]
+    pub fn into_arc(self) -> Arc<BuiltinFunctions> {
+        self.inner
+    }
+}
+
+impl Default for SharedBuiltinFunctions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FunctionResolver for SharedBuiltinFunctions {
+    fn resolve_function(
+        &self,
+        name: &str,
+        arguments: &[String],
+        context: &FunctionContext<'_>,
+    ) -> Result<Option<String>, FunctionError> {
+        self.inner.resolve_function(name, arguments, context)
+    }
+
+    fn is_defined(&self, name: &str) -> Option<bool> {
+        self.inner.is_defined(name)
+    }
+}
+
 impl fmt::Debug for BuiltinFunctions {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -206,6 +369,35 @@ impl BuiltinFunctions {
         }
     }
 
+    /// Creates a fresh registry and returns an explicitly shared run handle.
+    #[must_use]
+    pub fn new_shared() -> SharedBuiltinFunctions {
+        SharedBuiltinFunctions::new()
+    }
+
+    /// Converts this fresh registry into an explicit shared handle.
+    #[must_use]
+    pub fn into_shared(self) -> SharedBuiltinFunctions {
+        SharedBuiltinFunctions {
+            inner: Arc::new(self),
+        }
+    }
+
+    /// Alias for [`Self::into_shared`] emphasizing that the handle is shared.
+    #[must_use]
+    pub fn shared(self) -> SharedBuiltinFunctions {
+        self.into_shared()
+    }
+
+    /// Creates an explicit fresh copy of this registry.
+    ///
+    /// Counters and other registry-owned mutable native state are reset.  Use
+    /// [`SharedBuiltinFunctions::clone`] when run-shared state is required.
+    #[must_use]
+    pub fn fresh_clone(&self) -> Self {
+        self.clone()
+    }
+
     /// Returns all names known to the explicit registry.
     #[must_use]
     pub const fn function_names() -> &'static [&'static str] {
@@ -220,15 +412,13 @@ impl BuiltinFunctions {
 
     /// Drops per-user counter state for a completed virtual-user lifecycle.
     /// Global counter sequences are retained, matching JMeter's
-    /// process-wide counter.  Cached values for the completed lifecycle are
-    /// removed because they are no longer observable and must not consume the
-    /// bounded state budget.  A poisoned state lock is returned as a typed
+    /// process-wide counter. A poisoned state lock is returned as a typed
     /// error instead of being silently ignored.
     pub fn clear_counters_for_lifecycle(&self, lifecycle_id: u64) -> Result<(), FunctionError> {
         let mut counters = self
             .counters
             .lock()
-            .map_err(|_| FunctionError::execution("counter state lock is poisoned"))?;
+            .map_err(|_| FunctionError::poisoned("counter state lock is poisoned"))?;
         counters
             .next_values
             .retain(|(per_user, _, lifecycle, _, _), _| !*per_user || *lifecycle != lifecycle_id);
@@ -249,7 +439,7 @@ impl BuiltinFunctions {
         let mut counters = self
             .counters
             .lock()
-            .map_err(|_| FunctionError::execution("counter state lock is poisoned"))?;
+            .map_err(|_| FunctionError::poisoned("counter state lock is poisoned"))?;
         counters.next_values.clear();
         counters.cached_values.clear();
         Ok(())
@@ -259,6 +449,241 @@ impl BuiltinFunctions {
     #[must_use]
     pub fn is_known(name: &str) -> bool {
         KNOWN_FUNCTION_NAMES.contains(&name)
+    }
+
+    /// Classifies the capabilities required by one already-expanded
+    /// invocation.
+    ///
+    /// `arguments` must contain the strings that would be passed to the
+    /// resolver.  This method deliberately performs no argument evaluation
+    /// and no capability operation.  `None` means that `name` is outside the
+    /// native 5.6.3 registry; a known function with no requirements returns
+    /// `Some` with an empty requirement set.
+    #[must_use]
+    pub fn requirements_for_invocation(
+        name: &str,
+        arguments: &[String],
+    ) -> Option<FunctionInvocationRequirements> {
+        if !Self::is_known(name) {
+            return None;
+        }
+
+        let mut required = Vec::new();
+        let optional_variable = |index: usize| {
+            arguments
+                .get(index)
+                .is_some_and(|value| !java_trim(value).is_empty())
+        };
+
+        match name {
+            "__BeanShell" | "__groovy" | "__javaScript" | "__jexl2" | "__jexl3" => {
+                required.push(FunctionCapability::Script);
+                if optional_variable(1) {
+                    required.push(FunctionCapability::VariableMutation);
+                }
+            }
+            "__CSVRead" => required.push(FunctionCapability::Files),
+            "__FileToString" => {
+                required.push(FunctionCapability::Files);
+                if optional_variable(2) {
+                    required.push(FunctionCapability::VariableMutation);
+                }
+            }
+            "__StringFromFile" => {
+                required.push(FunctionCapability::Files);
+                // JMeter writes StringFromFile_'s default variable when the
+                // reference is omitted. An explicit empty/blank reference
+                // suppresses that write.
+                if arguments
+                    .get(1)
+                    .is_none_or(|value| !java_trim(value).is_empty())
+                {
+                    required.push(FunctionCapability::VariableMutation);
+                }
+            }
+            "__StringToFile" => {
+                // An empty path returns "false" before the file capability is
+                // touched. With no path yet, retain the conservative
+                // name-level requirement for the otherwise file-backed call.
+                if arguments
+                    .first()
+                    .is_none_or(|value| !java_trim(value).is_empty())
+                {
+                    required.push(FunctionCapability::Files);
+                }
+            }
+            "__Random" => {
+                required.push(FunctionCapability::Random);
+                if optional_variable(2) {
+                    required.push(FunctionCapability::VariableMutation);
+                }
+            }
+            "__RandomDate" => {
+                required.push(FunctionCapability::Random);
+                // RandomDate only consults the clock when the start date is
+                // omitted/blank. DateTimeFormatter also supplies the current
+                // year when a caller uses a pattern without an explicit year,
+                // so that form needs the pinned clock as well.
+                if random_date_requires_clock(arguments) {
+                    required.push(FunctionCapability::Clock);
+                }
+                if optional_variable(4) {
+                    required.push(FunctionCapability::VariableMutation);
+                }
+            }
+            "__RandomFromMultipleVars" => {
+                required.push(FunctionCapability::Random);
+                if optional_variable(1) {
+                    required.push(FunctionCapability::VariableMutation);
+                }
+            }
+            "__RandomString" => {
+                required.push(FunctionCapability::Random);
+                if optional_variable(2) {
+                    required.push(FunctionCapability::VariableMutation);
+                }
+            }
+            "__UUID" => required.push(FunctionCapability::Random),
+            "__TestPlanName" => required.push(FunctionCapability::TestPlanName),
+            "__XPath" => required.push(FunctionCapability::Response),
+            "__regexFunction" => {
+                required.push(FunctionCapability::Response);
+                // RegexFunction writes the optional name exactly as
+                // supplied (unlike AbstractFunction::addVariableValue), so
+                // even an all-space non-empty name is a mutation.
+                if arguments.get(5).is_some_and(|value| !value.is_empty()) {
+                    required.push(FunctionCapability::VariableMutation);
+                }
+            }
+            "__log" | "__logn" => required.push(FunctionCapability::Log),
+            "__machineIP" | "__machineName" => {
+                required.push(FunctionCapability::HostIdentity);
+                if optional_variable(0) {
+                    required.push(FunctionCapability::VariableMutation);
+                }
+            }
+            "__samplerName" => {
+                required.push(FunctionCapability::SamplerIdentity);
+                if optional_variable(0) {
+                    required.push(FunctionCapability::VariableMutation);
+                }
+            }
+            "__threadGroupName" => required.push(FunctionCapability::ThreadGroupIdentity),
+            "__threadNum" => required.push(FunctionCapability::ThreadIdentity),
+            "__counter" => {
+                // Boolean.parseBoolean is false for every value except a
+                // case-insensitive "true". Both modes still need an
+                // explicit iteration identity: JMeter reuses one value for
+                // every occurrence of the same function instance during an
+                // iteration. Per-user counters additionally need a thread.
+                required.push(FunctionCapability::IterationIdentity);
+                if arguments
+                    .first()
+                    .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+                {
+                    required.push(FunctionCapability::ThreadIdentity);
+                }
+                if optional_variable(1) {
+                    required.push(FunctionCapability::VariableMutation);
+                }
+            }
+            "__time" => {
+                required.push(FunctionCapability::Clock);
+                if optional_variable(1) {
+                    required.push(FunctionCapability::VariableMutation);
+                }
+            }
+            "__timeShift" => {
+                // JMeter's formatted parser/formatter uses the process
+                // default zone (and the default locale when the locale slot
+                // is empty). The pure boundary therefore needs an injected
+                // clock for every formatted call, even when the input date
+                // is explicit. Numeric epoch shifting with an explicit date
+                // does not consult a clock.
+                if arguments
+                    .first()
+                    .is_none_or(|value| !java_trim(value).is_empty())
+                    || arguments
+                        .get(1)
+                        .is_none_or(|value| java_trim(value).is_empty())
+                {
+                    required.push(FunctionCapability::Clock);
+                }
+                let variable_index = match arguments.len() {
+                    4 => Some(3),
+                    5 => Some(4),
+                    _ => None,
+                };
+                if variable_index.is_some_and(optional_variable) {
+                    required.push(FunctionCapability::VariableMutation);
+                }
+            }
+            "__setProperty" => required.push(FunctionCapability::PropertyMutation),
+            "__split" => required.push(FunctionCapability::VariableMutation),
+            "__property" => {
+                // Property.java checks the raw optional name and does not
+                // trim it before storing; a literal space is therefore a
+                // real (if unusual) variable key.
+                if arguments.get(1).is_some_and(|value| !value.is_empty()) {
+                    required.push(FunctionCapability::VariableMutation);
+                }
+            }
+            "__changeCase" => {
+                if optional_variable(2) {
+                    required.push(FunctionCapability::VariableMutation);
+                }
+            }
+            "__escapeOroRegexpChars" => {
+                if optional_variable(1) {
+                    required.push(FunctionCapability::VariableMutation);
+                }
+            }
+            "__intSum" => {
+                if sum_requires_variable(arguments, true) {
+                    required.push(FunctionCapability::VariableMutation);
+                }
+            }
+            "__longSum" => {
+                if sum_requires_variable(arguments, false) {
+                    required.push(FunctionCapability::VariableMutation);
+                }
+            }
+            "__dateTimeConvert" => {
+                // DateTimeFormatter.withZone(ZoneId.systemDefault()) is
+                // used for both parsing and formatting by JMeter. A clock
+                // capability carries the pinned zone/locale at this pure
+                // boundary; never silently substitute the host zone.
+                required.push(FunctionCapability::Clock);
+                if optional_variable(3) {
+                    required.push(FunctionCapability::VariableMutation);
+                }
+            }
+            "__digest" => {
+                if optional_variable(4) {
+                    required.push(FunctionCapability::VariableMutation);
+                }
+            }
+            name if Self::is_known(name) => {}
+            _ => unreachable!("known function was not classified"),
+        }
+
+        Some(FunctionInvocationRequirements::new(required))
+    }
+
+    /// Classifies the observable effect boundary for one already-expanded
+    /// invocation.  This is metadata only; it does not execute the function
+    /// or claim that an unavailable external adapter can be rolled back.
+    #[must_use]
+    pub fn effect_class_for_invocation(name: &str, arguments: &[String]) -> Option<EffectClass> {
+        let requirements = Self::requirements_for_invocation(name, arguments)?;
+        let class = match name {
+            "__BeanShell" | "__groovy" | "__javaScript" | "__jexl2" | "__jexl3" | "__log"
+            | "__logn" | "__StringToFile" => EffectClass::IrreversibleExternal,
+            "__XPath" | "__regexFunction" => EffectClass::TransactionalExternal,
+            _ if requirements.is_pure() => EffectClass::Pure,
+            _ => EffectClass::JournaledNative,
+        };
+        Some(class)
     }
 
     /// Returns whether `name` is registered in the native 5.6.3 vocabulary.
@@ -285,46 +710,143 @@ impl BuiltinFunctions {
 
     /// Returns whether `name` can execute with this registry plus the
     /// capabilities supplied for one evaluation.
+    ///
+    /// This name-only compatibility query uses the function's omitted-
+    /// argument shape. Call [`Self::is_executable_for_invocation`] when the
+    /// expanded arguments are available; optional output variables and
+    /// argument-dependent clock/identity requirements cannot be inferred
+    /// from a name alone.
     #[must_use]
     pub fn is_executable_with_capabilities(
         &self,
         name: &str,
         capabilities: EvaluationCapabilities<'_>,
     ) -> bool {
-        let has_variable_setter =
-            self.variable_setter.is_some() || capabilities.has_variable_setter();
-        let has_property_setter =
-            self.property_setter.is_some() || capabilities.has_property_setter();
-        let has_test_plan_name = self.test_plan_name.is_some() || capabilities.has_test_plan_name();
-        let has_random = self.random.is_some() || capabilities.has_random_source();
-        let has_clock = self.clock.is_some() || capabilities.has_clock();
-        let has_execution = self.execution.is_some() || capabilities.has_execution_context();
-        let has_host = self.host.is_some() || capabilities.has_host_resolver();
-        let has_log = self.log.is_some() || capabilities.has_log_sink();
-        let has_files = self.files.is_some() || capabilities.has_file_capability();
-        let has_response = self.response.is_some() || capabilities.has_response_extractor();
-        let has_scripts = self.scripts.is_some() || capabilities.has_script_capability();
-        match name {
-            "__BeanShell" | "__groovy" | "__javaScript" | "__jexl2" | "__jexl3" => has_scripts,
-            "__CSVRead" | "__FileToString" | "__StringFromFile" | "__StringToFile" => {
-                has_files && (name != "__StringFromFile" || has_variable_setter)
+        self.is_executable_for_invocation(name, &[], capabilities)
+    }
+
+    /// Returns whether one already-expanded invocation can execute with this
+    /// registry plus the supplied per-evaluation capabilities.
+    #[must_use]
+    pub fn is_executable_for_invocation(
+        &self,
+        name: &str,
+        arguments: &[String],
+        capabilities: EvaluationCapabilities<'_>,
+    ) -> bool {
+        self.missing_capabilities_for_invocation(name, arguments, capabilities)
+            .is_some_and(|missing| missing.is_empty())
+    }
+
+    /// Returns the capabilities missing for one invocation, or `None` for an
+    /// unknown function name.
+    #[must_use]
+    pub fn missing_capabilities_for_invocation(
+        &self,
+        name: &str,
+        arguments: &[String],
+        capabilities: EvaluationCapabilities<'_>,
+    ) -> Option<Vec<FunctionCapability>> {
+        let requirements = Self::requirements_for_invocation(name, arguments)?;
+        Some(
+            requirements
+                .required_capabilities()
+                .iter()
+                .copied()
+                .filter(|capability| !self.has_capability(*capability, capabilities))
+                .collect(),
+        )
+    }
+
+    /// Reports support for one already-expanded invocation, distinguishing an
+    /// unknown function from a registered function whose exact arguments need
+    /// an unavailable capability.
+    #[must_use]
+    pub fn support_status_for_invocation(
+        &self,
+        name: &str,
+        arguments: &[String],
+        capabilities: EvaluationCapabilities<'_>,
+    ) -> FunctionSupport {
+        match self.missing_capabilities_for_invocation(name, arguments, capabilities) {
+            None => FunctionSupport::Unknown,
+            Some(missing) if missing.is_empty() => FunctionSupport::Executable,
+            Some(_) => FunctionSupport::Registered,
+        }
+    }
+
+    fn has_capability(
+        &self,
+        capability: FunctionCapability,
+        capabilities: EvaluationCapabilities<'_>,
+    ) -> bool {
+        match capability {
+            FunctionCapability::VariableMutation => {
+                self.variable_setter.is_some() || capabilities.has_variable_setter()
             }
-            "__Random" | "__RandomFromMultipleVars" | "__RandomString" | "__UUID" => has_random,
-            "__RandomDate" => has_random && has_clock,
-            "__TestPlanName" => has_test_plan_name,
-            "__XPath" | "__regexFunction" => has_response,
-            "__log" | "__logn" => has_log,
-            "__machineIP" | "__machineName" => has_host,
-            "__samplerName" | "__threadGroupName" | "__threadNum" => has_execution,
-            "__counter" => capabilities
-                .execution_context()
-                .or(self.execution.as_deref())
-                .is_some_and(|execution| execution.iteration_identity().is_some()),
-            "__time" | "__timeShift" => has_clock,
-            "__setProperty" => has_property_setter,
-            "__split" => has_variable_setter,
-            name if Self::is_known(name) => true,
-            _ => false,
+            FunctionCapability::PropertyMutation => {
+                self.property_setter.is_some() || capabilities.has_property_setter()
+            }
+            FunctionCapability::TestPlanName => {
+                self.test_plan_name.is_some() || capabilities.has_test_plan_name()
+            }
+            FunctionCapability::Random => self.random.is_some() || capabilities.has_random_source(),
+            FunctionCapability::Clock => self.clock.is_some() || capabilities.has_clock(),
+            FunctionCapability::ThreadIdentity => {
+                capabilities
+                    .execution_context()
+                    .and_then(ExecutionContext::thread_num)
+                    .is_some()
+                    || self
+                        .execution
+                        .as_deref()
+                        .and_then(ExecutionContext::thread_num)
+                        .is_some()
+            }
+            FunctionCapability::IterationIdentity => {
+                capabilities
+                    .execution_context()
+                    .and_then(ExecutionContext::iteration_identity)
+                    .is_some()
+                    || self
+                        .execution
+                        .as_deref()
+                        .and_then(ExecutionContext::iteration_identity)
+                        .is_some()
+            }
+            FunctionCapability::ThreadGroupIdentity => {
+                capabilities
+                    .execution_context()
+                    .and_then(ExecutionContext::thread_group_name)
+                    .is_some()
+                    || self
+                        .execution
+                        .as_deref()
+                        .and_then(ExecutionContext::thread_group_name)
+                        .is_some()
+            }
+            FunctionCapability::SamplerIdentity => {
+                capabilities
+                    .execution_context()
+                    .and_then(ExecutionContext::sampler_name)
+                    .is_some()
+                    || self
+                        .execution
+                        .as_deref()
+                        .and_then(ExecutionContext::sampler_name)
+                        .is_some()
+            }
+            FunctionCapability::HostIdentity => {
+                self.host.is_some() || capabilities.has_host_resolver()
+            }
+            FunctionCapability::Log => self.log.is_some() || capabilities.has_log_sink(),
+            FunctionCapability::Files => self.files.is_some() || capabilities.has_file_capability(),
+            FunctionCapability::Response => {
+                self.response.is_some() || capabilities.has_response_extractor()
+            }
+            FunctionCapability::Script => {
+                self.scripts.is_some() || capabilities.has_script_capability()
+            }
         }
     }
 
@@ -550,18 +1072,36 @@ impl BuiltinFunctions {
         self
     }
 
-    fn variable_value(&self, context: &FunctionContext<'_>, name: &str) -> Option<String> {
-        self.variable_setter
-            .as_deref()
-            .and_then(|setter| setter.get_variable(name))
-            .or_else(|| context.variable_value(name))
+    fn variable_value(
+        &self,
+        context: &FunctionContext<'_>,
+        name: &str,
+    ) -> Result<Option<String>, FunctionError> {
+        if context.has_variable_setter() {
+            return context.variable_value_checked(name);
+        }
+        match self.variable_setter.as_deref() {
+            Some(setter) => setter
+                .get_variable_checked(name)
+                .map(|value| value.or_else(|| context.variable(name).map(str::to_owned))),
+            None => context.variable_value_checked(name),
+        }
     }
 
-    fn property_value(&self, context: &FunctionContext<'_>, name: &str) -> Option<String> {
-        self.property_setter
-            .as_deref()
-            .and_then(|setter| setter.get_property(name))
-            .or_else(|| context.property_value(name))
+    fn property_value(
+        &self,
+        context: &FunctionContext<'_>,
+        name: &str,
+    ) -> Result<Option<String>, FunctionError> {
+        if context.has_property_setter() {
+            return context.property_value_checked(name);
+        }
+        match self.property_setter.as_deref() {
+            Some(setter) => setter
+                .get_property_checked(name)
+                .map(|value| value.or_else(|| context.property(name).map(str::to_owned))),
+            None => context.property_value_checked(name),
+        }
     }
 
     fn set_variable(
@@ -570,10 +1110,28 @@ impl BuiltinFunctions {
         name: &str,
         value: &str,
     ) -> Result<(), FunctionError> {
+        if context.has_variable_setter() {
+            return context.set_variable(name, value);
+        }
         if let Some(setter) = self.variable_setter.as_deref() {
             setter.set_variable(name, value)
         } else {
             context.set_variable(name, value)
+        }
+    }
+
+    fn set_variables_atomic(
+        &self,
+        context: &FunctionContext<'_>,
+        values: &[(&str, &str)],
+    ) -> Result<(), FunctionError> {
+        if context.has_variable_setter() {
+            return context.set_variables_atomic(values);
+        }
+        if let Some(setter) = self.variable_setter.as_deref() {
+            setter.set_variables_atomic(values)
+        } else {
+            context.set_variables_atomic(values)
         }
     }
 
@@ -582,6 +1140,9 @@ impl BuiltinFunctions {
         context: &FunctionContext<'_>,
         name: &str,
     ) -> Result<(), FunctionError> {
+        if context.has_variable_setter() {
+            return context.remove_variable(name);
+        }
         if let Some(setter) = self.variable_setter.as_deref() {
             setter.remove_variable(name)
         } else {
@@ -595,6 +1156,9 @@ impl BuiltinFunctions {
         name: &str,
         value: &str,
     ) -> Result<Option<String>, FunctionError> {
+        if context.has_property_setter() {
+            return context.set_property(name, value);
+        }
         if let Some(setter) = self.property_setter.as_deref() {
             setter.set_property(name, value)
         } else {
@@ -648,6 +1212,20 @@ impl BuiltinFunctions {
             self.clock.as_deref().and_then(ClockSource::locale)
         };
         locale_from(value.as_deref())
+    }
+
+    fn clock_year(&self, context: &FunctionContext<'_>) -> Result<i64, FunctionError> {
+        let (millis, offset) = self.clock_values(context)?;
+        Ok(civil_from_days(local_epoch_day(millis, offset)?).0)
+    }
+
+    fn require_clock(&self, context: &FunctionContext<'_>) -> Result<(), FunctionError> {
+        if context.clock().is_none() && self.clock.is_none() {
+            return Err(FunctionError::unsupported(
+                "clock capability is unavailable",
+            ));
+        }
+        Ok(())
     }
 
     fn thread_num_value(&self, context: &FunctionContext<'_>) -> Result<u32, FunctionError> {
@@ -937,8 +1515,8 @@ impl BuiltinFunctions {
         check_count("__V", arguments, 1, 2)?;
         let name = &arguments[0];
         Ok(self
-            .variable_value(context, name)
-            .or_else(|| arguments.get(1).filter(|value| !value.is_empty()).cloned())
+            .variable_value(context, name)?
+            .or_else(|| arguments.get(1).cloned())
             .unwrap_or_else(|| name.clone()))
     }
 
@@ -950,10 +1528,13 @@ impl BuiltinFunctions {
         check_count("__property", arguments, 1, 3)?;
         let name = &arguments[0];
         let value = self
-            .property_value(context, name)
+            .property_value(context, name)?
             .or_else(|| arguments.get(2).cloned())
             .unwrap_or_else(|| name.clone());
-        set_optional_variable(self, context, arguments.get(1), &value)?;
+        if let Some(variable_name) = arguments.get(1).filter(|name| !name.is_empty()) {
+            ensure_variable_mutation_available(self, context)?;
+            self.set_variable(context, variable_name, &value)?;
+        }
         Ok(value)
     }
 
@@ -965,7 +1546,7 @@ impl BuiltinFunctions {
         check_count("__P", arguments, 1, 2)?;
         let name = &arguments[0];
         Ok(self
-            .property_value(context, name)
+            .property_value(context, name)?
             .or_else(|| arguments.get(1).cloned())
             .unwrap_or_else(|| "1".to_owned()))
     }
@@ -993,6 +1574,7 @@ impl BuiltinFunctions {
         context: &FunctionContext<'_>,
     ) -> Result<String, FunctionError> {
         check_count("__changeCase", arguments, 1, 3)?;
+        ensure_optional_variable_mutation(self, context, arguments.get(2))?;
         // JMeter treats an omitted or empty mode as the default UPPER mode.
         // Other unknown, non-empty modes are logged upstream and leave the
         // input unchanged.
@@ -1003,7 +1585,7 @@ impl BuiltinFunctions {
         let value = match mode.to_ascii_uppercase().as_str() {
             "UPPER" => arguments[0].to_uppercase(),
             "LOWER" => arguments[0].to_lowercase(),
-            "CAPITALIZE" => capitalize(&arguments[0]),
+            "CAPITALIZE" => capitalize(&arguments[0])?,
             _ => arguments[0].clone(),
         };
         // Unicode case mapping can expand a scalar (for example, `ß` to
@@ -1024,6 +1606,7 @@ impl BuiltinFunctions {
         context: &FunctionContext<'_>,
     ) -> Result<String, FunctionError> {
         check_count("__escapeOroRegexpChars", arguments, 1, 2)?;
+        ensure_optional_variable_mutation(self, context, arguments.get(1))?;
         let mut escaped = String::with_capacity(
             arguments[0]
                 .len()
@@ -1100,7 +1683,7 @@ impl BuiltinFunctions {
     ) -> Result<String, FunctionError> {
         check_count("__evalVar", arguments, 1, 1)?;
         let value = self
-            .variable_value(context, &arguments[0])
+            .variable_value(context, &arguments[0])?
             .unwrap_or_default();
         context.evaluate_nested(&value)
     }
@@ -1112,7 +1695,7 @@ impl BuiltinFunctions {
     ) -> Result<String, FunctionError> {
         check_count("__isPropDefined", arguments, 1, 1)?;
         Ok(self
-            .property_value(context, &arguments[0])
+            .property_value(context, &arguments[0])?
             .is_some()
             .to_string())
     }
@@ -1124,7 +1707,7 @@ impl BuiltinFunctions {
     ) -> Result<String, FunctionError> {
         check_count("__isVarDefined", arguments, 1, 1)?;
         Ok(self
-            .variable_value(context, &arguments[0])
+            .variable_value(context, &arguments[0])?
             .is_some()
             .to_string())
     }
@@ -1135,11 +1718,21 @@ impl BuiltinFunctions {
         context: &FunctionContext<'_>,
     ) -> Result<String, FunctionError> {
         check_count("__Random", arguments, 2, 3)?;
+        ensure_optional_variable_mutation(self, context, arguments.get(2))?;
         let minimum = parse_i64("__Random", &arguments[0])?;
         let maximum = parse_i64("__Random", &arguments[1])?;
         if minimum > maximum {
             return Err(FunctionError::invalid_arguments(
                 "__Random minimum must not exceed maximum",
+            ));
+        }
+        // JMeter passes `max + 1` to ThreadLocalRandom.nextLong.  The
+        // addition is performed in Java `long` arithmetic, so Long.MAX_VALUE
+        // wraps to Long.MIN_VALUE and the upstream call rejects the range
+        // instead of representing the full signed domain.
+        if maximum == i64::MAX {
+            return Err(FunctionError::invalid_arguments(
+                "__Random maximum is outside JMeter's exclusive-bound range",
             ));
         }
         let mut next = || self.next_random_u64(context);
@@ -1155,32 +1748,56 @@ impl BuiltinFunctions {
         context: &FunctionContext<'_>,
     ) -> Result<String, FunctionError> {
         check_count("__RandomDate", arguments, 3, 5)?;
+        ensure_optional_variable_mutation(self, context, arguments.get(4))?;
         let format = if java_trim(&arguments[0]).is_empty() {
             "yyyy-MM-dd"
         } else {
             java_trim(&arguments[0])
         };
+        let date_start = java_trim(&arguments[1]);
         let locale = if arguments
             .get(3)
             .is_none_or(|value| java_trim(value).is_empty())
         {
-            self.clock_locale(context)?
+            // JMeter uses the process default locale here. The pure boundary
+            // supplies a deterministic en_US fallback, while a clock's
+            // explicit locale remains available when the start date is
+            // omitted and the clock is already required for today's date.
+            if date_start.is_empty() || self.clock.is_some() || context.clock().is_some() {
+                self.clock_locale(context)?
+            } else {
+                Locale::EnUs
+            }
         } else {
             locale_from(arguments.get(3).map(String::as_str))?
         };
-        let start = if arguments[1].is_empty() {
+        let default_year = if date_start.is_empty() || !date_pattern_has_year(format) {
             let (now, offset) = self.clock_values(context)?;
-            start_of_day(now, offset)
+            Some(civil_from_days(local_epoch_day(now, offset)?).0)
         } else {
-            parse_datetime(format, java_trim(&arguments[1]), locale)?
+            None
+        };
+        let start_day = if date_start.is_empty() {
+            let (now, offset) = self.clock_values(context)?;
+            local_epoch_day(now, offset)?
+        } else {
+            parse_datetime_with_year_offset(format, date_start, locale, 0, default_year)?
+                .div_euclid(86_400_000)
         };
         if arguments[2].is_empty() {
             return Err(FunctionError::invalid_arguments(
                 "__RandomDate requires an end date",
             ));
         }
-        let end = parse_datetime(format, java_trim(&arguments[2]), locale)?;
-        if start >= end {
+        let end_day = parse_datetime_with_year_offset(
+            format,
+            java_trim(&arguments[2]),
+            locale,
+            0,
+            default_year,
+        )?
+        .div_euclid(86_400_000);
+        if start_day >= end_day {
             return Err(FunctionError::invalid_arguments(
                 "__RandomDate start date must be before the exclusive end date",
             ));
@@ -1189,8 +1806,6 @@ impl BuiltinFunctions {
         // number of calendar days, not a millisecond interval.  Sampling the
         // epoch-day range also keeps the end date exclusive when the format
         // omits a time component.
-        let start_day = start.div_euclid(86_400_000);
-        let end_day = end.div_euclid(86_400_000);
         let mut next = || self.next_random_u64(context);
         let day = uniform_exclusive(&mut next, start_day, end_day)?;
         let millis = day
@@ -1207,12 +1822,17 @@ impl BuiltinFunctions {
         context: &FunctionContext<'_>,
     ) -> Result<String, FunctionError> {
         check_count("__RandomFromMultipleVars", arguments, 1, 2)?;
+        ensure_optional_variable_mutation(self, context, arguments.get(1))?;
         let mut values = Vec::new();
-        for variable in java_trim(&arguments[0]).split('|').map(java_trim) {
+        // JMeter trims the complete source argument once, then splits on the
+        // literal pipe. It does not trim each variable name after splitting.
+        // This distinction is observable for variable names that themselves
+        // contain spaces and must not be normalized at the expression layer.
+        for variable in java_trim(&arguments[0]).split('|') {
             if variable.is_empty() {
                 continue;
             }
-            let match_count_value = self.variable_value(context, &format!("{variable}_matchNr"));
+            let match_count_value = self.variable_value(context, &format!("{variable}_matchNr"))?;
             // JMeter parses _matchNr with Integer.parseInt without trimming.
             // A missing, zero, or negative count falls back to the scalar
             // variable; only a positive count selects numbered candidates.
@@ -1220,7 +1840,7 @@ impl BuiltinFunctions {
                 .as_deref()
                 .filter(|value| !value.is_empty())
                 .map(|value| {
-                    value.parse::<i64>().map_err(|_| {
+                    value.parse::<i32>().map(i64::from).map_err(|_| {
                         FunctionError::invalid_arguments(format!(
                             "__RandomFromMultipleVars has an invalid {variable}_matchNr"
                         ))
@@ -1239,20 +1859,25 @@ impl BuiltinFunctions {
                     ));
                 }
                 for index in 1..=match_count {
-                    if let Some(value) = self
-                        .variable_value(context, &format!("{variable}_{index}"))
-                        .filter(|value| !value.is_empty())
-                    {
-                        if values.len() == MAX_RANDOM_VALUES {
-                            return Err(FunctionError::invalid_arguments(
-                                "__RandomFromMultipleVars has too many candidate values",
-                            ));
-                        }
-                        values.push(value);
+                    let value_name = format!("{variable}_{index}");
+                    let value = self.variable_value(context, &value_name)?.ok_or_else(|| {
+                        FunctionError::unsupported(format!(
+                            "__RandomFromMultipleVars candidate variable {value_name} is unavailable"
+                        ))
+                    })?;
+                    if values.len() == MAX_RANDOM_VALUES {
+                        return Err(FunctionError::invalid_arguments(
+                            "__RandomFromMultipleVars has too many candidate values",
+                        ));
                     }
+                    // A numbered JMeter variable may intentionally be empty;
+                    // StringUtils.isEmpty is only used for the scalar
+                    // fallback. Preserve the empty candidate in the random
+                    // list instead of silently dropping it.
+                    values.push(value);
                 }
             } else if let Some(value) = self
-                .variable_value(context, variable)
+                .variable_value(context, variable)?
                 .filter(|value| !value.is_empty())
             {
                 if values.len() == MAX_RANDOM_VALUES {
@@ -1280,6 +1905,7 @@ impl BuiltinFunctions {
         context: &FunctionContext<'_>,
     ) -> Result<String, FunctionError> {
         check_count("__RandomString", arguments, 1, 3)?;
+        ensure_optional_variable_mutation(self, context, arguments.get(2))?;
         let length = parse_usize("__RandomString", &arguments[0])?;
         if length > i32::MAX as usize {
             return Err(FunctionError::invalid_arguments(
@@ -1396,6 +2022,10 @@ impl BuiltinFunctions {
     ) -> Result<String, FunctionError> {
         check_count("__counter", arguments, 1, 2)?;
         let per_user = parse_bool("__counter", &arguments[0])?;
+        // Validate the optional write capability before touching the shared
+        // counter state. A failed capability lookup must not consume a
+        // counter value.
+        ensure_optional_variable_mutation(self, context, arguments.get(1))?;
         let execution = context.execution_context().or(self.execution.as_deref());
         let iteration = execution
             .and_then(ExecutionContext::iteration_identity)
@@ -1444,7 +2074,7 @@ impl BuiltinFunctions {
             let mut counters = self
                 .counters
                 .lock()
-                .map_err(|_| FunctionError::execution("counter state lock is poisoned"))?;
+                .map_err(|_| FunctionError::poisoned("counter state lock is poisoned"))?;
             let cache_key = (scope.clone(), iteration);
             if let Some(value) = counters.cached_values.get(&cache_key) {
                 *value
@@ -1479,16 +2109,21 @@ impl BuiltinFunctions {
         context: &FunctionContext<'_>,
     ) -> Result<String, FunctionError> {
         check_count("__dateTimeConvert", arguments, 3, 4)?;
+        ensure_optional_variable_mutation(self, context, arguments.get(3))?;
+        self.require_clock(context)?;
+        let locale = self.clock_locale(context)?;
+        let offset = self.clock_offset(context);
         let source_format = arguments[1].as_str();
         let millis = if source_format.is_empty() {
             parse_i64("__dateTimeConvert", &arguments[0])?
         } else {
-            parse_datetime(source_format, &arguments[0], Locale::EnUs)?
+            parse_datetime_with_offset(source_format, &arguments[0], locale, offset)?
         };
-        let value = format_datetime(
+        let value = format_datetime_with_offset(
             millis,
             &arguments[2],
-            Locale::EnUs,
+            locale,
+            offset,
             context.max_output_bytes(),
         )?;
         set_optional_variable(self, context, arguments.get(3), &value)?;
@@ -1501,12 +2136,18 @@ impl BuiltinFunctions {
         context: &FunctionContext<'_>,
     ) -> Result<String, FunctionError> {
         check_count("__digest", arguments, 2, 5)?;
-        let algorithm = arguments[0].to_ascii_uppercase();
+        ensure_optional_variable_mutation(self, context, arguments.get(4))?;
+        // MessageDigest algorithm lookup is case-insensitive, but aliases
+        // remain provider-defined. The JDK provider used by the pinned
+        // JMeter release exposes SHA/SHA1 as aliases for SHA-1; it does not
+        // expose the tempting SHA256/SHA512 spellings. Keep that boundary
+        // explicit instead of accepting Rust-only aliases.
+        let algorithm = arguments[0].as_str();
         let mut bytes = arguments[1].as_bytes().to_vec();
         if let Some(salt) = arguments.get(2).filter(|salt| !salt.is_empty()) {
             bytes.extend_from_slice(salt.as_bytes());
         }
-        let digest = digest_bytes(&algorithm, &bytes)?;
+        let digest = digest_bytes(algorithm, &bytes)?;
         let uppercase = arguments
             .get(3)
             .map_or(Ok(false), |value| parse_bool("__digest", value))?;
@@ -1527,12 +2168,16 @@ impl BuiltinFunctions {
             1,
             if empty_result { 3 } else { 4 },
         )?;
-        let level = arguments
-            .get(1)
-            .map(|value| java_trim(value))
-            .filter(|value| !value.is_empty())
-            .unwrap_or("INFO")
-            .to_ascii_uppercase();
+        let level = arguments.get(1).map_or_else(
+            || "INFO".to_owned(),
+            |value| {
+                if value.is_empty() {
+                    "INFO".to_owned()
+                } else {
+                    java_trim(value).to_ascii_uppercase()
+                }
+            },
+        );
         // JMeter sends unrecognized priorities to DEBUG after trimming and
         // uppercasing; they are not invalid arguments.
         let level = match level.as_str() {
@@ -1566,6 +2211,7 @@ impl BuiltinFunctions {
         context: &FunctionContext<'_>,
     ) -> Result<String, FunctionError> {
         check_count("__machineName", arguments, 0, 1)?;
+        ensure_optional_variable_mutation(self, context, arguments.first())?;
         let value = self.machine_name_value(context)?;
         set_optional_variable(self, context, arguments.first(), &value)?;
         Ok(value)
@@ -1577,6 +2223,7 @@ impl BuiltinFunctions {
         context: &FunctionContext<'_>,
     ) -> Result<String, FunctionError> {
         check_count("__machineIP", arguments, 0, 1)?;
+        ensure_optional_variable_mutation(self, context, arguments.first())?;
         let value = self.machine_ip_value(context)?;
         set_optional_variable(self, context, arguments.first(), &value)?;
         Ok(value)
@@ -1606,6 +2253,7 @@ impl BuiltinFunctions {
         context: &FunctionContext<'_>,
     ) -> Result<String, FunctionError> {
         check_count("__samplerName", arguments, 0, 1)?;
+        ensure_optional_variable_mutation(self, context, arguments.first())?;
         let value = self.sampler_name_value(context)?;
         set_optional_variable(self, context, arguments.first(), &value)?;
         Ok(value)
@@ -1617,6 +2265,7 @@ impl BuiltinFunctions {
         context: &FunctionContext<'_>,
     ) -> Result<String, FunctionError> {
         check_count("__time", arguments, 0, 2)?;
+        ensure_optional_variable_mutation(self, context, arguments.get(1))?;
         let (millis, offset) = self.clock_values(context)?;
         let format = arguments.first().map_or("", String::as_str);
         let value = if format.is_empty() {
@@ -1640,7 +2289,7 @@ impl BuiltinFunctions {
                 .ok_or_else(|| FunctionError::execution("__time divisor overflowed epoch range"))?
                 .to_string()
         } else {
-            let format = time_alias(self, context, format);
+            let format = time_alias(self, context, format)?;
             format_datetime_with_offset(
                 millis,
                 &format,
@@ -1658,22 +2307,43 @@ impl BuiltinFunctions {
         arguments: &[String],
         context: &FunctionContext<'_>,
     ) -> Result<String, FunctionError> {
-        check_count("__timeShift", arguments, 0, 5)?;
+        // TimeShift's Java implementation requires the four positional
+        // arguments (format, date, amount, variable), with a fifth locale
+        // slot only when explicitly requested. Empty values are how callers
+        // select the defaults; omitting the positions is not equivalent.
+        check_count("__timeShift", arguments, 4, 5)?;
         let format = arguments.first().map_or("", |value| java_trim(value));
-        let locale_argument = arguments.get(3);
-        let variable_argument = arguments.get(4);
+        let date = arguments.get(1).map_or("", |value| java_trim(value));
+        let (locale_argument, variable_argument) = if arguments.len() == 4 {
+            (None, arguments.get(3))
+        } else {
+            (arguments.get(3), arguments.get(4))
+        };
+        ensure_optional_variable_mutation(self, context, variable_argument)?;
         let locale = if locale_argument.is_none_or(|value| java_trim(value).is_empty()) {
-            self.clock_locale(context)?
+            if format.is_empty() && !date.is_empty() {
+                Locale::EnUs
+            } else {
+                self.clock_locale(context)?
+            }
         } else {
             locale_from(locale_argument.map(String::as_str))?
         };
-        let date = arguments.get(1).map_or("", |value| java_trim(value));
+        if !format.is_empty() {
+            self.require_clock(context)?;
+        }
         let millis = if date.is_empty() {
             self.clock_values(context)?.0
         } else if format.is_empty() {
             parse_i64("__timeShift", date)?
         } else {
-            parse_datetime(format, date, locale)?
+            parse_datetime_with_year_offset(
+                format,
+                date,
+                locale,
+                self.clock_offset(context),
+                Some(self.clock_year(context)?),
+            )?
         };
         let shift_argument = arguments.get(2).map_or("", |value| java_trim(value));
         let shift = if shift_argument.is_empty() {
@@ -1705,17 +2375,34 @@ impl BuiltinFunctions {
         context: &FunctionContext<'_>,
     ) -> Result<String, FunctionError> {
         check_count("__split", arguments, 2, 3)?;
+        ensure_variable_mutation_available(self, context)?;
         let delimiters = arguments
             .get(2)
             .filter(|value| !value.is_empty())
             .map_or(",", String::as_str);
         let parts = split_jmeter(&arguments[0], delimiters);
         let prefix = java_trim(&arguments[1]);
-        self.set_variable(context, prefix, &arguments[0])?;
-        self.set_variable(context, &format!("{prefix}_n"), &parts.len().to_string())?;
-        for (index, part) in parts.iter().enumerate() {
-            self.set_variable(context, &format!("{prefix}_{}", index + 1), part)?;
+        if parts.len() > MAX_VARIABLE_UPDATES {
+            return Err(FunctionError::resource_limit(
+                "__split produced too many variable updates",
+            ));
         }
+        let count = parts.len().to_string();
+        let count_name = format!("{prefix}_n");
+        let mut names = Vec::with_capacity(parts.len() + 2);
+        names.push(prefix.to_owned());
+        names.push(count_name);
+        names.extend((1..=parts.len()).map(|index| format!("{prefix}_{index}")));
+        let mut updates = Vec::with_capacity(names.len());
+        updates.push((names[0].as_str(), arguments[0].as_str()));
+        updates.push((names[1].as_str(), count.as_str()));
+        updates.extend(
+            parts
+                .iter()
+                .zip(names.iter().skip(2))
+                .map(|(part, name)| (name.as_str(), part.as_str())),
+        );
+        set_variables_atomically(self, context, &updates)?;
         self.remove_variable(context, &format!("{prefix}_{}", parts.len() + 1))?;
         Ok(arguments[0].clone())
     }
@@ -1726,17 +2413,16 @@ impl BuiltinFunctions {
         context: &FunctionContext<'_>,
     ) -> Result<String, FunctionError> {
         check_count("__FileToString", arguments, 1, 3)?;
-        let value = match self.file_read_to_string(
-            context,
-            arguments[0].as_str(),
-            arguments.get(1).map(|value| java_trim(value)),
-        ) {
+        ensure_optional_variable_mutation(self, context, arguments.get(2))?;
+        let encoding = arguments
+            .get(1)
+            .map(|value| java_trim(value))
+            .filter(|value| !value.is_empty());
+        let value = match self.file_read_to_string(context, arguments[0].as_str(), encoding) {
             Ok(value) => value,
-            Err(FunctionError::Unsupported(message)) => {
-                return Err(FunctionError::Unsupported(message));
-            }
-            Err(_) => "**ERR**".to_owned(),
+            Err(error) => file_read_error_or_err(error)?,
         };
+        ensure_function_output_bound(context, &value)?;
         set_optional_variable(self, context, arguments.get(2), &value)?;
         Ok(value)
     }
@@ -1747,6 +2433,11 @@ impl BuiltinFunctions {
         context: &FunctionContext<'_>,
     ) -> Result<String, FunctionError> {
         check_count("__StringFromFile", arguments, 1, 4)?;
+        if let Some(variable_argument) = arguments.get(1) {
+            ensure_optional_variable_mutation(self, context, Some(variable_argument))?;
+        } else {
+            ensure_variable_mutation_available(self, context)?;
+        }
         let key = arguments
             .get(1)
             .map_or(DEFAULT_STRING_FROM_FILE_VARIABLE, |value| java_trim(value));
@@ -1763,14 +2454,9 @@ impl BuiltinFunctions {
             end_sequence,
         ) {
             Ok(value) => value,
-            Err(FunctionError::Unsupported(message)) => {
-                return Err(FunctionError::Unsupported(message));
-            }
-            Err(FunctionError::StopThread(message)) => {
-                return Err(FunctionError::StopThread(message));
-            }
-            Err(_) => "**ERR**".to_owned(),
+            Err(error) => file_read_error_or_err(error)?,
         };
+        ensure_function_output_bound(context, &value)?;
         let variable_name = match arguments.get(1) {
             None => Some(DEFAULT_STRING_FROM_FILE_VARIABLE.to_owned()),
             Some(value) => {
@@ -1820,8 +2506,7 @@ impl BuiltinFunctions {
                 .filter(|encoding| !encoding.is_empty()),
         ) {
             Ok(()) => Ok("true".to_owned()),
-            Err(FunctionError::Unsupported(message)) => Err(FunctionError::Unsupported(message)),
-            Err(_) => Ok("false".to_owned()),
+            Err(error) => file_write_error_or_false(error),
         }
     }
 
@@ -1833,13 +2518,15 @@ impl BuiltinFunctions {
         check_count("__CSVRead", arguments, 2, 2)?;
         let selector = arguments[1].as_str();
         let delimiter = self
-            .property_value(context, "csvread.delimiter")
+            .property_value(context, "csvread.delimiter")?
             .and_then(|value| value.chars().next())
             .unwrap_or(',');
         match self.file_read_csv(context, &arguments[0], selector, delimiter) {
-            Ok(value) => Ok(value),
-            Err(FunctionError::Unsupported(message)) => Err(FunctionError::Unsupported(message)),
-            Err(_) => Ok(String::new()),
+            Ok(value) => {
+                ensure_function_output_bound(context, &value)?;
+                Ok(value)
+            }
+            Err(error) => file_read_error_or_empty(error),
         }
     }
 
@@ -1858,13 +2545,37 @@ impl BuiltinFunctions {
         context: &FunctionContext<'_>,
     ) -> Result<String, FunctionError> {
         check_count("__regexFunction", arguments, 2, 7)?;
+        if arguments.get(5).is_some_and(|value| !value.is_empty()) {
+            ensure_variable_mutation_available(self, context)?;
+        }
         let (value, captures) = self.regex_value(context, arguments)?;
+        if value.len() > context.max_output_bytes() {
+            return Err(FunctionError::execution(
+                "__regexFunction result exceeds the expression output bound",
+            ));
+        }
         if let Some(prefix) = arguments.get(5).filter(|value| !value.is_empty()) {
-            set_optional_variable(self, context, Some(prefix), &value)?;
+            if captures.len() + 1 > MAX_VARIABLE_UPDATES {
+                return Err(FunctionError::resource_limit(
+                    "__regexFunction produced too many variable updates",
+                ));
+            }
+            let mut names = Vec::with_capacity(captures.len() + 1);
+            let mut values = Vec::with_capacity(captures.len() + 1);
+            names.push(prefix.clone());
+            values.push(value);
             for (name, capture) in captures {
                 let variable_name = format!("{prefix}{name}");
-                set_optional_variable(self, context, Some(&variable_name), &capture)?;
+                names.push(variable_name);
+                values.push(capture);
             }
+            let updates = names
+                .iter()
+                .zip(values.iter())
+                .map(|(name, value)| (name.as_str(), value.as_str()))
+                .collect::<Vec<_>>();
+            set_variables_atomically(self, context, &updates)?;
+            return Ok(values[0].clone());
         }
         Ok(value)
     }
@@ -1876,6 +2587,7 @@ impl BuiltinFunctions {
         name: &str,
     ) -> Result<String, FunctionError> {
         check_count(name, arguments, 1, 2)?;
+        ensure_optional_variable_mutation(self, context, arguments.get(1))?;
         let value = self.script_value(context, name, arguments)?;
         set_optional_variable(self, context, arguments.get(1), &value)?;
         Ok(value)
@@ -1967,12 +2679,58 @@ fn parse_i64(name: &str, value: &str) -> Result<i64, FunctionError> {
 }
 
 fn parse_usize(name: &str, value: &str) -> Result<usize, FunctionError> {
-    // The pinned 5.6.3 RandomString bytecode calls Integer.parseInt on the
-    // CompoundVariable result after String.trim(). Keep Java's ASCII trim
-    // boundary rather than Rust's broader Unicode whitespace behavior.
-    java_trim(value).parse::<usize>().map_err(|_| {
+    // RandomString delegates directly to Integer.parseInt; unlike the
+    // numeric functions that explicitly call String.trim(), its length
+    // argument preserves surrounding whitespace and therefore rejects it.
+    let value = value.parse::<i32>().map_err(|_| {
+        FunctionError::invalid_arguments(format!("{name} expects a non-negative integer"))
+    })?;
+    usize::try_from(value).map_err(|_| {
         FunctionError::invalid_arguments(format!("{name} expects a non-negative integer"))
     })
+}
+
+fn sum_requires_variable(arguments: &[String], integer: bool) -> bool {
+    let Some(last) = arguments.last() else {
+        return false;
+    };
+    let last = java_trim(last);
+    if integer {
+        last.parse::<i32>().is_err()
+    } else {
+        !last.is_empty() && last.parse::<i64>().is_err()
+    }
+}
+
+fn random_date_requires_clock(arguments: &[String]) -> bool {
+    arguments
+        .get(1)
+        .is_none_or(|value| java_trim(value).is_empty())
+        || !date_pattern_has_year(arguments.first().map_or("yyyy-MM-dd", |value| {
+            let value = java_trim(value);
+            if value.is_empty() {
+                "yyyy-MM-dd"
+            } else {
+                value
+            }
+        }))
+}
+
+fn date_pattern_has_year(pattern: &str) -> bool {
+    let mut quoted = false;
+    let mut chars = pattern.chars().peekable();
+    while let Some(character) = chars.next() {
+        if character == '\'' {
+            if chars.peek() == Some(&'\'') {
+                chars.next();
+            } else {
+                quoted = !quoted;
+            }
+        } else if !quoted && matches!(character, 'y' | 'u') {
+            return true;
+        }
+    }
+    false
 }
 
 fn is_private_use_code_point(value: u32) -> bool {
@@ -2696,22 +3454,109 @@ fn parse_bool(name: &str, value: &str) -> Result<bool, FunctionError> {
     Ok(value.eq_ignore_ascii_case("true"))
 }
 
+fn ensure_function_output_bound(
+    context: &FunctionContext<'_>,
+    value: &str,
+) -> Result<(), FunctionError> {
+    if value.len() > context.max_output_bytes() {
+        return Err(FunctionError::execution(
+            "function result exceeds the expression output bound",
+        ));
+    }
+    Ok(())
+}
+
+fn file_read_error_or_err(error: FunctionError) -> Result<String, FunctionError> {
+    match error {
+        // Capability and control-boundary failures must remain typed. Mapping
+        // them to JMeter's ordinary I/O marker would silently turn an
+        // unavailable/limited adapter into a successful-looking result.
+        FunctionError::Unsupported(message) => Err(FunctionError::Unsupported(message)),
+        FunctionError::StopThread(message) => Err(FunctionError::StopThread(message)),
+        FunctionError::ResourceLimit(message) => Err(FunctionError::ResourceLimit(message)),
+        FunctionError::Poisoned(message) => Err(FunctionError::Poisoned(message)),
+        _ => Ok("**ERR**".to_owned()),
+    }
+}
+
+fn file_read_error_or_empty(error: FunctionError) -> Result<String, FunctionError> {
+    match error {
+        FunctionError::Unsupported(message) => Err(FunctionError::Unsupported(message)),
+        FunctionError::StopThread(message) => Err(FunctionError::StopThread(message)),
+        FunctionError::ResourceLimit(message) => Err(FunctionError::ResourceLimit(message)),
+        FunctionError::Poisoned(message) => Err(FunctionError::Poisoned(message)),
+        _ => Ok(String::new()),
+    }
+}
+
+fn file_write_error_or_false(error: FunctionError) -> Result<String, FunctionError> {
+    match error {
+        FunctionError::Unsupported(message) => Err(FunctionError::Unsupported(message)),
+        FunctionError::StopThread(message) => Err(FunctionError::StopThread(message)),
+        FunctionError::ResourceLimit(message) => Err(FunctionError::ResourceLimit(message)),
+        FunctionError::Poisoned(message) => Err(FunctionError::Poisoned(message)),
+        _ => Ok("false".to_owned()),
+    }
+}
+
 fn set_optional_variable(
     registry: &BuiltinFunctions,
     context: &FunctionContext<'_>,
     name: Option<&String>,
     value: &str,
 ) -> Result<(), FunctionError> {
+    if value.len() > context.max_output_bytes() {
+        return Err(FunctionError::execution(
+            "variable value exceeds the expression output bound",
+        ));
+    }
+    ensure_optional_variable_mutation(registry, context, name)?;
     if let Some(name) = name {
         let name = java_trim(name);
         if !name.is_empty() {
-            if registry.variable_setter.is_none() && !context.has_variable_setter() {
-                return Err(FunctionError::unsupported(
-                    "variable mutation capability is unavailable",
-                ));
-            }
             registry.set_variable(context, name, value)?;
         }
+    }
+    Ok(())
+}
+
+fn set_variables_atomically(
+    registry: &BuiltinFunctions,
+    context: &FunctionContext<'_>,
+    values: &[(&str, &str)],
+) -> Result<(), FunctionError> {
+    if values.iter().any(|(name, value)| {
+        name.len() > context.max_output_bytes() || value.len() > context.max_output_bytes()
+    }) {
+        return Err(FunctionError::execution(
+            "variable mutation exceeds the expression output bound",
+        ));
+    }
+    registry.set_variables_atomic(context, values)
+}
+
+fn ensure_optional_variable_mutation(
+    registry: &BuiltinFunctions,
+    context: &FunctionContext<'_>,
+    name: Option<&String>,
+) -> Result<(), FunctionError> {
+    if name
+        .map(|value| !java_trim(value).is_empty())
+        .unwrap_or(false)
+    {
+        ensure_variable_mutation_available(registry, context)?;
+    }
+    Ok(())
+}
+
+fn ensure_variable_mutation_available(
+    registry: &BuiltinFunctions,
+    context: &FunctionContext<'_>,
+) -> Result<(), FunctionError> {
+    if registry.variable_setter.is_none() && !context.has_variable_setter() {
+        return Err(FunctionError::unsupported(
+            "variable mutation capability is unavailable",
+        ));
     }
     Ok(())
 }
@@ -2836,16 +3681,36 @@ impl Default for DateFields {
     }
 }
 
-fn parse_datetime(format: &str, input: &str, locale: Locale) -> Result<i64, FunctionError> {
+fn parse_datetime_with_offset(
+    format: &str,
+    input: &str,
+    locale: Locale,
+    default_offset_seconds: i32,
+) -> Result<i64, FunctionError> {
+    parse_datetime_with_year_offset(format, input, locale, default_offset_seconds, None)
+}
+
+fn parse_datetime_with_year_offset(
+    format: &str,
+    input: &str,
+    locale: Locale,
+    default_offset_seconds: i32,
+    default_year: Option<i64>,
+) -> Result<i64, FunctionError> {
     if !format
         .chars()
         .any(|character| matches!(character, 'y' | 'u'))
+        && default_year.is_none()
     {
         return Err(FunctionError::unsupported(
             "date patterns without an explicit year require a JVM clock/default-date adapter",
         ));
     }
     let mut fields = DateFields::default();
+    if let Some(default_year) = default_year {
+        fields.year = default_year;
+    }
+    fields.offset_seconds = default_offset_seconds;
     let mut input_index = 0usize;
     let pattern: Vec<char> = format.chars().collect();
     let mut pattern_index = 0usize;
@@ -3424,11 +4289,11 @@ fn is_leap_year(year: i64) -> bool {
     year.rem_euclid(4) == 0 && (year.rem_euclid(100) != 0 || year.rem_euclid(400) == 0)
 }
 
-fn start_of_day(millis: i64, offset_seconds: i32) -> i64 {
-    let local = millis.saturating_add(i64::from(offset_seconds) * 1_000);
-    let days = local.div_euclid(86_400_000);
-    days.saturating_mul(86_400_000)
-        .saturating_sub(i64::from(offset_seconds) * 1_000)
+fn local_epoch_day(millis: i64, offset_seconds: i32) -> Result<i64, FunctionError> {
+    let local = millis
+        .checked_add(i64::from(offset_seconds) * 1_000)
+        .ok_or_else(|| FunctionError::execution("clock value overflowed local date range"))?;
+    Ok(local.div_euclid(86_400_000))
 }
 
 fn div_mod_floor(value: i64, divisor: i64) -> (i64, i64) {
@@ -3526,24 +4391,28 @@ fn weekday_names(locale: Locale, short: bool) -> &'static [&'static str] {
     }
 }
 
-fn time_alias(registry: &BuiltinFunctions, context: &FunctionContext<'_>, format: &str) -> String {
+fn time_alias(
+    registry: &BuiltinFunctions,
+    context: &FunctionContext<'_>,
+    format: &str,
+) -> Result<String, FunctionError> {
     match format {
         "YMD" => registry
             .property_value(context, "time.YMD")
-            .unwrap_or_else(|| "yyyyMMdd".to_owned()),
+            .map(|value| value.unwrap_or_else(|| "yyyyMMdd".to_owned())),
         "HMS" => registry
             .property_value(context, "time.HMS")
-            .unwrap_or_else(|| "HHmmss".to_owned()),
+            .map(|value| value.unwrap_or_else(|| "HHmmss".to_owned())),
         "YMDHMS" => registry
             .property_value(context, "time.YMDHMS")
-            .unwrap_or_else(|| "yyyyMMdd-HHmmss".to_owned()),
+            .map(|value| value.unwrap_or_else(|| "yyyyMMdd-HHmmss".to_owned())),
         "USER1" => registry
             .property_value(context, "time.USER1")
-            .unwrap_or_default(),
+            .map(|value| value.unwrap_or_default()),
         "USER2" => registry
             .property_value(context, "time.USER2")
-            .unwrap_or_default(),
-        value => value.to_owned(),
+            .map(|value| value.unwrap_or_default()),
+        value => Ok(value.to_owned()),
     }
 }
 
@@ -3692,14 +4561,14 @@ fn parse_duration_seconds(input: &str) -> Result<(i64, &str), FunctionError> {
 }
 
 fn digest_bytes(algorithm: &str, input: &[u8]) -> Result<Vec<u8>, FunctionError> {
-    match algorithm {
+    match algorithm.to_ascii_uppercase().as_str() {
         "MD2" => Ok(md2_digest(input).to_vec()),
         "MD5" => Ok(md5_digest(input).to_vec()),
-        "SHA-1" | "SHA1" => Ok(sha1_digest(input).to_vec()),
+        "SHA" | "SHA-1" | "SHA1" => Ok(sha1_digest(input).to_vec()),
         "SHA-224" => Ok(sha256_digest(input, Sha256Variant::Sha224).to_vec()),
-        "SHA-256" | "SHA256" => Ok(sha256_digest(input, Sha256Variant::Sha256).to_vec()),
+        "SHA-256" => Ok(sha256_digest(input, Sha256Variant::Sha256).to_vec()),
         "SHA-384" => Ok(sha512_digest(input, Sha512Variant::Sha384).to_vec()),
-        "SHA-512" | "SHA512" => Ok(sha512_digest(input, Sha512Variant::Sha512).to_vec()),
+        "SHA-512" => Ok(sha512_digest(input, Sha512Variant::Sha512).to_vec()),
         _ => Err(FunctionError::unsupported(format!(
             "digest algorithm {algorithm} is unavailable"
         ))),
@@ -4367,14 +5236,30 @@ fn parse_optional_sequence(
     })
 }
 
-fn capitalize(value: &str) -> String {
+fn capitalize(value: &str) -> Result<String, FunctionError> {
     let mut characters = value.chars();
     let Some(first) = characters.next() else {
-        return String::new();
+        return Ok(String::new());
     };
-    let mut result = first.to_uppercase().collect::<String>();
+    // Commons Lang delegates this operation to Java's single-code-point
+    // Character.toTitleCase. Rust's Unicode mapping can expand one scalar
+    // into several scalars (for example, a ligature); refusing that boundary
+    // avoids returning a value with different Java semantics.
+    let mut title = first.to_uppercase();
+    let Some(title_first) = title.next() else {
+        return Err(FunctionError::unsupported(
+            "__changeCase CAPITALIZE has no Java title-case mapping",
+        ));
+    };
+    if title.next().is_some() {
+        return Err(FunctionError::unsupported(
+            "__changeCase CAPITALIZE would require a multi-code-point Java title-case mapping",
+        ));
+    }
+    let mut result = String::new();
+    result.push(title_first);
     result.extend(characters);
-    result
+    Ok(result)
 }
 
 fn decode_java_long(value: &str) -> Result<i64, ()> {
@@ -4437,8 +5322,11 @@ fn sum(
                 "function result exceeds the expression output bound",
             ));
         }
-        if let Some(variable_name) = variable_name.filter(|name| !name.is_empty()) {
-            set_optional_variable(registry, context, Some(&variable_name.to_owned()), &value)?;
+        if let Some(variable_name) = variable_name {
+            // IntSum preserves the upstream distinction between an omitted
+            // numeric final argument and a non-numeric output-variable slot:
+            // the Java implementation writes even an explicitly empty name.
+            registry.set_variable(context, variable_name, &value)?;
         }
         Ok(value)
     } else {
@@ -5114,7 +6002,7 @@ impl MapVariableCapability {
         self.values
             .lock()
             .map(|values| values.clone())
-            .map_err(|_| FunctionError::execution("variable capability lock is poisoned"))
+            .map_err(|_| FunctionError::poisoned("variable capability lock is poisoned"))
     }
 }
 
@@ -5122,19 +6010,42 @@ impl VariableSetter for MapVariableCapability {
     fn set_variable(&self, name: &str, value: &str) -> Result<(), FunctionError> {
         self.values
             .lock()
-            .map_err(|_| FunctionError::execution("variable capability lock is poisoned"))?
+            .map_err(|_| FunctionError::poisoned("variable capability lock is poisoned"))?
             .insert(name.to_owned(), value.to_owned());
         Ok(())
     }
 
+    fn set_variables_atomic(&self, values: &[(&str, &str)]) -> Result<(), FunctionError> {
+        let mut stored = self
+            .values
+            .lock()
+            .map_err(|_| FunctionError::poisoned("variable capability lock is poisoned"))?;
+        for (name, value) in values {
+            stored.insert((*name).to_owned(), (*value).to_owned());
+        }
+        Ok(())
+    }
+
     fn get_variable(&self, name: &str) -> Option<String> {
-        self.values.lock().ok()?.get(name).cloned()
+        // The legacy optional getter cannot carry a typed poison error; new
+        // evaluation paths use `get_variable_checked` below.
+        match self.values.lock() {
+            Ok(values) => values.get(name).cloned(),
+            Err(_) => None,
+        }
+    }
+
+    fn get_variable_checked(&self, name: &str) -> Result<Option<String>, FunctionError> {
+        self.values
+            .lock()
+            .map(|values| values.get(name).cloned())
+            .map_err(|_| FunctionError::poisoned("variable capability lock is poisoned"))
     }
 
     fn remove_variable(&self, name: &str) -> Result<(), FunctionError> {
         self.values
             .lock()
-            .map_err(|_| FunctionError::execution("variable capability lock is poisoned"))?
+            .map_err(|_| FunctionError::poisoned("variable capability lock is poisoned"))?
             .remove(name);
         Ok(())
     }
@@ -5183,7 +6094,7 @@ impl MapPropertyCapability {
         self.values
             .lock()
             .map(|values| values.clone())
-            .map_err(|_| FunctionError::execution("property capability lock is poisoned"))
+            .map_err(|_| FunctionError::poisoned("property capability lock is poisoned"))
     }
 }
 
@@ -5192,12 +6103,24 @@ impl PropertySetter for MapPropertyCapability {
         Ok(self
             .values
             .lock()
-            .map_err(|_| FunctionError::execution("property capability lock is poisoned"))?
+            .map_err(|_| FunctionError::poisoned("property capability lock is poisoned"))?
             .insert(name.to_owned(), value.to_owned()))
     }
 
     fn get_property(&self, name: &str) -> Option<String> {
-        self.values.lock().ok()?.get(name).cloned()
+        // The legacy optional getter cannot carry a typed poison error; new
+        // evaluation paths use `get_property_checked` below.
+        match self.values.lock() {
+            Ok(values) => values.get(name).cloned(),
+            Err(_) => None,
+        }
+    }
+
+    fn get_property_checked(&self, name: &str) -> Result<Option<String>, FunctionError> {
+        self.values
+            .lock()
+            .map(|values| values.get(name).cloned())
+            .map_err(|_| FunctionError::poisoned("property capability lock is poisoned"))
     }
 }
 
@@ -5231,6 +6154,13 @@ mod tests {
     use std::collections::{HashMap, VecDeque};
     use std::sync::{Arc, Mutex};
     use std::thread;
+
+    fn mutex_snapshot<T: Clone>(mutex: &Mutex<T>) -> Option<T> {
+        match mutex.lock() {
+            Ok(value) => Some(value.clone()),
+            Err(_) => None,
+        }
+    }
 
     #[derive(Clone, Copy)]
     struct FixedRandom(u64);
@@ -5614,7 +6544,7 @@ mod tests {
         let cases = [
             ("${__V(NAME)}", "Ada"),
             ("${__V(MISSING,default)}", "default"),
-            ("${__V(MISSING,)}", "MISSING"),
+            ("${__V(MISSING,)}", ""),
             ("${__eval(${SQL})}", "select name"),
             ("${__evalVar(SQL)}", "select name"),
             ("${__property(region)}", "test"),
@@ -5704,6 +6634,10 @@ mod tests {
             Ok("debug-fallback".to_owned())
         );
         assert_eq!(
+            evaluator.evaluate("${__log(space-fallback,   )}"),
+            Ok("space-fallback".to_owned())
+        );
+        assert_eq!(
             evaluator
                 .evaluate("${__machineName(HOST)}:${HOST}:${__machineIP(IP)}:${IP}:${__threadNum}"),
             Ok("fixture-host:fixture-host:192.0.2.1:192.0.2.1:7".to_owned())
@@ -5725,7 +6659,7 @@ mod tests {
             Ok("file contents:file contents".to_owned())
         );
         assert_eq!(
-            log.entries.lock().ok().map(|entries| entries.clone()),
+            mutex_snapshot(&log.entries),
             Some(vec![
                 (
                     "WARN".to_owned(),
@@ -5735,10 +6669,11 @@ mod tests {
                 ),
                 ("INFO".to_owned(), "second".to_owned(), None, None),
                 ("DEBUG".to_owned(), "debug-fallback".to_owned(), None, None,),
+                ("DEBUG".to_owned(), "space-fallback".to_owned(), None, None,),
             ])
         );
         assert_eq!(
-            files.reads.lock().ok().map(|reads| reads.clone()),
+            mutex_snapshot(&files.reads),
             Some(vec![("data.txt".to_owned(), Some("UTF-8".to_owned()))])
         );
     }
@@ -5794,6 +6729,210 @@ mod tests {
             assert_eq!(evaluator.evaluate(source), Ok(source.to_owned()));
         }
         assert_eq!(property_store.snapshot(), Ok(BTreeMap::new()));
+    }
+
+    #[test]
+    fn invocation_requirements_are_argument_aware_and_side_effect_free() {
+        let functions = BuiltinFunctions::new();
+        let empty = EvaluationCapabilities::new();
+        let files = CursorFiles::new([]);
+        let random = FixedRandom(7);
+        let execution = TestExecution {
+            thread: 2,
+            group: "fixture".to_owned(),
+            lifecycle: 1,
+            iteration: 0,
+        };
+        let file_capabilities = EvaluationCapabilities::new().with_file_capability(&files);
+        let random_capabilities = EvaluationCapabilities::new().with_random_source(&random);
+        let execution_capabilities =
+            EvaluationCapabilities::new().with_execution_context(&execution);
+
+        assert!(
+            BuiltinFunctions::requirements_for_invocation(
+                "__StringFromFile",
+                &["data.txt".to_owned()],
+            )
+            .is_some_and(|requirements| {
+                requirements.requires(FunctionCapability::Files)
+                    && requirements.requires(FunctionCapability::VariableMutation)
+            })
+        );
+        assert_eq!(
+            functions.support_status_for_invocation(
+                "__StringFromFile",
+                &["data.txt".to_owned(), "".to_owned()],
+                file_capabilities,
+            ),
+            FunctionSupport::Executable
+        );
+        assert_eq!(
+            functions.support_status_for_invocation(
+                "__StringFromFile",
+                &["data.txt".to_owned()],
+                file_capabilities,
+            ),
+            FunctionSupport::Registered
+        );
+
+        assert_eq!(
+            functions.support_status_for_invocation(
+                "__FileToString",
+                &["data.txt".to_owned(), "UTF-8".to_owned(), "".to_owned()],
+                file_capabilities,
+            ),
+            FunctionSupport::Executable
+        );
+        assert_eq!(
+            functions.support_status_for_invocation(
+                "__FileToString",
+                &[
+                    "data.txt".to_owned(),
+                    "UTF-8".to_owned(),
+                    "CONTENT".to_owned()
+                ],
+                file_capabilities,
+            ),
+            FunctionSupport::Registered
+        );
+
+        assert_eq!(
+            functions.support_status_for_invocation(
+                "__RandomDate",
+                &[
+                    "yyyy-MM-dd".to_owned(),
+                    "2020-01-01".to_owned(),
+                    "2020-01-03".to_owned(),
+                ],
+                random_capabilities,
+            ),
+            FunctionSupport::Executable
+        );
+        assert_eq!(
+            functions.support_status_for_invocation(
+                "__RandomDate",
+                &[
+                    "yyyy-MM-dd".to_owned(),
+                    "".to_owned(),
+                    "2020-01-03".to_owned()
+                ],
+                random_capabilities,
+            ),
+            FunctionSupport::Registered
+        );
+        let no_clock_variables = HashMap::<String, String>::new();
+        let no_clock_properties = HashMap::<String, String>::new();
+        let no_clock_random = Evaluator::with_capabilities(
+            &no_clock_variables,
+            &no_clock_properties,
+            &functions,
+            random_capabilities,
+        );
+        assert_eq!(
+            no_clock_random.evaluate("${__RandomDate(yyyy-MM-dd,2020-01-01,2020-01-03,,)}"),
+            Ok("2020-01-02".to_owned())
+        );
+        assert_eq!(
+            functions.support_status_for_invocation(
+                "__timeShift",
+                &[
+                    "yyyy-MM-dd".to_owned(),
+                    "2020-01-01".to_owned(),
+                    "P1D".to_owned(),
+                    "".to_owned(),
+                ],
+                empty,
+            ),
+            FunctionSupport::Registered
+        );
+        assert_eq!(
+            functions.support_status_for_invocation(
+                "__timeShift",
+                &[
+                    "yyyy-MM-dd".to_owned(),
+                    "".to_owned(),
+                    "P1D".to_owned(),
+                    "".to_owned()
+                ],
+                empty,
+            ),
+            FunctionSupport::Registered
+        );
+
+        let no_variables = HashMap::<String, String>::new();
+        let no_properties = HashMap::<String, String>::new();
+        let no_clock_evaluator = Evaluator::new(&no_variables, &no_properties, &functions);
+        assert!(matches!(
+            no_clock_evaluator.evaluate("${__timeShift(yyyy-MM-dd,2020-01-01,P1D,)}"),
+            Err(crate::EvaluationError::Function {
+                source: FunctionError::Unsupported(_),
+                ..
+            })
+        ));
+
+        assert_eq!(
+            functions.support_status_for_invocation("__counter", &["false".to_owned()], empty,),
+            FunctionSupport::Registered
+        );
+        assert_eq!(
+            functions.support_status_for_invocation("__counter", &["true".to_owned()], empty,),
+            FunctionSupport::Registered
+        );
+        assert_eq!(
+            functions.support_status_for_invocation(
+                "__counter",
+                &["true".to_owned()],
+                execution_capabilities,
+            ),
+            FunctionSupport::Executable
+        );
+        assert_eq!(
+            functions.support_status_for_invocation(
+                "__intSum",
+                &["2".to_owned(), "output".to_owned()],
+                empty,
+            ),
+            FunctionSupport::Registered
+        );
+        assert_eq!(
+            functions.support_status_for_invocation(
+                "__intSum",
+                &["2".to_owned(), "7".to_owned()],
+                empty,
+            ),
+            FunctionSupport::Executable
+        );
+
+        assert!(
+            BuiltinFunctions::requirements_for_invocation("__escapeHtml", &["<value>".to_owned()],)
+                .is_some_and(|requirements| requirements.is_pure())
+        );
+        assert_eq!(
+            BuiltinFunctions::effect_class_for_invocation("__escapeHtml", &["<value>".to_owned()]),
+            Some(EffectClass::Pure)
+        );
+        assert_eq!(
+            BuiltinFunctions::effect_class_for_invocation(
+                "__setProperty",
+                &["name".to_owned(), "value".to_owned()],
+            ),
+            Some(EffectClass::JournaledNative)
+        );
+        assert_eq!(
+            BuiltinFunctions::effect_class_for_invocation("__XPath", &["//value".to_owned()]),
+            Some(EffectClass::TransactionalExternal)
+        );
+        assert_eq!(
+            BuiltinFunctions::effect_class_for_invocation(
+                "__StringToFile",
+                &["out.txt".to_owned(), "value".to_owned()],
+            ),
+            Some(EffectClass::IrreversibleExternal)
+        );
+        assert_eq!(
+            BuiltinFunctions::requirements_for_invocation("__not_a_jmeter_function", &[]),
+            None
+        );
     }
 
     #[test]
@@ -5857,6 +6996,13 @@ mod tests {
                 source: FunctionError::Execution(message),
                 ..
             }) if message.contains("rejection limit")
+        ));
+        assert!(matches!(
+            evaluator.evaluate("${__Random(0,9223372036854775807)}"),
+            Err(crate::EvaluationError::Function {
+                source: FunctionError::InvalidArguments(_),
+                ..
+            })
         ));
     }
 
@@ -6094,14 +7240,17 @@ mod tests {
         let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _guard = match functions.counters.lock() {
                 Ok(guard) => guard,
-                Err(poisoned) => poisoned.into_inner(),
+                Err(_) => std::panic::resume_unwind(Box::new(
+                    "counter state was already poisoned before the regression test",
+                )),
             };
             std::panic::resume_unwind(Box::new("poison counter state for cleanup regression"));
         }));
         assert!(poisoned.is_err());
         assert!(matches!(
             functions.clear_counters_for_lifecycle(10),
-            Err(FunctionError::Execution(message)) if message.contains("poisoned")
+            Err(FunctionError::Poisoned(message))
+                if message == "counter state lock is poisoned"
         ));
     }
 
@@ -6189,7 +7338,7 @@ mod tests {
             })
         ));
         assert_eq!(
-            files.lines.lock().ok().map(|lines| lines.clone()),
+            mutex_snapshot(&files.lines),
             Some(vec![
                 "file|OUT|Some(2)|Some(7)".to_owned(),
                 "file|StringFromFile_|None|None".to_owned(),
@@ -6484,6 +7633,13 @@ mod tests {
                 ..
             })
         ));
+        assert!(matches!(
+            evaluator.evaluate("${__digest(SHA256,abc)}"),
+            Err(crate::EvaluationError::Function {
+                source: FunctionError::Unsupported(_),
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -6736,7 +7892,7 @@ mod tests {
             evaluator.evaluate("${__StringToFile(   ,ignored)}"),
             Ok("false".to_owned())
         );
-        let writes = files.writes.lock().ok().map(|writes| writes.clone());
+        let writes = mutex_snapshot(&files.writes);
         assert_eq!(
             writes,
             Some(vec![
@@ -6767,10 +7923,15 @@ mod tests {
             evaluator.evaluate("${__RandomString(4, ab )}"),
             Ok("bbbb".to_owned())
         );
-        assert_eq!(
-            evaluator.evaluate("${__RandomString( 4 , ab )}"),
-            Ok("bbbb".to_owned()),
-            "JMeter trims RandomString's length before Integer.parseInt"
+        assert!(
+            matches!(
+                evaluator.evaluate("${__RandomString( 4 , ab )}"),
+                Err(crate::EvaluationError::Function {
+                    source: FunctionError::InvalidArguments(_),
+                    ..
+                })
+            ),
+            "JMeter passes RandomString's length directly to Integer.parseInt"
         );
         let controls = Evaluator::with_capabilities(
             &variables,
@@ -6830,7 +7991,7 @@ mod tests {
     }
 
     #[test]
-    fn random_from_multiple_vars_trims_names_handles_match_count_and_empty_results() {
+    fn random_from_multiple_vars_preserves_names_handles_match_count_and_empty_results() {
         let variables = HashMap::<String, String>::new();
         let properties = HashMap::<String, String>::new();
         let variable_store = MapVariableCapability::new([
@@ -6848,6 +8009,10 @@ mod tests {
             Evaluator::with_capabilities(&variables, &properties, &functions, capabilities);
         assert_eq!(
             evaluator.evaluate("${__RandomFromMultipleVars( A | B ,PICK)}:${PICK}"),
+            Ok(":".to_owned())
+        );
+        assert_eq!(
+            evaluator.evaluate("${__RandomFromMultipleVars(A|B,PICK)}:${PICK}"),
             Ok("first:first".to_owned())
         );
         assert_eq!(
@@ -6954,15 +8119,15 @@ mod tests {
         );
         assert_eq!(narrow.evaluate("${__time(-)}"), Ok("-".to_owned()));
         assert_eq!(
-            evaluator.evaluate("${__timeShift(yyyy-MM-dd,2020-01-01,P1D)}"),
+            evaluator.evaluate("${__timeShift(yyyy-MM-dd,2020-01-01,P1D,)}"),
             Ok("2020-01-02".to_owned())
         );
         assert_eq!(
-            evaluator.evaluate("${__timeShift}"),
+            evaluator.evaluate("${__timeShift(,,,)}"),
             Ok("1577836800000".to_owned())
         );
         assert_eq!(
-            evaluator.evaluate("${__timeShift(yyyy-MM-dd)}"),
+            evaluator.evaluate("${__timeShift(yyyy-MM-dd,,,)}"),
             Ok("2020-01-01".to_owned())
         );
         let shifted_variable = MapVariableCapability::default();
@@ -6979,7 +8144,7 @@ mod tests {
             Ok("2020-01-02:2020-01-02".to_owned())
         );
         assert_eq!(
-            evaluator.evaluate("${__timeShift(dd MMMM yyyy,21 février 2018,P2D,fr_FR)}"),
+            evaluator.evaluate("${__timeShift(dd MMMM yyyy,21 février 2018,P2D,fr_FR,)}"),
             Ok("23 février 2018".to_owned())
         );
         assert_eq!(

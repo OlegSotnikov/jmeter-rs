@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::future::{self, Future};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 
@@ -33,6 +34,10 @@ use jmeter_rs_results::{
 
 use crate::controllers::{Cancellation, ControlSignal};
 use crate::coordination::{CriticalSectionCoordinator, DeterministicCriticalSectionCoordinator};
+use crate::mutation::{
+    BoundedBytes, ContextGeneration, InvocationCommit, InvocationDelta, InvocationSnapshot,
+    MutationDiagnostic, MutationError, MutationLimits, RequestState, StagedInvocation,
+};
 use crate::scheduler::{
     CancellationToken, Deadline, DeadlineFuture, MonotonicInstant, Scheduler, SchedulerError,
     WakeRegistration,
@@ -42,6 +47,362 @@ const DEFAULT_MAX_TRACE_DETAIL_BYTES: usize = 1_024;
 const MAX_DIAGNOSTIC_BYTES: usize = 4_096;
 const MAX_EXPRESSION_FILE_CURSORS: usize = 65_536;
 const MAX_EXPRESSION_FILE_BYTES: usize = 1024 * 1024;
+
+/// Maximum number of TestPlan user-defined variables accepted by the native
+/// runtime seed.  This is a runtime safety bound, not an ambient properties
+/// fallback.
+pub const MAX_INITIAL_VARIABLES: usize = 64;
+/// Maximum UTF-8 byte length of one initial-variable name.
+pub const MAX_INITIAL_VARIABLE_NAME_BYTES: usize = 4 * 1024;
+/// Maximum UTF-8 byte length of one initial-variable value.
+pub const MAX_INITIAL_VARIABLE_VALUE_BYTES: usize = 1024 * 1024;
+/// Maximum aggregate UTF-8 bytes for all initial-variable names and values.
+pub const MAX_INITIAL_VARIABLE_TOTAL_BYTES: usize = 16 * 1024 * 1024;
+
+/// A malformed or bounded TestPlan initial-variable seed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum InitialVariablesError {
+    /// A variable name is empty.
+    EmptyName,
+    /// A variable name is already present in the seed.
+    DuplicateName { name: String },
+    /// The number of variables exceeds the runtime bound.
+    CountLimit { actual: usize, limit: usize },
+    /// One variable name exceeds the runtime bound.
+    NameLimit { actual: usize, limit: usize },
+    /// One variable value exceeds the runtime bound.
+    ValueLimit { actual: usize, limit: usize },
+    /// Aggregate variable bytes exceed the runtime bound.
+    TotalBytesLimit { actual: usize, limit: usize },
+}
+
+impl InitialVariablesError {
+    /// Returns a stable machine-readable diagnostic code.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::EmptyName => "runtime.initial-variables.empty-name",
+            Self::DuplicateName { .. } => "runtime.initial-variables.duplicate-name",
+            Self::CountLimit { .. } => "runtime.initial-variables.count-limit",
+            Self::NameLimit { .. } => "runtime.initial-variables.name-limit",
+            Self::ValueLimit { .. } => "runtime.initial-variables.value-limit",
+            Self::TotalBytesLimit { .. } => "runtime.initial-variables.total-bytes-limit",
+        }
+    }
+}
+
+impl fmt::Display for InitialVariablesError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyName => write!(formatter, "{}", self.code()),
+            Self::DuplicateName { name } => {
+                write!(formatter, "{}: {name:?}", self.code())
+            }
+            Self::CountLimit { actual, limit } => {
+                write!(formatter, "{}: {actual} items exceeds {limit}", self.code())
+            }
+            Self::NameLimit { actual, limit } | Self::ValueLimit { actual, limit } => {
+                write!(formatter, "{}: {actual} bytes exceeds {limit}", self.code())
+            }
+            Self::TotalBytesLimit { actual, limit } => {
+                write!(formatter, "{}: {actual} bytes exceeds {limit}", self.code())
+            }
+        }
+    }
+}
+
+impl std::error::Error for InitialVariablesError {}
+
+/// Immutable, validated TestPlan user-defined variables.
+///
+/// The backing map is private and exposes no mutable access.  Each virtual
+/// user copies the values into its own [`ExecutionContext`] exactly once when
+/// that user lifecycle is created.  The source map is validated completely
+/// before this value is constructed, so callers cannot observe a partially
+/// accepted seed.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct InitialVariables {
+    values: BTreeMap<String, String>,
+    total_bytes: usize,
+}
+
+impl InitialVariables {
+    /// Creates an empty immutable seed.
+    #[must_use]
+    pub const fn empty() -> Self {
+        Self {
+            values: BTreeMap::new(),
+            total_bytes: 0,
+        }
+    }
+
+    /// Validates and takes ownership of an ordered variable map.
+    pub fn try_from_map(values: BTreeMap<String, String>) -> Result<Self, InitialVariablesError> {
+        if values.len() > MAX_INITIAL_VARIABLES {
+            return Err(InitialVariablesError::CountLimit {
+                actual: values.len(),
+                limit: MAX_INITIAL_VARIABLES,
+            });
+        }
+        let total_bytes = validate_initial_variable_entries(values.iter())?;
+        Ok(Self {
+            values,
+            total_bytes,
+        })
+    }
+
+    /// Validates an ordered iterator, rejecting duplicate names rather than
+    /// allowing an insertion order to choose a winning value.
+    pub fn try_from_iter<I, K, V>(entries: I) -> Result<Self, InitialVariablesError>
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<String>,
+    {
+        let mut values = BTreeMap::new();
+        let mut total_bytes = 0usize;
+        for (name, value) in entries {
+            let name = name.into();
+            let value = value.into();
+            if values.contains_key(&name) {
+                return Err(InitialVariablesError::DuplicateName {
+                    name: bounded_text(name, MAX_DIAGNOSTIC_BYTES),
+                });
+            }
+            if values.len() >= MAX_INITIAL_VARIABLES {
+                let actual = match values.len().checked_add(1) {
+                    Some(actual) => actual,
+                    None => usize::MAX,
+                };
+                return Err(InitialVariablesError::CountLimit {
+                    actual,
+                    limit: MAX_INITIAL_VARIABLES,
+                });
+            }
+            total_bytes = validate_initial_variable_entry(&name, &value, total_bytes)?;
+            values.insert(name, value);
+        }
+        Self::try_from_map(values)
+    }
+
+    /// Projects source-ordered JMeter `Arguments` into the immutable
+    /// TestPlan seed.
+    ///
+    /// Apache JMeter 5.6.3 exposes TestPlan variables through
+    /// `Arguments.getArgumentsAsMap()`: the map preserves source order for
+    /// iteration and keeps the first value for duplicate names.  This seam
+    /// intentionally accepts an empty name and validates resource bounds only
+    /// for entries that survive that projection.  It is separate from
+    /// [`Self::try_from_iter`], whose strict duplicate and non-empty-name
+    /// policy remains useful to non-JMeter callers.
+    pub fn try_from_jmeter_arguments<I, K, V>(entries: I) -> Result<Self, InitialVariablesError>
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<String>,
+    {
+        let mut values = BTreeMap::new();
+        let mut total_bytes = 0usize;
+        for (name, value) in entries {
+            let name = name.into();
+            // JMeter's Arguments map is first-wins.  Skip the complete
+            // duplicate entry before validating its value so bounds apply to
+            // the canonical map, rather than to values Java discards.
+            if values.contains_key(&name) {
+                continue;
+            }
+            let value = value.into();
+            let actual = values
+                .len()
+                .checked_add(1)
+                .ok_or(InitialVariablesError::CountLimit {
+                    actual: usize::MAX,
+                    limit: MAX_INITIAL_VARIABLES,
+                })?;
+            if actual > MAX_INITIAL_VARIABLES {
+                return Err(InitialVariablesError::CountLimit {
+                    actual,
+                    limit: MAX_INITIAL_VARIABLES,
+                });
+            }
+            total_bytes = validate_initial_variable_entry_for_jmeter(&name, &value, total_bytes)?;
+            values.insert(name, value);
+        }
+        Ok(Self {
+            values,
+            total_bytes,
+        })
+    }
+
+    /// Returns a variable by exact name.
+    #[must_use]
+    pub fn get(&self, name: &str) -> Option<&str> {
+        self.values.get(name).map(String::as_str)
+    }
+
+    /// Returns the deterministic key/value order used by the seed.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> + '_ {
+        self.values
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+    }
+
+    /// Returns the number of initial variables.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    /// Returns whether this seed has no variables.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+
+    /// Returns the aggregate UTF-8 bytes occupied by names and values.
+    #[must_use]
+    pub const fn total_bytes(&self) -> usize {
+        self.total_bytes
+    }
+}
+
+fn validate_initial_variable_entries<'a, I>(entries: I) -> Result<usize, InitialVariablesError>
+where
+    I: IntoIterator<Item = (&'a String, &'a String)>,
+{
+    let mut total_bytes = 0usize;
+    for (name, value) in entries {
+        total_bytes = validate_initial_variable_entry(name, value, total_bytes)?;
+    }
+    Ok(total_bytes)
+}
+
+fn validate_initial_variable_entry(
+    name: &str,
+    value: &str,
+    current_total_bytes: usize,
+) -> Result<usize, InitialVariablesError> {
+    validate_initial_variable_entry_with_policy(name, value, current_total_bytes, false)
+}
+
+fn validate_initial_variable_entry_for_jmeter(
+    name: &str,
+    value: &str,
+    current_total_bytes: usize,
+) -> Result<usize, InitialVariablesError> {
+    validate_initial_variable_entry_with_policy(name, value, current_total_bytes, true)
+}
+
+fn validate_initial_variable_entry_with_policy(
+    name: &str,
+    value: &str,
+    current_total_bytes: usize,
+    allow_empty_name: bool,
+) -> Result<usize, InitialVariablesError> {
+    if !allow_empty_name && name.is_empty() {
+        return Err(InitialVariablesError::EmptyName);
+    }
+    if name.len() > MAX_INITIAL_VARIABLE_NAME_BYTES {
+        return Err(InitialVariablesError::NameLimit {
+            actual: name.len(),
+            limit: MAX_INITIAL_VARIABLE_NAME_BYTES,
+        });
+    }
+    if value.len() > MAX_INITIAL_VARIABLE_VALUE_BYTES {
+        return Err(InitialVariablesError::ValueLimit {
+            actual: value.len(),
+            limit: MAX_INITIAL_VARIABLE_VALUE_BYTES,
+        });
+    }
+    let entry_bytes =
+        name.len()
+            .checked_add(value.len())
+            .ok_or(InitialVariablesError::TotalBytesLimit {
+                actual: usize::MAX,
+                limit: MAX_INITIAL_VARIABLE_TOTAL_BYTES,
+            })?;
+    let total_bytes = current_total_bytes.checked_add(entry_bytes).ok_or(
+        InitialVariablesError::TotalBytesLimit {
+            actual: usize::MAX,
+            limit: MAX_INITIAL_VARIABLE_TOTAL_BYTES,
+        },
+    )?;
+    if total_bytes > MAX_INITIAL_VARIABLE_TOTAL_BYTES {
+        return Err(InitialVariablesError::TotalBytesLimit {
+            actual: total_bytes,
+            limit: MAX_INITIAL_VARIABLE_TOTAL_BYTES,
+        });
+    }
+    Ok(total_bytes)
+}
+
+#[derive(Clone, Debug)]
+struct PropertyWrite {
+    latest_version: u64,
+    latest_value: Option<String>,
+    restore_version: Option<u64>,
+    restore_value: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct PropertyTransaction {
+    active: bool,
+    baseline_versions: BTreeMap<String, u64>,
+    baseline_values: BTreeMap<String, String>,
+    writes: BTreeMap<String, PropertyWrite>,
+}
+
+/// Records one already-published property write in the active invocation
+/// transaction.  The latest value is optional so a typed remove operation is
+/// rollback-safe as well as a typed set.  Callers hold the shared mutation
+/// lock and the property/version locks before invoking this helper.
+fn record_property_write(
+    transaction: &mut PropertyTransaction,
+    name: &str,
+    previous_version: Option<u64>,
+    previous_value: Option<String>,
+    latest_version: u64,
+    latest_value: Option<String>,
+) {
+    if !transaction.active {
+        return;
+    }
+    let baseline_version = transaction.baseline_versions.get(name).copied();
+    let baseline_value = transaction.baseline_values.get(name).cloned();
+    match transaction.writes.entry(name.to_owned()) {
+        std::collections::btree_map::Entry::Occupied(mut entry) => {
+            let write = entry.get_mut();
+            if Some(write.latest_version) != previous_version
+                || write.latest_value.as_ref() != previous_value.as_ref()
+            {
+                // A peer write landed after this transaction's last update.
+                // Preserve that peer state as the rollback target.
+                write.restore_version = previous_version;
+                write.restore_value = previous_value;
+            }
+            write.latest_version = latest_version;
+            write.latest_value = latest_value;
+        }
+        std::collections::btree_map::Entry::Vacant(entry) => {
+            let differs_from_baseline = previous_version != baseline_version
+                || previous_value.as_ref() != baseline_value.as_ref();
+            entry.insert(PropertyWrite {
+                latest_version,
+                latest_value,
+                restore_version: if differs_from_baseline {
+                    previous_version
+                } else {
+                    baseline_version
+                },
+                restore_value: if differs_from_baseline {
+                    previous_value
+                } else {
+                    baseline_value
+                },
+            });
+        }
+    }
+}
 
 /// Returns a stable identity for one plan field without relying on process
 /// addresses or a caller-provided numeric sentinel.  The evaluator accepts a
@@ -85,6 +446,89 @@ fn bounded_text(value: impl Into<String>, limit: usize) -> String {
     bounded.truncate(end);
     bounded.push_str(suffix);
     bounded
+}
+
+/// Redacts credential-shaped fields and bounds one diagnostic before it is
+/// retained by a typed error.  Poison details may originate at an external
+/// capability boundary, so the component error must not retain an unbounded
+/// or verbatim adapter payload.  This intentionally handles only the small,
+/// deterministic vocabulary used by diagnostics; it is not a configuration
+/// parser.
+fn bounded_redacted_text(value: impl Into<String>, limit: usize) -> String {
+    const SECRET_KEYS: [&str; 9] = [
+        "password",
+        "passwd",
+        "token",
+        "secret",
+        "authorization",
+        "api_key",
+        "apikey",
+        "access_key",
+        "client_secret",
+    ];
+
+    // Bound the scan before cloning so an untrusted adapter cannot make the
+    // redaction pass retain a second unbounded copy of its payload.
+    let original = bounded_text(value, limit.saturating_add(256));
+    let mut output = String::with_capacity(original.len());
+    let mut cursor = 0;
+    while cursor < original.len() {
+        let Some(relative) = original[cursor..]
+            .find(|character: char| character.is_ascii_alphabetic() || character == '_')
+        else {
+            output.push_str(&original[cursor..]);
+            break;
+        };
+        let start = cursor + relative;
+        output.push_str(&original[cursor..start]);
+        let end = original[start..]
+            .find(|character: char| {
+                !(character.is_ascii_alphanumeric() || character == '_' || character == '-')
+            })
+            .map_or(original.len(), |offset| start + offset);
+        let word = &original[start..end];
+        let lower = word.to_ascii_lowercase();
+        let is_boundary = start == 0
+            || !original[..start]
+                .chars()
+                .next_back()
+                .is_some_and(|character| character.is_ascii_alphanumeric() || character == '_');
+        let is_secret_key = is_boundary
+            && SECRET_KEYS
+                .iter()
+                .any(|candidate| lower.eq_ignore_ascii_case(candidate));
+        let after = &original[end..];
+        let separator = after
+            .chars()
+            .next()
+            .filter(|character| *character == '=' || *character == ':');
+        if is_secret_key && separator.is_some() {
+            output.push_str(word);
+            // Both supported separators are ASCII, so advancing by one byte
+            // remains at a UTF-8 boundary.
+            output.push(separator.unwrap_or('='));
+            output.push_str("<redacted>");
+
+            // Consume the value through the next diagnostic delimiter.  This
+            // also removes optional whitespace after `=`/`:` so a value cannot
+            // reappear in the retained suffix.
+            let mut skip = end.saturating_add(1);
+            while skip < original.len() {
+                let Some(character) = original[skip..].chars().next() else {
+                    break;
+                };
+                if matches!(character, ',' | ';' | ')' | '\r' | '\n') {
+                    break;
+                }
+                skip += character.len_utf8();
+            }
+            cursor = skip;
+        } else {
+            output.push_str(word);
+            cursor = end;
+        }
+    }
+    bounded_text(output, limit)
 }
 
 fn read_lock<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {
@@ -241,6 +685,46 @@ pub trait Sleeper: Send + Sync {
     fn sleep<'a>(&'a self, duration: Duration) -> CapabilityFuture<'a, ()>;
 }
 
+/// Waits for a timer while registering the supplied cancellation token with
+/// the in-flight sleeper.  This keeps the public [`Sleeper`] contract
+/// backwards-compatible for application edges while making the execution
+/// phase interruptible: an edge that requests a stop wakes this future and
+/// the sampler is never entered.
+async fn sleep_interruptibly(
+    sleeper: &dyn Sleeper,
+    duration: Duration,
+    cancellation: &CancellationToken,
+) -> Result<(), CapabilityError> {
+    let mut sleep = sleeper.sleep(duration);
+    future::poll_fn(|task_context| {
+        let signal = cancellation.signal();
+        if signal != ControlSignal::Continue {
+            return std::task::Poll::Ready(Err(CapabilityError::Control(signal)));
+        }
+        match sleep.as_mut().poll(task_context) {
+            std::task::Poll::Ready(Ok(())) => {
+                let signal = cancellation.signal();
+                if signal == ControlSignal::Continue {
+                    std::task::Poll::Ready(Ok(()))
+                } else {
+                    std::task::Poll::Ready(Err(CapabilityError::Control(signal)))
+                }
+            }
+            std::task::Poll::Ready(Err(error)) => std::task::Poll::Ready(Err(error)),
+            std::task::Poll::Pending => {
+                cancellation.register_waker(task_context.waker());
+                let signal = cancellation.signal();
+                if signal == ControlSignal::Continue {
+                    std::task::Poll::Pending
+                } else {
+                    std::task::Poll::Ready(Err(CapabilityError::Control(signal)))
+                }
+            }
+        }
+    })
+    .await
+}
+
 /// Supplies deterministic random values to components.
 pub trait RandomSource: Send + Sync {
     /// Returns the next value in the component's scoped stream.
@@ -334,6 +818,10 @@ pub enum ComponentError {
     Control(ControlSignal),
     /// The component exceeded a local resource bound.
     ResourceLimit(String),
+    /// The component's state authority is poisoned and cannot safely
+    /// continue.  This is not a control signal, ordinary failure, or a
+    /// configured default/no-match outcome.
+    Poisoned(String),
     /// Multiple component diagnostics were raised at one boundary.
     Combined {
         /// First component diagnostic.
@@ -362,6 +850,12 @@ impl ComponentError {
         Self::ResourceLimit(bounded_text(message, MAX_DIAGNOSTIC_BYTES))
     }
 
+    /// Creates a bounded, redacted poisoned-component error.
+    #[must_use]
+    pub fn poisoned(message: impl Into<String>) -> Self {
+        Self::Poisoned(bounded_redacted_text(message, MAX_DIAGNOSTIC_BYTES))
+    }
+
     /// Returns a stable machine-readable code.
     #[must_use]
     pub const fn code(&self) -> &'static str {
@@ -370,6 +864,7 @@ impl ComponentError {
             Self::Unsupported(_) => "runtime.component.unsupported",
             Self::Control(_) => "runtime.component.control",
             Self::ResourceLimit(_) => "runtime.component.resource-limit",
+            Self::Poisoned(_) => "runtime.component.poisoned",
             Self::Combined { .. } => "runtime.component.combined",
         }
     }
@@ -382,6 +877,7 @@ impl fmt::Display for ComponentError {
             Self::Unsupported(message) => write!(formatter, "{}: {message}", self.code()),
             Self::Control(signal) => write!(formatter, "{}: {signal:?}", self.code()),
             Self::ResourceLimit(message) => write!(formatter, "{}: {message}", self.code()),
+            Self::Poisoned(message) => write!(formatter, "{}: {message}", self.code()),
             Self::Combined { primary, secondary } => {
                 write!(
                     formatter,
@@ -415,6 +911,7 @@ impl From<FunctionError> for ComponentError {
             FunctionError::Unsupported(message) => Self::unsupported(message),
             FunctionError::StopThread(_) => Self::Control(ControlSignal::StopThread),
             FunctionError::ResourceLimit(message) => Self::resource_limit(message),
+            FunctionError::Poisoned(message) => Self::poisoned(message),
         }
     }
 }
@@ -513,6 +1010,10 @@ pub struct RuntimeCapabilities {
     environment: Arc<dyn Environment>,
     scheduler: Arc<dyn Scheduler>,
     properties: Arc<RwLock<BTreeMap<String, String>>>,
+    property_versions: Arc<RwLock<BTreeMap<String, u64>>>,
+    property_epoch: Arc<AtomicU64>,
+    mutation_lock: Arc<Mutex<()>>,
+    property_generation_error: Arc<Mutex<Option<MutationError>>>,
     critical_sections: Arc<dyn CriticalSectionCoordinator>,
     expression_cleanup: Arc<dyn ExpressionStateCleanup>,
 }
@@ -541,6 +1042,10 @@ impl Default for RuntimeCapabilities {
             environment: Arc::new(EmptyEnvironment),
             scheduler: Arc::new(crate::scheduler::ImmediateScheduler),
             properties: Arc::new(RwLock::new(BTreeMap::new())),
+            property_versions: Arc::new(RwLock::new(BTreeMap::new())),
+            property_epoch: Arc::new(AtomicU64::new(0)),
+            mutation_lock: Arc::new(Mutex::new(())),
+            property_generation_error: Arc::new(Mutex::new(None)),
             critical_sections: Arc::new(DeterministicCriticalSectionCoordinator::default()),
             expression_cleanup: Arc::new(NoopExpressionStateCleanup),
         }
@@ -565,6 +1070,10 @@ impl RuntimeCapabilities {
             environment,
             scheduler: Arc::new(crate::scheduler::ImmediateScheduler),
             properties: Arc::new(RwLock::new(BTreeMap::new())),
+            property_versions: Arc::new(RwLock::new(BTreeMap::new())),
+            property_epoch: Arc::new(AtomicU64::new(0)),
+            mutation_lock: Arc::new(Mutex::new(())),
+            property_generation_error: Arc::new(Mutex::new(None)),
             critical_sections: Arc::new(DeterministicCriticalSectionCoordinator::default()),
             expression_cleanup: Arc::new(NoopExpressionStateCleanup),
         }
@@ -617,6 +1126,14 @@ impl RuntimeCapabilities {
     #[must_use]
     pub fn with_properties(mut self, value: Arc<RwLock<BTreeMap<String, String>>>) -> Self {
         self.properties = value;
+        // The caller supplied a replacement map, so any version ledger from
+        // the previous map no longer describes the visible values. Start a
+        // fresh ledger rather than allowing a later rollback to compare
+        // unrelated versions.
+        self.property_versions = Arc::new(RwLock::new(BTreeMap::new()));
+        self.property_epoch = Arc::new(AtomicU64::new(0));
+        self.mutation_lock = Arc::new(Mutex::new(()));
+        self.property_generation_error = Arc::new(Mutex::new(None));
         self
     }
 
@@ -679,6 +1196,14 @@ impl RuntimeCapabilities {
         Arc::clone(&self.properties)
     }
 
+    fn property_versions(&self) -> Arc<RwLock<BTreeMap<String, u64>>> {
+        Arc::clone(&self.property_versions)
+    }
+
+    fn property_epoch(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.property_epoch)
+    }
+
     /// Returns the explicit critical-section coordinator.
     #[must_use]
     pub fn critical_sections(&self) -> &dyn CriticalSectionCoordinator {
@@ -713,6 +1238,10 @@ impl RuntimeCapabilities {
             environment: Arc::clone(&self.environment),
             scheduler: Arc::clone(&self.scheduler),
             properties: Arc::clone(&self.properties),
+            property_versions: Arc::clone(&self.property_versions),
+            property_epoch: Arc::clone(&self.property_epoch),
+            mutation_lock: Arc::clone(&self.mutation_lock),
+            property_generation_error: Arc::clone(&self.property_generation_error),
             critical_sections: Arc::clone(&self.critical_sections),
             expression_cleanup: Arc::clone(&self.expression_cleanup),
         }
@@ -724,6 +1253,17 @@ pub struct ExecutionContext {
     capabilities: RuntimeCapabilities,
     variables: Arc<RwLock<BTreeMap<String, String>>>,
     properties: Arc<RwLock<BTreeMap<String, String>>>,
+    property_versions: Arc<RwLock<BTreeMap<String, u64>>>,
+    property_epoch: Arc<AtomicU64>,
+    mutation_lock: Arc<Mutex<()>>,
+    property_generation_error: Arc<Mutex<Option<MutationError>>>,
+    property_transaction: Arc<Mutex<PropertyTransaction>>,
+    context_generation: ContextGeneration,
+    request_state: RequestState,
+    current_result: Option<SampleResult>,
+    mutation_outputs: Vec<BoundedBytes>,
+    mutation_diagnostics: Vec<MutationDiagnostic>,
+    mutation_limits: MutationLimits,
     run: jmeter_rs_results::RunIdentity,
     thread: ThreadIdentity,
     host: HostIdentity,
@@ -749,6 +1289,8 @@ impl fmt::Debug for ExecutionContext {
             .debug_struct("ExecutionContext")
             .field("variables", &read_lock(&self.variables))
             .field("properties", &read_lock(&self.properties))
+            .field("context_generation", &self.context_generation)
+            .field("request_generation", &self.request_state.generation())
             .field("run", &self.run)
             .field("thread", &self.thread)
             .field("host", &self.host)
@@ -774,10 +1316,25 @@ impl ExecutionContext {
     #[must_use]
     pub fn with_capabilities(capabilities: RuntimeCapabilities) -> Self {
         let properties = capabilities.properties();
+        let property_versions = capabilities.property_versions();
+        let property_epoch = capabilities.property_epoch();
+        let mutation_lock = Arc::clone(&capabilities.mutation_lock);
+        let property_generation_error = Arc::clone(&capabilities.property_generation_error);
         Self {
             capabilities,
             variables: Arc::new(RwLock::new(BTreeMap::new())),
             properties,
+            property_versions,
+            property_epoch,
+            mutation_lock,
+            property_generation_error,
+            property_transaction: Arc::new(Mutex::new(PropertyTransaction::default())),
+            context_generation: ContextGeneration::FIRST,
+            request_state: RequestState::default(),
+            current_result: None,
+            mutation_outputs: Vec::new(),
+            mutation_diagnostics: Vec::new(),
+            mutation_limits: MutationLimits::default(),
             run: jmeter_rs_results::RunIdentity::new(""),
             thread: ThreadIdentity::new(""),
             host: HostIdentity::new(""),
@@ -801,10 +1358,22 @@ impl ExecutionContext {
     /// Creates an independent per-user clone of this context.
     #[must_use]
     pub fn clone_for_user(&self) -> Self {
+        let _mutation_guard = mutex_lock(&self.mutation_lock);
         Self {
             capabilities: self.capabilities.clone_for_user(),
             variables: Arc::new(RwLock::new(read_lock(&self.variables).clone())),
             properties: Arc::clone(&self.properties),
+            property_versions: Arc::clone(&self.property_versions),
+            property_epoch: Arc::clone(&self.property_epoch),
+            mutation_lock: Arc::clone(&self.mutation_lock),
+            property_generation_error: Arc::clone(&self.property_generation_error),
+            property_transaction: Arc::new(Mutex::new(PropertyTransaction::default())),
+            context_generation: self.context_generation,
+            request_state: self.request_state.clone(),
+            current_result: self.current_result.clone(),
+            mutation_outputs: self.mutation_outputs.clone(),
+            mutation_diagnostics: self.mutation_diagnostics.clone(),
+            mutation_limits: self.mutation_limits,
             run: self.run.clone(),
             thread: self.thread.clone(),
             host: self.host.clone(),
@@ -834,6 +1403,347 @@ impl ExecutionContext {
         &self.capabilities
     }
 
+    /// Returns the versioned invocation/context generation.  This identity is
+    /// deliberately distinct from [`RequestState::generation`].
+    #[must_use]
+    pub const fn context_generation(&self) -> ContextGeneration {
+        self.context_generation
+    }
+
+    /// Returns the typed request state owned by this context.
+    #[must_use]
+    pub fn request_state(&self) -> &RequestState {
+        &self.request_state
+    }
+
+    /// Replaces typed request state after validating its bounded shape.
+    pub fn set_request_state(&mut self, request: RequestState) -> Result<(), MutationError> {
+        request.validate()?;
+        self.request_state = request;
+        Ok(())
+    }
+
+    /// Returns the request generation without conflating it with context
+    /// generation.
+    #[must_use]
+    pub fn request_generation(&self) -> crate::RequestGeneration {
+        self.request_state.generation()
+    }
+
+    /// Returns the current context-level result projection, when one has been
+    /// committed through the mutation seam.
+    #[must_use]
+    pub fn current_result(&self) -> Option<&SampleResult> {
+        self.current_result.as_ref()
+    }
+
+    /// Returns the redacted mutation diagnostics retained by successful
+    /// commits.
+    #[must_use]
+    pub fn mutation_diagnostics(&self) -> &[MutationDiagnostic] {
+        &self.mutation_diagnostics
+    }
+
+    /// Returns bounded output chunks retained by successful commits.
+    #[must_use]
+    pub fn mutation_outputs(&self) -> &[BoundedBytes] {
+        &self.mutation_outputs
+    }
+
+    /// Replaces the per-context mutation limits before any invocation is
+    /// staged.
+    pub fn set_mutation_limits(&mut self, limits: MutationLimits) -> Result<(), MutationError> {
+        if limits.max_mutations == 0
+            || limits.max_value_bytes == 0
+            || limits.max_result_depth == 0
+            || limits.max_result_nodes == 0
+            || limits.max_request_bytes == 0
+            || limits.max_diagnostics == 0
+            || limits.max_diagnostic_bytes == 0
+            || limits.max_outputs == 0
+            || limits.max_output_bytes == 0
+        {
+            return Err(MutationError::limit("mutation-limits"));
+        }
+        self.mutation_limits = limits;
+        Ok(())
+    }
+
+    /// Returns the bounded mutation limits used by the next invocation.
+    #[must_use]
+    pub const fn mutation_limits(&self) -> MutationLimits {
+        self.mutation_limits
+    }
+
+    /// Returns a terminal property-generation failure, if checked version
+    /// allocation has exhausted its non-reusable identity space.
+    #[must_use]
+    pub fn property_generation_error(&self) -> Option<MutationError> {
+        let _mutation_guard = mutex_lock(&self.mutation_lock);
+        *mutex_lock(&self.property_generation_error)
+    }
+
+    /// Captures a complete processor invocation from the context-owned
+    /// variables, properties, request state, and current result.
+    #[must_use]
+    pub fn snapshot_processor_invocation(&self) -> InvocationSnapshot {
+        self.snapshot_processor_invocation_with(&self.request_state, self.current_result.as_ref())
+    }
+
+    pub(crate) fn snapshot_processor_invocation_with(
+        &self,
+        request: &RequestState,
+        result: Option<&SampleResult>,
+    ) -> InvocationSnapshot {
+        let _mutation_guard = mutex_lock(&self.mutation_lock);
+        let properties = read_lock(&self.properties).clone();
+        let property_versions = read_lock(&self.property_versions).clone();
+        let variables = read_lock(&self.variables).clone();
+        InvocationSnapshot::from_parts(
+            self.context_generation,
+            variables,
+            properties,
+            property_versions,
+            request.clone(),
+            result.cloned(),
+        )
+    }
+
+    /// Validates and stages a complete invocation delta without mutating live
+    /// context state.
+    pub fn validate_and_stage_invocation(
+        &self,
+        delta: &InvocationDelta,
+    ) -> Result<StagedInvocation, MutationError> {
+        if let Some(error) = self.property_generation_error() {
+            return Err(error);
+        }
+        delta.validate_and_stage(
+            &self.snapshot_processor_invocation(),
+            self.mutation_limits,
+            self.control_signal(),
+        )
+    }
+
+    /// Atomically commits one previously staged invocation.  All conflict,
+    /// generation, output, and version checks happen before the first field
+    /// is replaced.  A committed stage cannot be committed again.
+    pub fn commit_staged_invocation(
+        &mut self,
+        staged: &mut StagedInvocation,
+    ) -> Result<InvocationCommit, MutationError> {
+        // Global order for the mutation seam is:
+        // mutation_lock -> property_transaction -> properties -> versions
+        // -> variables.  Checkpoint and rollback use this same outer lock
+        // and order, so a peer cannot create a lock inversion while a staged
+        // candidate is published.
+        let _mutation_guard = mutex_lock(&self.mutation_lock);
+        if staged.is_committed() {
+            return Err(MutationError::new(
+                crate::MutationErrorCode::AlreadyCommitted,
+                "invocation-stage",
+            ));
+        }
+        if staged.base_generation() != self.context_generation {
+            return Err(MutationError::new(
+                crate::MutationErrorCode::StaleGeneration,
+                "context-current-generation",
+            ));
+        }
+        let next_generation = self
+            .context_generation
+            .checked_next()
+            .ok_or(MutationError::overflow("context-generation"))?;
+
+        let next_output_len = self
+            .mutation_outputs
+            .len()
+            .checked_add(staged.outputs().len())
+            .ok_or(MutationError::overflow("output-count"))?;
+        if next_output_len > self.mutation_limits.max_outputs {
+            return Err(MutationError::limit("context-output-count"));
+        }
+        let current_output_bytes = self
+            .mutation_outputs
+            .iter()
+            .map(BoundedBytes::len)
+            .try_fold(0usize, |total, value| {
+                total
+                    .checked_add(value)
+                    .ok_or(MutationError::overflow("output-bytes"))
+            })?;
+        let staged_output_bytes =
+            staged
+                .outputs()
+                .iter()
+                .map(BoundedBytes::len)
+                .try_fold(0usize, |total, value| {
+                    total
+                        .checked_add(value)
+                        .ok_or(MutationError::overflow("output-bytes"))
+                })?;
+        if current_output_bytes
+            .checked_add(staged_output_bytes)
+            .ok_or(MutationError::overflow("output-bytes"))?
+            > self.mutation_limits.max_output_bytes
+        {
+            return Err(MutationError::limit("context-output-bytes"));
+        }
+        let next_diagnostic_len = self
+            .mutation_diagnostics
+            .len()
+            .checked_add(staged.diagnostics().len())
+            .ok_or(MutationError::overflow("diagnostic-count"))?;
+        if next_diagnostic_len > self.mutation_limits.max_diagnostics {
+            return Err(MutationError::limit("context-diagnostic-count"));
+        }
+        let current_diagnostic_bytes =
+            self.mutation_diagnostics
+                .iter()
+                .try_fold(0usize, |total, diagnostic| {
+                    total
+                        .checked_add(diagnostic.code().len())
+                        .and_then(|value| value.checked_add(diagnostic.detail_byte_len()))
+                        .ok_or(MutationError::overflow("diagnostic-bytes"))
+                })?;
+        let staged_diagnostic_bytes =
+            staged
+                .diagnostics()
+                .iter()
+                .try_fold(0usize, |total, diagnostic| {
+                    total
+                        .checked_add(diagnostic.code().len())
+                        .and_then(|value| value.checked_add(diagnostic.detail_byte_len()))
+                        .ok_or(MutationError::overflow("diagnostic-bytes"))
+                })?;
+        if current_diagnostic_bytes
+            .checked_add(staged_diagnostic_bytes)
+            .ok_or(MutationError::overflow("diagnostic-bytes"))?
+            > self.mutation_limits.max_diagnostic_bytes
+        {
+            return Err(MutationError::limit("context-diagnostic-bytes"));
+        }
+
+        {
+            let property_transaction_handle = Arc::clone(&self.property_transaction);
+            let mut transaction = mutex_lock(&property_transaction_handle);
+            let mut properties = write_lock(&self.properties);
+            let mut versions = write_lock(&self.property_versions);
+            for (key, base) in staged.property_bases() {
+                let current_version = versions.get(key.as_str()).copied();
+                let current_value = properties.get(key.as_str()).cloned();
+                if current_version != base.version || current_value != base.value {
+                    return Err(MutationError::new(
+                        crate::MutationErrorCode::PropertyConflict,
+                        "newer-peer-property",
+                    ));
+                }
+            }
+            let epoch = self.property_epoch.load(Ordering::Acquire);
+            let property_increment = u64::try_from(staged.property_mutations().len())
+                .map_err(|_| MutationError::overflow("property-generation"))?;
+            let final_epoch = if property_increment == 0 {
+                epoch
+            } else {
+                match epoch
+                    .checked_add(property_increment)
+                    .filter(|value| *value != 0)
+                {
+                    Some(value) => value,
+                    None => {
+                        let error = MutationError::overflow("property-generation");
+                        self.mark_property_generation_error(error);
+                        return Err(error);
+                    }
+                }
+            };
+            let mut assignments = Vec::new();
+            for (index, mutation) in staged.property_mutations().iter().enumerate() {
+                let offset = u64::try_from(index)
+                    .map_err(|_| MutationError::overflow("property-generation"))?;
+                let version = match epoch
+                    .checked_add(offset)
+                    .and_then(|value| value.checked_add(1))
+                    .filter(|value| *value != 0)
+                {
+                    Some(value) => value,
+                    None => {
+                        let error = MutationError::overflow("property-generation");
+                        self.mark_property_generation_error(error);
+                        return Err(error);
+                    }
+                };
+                assignments.push((mutation.key.as_str().to_owned(), version));
+            }
+
+            // Every possible error has been checked.  Keep the shared
+            // property/version lock held through the complete local-context
+            // publication.  A peer can therefore observe either the old
+            // property plus old context, or the new property plus new
+            // context; it cannot observe the property between those writes.
+            for (mutation, (_key, version)) in
+                staged.property_mutations().iter().zip(assignments.iter())
+            {
+                let previous_version = versions.get(mutation.key.as_str()).copied();
+                let previous_value = properties.get(mutation.key.as_str()).cloned();
+                match &mutation.value {
+                    crate::Presence::Missing => {
+                        properties.remove(mutation.key.as_str());
+                    }
+                    crate::Presence::Present(value) => {
+                        properties
+                            .insert(mutation.key.as_str().to_owned(), value.as_str().to_owned());
+                    }
+                }
+                versions.insert(mutation.key.as_str().to_owned(), *version);
+                let latest_value = properties.get(mutation.key.as_str()).cloned();
+                record_property_write(
+                    &mut transaction,
+                    mutation.key.as_str(),
+                    previous_version,
+                    previous_value,
+                    *version,
+                    latest_value,
+                );
+            }
+            *write_lock(&self.variables) = staged.candidate_variables().clone();
+
+            // The epoch publication is part of this same lock domain.  The
+            // next peer commit cannot allocate a version from the old epoch.
+            self.property_epoch.store(final_epoch, Ordering::Release);
+            self.request_state = staged.candidate_request().clone();
+            self.current_result = staged.candidate_result().cloned();
+            self.mutation_outputs
+                .extend(staged.outputs().iter().cloned());
+            self.mutation_diagnostics
+                .extend(staged.diagnostics().iter().cloned());
+            self.context_generation = next_generation;
+            if staged.signal() != ControlSignal::Continue {
+                self.cancellation.request(staged.signal());
+                self.cancellation_token.request(staged.signal());
+            }
+        }
+        let receipt = InvocationCommit {
+            generation: next_generation,
+            request_generation: self.request_state.generation(),
+            after_state_digest: staged.after_state_digest(),
+            proposal_digest: staged.proposal_digest(),
+            output_count: staged.outputs().len(),
+            diagnostic_count: staged.diagnostics().len(),
+        };
+        staged.mark_committed();
+        Ok(receipt)
+    }
+
+    /// Validates, stages, and commits one delta atomically.
+    pub fn apply_invocation_delta(
+        &mut self,
+        delta: &InvocationDelta,
+    ) -> Result<InvocationCommit, MutationError> {
+        let mut staged = self.validate_and_stage_invocation(delta)?;
+        self.commit_staged_invocation(&mut staged)
+    }
+
     /// Returns thread-local variables.
     pub fn variables(&self) -> RwLockReadGuard<'_, BTreeMap<String, String>> {
         read_lock(&self.variables)
@@ -846,12 +1756,42 @@ impl ExecutionContext {
 
     /// Sets a thread-local variable.
     pub fn set_variable(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        let _mutation_guard = mutex_lock(&self.mutation_lock);
         write_lock(&self.variables).insert(name.into(), value.into());
+    }
+
+    /// Seeds this context with one validated TestPlan initial-variable map.
+    ///
+    /// Seeding is transactional with respect to the context: all collisions
+    /// are checked before any value is inserted.  A fresh virtual-user
+    /// context is empty, while this explicit collision check keeps callers
+    /// from accidentally overwriting an existing variable when using the
+    /// lower-level execution seam.
+    pub fn seed_initial_variables(
+        &mut self,
+        initial: &InitialVariables,
+    ) -> Result<(), InitialVariablesError> {
+        let mut variables = write_lock(&self.variables);
+        if let Some((name, _)) = initial
+            .iter()
+            .find(|(name, _)| variables.contains_key(*name))
+        {
+            return Err(InitialVariablesError::DuplicateName {
+                name: bounded_text(name, MAX_DIAGNOSTIC_BYTES),
+            });
+        }
+        variables.extend(
+            initial
+                .iter()
+                .map(|(name, value)| (name.to_owned(), value.to_owned())),
+        );
+        Ok(())
     }
 
     /// Returns a thread-local variable.
     #[must_use]
     pub fn variable(&self, name: &str) -> Option<String> {
+        let _mutation_guard = mutex_lock(&self.mutation_lock);
         read_lock(&self.variables).get(name).cloned()
     }
 
@@ -860,19 +1800,48 @@ impl ExecutionContext {
         read_lock(&self.properties)
     }
 
-    /// Returns mutable run-scoped properties.
-    pub fn properties_mut(&self) -> RwLockWriteGuard<'_, BTreeMap<String, String>> {
-        write_lock(&self.properties)
-    }
-
     /// Sets a run-scoped property in this context's explicit view.
     pub fn set_property(&self, name: impl Into<String>, value: impl Into<String>) {
-        write_lock(&self.properties).insert(name.into(), value.into());
+        let _ = self.set_property_value(&name.into(), &value.into());
+    }
+
+    fn mark_property_generation_error(&self, error: MutationError) {
+        *mutex_lock(&self.property_generation_error) = Some(error);
+    }
+
+    fn set_property_value(&self, name: &str, value: &str) -> Option<String> {
+        let _mutation_guard = mutex_lock(&self.mutation_lock);
+        let transaction = Arc::clone(&self.property_transaction);
+        let mut transaction = mutex_lock(&transaction);
+        let mut properties = write_lock(&self.properties);
+        let mut versions = write_lock(&self.property_versions);
+        let previous_version = versions.get(name).copied();
+        let epoch = self.property_epoch.load(Ordering::Acquire);
+        let version = match epoch.checked_add(1).filter(|value| *value != 0) {
+            Some(version) => version,
+            None => {
+                self.mark_property_generation_error(MutationError::overflow("property-generation"));
+                return None;
+            }
+        };
+        let previous = properties.insert(name.to_owned(), value.to_owned());
+        record_property_write(
+            &mut transaction,
+            name,
+            previous_version,
+            previous.clone(),
+            version,
+            Some(value.to_owned()),
+        );
+        versions.insert(name.to_owned(), version);
+        self.property_epoch.store(version, Ordering::Release);
+        previous
     }
 
     /// Returns a property from this context's explicit view.
     #[must_use]
     pub fn property(&self, name: &str) -> Option<String> {
+        let _mutation_guard = mutex_lock(&self.mutation_lock);
         read_lock(&self.properties).get(name).cloned()
     }
 
@@ -1534,9 +2503,7 @@ struct RuntimeExprProperties<'a> {
 
 impl ExprPropertySetter for RuntimeExprProperties<'_> {
     fn set_property(&self, name: &str, value: &str) -> Result<Option<String>, FunctionError> {
-        let mut properties = write_lock(&self.context.properties);
-        let previous = properties.insert(name.to_owned(), value.to_owned());
-        Ok(previous)
+        Ok(self.context.set_property_value(name, value))
     }
 
     fn get_property(&self, name: &str) -> Option<String> {
@@ -1549,7 +2516,33 @@ pub struct SampleContext<'a> {
     execution: ExecutionSlot<'a>,
     sampler_id: NodeId,
     request: BTreeMap<String, String>,
+    request_state: RequestState,
     result: Option<SampleResult>,
+}
+
+/// State captured at the start of one mutable component invocation.
+///
+/// Processors and extractors are allowed to propose changes to variables,
+/// run-scoped properties, the merged request, and the current result.  The
+/// proposal is committed only when the component returns successfully.  A
+/// provider/argument/limit failure or cancellation/control action therefore
+/// cannot leave a partially applied mutation visible to the next sampler.
+/// The phase trace is intentionally not part of this checkpoint: diagnostics
+/// remain observable even when a component's semantic state is rolled back.
+#[derive(Clone, Debug)]
+struct InvocationCheckpoint {
+    variables: BTreeMap<String, String>,
+    properties: BTreeMap<String, String>,
+    property_versions: BTreeMap<String, u64>,
+    property_transaction: Arc<Mutex<PropertyTransaction>>,
+    request: BTreeMap<String, String>,
+    request_state: RequestState,
+    execution_request_state: RequestState,
+    result: Option<SampleResult>,
+    context_generation: ContextGeneration,
+    execution_result: Option<SampleResult>,
+    mutation_outputs: Vec<BoundedBytes>,
+    mutation_diagnostics: Vec<MutationDiagnostic>,
 }
 
 /// The execution state held by a sampler invocation.
@@ -1567,10 +2560,12 @@ enum ExecutionSlot<'a> {
 
 impl<'a> SampleContext<'a> {
     fn new(execution: &'a mut ExecutionContext, sampler_id: NodeId) -> Self {
+        let request_state = execution.request_state().clone();
         Self {
             execution: ExecutionSlot::Borrowed(execution),
             sampler_id,
             request: BTreeMap::new(),
+            request_state,
             result: None,
         }
     }
@@ -1592,6 +2587,7 @@ impl<'a> SampleContext<'a> {
             execution: ExecutionSlot::Owned(Box::new(self.execution().clone_for_user())),
             sampler_id: self.sampler_id,
             request: self.request.clone(),
+            request_state: self.request_state.clone(),
             result: self.result.clone(),
         }
     }
@@ -1624,6 +2620,32 @@ impl<'a> SampleContext<'a> {
         self.request.insert(name.into(), value.into());
     }
 
+    /// Returns the typed request state used by the mutation seam.  The legacy
+    /// string map above remains a configuration merge view and is not a URL.
+    #[must_use]
+    pub fn request_state(&self) -> &RequestState {
+        &self.request_state
+    }
+
+    /// Replaces the typed request state after validation.
+    pub fn set_request_state(&mut self, request: RequestState) -> Result<(), MutationError> {
+        request.validate()?;
+        self.request_state = request;
+        Ok(())
+    }
+
+    /// Returns the request generation independently of invocation generation.
+    #[must_use]
+    pub fn request_generation(&self) -> crate::RequestGeneration {
+        self.request_state.generation()
+    }
+
+    /// Returns the versioned invocation/context generation.
+    #[must_use]
+    pub fn context_generation(&self) -> ContextGeneration {
+        self.execution().context_generation()
+    }
+
     /// Returns one merged request/configuration value.
     #[must_use]
     pub fn request_value(&self, name: &str) -> Option<&str> {
@@ -1644,6 +2666,166 @@ impl<'a> SampleContext<'a> {
     /// Replaces the result held by this invocation.
     pub fn set_result(&mut self, result: Option<SampleResult>) {
         self.result = result;
+    }
+
+    /// Captures this complete processor invocation, including typed request
+    /// and result state.
+    #[must_use]
+    pub fn snapshot_processor_invocation(&self) -> InvocationSnapshot {
+        self.execution()
+            .snapshot_processor_invocation_with(&self.request_state, self.result.as_ref())
+    }
+
+    /// Validates and stages a processor delta without changing this context.
+    pub fn validate_and_stage_invocation(
+        &self,
+        delta: &InvocationDelta,
+    ) -> Result<StagedInvocation, MutationError> {
+        if let Some(error) = self.execution().property_generation_error() {
+            return Err(error);
+        }
+        delta.validate_and_stage(
+            &self.snapshot_processor_invocation(),
+            self.execution().mutation_limits(),
+            self.execution().control_signal(),
+        )
+    }
+
+    /// Commits a staged processor delta to execution and this sample context
+    /// exactly once.
+    pub fn commit_staged_invocation(
+        &mut self,
+        staged: &mut StagedInvocation,
+    ) -> Result<InvocationCommit, MutationError> {
+        let receipt = self.execution_mut().commit_staged_invocation(staged)?;
+        self.request_state = staged.candidate_request().clone();
+        self.result = staged.candidate_result().cloned();
+        Ok(receipt)
+    }
+
+    /// Validates, stages, and commits one processor delta atomically.
+    pub fn apply_invocation_delta(
+        &mut self,
+        delta: &InvocationDelta,
+    ) -> Result<InvocationCommit, MutationError> {
+        let mut staged = self.validate_and_stage_invocation(delta)?;
+        self.commit_staged_invocation(&mut staged)
+    }
+
+    /// Captures the mutable invocation state before a component runs.
+    ///
+    /// This is an executor-neutral transaction boundary. It snapshots the
+    /// explicit run/property view as well as virtual-user variables: JMeter
+    /// properties are shared, but a failed processor must not publish a
+    /// half-applied property update. The pipeline restores the snapshot only
+    /// for a component error; successful components publish all changes
+    /// before the next component starts.
+    fn checkpoint(&mut self) -> InvocationCheckpoint {
+        let request = self.request.clone();
+        let request_state = self.request_state.clone();
+        let result = self.result.clone();
+        let execution = self.execution_mut();
+        let _mutation_guard = mutex_lock(&execution.mutation_lock);
+        let baseline_values = read_lock(&execution.properties).clone();
+        let baseline_versions = read_lock(&execution.property_versions).clone();
+        let variables = read_lock(&execution.variables).clone();
+        execution.property_transaction = Arc::new(Mutex::new(PropertyTransaction {
+            active: true,
+            baseline_versions: baseline_versions.clone(),
+            baseline_values: baseline_values.clone(),
+            writes: BTreeMap::new(),
+        }));
+        InvocationCheckpoint {
+            variables,
+            properties: baseline_values,
+            property_versions: baseline_versions,
+            property_transaction: Arc::clone(&execution.property_transaction),
+            request,
+            request_state,
+            execution_request_state: execution.request_state.clone(),
+            result,
+            context_generation: execution.context_generation,
+            execution_result: execution.current_result.clone(),
+            mutation_outputs: execution.mutation_outputs.clone(),
+            mutation_diagnostics: execution.mutation_diagnostics.clone(),
+        }
+    }
+
+    /// Rolls back one failed component invocation to its checkpoint.
+    fn rollback(&mut self, checkpoint: InvocationCheckpoint) {
+        {
+            let execution = self.execution_mut();
+            let _mutation_guard = mutex_lock(&execution.mutation_lock);
+            let transaction = mutex_lock(&checkpoint.property_transaction);
+            let mut properties = write_lock(&execution.properties);
+            let mut versions = write_lock(&execution.property_versions);
+            let mut all_keys = checkpoint.properties.keys().cloned().collect::<Vec<_>>();
+            all_keys.extend(
+                properties
+                    .keys()
+                    .filter(|key| !checkpoint.properties.contains_key(*key))
+                    .cloned(),
+            );
+            for key in checkpoint.property_versions.keys() {
+                if !all_keys.iter().any(|existing| existing == key) {
+                    all_keys.push(key.clone());
+                }
+            }
+            for key in transaction.writes.keys() {
+                if !all_keys.iter().any(|existing| existing == key) {
+                    all_keys.push(key.clone());
+                }
+            }
+            for key in all_keys {
+                let current_version = versions.get(&key).copied();
+                let checkpoint_version = checkpoint.property_versions.get(&key).copied();
+                let should_restore = transaction
+                    .writes
+                    .get(&key)
+                    .map(|write| {
+                        current_version == Some(write.latest_version)
+                            && properties.get(&key).cloned() == write.latest_value
+                    })
+                    .unwrap_or(current_version == checkpoint_version);
+                if !should_restore {
+                    continue;
+                }
+                let restore_value = match transaction.writes.get(&key) {
+                    Some(write) => write.restore_value.clone(),
+                    None => checkpoint.properties.get(&key).cloned(),
+                };
+                match restore_value {
+                    Some(value) => {
+                        properties.insert(key.clone(), value);
+                    }
+                    None => {
+                        properties.remove(&key);
+                    }
+                }
+                let restore_version = match transaction.writes.get(&key) {
+                    Some(write) => write.restore_version,
+                    None => checkpoint_version,
+                };
+                match restore_version {
+                    Some(version) => {
+                        versions.insert(key, version);
+                    }
+                    None => {
+                        versions.remove(&key);
+                    }
+                }
+            }
+            execution.property_transaction = Arc::new(Mutex::new(PropertyTransaction::default()));
+            *write_lock(&execution.variables) = checkpoint.variables;
+            execution.context_generation = checkpoint.context_generation;
+            execution.request_state = checkpoint.execution_request_state;
+            execution.current_result = checkpoint.execution_result;
+            execution.mutation_outputs = checkpoint.mutation_outputs;
+            execution.mutation_diagnostics = checkpoint.mutation_diagnostics;
+        }
+        self.request = checkpoint.request;
+        self.request_state = checkpoint.request_state;
+        self.result = checkpoint.result;
     }
 
     /// Records one trace entry, returning a bounded failure if full.
@@ -3074,9 +4256,11 @@ impl ExecutionPipeline {
                     node_id: package.sampler_id,
                     source,
                 })?;
+            let checkpoint = sample_context.checkpoint();
             match component.apply(&mut sample_context).await {
                 Ok(()) => {}
                 Err(ComponentError::Control(signal)) => {
+                    sample_context.rollback(checkpoint);
                     sample_context.execution_mut().request_control(signal);
                     return Ok(ExecutionReport::controlled(
                         package.sampler_id,
@@ -3084,6 +4268,7 @@ impl ExecutionPipeline {
                     ));
                 }
                 Err(source) => {
+                    sample_context.rollback(checkpoint);
                     return Err(PipelineError::Configuration {
                         node_id: package.sampler_id,
                         source,
@@ -3113,9 +4298,11 @@ impl ExecutionPipeline {
                     node_id: package.sampler_id,
                     source,
                 })?;
+            let checkpoint = sample_context.checkpoint();
             match component.process(&mut sample_context).await {
                 Ok(()) => {}
                 Err(ComponentError::Control(signal)) => {
+                    sample_context.rollback(checkpoint);
                     sample_context.execution_mut().request_control(signal);
                     return Ok(ExecutionReport::controlled(
                         package.sampler_id,
@@ -3123,6 +4310,7 @@ impl ExecutionPipeline {
                     ));
                 }
                 Err(source) => {
+                    sample_context.rollback(checkpoint);
                     return Err(PipelineError::Preprocessor {
                         node_id: package.sampler_id,
                         source,
@@ -3153,9 +4341,11 @@ impl ExecutionPipeline {
                     node_id: package.sampler_id,
                     source,
                 })?;
+            let checkpoint = sample_context.checkpoint();
             let delay = match component.delay(&mut sample_context).await {
                 Ok(delay) => delay,
                 Err(ComponentError::Control(signal)) => {
+                    sample_context.rollback(checkpoint);
                     sample_context.execution_mut().request_control(signal);
                     return Ok(ExecutionReport::controlled(
                         package.sampler_id,
@@ -3163,6 +4353,7 @@ impl ExecutionPipeline {
                     ));
                 }
                 Err(source) => {
+                    sample_context.rollback(checkpoint);
                     return Err(PipelineError::Timer {
                         node_id: package.sampler_id,
                         source,
@@ -3170,19 +4361,29 @@ impl ExecutionPipeline {
                 }
             };
             let delay = if component.is_modifiable() {
-                scale_timer_delay(
+                match scale_timer_delay(
                     delay,
                     sample_context.execution().timer_factor(),
                     package.sampler_id,
-                )?
+                ) {
+                    Ok(delay) => delay,
+                    Err(error) => {
+                        sample_context.rollback(checkpoint);
+                        return Err(error);
+                    }
+                }
             } else {
                 delay
             };
-            total_delay = total_delay
-                .checked_add(delay)
-                .ok_or(PipelineError::TimerOverflow {
-                    sampler_id: package.sampler_id,
-                })?;
+            total_delay = match total_delay.checked_add(delay) {
+                Some(total_delay) => total_delay,
+                None => {
+                    sample_context.rollback(checkpoint);
+                    return Err(PipelineError::TimerOverflow {
+                        sampler_id: package.sampler_id,
+                    });
+                }
+            };
             if sample_context.execution().control_signal().is_stop() {
                 return Ok(ExecutionReport::controlled(
                     package.sampler_id,
@@ -3196,13 +4397,9 @@ impl ExecutionPipeline {
         }
         if !total_delay.is_zero() {
             check_phase_deadline(&sample_context, package.sampler_id)?;
-            match sample_context
-                .execution()
-                .capabilities()
-                .sleeper()
-                .sleep(total_delay)
-                .await
-            {
+            let sleeper = sample_context.execution().capabilities().sleeper();
+            let cancellation = sample_context.execution().cancellation_token();
+            match sleep_interruptibly(sleeper, total_delay, cancellation).await {
                 Ok(()) => {}
                 Err(CapabilityError::Control(signal)) => {
                     sample_context.execution_mut().request_control(signal);
@@ -3218,6 +4415,13 @@ impl ExecutionPipeline {
                     });
                 }
             }
+        }
+        // A cancellation request can race the sleeper's final poll. Recheck
+        // at the sampler boundary so a stop raised after that poll still
+        // prevents sampler entry.
+        let signal = sample_context.execution().control_signal();
+        if signal != ControlSignal::Continue {
+            return Ok(ExecutionReport::controlled(package.sampler_id, signal));
         }
 
         let start = sample_context.execution().capabilities().clock().now();
@@ -3284,13 +4488,16 @@ impl ExecutionPipeline {
                     node_id: package.sampler_id,
                     source,
                 })?;
+            let checkpoint = sample_context.checkpoint();
             match component.process(&mut sample_context).await {
                 Ok(()) => {}
                 Err(ComponentError::Control(signal)) => {
+                    sample_context.rollback(checkpoint);
                     sample_context.execution_mut().request_control(signal);
                     break;
                 }
                 Err(source) => {
+                    sample_context.rollback(checkpoint);
                     return Err(PipelineError::Postprocessor {
                         node_id: package.sampler_id,
                         source,
@@ -3314,29 +4521,35 @@ impl ExecutionPipeline {
                     node_id: package.sampler_id,
                     source,
                 })?;
+            let checkpoint = sample_context.checkpoint();
             let assertion = match component.evaluate(&mut sample_context).await {
                 Ok(assertion) => assertion,
                 Err(ComponentError::Control(signal)) => {
+                    sample_context.rollback(checkpoint);
                     sample_context.execution_mut().request_control(signal);
                     break;
                 }
                 Err(source) => {
+                    sample_context.rollback(checkpoint);
                     return Err(PipelineError::Assertion {
                         node_id: package.sampler_id,
                         source,
                     });
                 }
             };
-            let result = sample_context.result_mut().ok_or(PipelineError::Result {
-                sampler_id: package.sampler_id,
-                source: ResultError::InvalidHierarchy {
+            let append_result = match sample_context.result_mut() {
+                Some(result) => append_assertion_result(result, assertion),
+                None => Err(ResultError::InvalidHierarchy {
                     field: jmeter_rs_results::ResultField::Assertion,
-                },
-            })?;
-            append_assertion_result(result, assertion).map_err(|source| PipelineError::Result {
-                sampler_id: package.sampler_id,
-                source,
-            })?;
+                }),
+            };
+            if let Err(source) = append_result {
+                sample_context.rollback(checkpoint);
+                return Err(PipelineError::Result {
+                    sampler_id: package.sampler_id,
+                    source,
+                });
+            }
         }
 
         let event = {
@@ -3358,32 +4571,37 @@ impl ExecutionPipeline {
                 source,
             })?
         };
-        for (index, component) in package.listeners.iter().enumerate() {
-            sample_context
-                .execution_mut()
-                .set_expression_field_namespace(
-                    "runtime.plan.listener",
-                    package.sampler_id,
-                    &format!("listener:{index}"),
-                );
-            check_phase_deadline(&sample_context, package.sampler_id)?;
-            sample_context
-                .record(Phase::Listener, format!("listener[{index}]"))
-                .map_err(|source| PipelineError::Listener {
-                    node_id: package.sampler_id,
-                    source,
-                })?;
-            match component.on_event(&event).await {
-                Ok(()) => {}
-                Err(ComponentError::Control(signal)) => {
-                    sample_context.execution_mut().request_control(signal);
-                    break;
-                }
-                Err(source) => {
-                    return Err(PipelineError::Listener {
+        let ignored = sample_context
+            .result()
+            .is_some_and(|result| result.ignored());
+        if !ignored {
+            for (index, component) in package.listeners.iter().enumerate() {
+                sample_context
+                    .execution_mut()
+                    .set_expression_field_namespace(
+                        "runtime.plan.listener",
+                        package.sampler_id,
+                        &format!("listener:{index}"),
+                    );
+                check_phase_deadline(&sample_context, package.sampler_id)?;
+                sample_context
+                    .record(Phase::Listener, format!("listener[{index}]"))
+                    .map_err(|source| PipelineError::Listener {
                         node_id: package.sampler_id,
                         source,
-                    });
+                    })?;
+                match component.on_event(&event).await {
+                    Ok(()) => {}
+                    Err(ComponentError::Control(signal)) => {
+                        sample_context.execution_mut().request_control(signal);
+                        break;
+                    }
+                    Err(source) => {
+                        return Err(PipelineError::Listener {
+                            node_id: package.sampler_id,
+                            source,
+                        });
+                    }
                 }
             }
         }
@@ -3538,6 +4756,290 @@ fn update_result_timing(
 )]
 mod tests {
     use super::*;
+    use crate::{
+        BoundedBytes, BoundedText, ControlPatch, Digest32, HeaderOperation, MutationErrorCode,
+        Presence, PropertyMutation, RequestPatch, ResultPatch, VariableMutation,
+    };
+    use std::sync::Barrier;
+
+    fn block_on<T>(future: impl Future<Output = T>) -> T {
+        let waker = std::task::Waker::noop();
+        let mut task_context = std::task::Context::from_waker(waker);
+        let mut future = Box::pin(future);
+        loop {
+            match Future::poll(future.as_mut(), &mut task_context) {
+                std::task::Poll::Ready(value) => return value,
+                std::task::Poll::Pending => std::hint::spin_loop(),
+            }
+        }
+    }
+
+    #[test]
+    fn poisoned_function_error_maps_to_a_distinct_redacted_component_error() {
+        let secret = "top-secret-function-payload";
+        let function_error = FunctionError::poisoned(format!(
+            "authority state is unavailable; password={secret}; token=another-secret"
+        ));
+        assert_eq!(function_error.code(), "FUNC_POISONED");
+
+        let component_error = ComponentError::from(function_error);
+        assert_eq!(component_error.code(), "runtime.component.poisoned");
+        assert!(matches!(
+            component_error,
+            ComponentError::Poisoned(message)
+                if message.contains("password=<redacted>")
+                    && message.contains("token=<redacted>")
+                    && !message.contains(secret)
+                    && !message.contains("another-secret")
+        ));
+    }
+
+    #[test]
+    fn poisoned_function_error_is_not_control_or_default_failure() {
+        let component_error = ComponentError::from(FunctionError::poisoned(
+            "state authority is poisoned; password=must-not-be-applied",
+        ));
+        assert!(matches!(&component_error, ComponentError::Poisoned(_)));
+        assert!(!matches!(&component_error, ComponentError::Control(_)));
+        assert_ne!(component_error.code(), "runtime.component.failure");
+        assert_ne!(component_error.code(), "runtime.component.unsupported");
+        assert_ne!(component_error.code(), "runtime.component.resource-limit");
+        assert!(!component_error.to_string().contains("must-not-be-applied"));
+        assert!(std::error::Error::source(&component_error).is_none());
+    }
+
+    #[test]
+    fn poisoned_component_payload_is_bounded_before_debug_or_display() {
+        let error = ComponentError::poisoned(format!(
+            "password={}",
+            "untrusted-secret-value-".repeat(MAX_DIAGNOSTIC_BYTES)
+        ));
+        let message = match &error {
+            ComponentError::Poisoned(message) => message,
+            _ => panic!("poison constructor returned another category"),
+        };
+        assert!(message.len() <= MAX_DIAGNOSTIC_BYTES);
+        assert!(!message.contains("untrusted-secret-value"));
+        assert!(!format!("{error:?}").contains("untrusted-secret-value"));
+        assert!(!error.to_string().contains("untrusted-secret-value"));
+    }
+
+    #[test]
+    fn jmeter_arguments_projection_is_first_wins_and_accepts_empty_names() {
+        let oversized = "secret-discarded-value"
+            .repeat(MAX_INITIAL_VARIABLE_VALUE_BYTES / "secret-discarded-value".len() + 1);
+        let seed = InitialVariables::try_from_jmeter_arguments([
+            ("duplicate", "first".to_owned()),
+            ("", "empty-key".to_owned()),
+            ("duplicate", oversized),
+            ("", "discarded-empty-key".to_owned()),
+        ])
+        .expect("JMeter Arguments projection");
+
+        assert_eq!(seed.get("duplicate"), Some("first"));
+        assert_eq!(seed.get(""), Some("empty-key"));
+        assert_eq!(seed.len(), 2);
+    }
+
+    #[test]
+    fn jmeter_arguments_bounds_apply_after_first_wins_selection() {
+        let duplicate_entries = (0..=MAX_INITIAL_VARIABLES)
+            .map(|index| (String::from("same"), index.to_string()))
+            .collect::<Vec<_>>();
+        let seed = InitialVariables::try_from_jmeter_arguments(duplicate_entries)
+            .expect("duplicate source entries count once in the JMeter map");
+        assert_eq!(seed.len(), 1);
+        assert_eq!(seed.get("same"), Some("0"));
+
+        let unique_entries = (0..=MAX_INITIAL_VARIABLES)
+            .map(|index| (format!("key-{index}"), String::from("value")))
+            .collect::<Vec<_>>();
+        let error = InitialVariables::try_from_jmeter_arguments(unique_entries)
+            .expect_err("canonical map count bound");
+        assert_eq!(error.code(), "runtime.initial-variables.count-limit");
+    }
+
+    #[test]
+    fn strict_initial_variable_constructor_retains_non_jmeter_policy() {
+        let error = InitialVariables::try_from_iter([("", "value")])
+            .expect_err("strict constructor rejects an empty name");
+        assert_eq!(error.code(), "runtime.initial-variables.empty-name");
+
+        let error =
+            InitialVariables::try_from_iter([("duplicate", "first"), ("duplicate", "second")])
+                .expect_err("strict constructor rejects duplicate names");
+        assert_eq!(error.code(), "runtime.initial-variables.duplicate-name");
+
+        let secret = "secret-value-that-must-not-appear";
+        let oversized_value = format!("{secret}x");
+        let error = InitialVariables::try_from_jmeter_arguments([(
+            "bounded",
+            oversized_value.repeat(MAX_INITIAL_VARIABLE_VALUE_BYTES / oversized_value.len() + 1),
+        )])
+        .expect_err("value bound");
+        assert_eq!(error.code(), "runtime.initial-variables.value-limit");
+        assert!(!error.to_string().contains(secret));
+    }
+
+    struct CheckpointSampler;
+
+    impl Sampler for CheckpointSampler {
+        fn sample<'a>(
+            &'a self,
+            _context: &'a mut SampleContext<'_>,
+        ) -> ComponentFuture<'a, SamplerOutput> {
+            Box::pin(future::ready(Ok(SamplerOutput::result(SampleResult::new(
+                "before",
+            )))))
+        }
+    }
+
+    struct IgnoredSampler;
+
+    impl Sampler for IgnoredSampler {
+        fn sample<'a>(
+            &'a self,
+            _context: &'a mut SampleContext<'_>,
+        ) -> ComponentFuture<'a, SamplerOutput> {
+            let mut result = SampleResult::new("ignored");
+            result.set_ignored(true);
+            Box::pin(future::ready(Ok(SamplerOutput::result(result))))
+        }
+    }
+
+    struct RecordingSampler {
+        ran: Arc<Mutex<bool>>,
+    }
+
+    impl Sampler for RecordingSampler {
+        fn sample<'a>(
+            &'a self,
+            _context: &'a mut SampleContext<'_>,
+        ) -> ComponentFuture<'a, SamplerOutput> {
+            let ran = Arc::clone(&self.ran);
+            Box::pin(future::ready({
+                *mutex_lock(&ran) = true;
+                Ok(SamplerOutput::result(SampleResult::new("ran")))
+            }))
+        }
+    }
+
+    struct RecordingListener {
+        calls: Arc<Mutex<usize>>,
+    }
+
+    impl Listener for RecordingListener {
+        fn on_event<'a>(&'a self, _event: &'a SampleEvent) -> ComponentFuture<'a, ()> {
+            let calls = Arc::clone(&self.calls);
+            Box::pin(future::ready({
+                let mut count = mutex_lock(&calls);
+                *count = count.saturating_add(1);
+                Ok(())
+            }))
+        }
+    }
+
+    struct FixedTimer;
+
+    impl Timer for FixedTimer {
+        fn delay<'a>(
+            &'a self,
+            _context: &'a mut SampleContext<'_>,
+        ) -> ComponentFuture<'a, Duration> {
+            Box::pin(future::ready(Ok(Duration::from_millis(1))))
+        }
+    }
+
+    struct CancelDuringSleepSleeper {
+        token: Arc<Mutex<Option<CancellationToken>>>,
+    }
+
+    impl Sleeper for CancelDuringSleepSleeper {
+        fn sleep<'a>(&'a self, _duration: Duration) -> CapabilityFuture<'a, ()> {
+            let token = mutex_lock(&self.token)
+                .clone()
+                .expect("execution token installed before timer execution");
+            Box::pin(future::poll_fn(move |task_context| {
+                let signal = token.signal();
+                if signal == ControlSignal::Continue {
+                    token.request(ControlSignal::StopTestImmediate);
+                    task_context.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                } else {
+                    std::task::Poll::Ready(Err(CapabilityError::Control(signal)))
+                }
+            }))
+        }
+    }
+
+    struct MutatingFailurePostprocessor;
+
+    impl Postprocessor for MutatingFailurePostprocessor {
+        fn process<'a>(&'a self, context: &'a mut SampleContext<'_>) -> ComponentFuture<'a, ()> {
+            context.execution_mut().set_variable("changed", "after");
+            context.execution().set_property("shared", "after");
+            context.set_request_value("header", "after");
+            if let Some(result) = context.result_mut() {
+                result.set_label("after");
+            }
+            Box::pin(future::ready(Err(ComponentError::failure(
+                "postprocessor failed after mutation",
+            ))))
+        }
+    }
+
+    struct TypedMutatingFailurePostprocessor;
+
+    impl Postprocessor for TypedMutatingFailurePostprocessor {
+        fn process<'a>(&'a self, context: &'a mut SampleContext<'_>) -> ComponentFuture<'a, ()> {
+            let request = context.request_state().clone();
+            let mut request_patch = RequestPatch::new(request.generation(), request.digest());
+            request_patch.set_body(Presence::Present(BoundedBytes::empty()));
+            let mut result_patch = ResultPatch::default();
+            result_patch.set_label(Presence::Present(
+                BoundedText::try_new("typed-after", 4 * 1024).expect("label"),
+            ));
+            let mut delta = InvocationDelta::new(context.context_generation());
+            delta
+                .add_variable(VariableMutation::set("typed", "after").expect("variable"))
+                .expect("variable mutation");
+            delta
+                .add_property(PropertyMutation::set("shared", "typed-after").expect("property"))
+                .expect("property mutation");
+            delta.set_request_patch(request_patch);
+            delta.set_result_patch(result_patch);
+            context
+                .apply_invocation_delta(&delta)
+                .expect("typed commit");
+            let peer = context.execution().clone_for_user();
+            peer.set_property("shared", "peer-after");
+            Box::pin(future::ready(Err(ComponentError::failure(
+                "typed postprocessor failed after mutation",
+            ))))
+        }
+    }
+
+    struct MutatingControlPostprocessor;
+
+    impl Postprocessor for MutatingControlPostprocessor {
+        fn process<'a>(&'a self, context: &'a mut SampleContext<'_>) -> ComponentFuture<'a, ()> {
+            context.execution().set_property("shared", "control");
+            Box::pin(future::ready(Err(ComponentError::Control(
+                ControlSignal::StopTestImmediate,
+            ))))
+        }
+    }
+
+    struct PoisonedPostprocessor;
+
+    impl Postprocessor for PoisonedPostprocessor {
+        fn process<'a>(&'a self, _context: &'a mut SampleContext<'_>) -> ComponentFuture<'a, ()> {
+            let error = ComponentError::from(FunctionError::poisoned(
+                "state authority poisoned; password=must-not-escape",
+            ));
+            Box::pin(future::ready(Err(error)))
+        }
+    }
 
     #[test]
     fn sample_context_clone_isolated_from_borrowed_invocation() {
@@ -3570,10 +5072,162 @@ mod tests {
     }
 
     #[test]
+    fn failed_mutable_component_rolls_back_the_invocation_delta() {
+        let mut execution = ExecutionContext::new();
+        execution.set_variable("changed", "before");
+        execution.set_property("shared", "before");
+        let package = SamplePackage::new(NodeId::new(2), Arc::new(CheckpointSampler))
+            .with_postprocessors(vec![Arc::new(MutatingFailurePostprocessor)]);
+
+        let error = block_on(package.execute(&mut execution)).expect_err("postprocessor failure");
+
+        assert!(matches!(error, PipelineError::Postprocessor { .. }));
+        assert_eq!(execution.variable("changed").as_deref(), Some("before"));
+        assert_eq!(execution.property("shared").as_deref(), Some("before"));
+    }
+
+    #[test]
+    fn failed_typed_component_rolls_back_the_complete_commit_record() {
+        let mut execution = ExecutionContext::new();
+        execution.set_variable("typed", "before");
+        execution.set_property("shared", "before");
+        let package = SamplePackage::new(NodeId::new(9), Arc::new(CheckpointSampler))
+            .with_postprocessors(vec![Arc::new(TypedMutatingFailurePostprocessor)]);
+
+        let error = block_on(package.execute(&mut execution)).expect_err("typed failure");
+
+        assert!(matches!(error, PipelineError::Postprocessor { .. }));
+        assert_eq!(execution.variable("typed").as_deref(), Some("before"));
+        assert_eq!(execution.property("shared").as_deref(), Some("peer-after"));
+        assert_eq!(execution.context_generation(), ContextGeneration::FIRST);
+        assert!(execution.request_state().body().is_missing());
+        assert!(execution.current_result().is_none());
+        assert!(execution.mutation_outputs().is_empty());
+        assert!(execution.mutation_diagnostics().is_empty());
+    }
+
+    #[test]
+    fn failed_component_does_not_rollback_a_newer_shared_property_write() {
+        let mut execution = ExecutionContext::new();
+        execution.set_property("shared", "before");
+        let mut context = SampleContext::new(&mut execution, NodeId::new(4));
+        let checkpoint = context.checkpoint();
+        let peer = context.execution().clone_for_user();
+
+        context.execution().set_property("shared", "component");
+        peer.set_property("shared", "peer");
+        context.execution().set_property("direct", "component");
+        peer.set_property("direct", "peer-direct");
+        context.rollback(checkpoint);
+
+        assert_eq!(
+            context.execution().property("shared").as_deref(),
+            Some("peer")
+        );
+        assert_eq!(
+            context.execution().property("direct").as_deref(),
+            Some("peer-direct")
+        );
+    }
+
+    #[test]
+    fn failed_component_preserves_a_peer_write_that_precedes_its_proposal() {
+        let mut execution = ExecutionContext::new();
+        execution.set_property("shared", "before");
+        let mut context = SampleContext::new(&mut execution, NodeId::new(8));
+        let checkpoint = context.checkpoint();
+        let peer = context.execution().clone_for_user();
+
+        peer.set_property("shared", "peer");
+        context.execution().set_property("shared", "component");
+        context.rollback(checkpoint);
+
+        assert_eq!(
+            context.execution().property("shared").as_deref(),
+            Some("peer")
+        );
+    }
+
+    #[test]
+    fn control_component_rolls_back_before_stopping_the_invocation() {
+        let mut execution = ExecutionContext::new();
+        execution.set_property("shared", "before");
+        let package = SamplePackage::new(NodeId::new(7), Arc::new(CheckpointSampler))
+            .with_postprocessors(vec![Arc::new(MutatingControlPostprocessor)]);
+
+        let report = block_on(package.execute(&mut execution)).expect("controlled report");
+
+        assert_eq!(report.signal, ControlSignal::StopTestImmediate);
+        assert_eq!(execution.property("shared").as_deref(), Some("before"));
+    }
+
+    #[test]
+    fn poisoned_postprocessor_stays_an_error_and_does_not_request_control() {
+        let mut execution = ExecutionContext::new();
+        let package = SamplePackage::new(NodeId::new(11), Arc::new(CheckpointSampler))
+            .with_postprocessors(vec![Arc::new(PoisonedPostprocessor)]);
+
+        let error = block_on(package.execute(&mut execution)).expect_err("poisoned postprocessor");
+        match error {
+            PipelineError::Postprocessor {
+                source: ComponentError::Poisoned(message),
+                ..
+            } => {
+                assert_eq!(message, "state authority poisoned; password=<redacted>");
+                assert!(!message.contains("must-not-escape"));
+            }
+            other => panic!("expected poisoned postprocessor error, got {other:?}"),
+        }
+        assert_eq!(execution.control_signal(), ControlSignal::Continue);
+        assert_eq!(execution.property("default"), None);
+    }
+
+    #[test]
+    fn invocation_checkpoint_restores_request_and_result_without_trace_rollback() {
+        let mut execution = ExecutionContext::new();
+        execution.set_variable("value", "before");
+        execution.set_property("shared", "before");
+        let mut context = SampleContext::new(&mut execution, NodeId::new(3));
+        context.set_request_value("header", "before");
+        context.set_result(Some(SampleResult::new("before")));
+        context
+            .record(Phase::Postprocessor, "before")
+            .expect("trace entry");
+        let checkpoint = context.checkpoint();
+
+        context.execution_mut().set_variable("value", "after");
+        context.execution().set_property("shared", "after");
+        context.set_request_value("header", "after");
+        context.result_mut().expect("result").set_label("after");
+        context
+            .record(Phase::Postprocessor, "diagnostic")
+            .expect("diagnostic entry");
+        context.rollback(checkpoint);
+
+        assert_eq!(
+            context.execution().variable("value").as_deref(),
+            Some("before")
+        );
+        assert_eq!(
+            context.execution().property("shared").as_deref(),
+            Some("before")
+        );
+        assert_eq!(context.request_value("header"), Some("before"));
+        assert_eq!(context.result().map(SampleResult::label), Some("before"));
+        assert_eq!(context.execution().trace().events().len(), 2);
+    }
+
+    #[test]
     fn assertion_failures_count_once_per_sample() {
         let mut result = SampleResult::new("assertions");
         result.set_successful(true);
-        assert_eq!(result.error_count(), None);
+        // JMeter derives the ordinary sample error count from the success
+        // projection, so a successful result represents zero errors even
+        // when no explicit wire `ec` field was supplied.
+        assert_eq!(
+            result.error_count(),
+            Some(jmeter_rs_results::ErrorCount::ZERO)
+        );
 
         append_assertion_result(
             &mut result,
@@ -3604,5 +5258,316 @@ mod tests {
             preexisting.error_count(),
             Some(jmeter_rs_results::ErrorCount::new(7))
         );
+    }
+
+    #[test]
+    fn ignored_results_are_snapshotted_but_not_sent_to_listeners() {
+        let calls = Arc::new(Mutex::new(0));
+        let package =
+            SamplePackage::new(NodeId::new(5), Arc::new(IgnoredSampler)).with_listeners(vec![
+                Arc::new(RecordingListener {
+                    calls: Arc::clone(&calls),
+                }),
+            ]);
+        let mut execution = ExecutionContext::new();
+
+        let report = block_on(package.execute(&mut execution)).expect("ignored sample report");
+
+        assert_eq!(*mutex_lock(&calls), 0);
+        assert!(report.event.is_some());
+        assert!(
+            execution
+                .trace()
+                .events()
+                .iter()
+                .all(|entry| entry.phase != Phase::Listener)
+        );
+    }
+
+    #[test]
+    fn immediate_stop_interrupts_timer_before_sampler() {
+        let token = Arc::new(Mutex::new(None));
+        let sleeper = Arc::new(CancelDuringSleepSleeper {
+            token: Arc::clone(&token),
+        });
+        let capabilities = RuntimeCapabilities::default().with_sleeper(sleeper);
+        let mut execution = ExecutionContext::with_capabilities(capabilities);
+        *mutex_lock(&token) = Some(execution.cancellation_token().clone());
+        let ran = Arc::new(Mutex::new(false));
+        let package = SamplePackage::new(
+            NodeId::new(6),
+            Arc::new(RecordingSampler {
+                ran: Arc::clone(&ran),
+            }),
+        )
+        .with_timers(vec![Arc::new(FixedTimer)]);
+
+        let report = block_on(package.execute(&mut execution)).expect("controlled report");
+
+        assert_eq!(report.signal, ControlSignal::StopTestImmediate);
+        assert!(report.result.is_none());
+        assert!(!*mutex_lock(&ran));
+        assert!(
+            execution
+                .trace()
+                .events()
+                .iter()
+                .all(|entry| entry.phase != Phase::Sampler)
+        );
+    }
+
+    #[test]
+    fn typed_invocation_commit_is_atomic_versioned_and_separates_request_generation() {
+        let mut execution = ExecutionContext::new();
+        execution.set_variable("before", "value");
+        execution.set_property("shared", "before");
+        let request = execution.request_state().clone();
+        let mut request_patch = RequestPatch::new(request.generation(), request.digest());
+        request_patch.set_body(Presence::Present(BoundedBytes::empty()));
+        request_patch
+            .add_header_operation(HeaderOperation::add("X-Test", "one").expect("header"))
+            .expect("header operation");
+
+        let mut delta = InvocationDelta::new(execution.context_generation());
+        delta
+            .add_variable(VariableMutation::set("after", "value").expect("variable"))
+            .expect("variable mutation");
+        delta
+            .add_property(PropertyMutation::set("shared", "component").expect("property"))
+            .expect("property mutation");
+        delta.set_request_patch(request_patch);
+
+        let before_generation = execution.context_generation();
+        let before_request_generation = execution.request_generation();
+        let mut staged = execution
+            .validate_and_stage_invocation(&delta)
+            .expect("stage");
+        assert_eq!(execution.context_generation(), before_generation);
+        assert_eq!(execution.request_generation(), before_request_generation);
+        assert_eq!(execution.variable("after"), None);
+        assert_eq!(execution.property("shared").as_deref(), Some("before"));
+
+        let receipt = execution
+            .commit_staged_invocation(&mut staged)
+            .expect("commit");
+        assert_eq!(
+            receipt.generation,
+            ContextGeneration::try_new(2).expect("generation")
+        );
+        assert_eq!(execution.context_generation(), receipt.generation);
+        assert_eq!(execution.request_generation().get(), 2);
+        assert_eq!(execution.variable("after").as_deref(), Some("value"));
+        assert_eq!(execution.property("shared").as_deref(), Some("component"));
+        assert!(
+            matches!(execution.request_state().body(), Presence::Present(value) if value.is_empty())
+        );
+        assert!(staged.is_committed());
+
+        let mut follow_up = InvocationDelta::new(execution.context_generation());
+        follow_up
+            .add_variable(VariableMutation::set("follow-up", "value").expect("variable"))
+            .expect("variable mutation");
+        execution
+            .apply_invocation_delta(&follow_up)
+            .expect("follow-up commit");
+        assert_eq!(execution.context_generation().get(), 3);
+        assert_eq!(execution.request_generation().get(), 2);
+        assert_ne!(
+            execution.context_generation().get(),
+            execution.request_generation().get()
+        );
+
+        let second = execution.commit_staged_invocation(&mut staged);
+        assert_eq!(
+            second.expect_err("double commit").code(),
+            MutationErrorCode::AlreadyCommitted
+        );
+    }
+
+    #[test]
+    fn stale_request_patch_and_cancellation_leave_live_context_unchanged() {
+        let mut execution = ExecutionContext::new();
+        execution.set_variable("stable", "before");
+        let request = execution.request_state().clone();
+        let mut stale_patch = RequestPatch::new(request.generation(), Digest32::sha256(b"stale"));
+        stale_patch.set_body(Presence::Present(BoundedBytes::empty()));
+        let mut stale_delta = InvocationDelta::new(execution.context_generation());
+        stale_delta
+            .add_variable(VariableMutation::set("partial", "must-not-publish").expect("variable"))
+            .expect("variable mutation");
+        stale_delta.set_request_patch(stale_patch);
+
+        let generation = execution.context_generation();
+        let error = execution
+            .validate_and_stage_invocation(&stale_delta)
+            .expect_err("stale request digest");
+        assert_eq!(error.code(), MutationErrorCode::StaleDigest);
+        assert_eq!(execution.context_generation(), generation);
+        assert_eq!(execution.variable("stable").as_deref(), Some("before"));
+        assert_eq!(execution.variable("partial"), None);
+        assert!(execution.request_state().body().is_missing());
+
+        let mut cancelled = InvocationDelta::new(execution.context_generation());
+        cancelled
+            .add_variable(VariableMutation::set("cancelled", "must-not-publish").expect("variable"))
+            .expect("variable mutation");
+        execution.request_control(ControlSignal::StopThread);
+        let error = execution
+            .validate_and_stage_invocation(&cancelled)
+            .expect_err("cancellation");
+        assert_eq!(error.code(), MutationErrorCode::Cancelled);
+        assert_eq!(execution.variable("cancelled"), None);
+    }
+
+    #[test]
+    fn staged_property_delta_preserves_newer_peer_write() {
+        let mut execution = ExecutionContext::new();
+        execution.set_property("shared", "before");
+        let mut delta = InvocationDelta::new(execution.context_generation());
+        delta
+            .add_property(PropertyMutation::set("shared", "component").expect("property"))
+            .expect("property mutation");
+        let mut staged = execution
+            .validate_and_stage_invocation(&delta)
+            .expect("stage");
+
+        let peer = execution.clone_for_user();
+        peer.set_property("shared", "peer");
+        let error = execution
+            .commit_staged_invocation(&mut staged)
+            .expect_err("peer conflict");
+        assert_eq!(error.code(), MutationErrorCode::PropertyConflict);
+        assert_eq!(execution.property("shared").as_deref(), Some("peer"));
+        assert_eq!(execution.context_generation(), ContextGeneration::FIRST);
+        assert!(!staged.is_committed());
+    }
+
+    #[test]
+    fn simultaneous_property_commits_allocate_distinct_monotonic_versions() {
+        let mut first = ExecutionContext::new();
+        let mut second = first.clone_for_user();
+
+        let mut first_delta = InvocationDelta::new(first.context_generation());
+        first_delta
+            .add_property(PropertyMutation::set("first", "one").expect("property"))
+            .expect("property mutation");
+        let mut second_delta = InvocationDelta::new(second.context_generation());
+        second_delta
+            .add_property(PropertyMutation::set("second", "two").expect("property"))
+            .expect("property mutation");
+        let mut first_stage = first
+            .validate_and_stage_invocation(&first_delta)
+            .expect("stage");
+        let mut second_stage = second
+            .validate_and_stage_invocation(&second_delta)
+            .expect("stage");
+        let barrier = Arc::new(Barrier::new(2));
+
+        let (first, second) = std::thread::scope(|scope| {
+            let first_barrier = Arc::clone(&barrier);
+            let first_thread = scope.spawn(move || {
+                first_barrier.wait();
+                let receipt = first
+                    .commit_staged_invocation(&mut first_stage)
+                    .expect("first commit");
+                (first, receipt)
+            });
+            let second_barrier = Arc::clone(&barrier);
+            let second_thread = scope.spawn(move || {
+                second_barrier.wait();
+                let receipt = second
+                    .commit_staged_invocation(&mut second_stage)
+                    .expect("second commit");
+                (second, receipt)
+            });
+            (
+                first_thread.join().expect("first thread"),
+                second_thread.join().expect("second thread"),
+            )
+        });
+
+        assert_eq!(
+            first.1.generation,
+            ContextGeneration::try_new(2).expect("generation")
+        );
+        assert_eq!(
+            second.1.generation,
+            ContextGeneration::try_new(2).expect("generation")
+        );
+        let versions = read_lock(&first.0.property_versions);
+        let mut assigned = versions.values().copied().collect::<Vec<_>>();
+        assigned.sort_unstable();
+        assert_eq!(assigned, vec![1, 2]);
+        assert_eq!(first.0.property("first").as_deref(), Some("one"));
+        assert_eq!(first.0.property("second").as_deref(), Some("two"));
+    }
+
+    #[test]
+    fn mutation_lock_serializes_commit_and_rollback_without_lock_inversion() {
+        let mut execution = ExecutionContext::new();
+        execution.set_property("shared", "before");
+        let mut context = SampleContext::new(&mut execution, NodeId::new(10));
+        let checkpoint = context.checkpoint();
+        let mut peer = context.execution().clone_for_user();
+        let mut delta = InvocationDelta::new(peer.context_generation());
+        delta
+            .add_property(PropertyMutation::set("shared", "peer").expect("property"))
+            .expect("property mutation");
+        let mut staged = peer.validate_and_stage_invocation(&delta).expect("stage");
+        let barrier = Arc::new(Barrier::new(2));
+
+        let (commit_result, _) = std::thread::scope(|scope| {
+            let commit_barrier = Arc::clone(&barrier);
+            let commit_thread = scope.spawn(move || {
+                commit_barrier.wait();
+                peer.commit_staged_invocation(&mut staged)
+            });
+            let rollback_barrier = Arc::clone(&barrier);
+            let rollback_thread = scope.spawn(move || {
+                rollback_barrier.wait();
+                context.rollback(checkpoint);
+            });
+            (
+                commit_thread.join().expect("commit thread"),
+                rollback_thread.join().expect("rollback thread"),
+            )
+        });
+
+        assert!(commit_result.is_ok());
+        let property = execution.property("shared");
+        assert!(matches!(property.as_deref(), Some("before" | "peer")));
+    }
+
+    #[test]
+    fn property_generation_exhaustion_is_checked_and_terminal() {
+        let execution = ExecutionContext::new();
+        execution.set_property("stable", "before");
+        execution.property_epoch.store(u64::MAX, Ordering::Release);
+
+        execution.set_property("overflow", "must-not-publish");
+
+        assert_eq!(execution.property("overflow"), None);
+        let error = execution
+            .property_generation_error()
+            .expect("generation exhaustion");
+        assert_eq!(error.code(), MutationErrorCode::Overflow);
+        let delta = InvocationDelta::new(execution.context_generation());
+        let error = execution
+            .validate_and_stage_invocation(&delta)
+            .expect_err("terminal generation failure");
+        assert_eq!(error.code(), MutationErrorCode::Overflow);
+        assert_eq!(execution.property("stable").as_deref(), Some("before"));
+    }
+
+    #[test]
+    fn unsupported_break_control_is_rejected_without_mapping_to_next_loop() {
+        let execution = ExecutionContext::new();
+        let mut delta = InvocationDelta::new(execution.context_generation());
+        delta.set_control_patch(ControlPatch::BreakCurrentLoop);
+        let error = execution
+            .validate_and_stage_invocation(&delta)
+            .expect_err("unsupported control");
+        assert_eq!(error.code(), MutationErrorCode::UnsupportedControl);
+        assert_eq!(execution.control_signal(), ControlSignal::Continue);
     }
 }

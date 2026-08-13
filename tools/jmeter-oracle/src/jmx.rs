@@ -24,6 +24,11 @@ use super::{ErrorCode, OracleError, Result, ValidatedCase, absolute_path};
 
 const PROJECTION_SCHEMA_ID: &str = "jmeter-rs.jmx-semantic-projection";
 const PROJECTION_SCHEMA_VERSION: u64 = 1;
+const EXPECTATION_SCHEMA_ID: &str = "jmeter-rs.semantic-expectation";
+const PINNED_SAVESERVICE: &str =
+    include_str!("../../../crates/jmx/data/saveservice-5.6.3.properties");
+const PINNED_UPGRADE: &str = include_str!("../../../crates/jmx/data/upgrade-5.6.3.properties");
+const PINNED_SOURCE_COMMIT: &str = "34a2785748e9e0b14702595e8682c387869deda3";
 
 /// Parsed bounded JMX projection.
 #[derive(Clone, Debug)]
@@ -46,9 +51,18 @@ struct JmxSource {
     root: XmlNode,
     leading: Vec<XmlEvent>,
     trailing: Vec<XmlEvent>,
+    xml_declaration: Option<XmlSpan>,
+    byte_order_mark: bool,
     version: String,
     source_sha256: String,
     node_count: usize,
+}
+
+#[derive(Clone, Debug)]
+struct XmlSpan {
+    start: usize,
+    end: usize,
+    text: String,
 }
 
 #[derive(Clone, Debug)]
@@ -96,6 +110,7 @@ struct Build<'a> {
     opaque_legacy: Vec<Value>,
     duplicate_identity_probes: Vec<Value>,
     opaque_bytes: usize,
+    opaque_ranges: BTreeMap<usize, usize>,
     property_count: usize,
     property_counts_by_element: BTreeMap<String, usize>,
     diagnostic_count: usize,
@@ -165,6 +180,7 @@ pub(crate) fn compare_case_jmx_projection(
     apply_case_jmx_limits(fixture.case().document(), &mut effective.limits)?;
     load_jmx_normalization(expected, &mut effective)?;
     validate_jmx_options(&effective, expected)?;
+    validate_jmx_expectation_provenance(expected, fixture)?;
     let actual = parse_jmx_semantic(actual_path, &effective.limits)?;
     let report = compare_jmx_projection(
         &actual,
@@ -176,6 +192,77 @@ pub(crate) fn compare_case_jmx_projection(
     )?;
     let _ = fixture;
     Ok(report)
+}
+
+fn validate_jmx_expectation_provenance(expected: &Value, fixture: &ValidatedCase) -> Result<()> {
+    let check_string = |field: &str, expected_value: &str| -> Result<()> {
+        if let Some(value) = expected.get(field) {
+            let value = value.as_str().ok_or_else(|| {
+                OracleError::new_for_cli(
+                    ErrorCode::ManifestSchema,
+                    format!("JMX expectation {field} must be a string"),
+                )
+            })?;
+            if value != expected_value {
+                return Err(OracleError::new_for_cli(
+                    ErrorCode::ManifestMismatch,
+                    format!("JMX expectation {field} does not match the case"),
+                ));
+            }
+        }
+        Ok(())
+    };
+    check_string("profile_id", fixture.profile().profile_id())?;
+    check_string("case_id", fixture.case().case_id())?;
+    check_string("fixture_family_id", fixture.case().fixture_family_id())?;
+    if let Some(value) = expected.get("conformance_ids") {
+        let values = value.as_array().ok_or_else(|| {
+            OracleError::new_for_cli(
+                ErrorCode::ManifestSchema,
+                "JMX expectation conformance_ids must be an array",
+            )
+        })?;
+        let declared: BTreeSet<&str> = values
+            .iter()
+            .map(|value| {
+                value.as_str().ok_or_else(|| {
+                    OracleError::new_for_cli(
+                        ErrorCode::ManifestSchema,
+                        "JMX expectation conformance_ids must contain strings",
+                    )
+                })
+            })
+            .collect::<Result<BTreeSet<_>>>()?;
+        let case_ids: BTreeSet<&str> = fixture
+            .case()
+            .conformance_ids()
+            .iter()
+            .map(String::as_str)
+            .collect();
+        if !declared.is_subset(&case_ids) {
+            return Err(OracleError::new_for_cli(
+                ErrorCode::ManifestMismatch,
+                "JMX expectation conformance_ids are not declared by the case",
+            ));
+        }
+    }
+    if let Some(value) = expected.get("rust_conformance_claim")
+        && !value.is_boolean()
+    {
+        return Err(OracleError::new_for_cli(
+            ErrorCode::ManifestSchema,
+            "JMX expectation rust_conformance_claim must be boolean",
+        ));
+    }
+    if let Some(value) = expected.get("generated_from")
+        && !value.is_object()
+    {
+        return Err(OracleError::new_for_cli(
+            ErrorCode::ManifestSchema,
+            "JMX expectation generated_from must be an object",
+        ));
+    }
+    Ok(())
 }
 
 fn apply_case_jmx_limits(document: &Value, limits: &mut CompareLimits) -> Result<()> {
@@ -323,20 +410,22 @@ pub(crate) fn apply_case_jmx_expected_read_limit(
 fn compare_jmx_projection(
     actual: &JmxDocument,
     expected: &Value,
-    actual_path: &Path,
-    expected_path: &Path,
+    _actual_path: &Path,
+    _expected_path: &Path,
     expected_size_bytes: u64,
     options: &CompareOptions,
 ) -> Result<CompareReport> {
     validate_jmx_expectation(expected, &options.limits)?;
     let actual_summary = ArtifactSummary {
-        path: actual_path.to_string_lossy().into_owned(),
+        // Reports can be persisted or printed by CI.  Do not disclose the
+        // caller's workspace, fixture root, or source filename in them.
+        path: "<actual-jmx>".into(),
         format: CompareFormat::JmxSemantic,
         size_bytes: actual.size_bytes,
         event_count: actual.element_count,
     };
     let expected_summary = ArtifactSummary {
-        path: expected_path.to_string_lossy().into_owned(),
+        path: "<expected-jmx-projection>".into(),
         format: CompareFormat::JmxSemantic,
         size_bytes: expected_size_bytes,
         event_count: expected_event_count(expected),
@@ -357,34 +446,25 @@ fn expected_event_count(value: &Value) -> usize {
 fn read_jmx_file(path: &Path, maximum: u64) -> Result<Vec<u8>> {
     reject_symlinks(path, "JMX input")?;
     let file = File::open(path).map_err(|error| {
-        OracleError::new_for_cli(
-            ErrorCode::File,
-            format!("open JMX input '{}': {error}", path.display()),
-        )
+        OracleError::new_for_cli(ErrorCode::File, format!("open JMX input: {error}"))
     })?;
     reject_symlinks(path, "JMX input")?;
     let opened = file.metadata().map_err(|error| {
-        OracleError::new_for_cli(
-            ErrorCode::File,
-            format!("stat opened JMX input '{}': {error}", path.display()),
-        )
+        OracleError::new_for_cli(ErrorCode::File, format!("stat opened JMX input: {error}"))
     })?;
     if !opened.is_file() {
         return Err(OracleError::new_for_cli(
             ErrorCode::File,
-            format!("JMX input is not a regular file '{}'", path.display()),
+            "JMX input is not a regular file",
         ));
     }
     let path_metadata = fs::metadata(path).map_err(|error| {
-        OracleError::new_for_cli(
-            ErrorCode::File,
-            format!("stat JMX input '{}': {error}", path.display()),
-        )
+        OracleError::new_for_cli(ErrorCode::File, format!("stat JMX input: {error}"))
     })?;
     if !same_file_identity(&opened, &path_metadata) {
         return Err(OracleError::new_for_cli(
             ErrorCode::PathPolicy,
-            format!("JMX input '{}' changed while opening", path.display()),
+            "JMX input changed while opening",
         ));
     }
     let plus_one = maximum.checked_add(1).ok_or_else(|| {
@@ -394,15 +474,12 @@ fn read_jmx_file(path: &Path, maximum: u64) -> Result<Vec<u8>> {
     file.take(plus_one)
         .read_to_end(&mut bytes)
         .map_err(|error| {
-            OracleError::new_for_cli(
-                ErrorCode::File,
-                format!("read JMX input '{}': {error}", path.display()),
-            )
+            OracleError::new_for_cli(ErrorCode::File, format!("read JMX input: {error}"))
         })?;
     if bytes.len() as u64 > maximum {
         return Err(OracleError::new_for_cli(
             ErrorCode::OutputLimit,
-            format!("JMX input '{}' exceeds {maximum} bytes", path.display()),
+            format!("JMX input exceeds {maximum} bytes"),
         ));
     }
     Ok(bytes)
@@ -414,10 +491,7 @@ fn read_json_safe(path: &Path, maximum: u64, limits: &CompareLimits) -> Result<(
     let value = serde_json::from_slice(&bytes).map_err(|error| {
         OracleError::new_for_cli(
             ErrorCode::ManifestJson,
-            format!(
-                "parse JMX expected projection '{}': {error}",
-                path.display()
-            ),
+            format!("parse JMX expected projection: {error}"),
         )
     })?;
     let mut nodes = 0_usize;
@@ -465,15 +539,12 @@ fn reject_symlinks(path: &Path, label: &str) -> Result<()> {
     for component in path.components() {
         current.push(component.as_os_str());
         let metadata = fs::symlink_metadata(&current).map_err(|error| {
-            OracleError::new_for_cli(
-                ErrorCode::File,
-                format!("inspect {label} path '{}': {error}", current.display()),
-            )
+            OracleError::new_for_cli(ErrorCode::File, format!("inspect {label} path: {error}"))
         })?;
         if metadata.file_type().is_symlink() {
             return Err(OracleError::new_for_cli(
                 ErrorCode::PathPolicy,
-                format!("{label} path '{}' contains a symlink", path.display()),
+                format!("{label} path contains a symlink"),
             ));
         }
     }
@@ -503,7 +574,8 @@ fn parse_source(
     limits: &CompareLimits,
     source_sha256: String,
 ) -> Result<JmxSource> {
-    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+    let byte_order_mark = bytes.starts_with(&[0xEF, 0xBB, 0xBF]);
+    if byte_order_mark {
         bytes.drain(..3);
     }
     let text = std::str::from_utf8(&bytes).map_err(|error| {
@@ -514,7 +586,9 @@ fn parse_source(
     })?;
     let mut parser = XmlParser::new(text, limits);
     parser.skip_space();
+    let mut xml_declaration = None;
     if parser.consume("<?xml") {
+        let declaration_start = parser.position - "<?xml".len();
         if !parser
             .text
             .as_bytes()
@@ -524,6 +598,16 @@ fn parse_source(
             return Err(jmx_parse("malformed XML declaration"));
         }
         parser.skip_until("?>")?;
+        let declaration_end = parser.position;
+        let declaration_text = bounded_text(
+            &parser.text[declaration_start..declaration_end],
+            limits.max_text_bytes,
+        )?;
+        xml_declaration = Some(XmlSpan {
+            start: declaration_start,
+            end: declaration_end,
+            text: declaration_text,
+        });
         parser.skip_space();
     }
     let mut leading = Vec::new();
@@ -552,6 +636,8 @@ fn parse_source(
         root,
         leading,
         trailing,
+        xml_declaration,
+        byte_order_mark,
         version,
         source_sha256,
         node_count,
@@ -564,6 +650,7 @@ struct XmlParser<'a> {
     limits: &'a CompareLimits,
     depth: usize,
     node_count: usize,
+    attribute_count: usize,
 }
 
 impl<'a> XmlParser<'a> {
@@ -574,6 +661,7 @@ impl<'a> XmlParser<'a> {
             limits,
             depth: 0,
             node_count: 0,
+            attribute_count: 0,
         }
     }
 
@@ -723,7 +811,10 @@ impl<'a> XmlParser<'a> {
             let raw = &self.text[value_start..self.position];
             self.position += 1;
             attrs.push((key, decode_entities(raw, self.limits.max_text_bytes)?));
-            if attrs.len() > self.limits.max_attributes {
+            self.attribute_count = self.attribute_count.saturating_add(1);
+            if attrs.len() > self.limits.max_attributes
+                || self.attribute_count > self.limits.max_attributes
+            {
                 return Err(limit("JMX XML attribute count exceeds configured bound"));
             }
         }
@@ -967,6 +1058,7 @@ fn build_projection(source: &JmxSource, limits: &CompareLimits) -> Result<Value>
         opaque_legacy: Vec::new(),
         duplicate_identity_probes: Vec::new(),
         opaque_bytes: 0,
+        opaque_ranges: BTreeMap::new(),
         property_count: 0,
         property_counts_by_element: BTreeMap::new(),
         diagnostic_count: 0,
@@ -1021,6 +1113,22 @@ fn build_projection(source: &JmxSource, limits: &CompareLimits) -> Result<Value>
         Value::String(source.source_sha256.clone()),
     );
     projection.insert("root".into(), root);
+    projection.insert(
+        "xml_declaration".into(),
+        source
+            .xml_declaration
+            .as_ref()
+            .map_or(Value::Null, |declaration| {
+                json!({
+                    "text": declaration.text,
+                    "raw_xml_sha256": raw_hash(source, declaration.start, declaration.end),
+                })
+            }),
+    );
+    projection.insert(
+        "byte_order_mark".into(),
+        Value::Bool(source.byte_order_mark),
+    );
     projection.insert("ordered_hash_tree_pairs".into(), Value::Array(pairs));
     projection.insert(
         "typed_properties".into(),
@@ -1074,6 +1182,7 @@ fn build_projection(source: &JmxSource, limits: &CompareLimits) -> Result<Value>
     projection.insert("diagnostics".into(), Value::Array(build.diagnostics));
     projection.insert("elements".into(), Value::Array(build.elements));
     projection.insert("opaque_legacy".into(), Value::Array(build.opaque_legacy));
+    projection.insert("registry_inventory".into(), pinned_registry_inventory());
     projection.insert(
         "duplicate_identity_probes".into(),
         Value::Array(build.duplicate_identity_probes),
@@ -1115,6 +1224,54 @@ fn build_projection(source: &JmxSource, limits: &CompareLimits) -> Result<Value>
         document_extensions(source, limits)?,
     );
     Ok(Value::Object(projection))
+}
+
+fn pinned_registry_inventory() -> Value {
+    let mut alias_keys = 0_usize;
+    let mut primary_classes = BTreeSet::new();
+    for line in PINNED_SAVESERVICE.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with('!') {
+            continue;
+        }
+        let Some((raw_key, raw_value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = raw_key.trim();
+        let value = raw_value.trim();
+        if key.is_empty() || key.starts_with('_') || value.is_empty() {
+            continue;
+        }
+        alias_keys = alias_keys.saturating_add(key.split(',').count());
+        primary_classes.insert(value);
+    }
+    let upgrade_rules = PINNED_UPGRADE
+        .lines()
+        .filter(|line| {
+            let line = line.trim();
+            !line.is_empty()
+                && !line.starts_with('#')
+                && !line.starts_with('!')
+                && line.contains('=')
+        })
+        .count();
+    json!({
+        "saveservice": {
+            "path": "crates/jmx/data/saveservice-5.6.3.properties",
+            "source_commit": PINNED_SOURCE_COMMIT,
+            "sha256": sha256(PINNED_SAVESERVICE.as_bytes()),
+            "alias_keys": alias_keys,
+            "primary_classes": primary_classes.len(),
+            "rule": "The pinned registry consumes every non-metadata alias entry; this projection records source identity and counts without copying the upstream table into JMX fixtures."
+        },
+        "upgrade": {
+            "path": "crates/jmx/data/upgrade-5.6.3.properties",
+            "source_commit": PINNED_SOURCE_COMMIT,
+            "sha256": sha256(PINNED_UPGRADE.as_bytes()),
+            "rules": upgrade_rules,
+            "rule": "The pinned upgrade registry consumes every non-comment rule; this projection records source identity and counts without copying the upstream table into JMX fixtures."
+        }
+    })
 }
 
 fn walk_hash_tree(
@@ -1190,13 +1347,13 @@ fn walk_hash_tree(
             "position".into(),
             Value::Number((pair_position as u64).into()),
         );
-        pair.insert("path".into(), Value::String(path));
+        pair.insert("path".into(), Value::String(path.clone()));
         pair.insert(
             "identity".into(),
             // Identity is assigned at the same pre-order point as the pair
             // position.  It must not depend on how many descendants happen
             // to be visited later in the recursive walk.
-            json!({"position": pair_position, "segment": segment}),
+            json!({"position": pair_position, "segment": segment, "path": path.clone()}),
         );
         pair.insert("element".into(), descriptor);
         pair.insert(
@@ -1252,7 +1409,9 @@ fn duplicate_identity_probes(pairs: &[Value], properties: &[Value]) -> Vec<Value
             };
             probes.push(json!({
                 "path": left_segment,
+                "left_path": left.get("path"),
                 "same_wire_identity_as": right_segment,
+                "right_path": right.get("path"),
                 "difference": if left_element.get("tag").and_then(Value::as_str) == Some("PluginSampler") {
                     "custom attribute, property values, and child hashTree"
                 } else {
@@ -1298,7 +1457,9 @@ fn duplicate_identity_probes(pairs: &[Value], properties: &[Value]) -> Vec<Value
             };
             probes.push(json!({
                 "path": left_path,
+                "left_owner_path": left_path.rsplit_once('/').map_or(left_path, |(owner, _)| owner),
                 "same_typed_property_name_as": right_path,
+                "right_owner_path": right_path.rsplit_once('/').map_or(right_path, |(owner, _)| owner),
                 "difference": difference,
                 "deduplicate": false
             }));
@@ -1429,7 +1590,7 @@ fn build_element(
         if !known {
             descriptor.insert("opaque_element_sha256".into(), Value::String(hash.clone()));
         }
-        account_opaque(build, node.end.saturating_sub(node.start))?;
+        account_opaque(build, node.start, node.end)?;
         // The nested unknown child is represented by its ordered hashTree
         // pair and opaque property hash.  The top-level opaque payload list
         // is reserved for payload spans that have no separate pair/property
@@ -2316,7 +2477,7 @@ fn emit_property(
 
 fn emit_opaque_property(build: &mut Build<'_>, node: &XmlNode, owner: &str) -> Result<()> {
     let hash = raw_hash(build.source, node.start, node.end);
-    account_opaque(build, node.end.saturating_sub(node.start))?;
+    account_opaque(build, node.start, node.end)?;
     let mut descriptor = Map::new();
     descriptor.insert(
         "path".into(),
@@ -2447,14 +2608,53 @@ fn add_opaque(build: &mut Build<'_>, value: Value) -> Result<()> {
     Ok(())
 }
 
-fn account_opaque(build: &mut Build<'_>, bytes: usize) -> Result<()> {
-    build.opaque_bytes = build
+fn account_opaque(build: &mut Build<'_>, start: usize, end: usize) -> Result<()> {
+    if end <= start {
+        return Ok(());
+    }
+    // `opaque_ranges` is maintained as sorted, disjoint intervals.  Inspect
+    // only the predecessor and the following intervals that can overlap the
+    // new span; scanning every prior subtree would turn a large unknown-plan
+    // input into quadratic work.
+    let mut overlapping = Vec::new();
+    if let Some((&range_start, &range_end)) = build.opaque_ranges.range(..start).next_back()
+        && range_end >= start
+    {
+        overlapping.push((range_start, range_end));
+    }
+    for (&range_start, &range_end) in build
+        .opaque_ranges
+        .range(start..)
+        .take_while(|(range_start, _)| **range_start <= end)
+    {
+        overlapping.push((range_start, range_end));
+    }
+    let covered = overlapping
+        .iter()
+        .map(|(range_start, range_end)| {
+            (*range_end)
+                .min(end)
+                .saturating_sub((*range_start).max(start))
+        })
+        .sum::<usize>();
+    let newly_covered = end.saturating_sub(start).saturating_sub(covered);
+    let next = build
         .opaque_bytes
-        .checked_add(bytes)
+        .checked_add(newly_covered)
         .ok_or_else(|| limit("JMX opaque byte bound overflow"))?;
-    if build.opaque_bytes > build.limits.max_opaque_bytes {
+    if next > build.limits.max_opaque_bytes {
         return Err(limit("JMX opaque subtree bytes exceed configured bound"));
     }
+    let mut merged_start = start;
+    let mut merged_end = end;
+    for (range_start, _range_end) in overlapping {
+        if let Some(range_end) = build.opaque_ranges.remove(&range_start) {
+            merged_start = merged_start.min(range_start);
+            merged_end = merged_end.max(range_end);
+        }
+    }
+    build.opaque_ranges.insert(merged_start, merged_end);
+    build.opaque_bytes = next;
     Ok(())
 }
 
@@ -2773,6 +2973,8 @@ fn validate_jmx_expectation(expected: &Value, limits: &CompareLimits) -> Result<
         "generated_from",
         "rust_conformance_claim",
         "root",
+        "xml_declaration",
+        "byte_order_mark",
         "topology",
         "ordered_hash_tree_pairs",
         "typed_properties",
@@ -2839,6 +3041,14 @@ fn validate_jmx_expectation(expected: &Value, limits: &CompareLimits) -> Result<
             "JMX expectation format must be jmx-semantic",
         ));
     }
+    if let Some(schema_id) = object.get("schema_id")
+        && schema_id.as_str() != Some(EXPECTATION_SCHEMA_ID)
+    {
+        return Err(OracleError::new_for_cli(
+            ErrorCode::UnsupportedFormat,
+            "unsupported JMX expectation schema_id",
+        ));
+    }
     if let Some(version) = object.get("schema_version")
         && version.as_u64() != Some(PROJECTION_SCHEMA_VERSION)
     {
@@ -2884,6 +3094,31 @@ fn validate_jmx_expectation(expected: &Value, limits: &CompareLimits) -> Result<
                 "root.text must be a string",
             ));
         }
+    }
+    if let Some(declaration) = object.get("xml_declaration")
+        && !declaration.is_null()
+    {
+        validate_jmx_object(declaration, &["text", "raw_xml_sha256"], "xml_declaration")?;
+        if declaration
+            .get("text")
+            .is_some_and(|value| !value.is_string())
+            || declaration
+                .get("raw_xml_sha256")
+                .is_some_and(|value| !value.is_string())
+        {
+            return Err(OracleError::new_for_cli(
+                ErrorCode::ManifestSchema,
+                "xml_declaration text/raw_xml_sha256 must be strings",
+            ));
+        }
+    }
+    if let Some(bom) = object.get("byte_order_mark")
+        && !bom.is_boolean()
+    {
+        return Err(OracleError::new_for_cli(
+            ErrorCode::ManifestSchema,
+            "byte_order_mark must be boolean",
+        ));
     }
     if let Some(pairs) = object.get("ordered_hash_tree_pairs") {
         validate_jmx_pairs(pairs, limits)?;
@@ -2937,6 +3172,7 @@ fn validate_jmx_expectation(expected: &Value, limits: &CompareLimits) -> Result<
         "upgrade_rules_omitted",
         "elements",
         "opaque_legacy",
+        "registry_inventory",
     ] {
         if let Some(value) = object.get(field) {
             if !value.is_array() && !value.is_object() && !value.is_null() {
@@ -3046,12 +3282,145 @@ fn validate_jmx_expectation(expected: &Value, limits: &CompareLimits) -> Result<
         ],
         limits,
     )?;
+    validate_jmx_object_array(
+        object.get("duplicate_identity_probes"),
+        "duplicate_identity_probes",
+        &[
+            "path",
+            "left_path",
+            "right_path",
+            "left_owner_path",
+            "right_owner_path",
+            "same_wire_identity_as",
+            "same_typed_property_name_as",
+            "difference",
+            "deduplicate",
+        ],
+        limits,
+    )?;
+    if let Some(probes) = object.get("duplicate_identity_probes") {
+        validate_jmx_duplicate_identity_probes(probes)?;
+    }
+    if let Some(inventory) = object.get("registry_inventory") {
+        validate_jmx_registry_inventory(inventory)?;
+    }
     if let Some(extensions) = object.get("document_extensions") {
         validate_jmx_extensions(extensions, limits, "document_extensions")?;
     }
     if let Some(normalization) = object.get("normalization") {
         let mut options = CompareOptions::default();
         load_jmx_normalization(&json!({"normalization": normalization}), &mut options)?;
+    }
+    Ok(())
+}
+
+fn validate_jmx_duplicate_identity_probes(value: &Value) -> Result<()> {
+    let probes = value.as_array().ok_or_else(|| {
+        OracleError::new_for_cli(
+            ErrorCode::ManifestSchema,
+            "JMX duplicate_identity_probes must be an array",
+        )
+    })?;
+    for (index, probe) in probes.iter().enumerate() {
+        let object = probe.as_object().ok_or_else(|| {
+            OracleError::new_for_cli(
+                ErrorCode::ManifestSchema,
+                format!("JMX duplicate_identity_probes[{index}] must be an object"),
+            )
+        })?;
+        for key in [
+            "path",
+            "left_path",
+            "right_path",
+            "left_owner_path",
+            "right_owner_path",
+            "same_wire_identity_as",
+            "same_typed_property_name_as",
+            "difference",
+        ] {
+            if let Some(value) = object.get(key)
+                && !value.is_string()
+            {
+                return Err(OracleError::new_for_cli(
+                    ErrorCode::ManifestSchema,
+                    format!("JMX duplicate_identity_probes[{index}].{key} must be a string"),
+                ));
+            }
+        }
+        if let Some(value) = object.get("deduplicate")
+            && !value.is_boolean()
+        {
+            return Err(OracleError::new_for_cli(
+                ErrorCode::ManifestSchema,
+                format!("JMX duplicate_identity_probes[{index}].deduplicate must be boolean"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_jmx_registry_inventory(value: &Value) -> Result<()> {
+    let object = value.as_object().ok_or_else(|| {
+        OracleError::new_for_cli(
+            ErrorCode::ManifestSchema,
+            "JMX registry_inventory must be an object",
+        )
+    })?;
+    for key in object.keys() {
+        if !matches!(key.as_str(), "saveservice" | "upgrade") {
+            return Err(OracleError::new_for_cli(
+                ErrorCode::UnsupportedFormat,
+                format!("unsupported JMX registry_inventory field '{key}'"),
+            ));
+        }
+    }
+    for section in ["saveservice", "upgrade"] {
+        let Some(value) = object.get(section) else {
+            continue;
+        };
+        let section_object = value.as_object().ok_or_else(|| {
+            OracleError::new_for_cli(
+                ErrorCode::ManifestSchema,
+                format!("JMX registry_inventory.{section} must be an object"),
+            )
+        })?;
+        for key in section_object.keys() {
+            if !matches!(
+                key.as_str(),
+                "path"
+                    | "source_commit"
+                    | "sha256"
+                    | "alias_keys"
+                    | "primary_classes"
+                    | "rules"
+                    | "rule"
+            ) {
+                return Err(OracleError::new_for_cli(
+                    ErrorCode::UnsupportedFormat,
+                    format!("unsupported JMX registry_inventory.{section} field '{key}'"),
+                ));
+            }
+        }
+        for key in ["path", "source_commit", "sha256", "rule"] {
+            if let Some(value) = section_object.get(key)
+                && !value.is_string()
+            {
+                return Err(OracleError::new_for_cli(
+                    ErrorCode::ManifestSchema,
+                    format!("JMX registry_inventory.{section}.{key} must be a string"),
+                ));
+            }
+        }
+        for key in ["alias_keys", "primary_classes", "rules"] {
+            if let Some(value) = section_object.get(key)
+                && value.as_u64().is_none()
+            {
+                return Err(OracleError::new_for_cli(
+                    ErrorCode::ManifestSchema,
+                    format!("JMX registry_inventory.{section}.{key} must be an unsigned integer"),
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -3490,6 +3859,91 @@ fn compare_declared_jmx(
             report,
         );
     }
+    for field in ["xml_declaration", "byte_order_mark"] {
+        if let Some(expected_value) = expected.get(field) {
+            compare_declared_field(
+                actual.get(field),
+                Some(expected_value),
+                &format!("/{field}"),
+                options,
+                report,
+            );
+        }
+    }
+    if let Some(expected_value) = expected.get("registry_inventory")
+        && !expected_value.is_null()
+    {
+        compare_registry_inventory(
+            actual.get("registry_inventory"),
+            expected_value,
+            options,
+            report,
+        );
+    }
+}
+
+fn compare_registry_inventory(
+    actual: Option<&Value>,
+    expected: &Value,
+    options: &CompareOptions,
+    report: &mut CompareReport,
+) {
+    let Some(actual) = actual.and_then(Value::as_object) else {
+        push_diff(
+            report,
+            options,
+            "/registry_inventory",
+            "missing",
+            Some(expected),
+            None,
+        );
+        return;
+    };
+    let Some(expected) = expected.as_object() else {
+        push_diff(
+            report,
+            options,
+            "/registry_inventory",
+            "changed",
+            Some(expected),
+            actual.get("saveservice"),
+        );
+        return;
+    };
+    for section in ["saveservice", "upgrade"] {
+        let Some(expected_section) = expected.get(section) else {
+            continue;
+        };
+        let Some(actual_section) = actual.get(section) else {
+            push_diff(
+                report,
+                options,
+                &format!("/registry_inventory/{section}"),
+                "missing",
+                Some(expected_section),
+                None,
+            );
+            continue;
+        };
+        for key in [
+            "path",
+            "source_commit",
+            "sha256",
+            "alias_keys",
+            "primary_classes",
+            "rules",
+        ] {
+            if let Some(expected_value) = expected_section.get(key) {
+                compare_declared_field(
+                    actual_section.get(key),
+                    Some(expected_value),
+                    &format!("/registry_inventory/{section}/{key}"),
+                    options,
+                    report,
+                );
+            }
+        }
+    }
 }
 
 fn compare_field(
@@ -3887,6 +4341,42 @@ mod tests {
             pair["element"]["tag"] == Value::String("SoapSampler".into())
                 && pair["element"]["testclass"] == Value::String("ConfigTestElement".into())
         }));
+        assert_eq!(document.projection["byte_order_mark"], Value::Bool(false));
+        assert!(
+            document.projection["xml_declaration"]["text"]
+                .as_str()
+                .is_some_and(|text| text.starts_with("<?xml"))
+        );
+        assert_eq!(
+            document.projection["registry_inventory"]["saveservice"]["alias_keys"],
+            json!(293)
+        );
+        assert_eq!(
+            document.projection["registry_inventory"]["upgrade"]["rules"],
+            json!(52)
+        );
+    }
+
+    #[test]
+    fn semantic_projection_retains_bom_and_xml_declaration_provenance() {
+        let bytes = b"\xEF\xBB\xBF<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<jmeterTestPlan version=\"1.2\"><hashTree/></jmeterTestPlan>";
+        let source = parse_source(bytes.to_vec(), &CompareLimits::default(), sha256(bytes))
+            .expect("BOM-prefixed JMX parses");
+        assert!(source.byte_order_mark);
+        assert_eq!(
+            source
+                .xml_declaration
+                .as_ref()
+                .map(|value| value.text.as_str()),
+            Some("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+        );
+        let projection =
+            build_projection(&source, &CompareLimits::default()).expect("BOM-prefixed projection");
+        assert_eq!(projection["byte_order_mark"], Value::Bool(true));
+        assert_eq!(
+            projection["xml_declaration"]["raw_xml_sha256"],
+            Value::String(sha256(b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>"))
+        );
     }
 
     #[test]
@@ -4022,6 +4512,8 @@ mod tests {
         let report = compare_jmx_files(actual, expected, &CompareOptions::default())
             .expect("legacy upgrade comparator");
         assert!(report.equal, "{}", report.human_diff);
+        assert_eq!(report.actual.path, "<actual-jmx>");
+        assert_eq!(report.expected.path, "<expected-jmx-projection>");
 
         let document = parse_jmx_semantic(
             fixture("jmx-aliases/upgrades/plan.jmx"),
@@ -4077,6 +4569,74 @@ mod tests {
         )
         .expect_err("per-element property limit");
         assert_eq!(error.code(), ErrorCode::OutputLimit);
+    }
+
+    #[test]
+    fn semantic_attribute_bound_is_aggregate_across_the_document() {
+        let error = parse_jmx_semantic(
+            fixture("jmx-aliases/aliases/plan.jmx"),
+            &CompareLimits {
+                max_attributes: 4,
+                ..CompareLimits::default()
+            },
+        )
+        .expect_err("aggregate XML attribute limit");
+        assert_eq!(error.code(), ErrorCode::OutputLimit);
+    }
+
+    #[test]
+    fn semantic_opaque_bound_counts_overlapping_subtrees_once() {
+        let path = fixture("jmx-aliases/unknown-plugin/plan.jmx");
+        let bytes = read_jmx_file(&path, CompareLimits::default().max_input_bytes)
+            .expect("unknown-plugin input");
+        let source = parse_source(bytes.clone(), &CompareLimits::default(), sha256(&bytes))
+            .expect("unknown-plugin source");
+        fn find_node<'a>(node: &'a XmlNode, name: &str) -> Option<&'a XmlNode> {
+            if node.name == name {
+                return Some(node);
+            }
+            node.events.iter().find_map(|event| match event {
+                XmlEvent::Element(child) => find_node(child, name),
+                XmlEvent::Comment { .. }
+                | XmlEvent::ProcessingInstruction { .. }
+                | XmlEvent::CData { .. } => None,
+            })
+        }
+        let plugin = find_node(&source.root, "PluginSampler").expect("plugin sampler");
+        let child = find_node(&source.root, "PluginChild").expect("plugin child");
+        let limit = plugin
+            .end
+            .saturating_sub(plugin.start)
+            .saturating_add(child.end.saturating_sub(child.start));
+        let document = parse_jmx_semantic(
+            path,
+            &CompareLimits {
+                max_opaque_bytes: limit,
+                ..CompareLimits::default()
+            },
+        )
+        .expect("nested opaque spans share one byte budget");
+        assert!(document.projection["opaque_payloads"].as_array().is_some());
+    }
+
+    #[test]
+    fn semantic_case_expectation_rejects_provenance_mismatch() {
+        let profile_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../compat/profiles/jmeter-5.6.3.json");
+        let profile = crate::ProfileManifest::load(profile_path).expect("active profile");
+        let case = crate::CaseManifest::load(fixture("jmx-aliases/aliases/case.json"))
+            .expect("aliases case");
+        let validated = crate::ValidatedCase::new(profile, case, fixture("jmx-aliases/aliases"))
+            .expect("validated aliases case");
+        let error = validate_jmx_expectation_provenance(
+            &json!({
+                "format": "jmx-semantic",
+                "case_id": "different-case"
+            }),
+            &validated,
+        )
+        .expect_err("mismatched case provenance");
+        assert_eq!(error.code(), ErrorCode::ManifestMismatch);
     }
 
     #[test]

@@ -20,7 +20,10 @@ mod protocol;
 mod sender;
 mod state;
 
-pub use error::{MAX_WIRE_FAILURE_MESSAGE_BYTES, ProtocolError, RemoteError, RemoteErrorCode};
+pub use error::{
+    MAX_REMOTE_ERROR_MESSAGE_BYTES, MAX_WIRE_FAILURE_MESSAGE_BYTES, ProtocolError, RemoteError,
+    RemoteErrorCode, RemoteRetryability,
+};
 pub use protocol::{
     AckStage, Cancellation, Codec, DEFAULT_MAX_FIELD_BYTES, DEFAULT_MAX_MESSAGE_BYTES,
     DataReference, Deadline, DependencyReference, Envelope, FailurePolicy,

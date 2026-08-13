@@ -3,6 +3,18 @@
 
 use std::fmt;
 
+/// Default upper bound for diagnostic context retained by the test harness.
+///
+/// Error displays are for a human at a local assertion boundary and are not a
+/// safe wire or artifact format.  Anything that crosses a harness boundary
+/// should use [`ErrorDiagnostic`] (or [`BoundedDiagnostic`]) so a malformed
+/// fixture cannot turn an error into an unbounded allocation or an evidence
+/// artifact containing arbitrary input.
+pub const MAX_DIAGNOSTIC_BYTES: usize = 1024;
+
+/// Placeholder used for context that is intentionally not retained.
+pub const REDACTED_VALUE: &str = "<redacted>";
+
 /// Machine-readable error identifiers for this crate.
 ///
 /// The string returned by [`ErrorCode::as_str`] is the compatibility key.  It
@@ -213,6 +225,94 @@ impl ErrorCode {
             Self::CanonicalEventBytesCapacity => "TEST_SUPPORT_CANONICAL_EVENT_BYTES_CAPACITY",
         }
     }
+
+    /// Alias for [`ErrorCode::as_str`] at serialization boundaries.
+    #[must_use]
+    pub const fn stable_code(self) -> &'static str {
+        self.as_str()
+    }
+
+    /// Every code in this crate, in stable declaration order.
+    ///
+    /// Keeping the registry next to [`ErrorCode::as_str`] makes the closed
+    /// vocabulary auditable and lets harnesses validate manifests without
+    /// matching on every individual variant.  The slice is immutable and has
+    /// no runtime allocation.
+    pub const ALL: &[Self] = &[
+        Self::ClockOverflow,
+        Self::ClockMovedBackward,
+        Self::TimerCapacity,
+        Self::TimerDeadlineOverflow,
+        Self::TimerSequenceOverflow,
+        Self::TimerUnknown,
+        Self::TimerLeak,
+        Self::TimerTraceCapacity,
+        Self::RandomEmptyRange,
+        Self::RandomScopeDepth,
+        Self::RandomScopeBytes,
+        Self::TraceInvalidLimit,
+        Self::TraceCapacity,
+        Self::TraceEventTooLarge,
+        Self::TraceKindTooLarge,
+        Self::TraceSequenceOverflow,
+        Self::TraceSequenceInvalid,
+        Self::ReplayExhausted,
+        Self::ReplayMismatch,
+        Self::ReplaySequenceMismatch,
+        Self::ReplayTrailingEvents,
+        Self::SchedulerCapacity,
+        Self::SchedulerEventCapacity,
+        Self::SchedulerDeadlineOverflow,
+        Self::SchedulerSequenceOverflow,
+        Self::SchedulerUnknownTask,
+        Self::SchedulerLeak,
+        Self::SchedulerDeadlock,
+        Self::SchedulerStarvation,
+        Self::SchedulerRunaway,
+        Self::SchedulerWatchdogLimit,
+        Self::TransportScriptExhausted,
+        Self::TransportRequestMismatch,
+        Self::TransportBodyTooLarge,
+        Self::TransportHeaderTooLarge,
+        Self::TransportHeaderCountTooLarge,
+        Self::TransportMethodTooLarge,
+        Self::TransportTargetTooLarge,
+        Self::TransportScriptTooLarge,
+        Self::TransportEventTooLarge,
+        Self::TransportCapacity,
+        Self::TransportDelayPending,
+        Self::TransportDelayTooLarge,
+        Self::TransportDelayAggregateTooLarge,
+        Self::TransportInvalidSize,
+        Self::TransportMissingEnd,
+        Self::TransportUnexpectedEnd,
+        Self::TransportIncomplete,
+        Self::TransportSequenceOverflow,
+        Self::TransportReset,
+        Self::TransportCancelled,
+        Self::TransportLeak,
+        Self::TransportUnexpectedAfterReset,
+        Self::FixtureInvalidMetadata,
+        Self::FixtureDuplicateArtifact,
+        Self::FixtureArtifactTooLarge,
+        Self::FixtureArtifactNameTooLarge,
+        Self::FixtureCapacity,
+        Self::CanonicalCapacity,
+        Self::CanonicalTextTooLarge,
+        Self::CanonicalFieldTooLarge,
+        Self::CanonicalEventCapacity,
+        Self::CanonicalEventTooLarge,
+        Self::CanonicalEventBytesCapacity,
+    ];
+
+    /// Parses a stable code spelling without accepting localized text.
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|code| code.as_str() == value)
+    }
 }
 
 impl fmt::Display for ErrorCode {
@@ -221,8 +321,286 @@ impl fmt::Display for ErrorCode {
     }
 }
 
+/// A UTF-8 diagnostic that is bounded before it is retained or emitted.
+///
+/// The `Debug` representation deliberately reports only byte length and
+/// truncation state.  Callers that need the text for a local assertion can
+/// use [`BoundedDiagnostic::as_str`] or `Display`; generic logs should prefer
+/// `Debug` so fixture values do not escape into telemetry.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct BoundedDiagnostic {
+    text: String,
+    truncated: bool,
+    redacted: bool,
+}
+
+impl BoundedDiagnostic {
+    /// Retains at most `max_bytes` UTF-8 bytes of `value`.
+    #[must_use]
+    pub fn new(value: impl AsRef<str>, max_bytes: usize) -> Self {
+        let value = value.as_ref();
+        let max_bytes = max_bytes.min(MAX_DIAGNOSTIC_BYTES);
+        if value.len() <= max_bytes {
+            return Self {
+                text: value.to_owned(),
+                truncated: false,
+                redacted: false,
+            };
+        }
+
+        let mut text = String::new();
+        if max_bytes >= '…'.len_utf8() {
+            let prefix_bytes = max_bytes - '…'.len_utf8();
+            // `value.get(..prefix_bytes)` can end in a UTF-8 continuation byte
+            // even when `value.get(..max_bytes)` was not available.  Walking
+            // char boundaries avoids a panic and keeps the bound exact.
+            let mut safe_prefix = 0;
+            for (index, character) in value.char_indices() {
+                let next = index + character.len_utf8();
+                if next > prefix_bytes {
+                    break;
+                }
+                safe_prefix = next;
+            }
+            text.push_str(&value[..safe_prefix]);
+            text.push('…');
+        } else {
+            let mut safe_prefix = 0;
+            for (index, character) in value.char_indices() {
+                let next = index + character.len_utf8();
+                if next > max_bytes {
+                    break;
+                }
+                safe_prefix = next;
+            }
+            text.push_str(&value[..safe_prefix]);
+        }
+        Self {
+            text,
+            truncated: true,
+            redacted: false,
+        }
+    }
+
+    /// Retains a fixed redaction marker under the requested byte bound.
+    #[must_use]
+    pub fn redacted(max_bytes: usize) -> Self {
+        let mut diagnostic = Self::new(REDACTED_VALUE, max_bytes);
+        diagnostic.redacted = true;
+        diagnostic
+    }
+
+    /// Returns the bounded text for an explicitly local diagnostic.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.text
+    }
+
+    /// Returns the retained UTF-8 byte length.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.text.len()
+    }
+
+    /// Returns whether input was shortened to satisfy the bound.
+    #[must_use]
+    pub const fn is_truncated(&self) -> bool {
+        self.truncated
+    }
+
+    /// Returns whether the value is an explicit redaction marker.
+    #[must_use]
+    pub const fn is_redacted(&self) -> bool {
+        self.redacted
+    }
+
+    /// Returns whether no diagnostic text was retained.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.text.is_empty()
+    }
+}
+
+impl fmt::Debug for BoundedDiagnostic {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("BoundedDiagnostic")
+            .field("bytes", &self.text.len())
+            .field("truncated", &self.truncated)
+            .field("redacted", &self.redacted)
+            .finish()
+    }
+}
+
+impl fmt::Display for BoundedDiagnostic {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.text)
+    }
+}
+
+/// Stable, redaction-safe projection of a capability error.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ErrorDiagnostic {
+    code: ErrorCode,
+    context: BoundedDiagnostic,
+}
+
+impl ErrorDiagnostic {
+    /// Creates a diagnostic with bounded context supplied by the caller.
+    ///
+    /// The context is assumed to be safe for local diagnostics.  Its `Debug`
+    /// representation remains redacted; use `Display` only at an explicit
+    /// assertion boundary.
+    #[must_use]
+    pub fn with_context(code: ErrorCode, context: impl AsRef<str>) -> Self {
+        Self {
+            code,
+            context: BoundedDiagnostic::new(context, MAX_DIAGNOSTIC_BYTES),
+        }
+    }
+
+    /// Creates a diagnostic containing no caller-controlled context.
+    #[must_use]
+    pub fn redacted(code: ErrorCode) -> Self {
+        Self {
+            code,
+            context: BoundedDiagnostic::redacted(MAX_DIAGNOSTIC_BYTES),
+        }
+    }
+
+    /// Returns the stable machine-readable code.
+    #[must_use]
+    pub const fn code(&self) -> ErrorCode {
+        self.code
+    }
+
+    /// Returns bounded context for an explicit local assertion boundary.
+    #[must_use]
+    pub fn context(&self) -> &str {
+        self.context.as_str()
+    }
+
+    /// Returns the bounded context projection.
+    #[must_use]
+    pub const fn context_value(&self) -> &BoundedDiagnostic {
+        &self.context
+    }
+}
+
+impl fmt::Debug for ErrorDiagnostic {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ErrorDiagnostic")
+            .field("code", &self.code)
+            .field("context", &self.context)
+            .finish()
+    }
+}
+
+impl fmt::Display for ErrorDiagnostic {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}: {}", self.code, self.context)
+    }
+}
+
 /// A common interface implemented by every capability error.
 pub trait StableError: std::error::Error {
     /// Returns the stable machine-readable code for this error.
     fn code(&self) -> ErrorCode;
+
+    /// Returns a redaction-safe diagnostic projection.
+    ///
+    /// Implementations may still expose their richer `Display` text at a
+    /// local assertion boundary, but generic harnesses should use this method
+    /// so malformed fixture input cannot become an unbounded or secret-bearing
+    /// artifact.
+    fn diagnostic(&self) -> ErrorDiagnostic {
+        ErrorDiagnostic::redacted(self.code())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stable_code_registry_is_closed_ascii_unique_and_round_trips() {
+        assert!(!ErrorCode::ALL.is_empty());
+        for (index, code) in ErrorCode::ALL.iter().enumerate() {
+            let spelling = code.as_str();
+            assert!(spelling.is_ascii());
+            assert!(spelling.starts_with("TEST_SUPPORT_"));
+            assert_eq!(code.stable_code(), spelling);
+            assert_eq!(ErrorCode::parse(spelling), Some(*code));
+            assert_eq!(code.to_string(), spelling);
+            assert!(
+                ErrorCode::ALL[..index]
+                    .iter()
+                    .all(|previous| previous.as_str() != spelling)
+            );
+        }
+        assert_eq!(ErrorCode::parse("TEST_SUPPORT_UNKNOWN"), None);
+        assert_eq!(ErrorCode::parse("fixture capacity"), None);
+    }
+
+    #[test]
+    fn bounded_diagnostic_is_utf8_safe_and_does_not_leak_in_debug() {
+        let secret = "fixture-secret-雪-credential";
+        let diagnostic = BoundedDiagnostic::new(secret, 10);
+        assert!(diagnostic.len() <= 10);
+        assert!(diagnostic.is_truncated());
+        assert!(!diagnostic.as_str().contains(secret));
+        assert!(!format!("{diagnostic:?}").contains("fixture-secret"));
+
+        let oversized = "x".repeat(MAX_DIAGNOSTIC_BYTES + 1);
+        let hard_bound = BoundedDiagnostic::new(oversized, usize::MAX);
+        assert!(hard_bound.len() <= MAX_DIAGNOSTIC_BYTES);
+        assert!(hard_bound.is_truncated());
+
+        let redacted = BoundedDiagnostic::redacted(4);
+        assert!(redacted.len() <= 4);
+        assert!(redacted.is_redacted());
+        assert!(!format!("{redacted:?}").contains(REDACTED_VALUE));
+    }
+
+    #[test]
+    fn stable_error_default_diagnostic_contains_only_code_and_redaction() {
+        #[derive(Debug)]
+        struct FixtureFailure;
+
+        impl fmt::Display for FixtureFailure {
+            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("credential=fixture-secret")
+            }
+        }
+
+        impl std::error::Error for FixtureFailure {}
+
+        impl StableError for FixtureFailure {
+            fn code(&self) -> ErrorCode {
+                ErrorCode::FixtureInvalidMetadata
+            }
+        }
+
+        let error = FixtureFailure;
+        let diagnostic = error.diagnostic();
+        assert_eq!(diagnostic.code(), ErrorCode::FixtureInvalidMetadata);
+        assert_eq!(diagnostic.context(), REDACTED_VALUE);
+        assert!(!format!("{diagnostic:?}").contains("fixture-secret"));
+    }
+
+    #[test]
+    fn error_diagnostic_bounds_context_but_keeps_code_stable() {
+        let context = "fixture-secret".repeat(MAX_DIAGNOSTIC_BYTES);
+        let diagnostic = ErrorDiagnostic::with_context(ErrorCode::TransportReset, context);
+        assert_eq!(diagnostic.code(), ErrorCode::TransportReset);
+        assert!(diagnostic.context_value().len() <= MAX_DIAGNOSTIC_BYTES);
+        assert!(diagnostic.context_value().is_truncated());
+        assert!(!format!("{diagnostic:?}").contains("fixture-secret"));
+        assert!(
+            diagnostic
+                .to_string()
+                .starts_with("TEST_SUPPORT_TRANSPORT_RESET: ")
+        );
+    }
 }

@@ -2,7 +2,7 @@
 //! Deterministic coordinator and worker lifecycle state machines.
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     fmt,
 };
 
@@ -17,6 +17,17 @@ use crate::protocol::{
 use crate::sender::{SampleSender, SendOutcome, SenderConfig};
 
 const DEFAULT_MAX_RETAINED_BYTES: usize = 4096usize.saturating_mul(1024).saturating_mul(1024);
+
+fn validate_run_id(run_id: RunId) -> Result<(), RemoteError> {
+    if run_id == 0 {
+        return Err(RemoteError::new(
+            RemoteErrorCode::Protocol,
+            false,
+            "run generation must be non-zero",
+        ));
+    }
+    Ok(())
+}
 
 /// Worker lifecycle state.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -390,14 +401,27 @@ pub struct RemoteWorker {
     phase: WorkerPhase,
     run_id: Option<RunId>,
     // A run ID is a logical generation, not a reusable transport sequence.
-    // Retaining the last consumed generation prevents a delayed start from a
-    // previous configuration from resurrecting a stopped worker.
+    // Retaining the last consumed generation prevents a delayed start/stop
+    // from an older configuration from resurrecting or cancelling a newer
+    // stopped worker.
     last_run_id: Option<RunId>,
+    consumed_run_ids: BTreeSet<RunId>,
+    consumed_run_order: VecDeque<RunId>,
+    // Configuration request identity provides a bounded stale-frame guard
+    // for Profile/Plan/Properties, whose wire bodies intentionally carry no
+    // run generation. Coordinator request IDs are monotonic and globally
+    // unique; a lower ID from a retired configuration can therefore never
+    // replace a newer staged plan.
+    profile_request_id: Option<RequestId>,
     thread_count: u32,
     sender_mode: Option<SampleSenderMode>,
     sender: Option<SampleSender>,
     batch_time_ms: Option<u64>,
     next_sequence: u64,
+    // Exclusive prefix of worker sequences released by the sender. An
+    // immediate stop may cancel samples accepted by a Hold/Batch sender, so
+    // this is intentionally distinct from `next_sequence`.
+    delivered_watermark: u64,
     next_sample_envelope_ordinal: u64,
     sample_envelope_ids: BTreeMap<SampleKey, RequestId>,
     failure: Option<RemoteError>,
@@ -411,7 +435,10 @@ impl fmt::Debug for RemoteWorker {
             .field("phase", &self.phase)
             .field("run_id", &self.run_id)
             .field("last_run_id", &self.last_run_id)
+            .field("consumed_run_count", &self.consumed_run_ids.len())
+            .field("profile_request_id", &self.profile_request_id)
             .field("thread_count", &self.thread_count)
+            .field("delivered_watermark", &self.delivered_watermark)
             .field("sender_mode", &self.sender_mode)
             .field("has_plan", &self.plan.is_some())
             .field(
@@ -443,11 +470,15 @@ impl RemoteWorker {
             phase: WorkerPhase::Idle,
             run_id: None,
             last_run_id: None,
+            consumed_run_ids: BTreeSet::new(),
+            consumed_run_order: VecDeque::new(),
+            profile_request_id: None,
             thread_count: 0,
             sender_mode: None,
             sender: None,
             batch_time_ms: None,
             next_sequence: 0,
+            delivered_watermark: 0,
             next_sample_envelope_ordinal: 1,
             sample_envelope_ids: BTreeMap::new(),
             failure: None,
@@ -526,6 +557,7 @@ impl RemoteWorker {
             profile.validate_with_limits(limits)?;
         }
         self.wire_codec_limits = limits;
+        self.trim_consumed_run_ids();
         Ok(())
     }
 
@@ -691,6 +723,7 @@ impl RemoteWorker {
             let delivered = sender.drain_delivered();
             (pending_keys, delivered)
         };
+        self.note_delivered_samples(&delivered);
         self.prune_sample_envelope_ids(&pending_keys, &delivered);
         self.envelopes_for_delivered(delivered)
     }
@@ -722,6 +755,7 @@ impl RemoteWorker {
             .ok_or_else(|| RemoteError::state("worker sender is missing"))?;
         let delivered = sender.advance_time(now_ms)?;
         let pending_keys = sender.pending_sample_keys();
+        self.note_delivered_samples(&delivered);
         self.prune_sample_envelope_ids(&pending_keys, &delivered);
         self.envelopes_for_delivered(delivered)
     }
@@ -769,17 +803,56 @@ impl RemoteWorker {
             .retain(|key, _| pending_keys.contains(key) || delivered_keys.contains(key));
     }
 
+    fn note_delivered_samples(&mut self, delivered: &[RemoteSample]) {
+        for sample in delivered {
+            // Native sender modes preserve sequence order. Taking the
+            // maximum also keeps this accounting monotonic if an adapter
+            // replays an already-delivered batch before the envelope is
+            // consumed by its transport.
+            self.delivered_watermark = self
+                .delivered_watermark
+                .max(sample.sequence().saturating_add(1));
+        }
+    }
+
+    fn remember_run_id(&mut self, run_id: RunId) {
+        if self.consumed_run_ids.insert(run_id) {
+            self.consumed_run_order.push_back(run_id);
+        }
+        self.trim_consumed_run_ids();
+    }
+
+    fn trim_consumed_run_ids(&mut self) {
+        while self.consumed_run_ids.len() > self.wire_codec_limits.max_samples() {
+            let Some(oldest) = self.consumed_run_order.pop_front() else {
+                break;
+            };
+            self.consumed_run_ids.remove(&oldest);
+        }
+    }
+
     fn accept_profile(
         &mut self,
         request_id: u64,
         profile: ProfileDescriptor,
     ) -> Result<Vec<RemoteEnvelope>, RemoteError> {
+        if self
+            .profile_request_id
+            .is_some_and(|previous| request_id < previous)
+        {
+            return Err(RemoteError::new(
+                RemoteErrorCode::Cancelled,
+                false,
+                "profile belongs to a retired configuration generation",
+            ));
+        }
         self.advertised_profile
             .validate_with_limits(self.wire_codec_limits)?;
         profile.validate_with_limits(self.wire_codec_limits)?;
         if matches!(self.phase, WorkerPhase::Idle | WorkerPhase::Ready)
             && self.accepted_profile.as_ref() == Some(&profile)
         {
+            self.profile_request_id = Some(request_id);
             return Ok(vec![self.ack(request_id, AckStage::Profile, None, None)]);
         }
         if !matches!(self.phase, WorkerPhase::Idle | WorkerPhase::Stopped) {
@@ -797,12 +870,14 @@ impl RemoteWorker {
             ));
         }
         self.accepted_profile = Some(profile);
+        self.profile_request_id = Some(request_id);
         self.plan = None;
         self.properties = None;
         self.run_id = None;
         self.sender = None;
         self.sender_mode = None;
         self.next_sequence = 0;
+        self.delivered_watermark = 0;
         self.sample_envelope_ids.clear();
         self.thread_count = 0;
         self.phase = WorkerPhase::Idle;
@@ -815,6 +890,16 @@ impl RemoteWorker {
         request_id: u64,
         plan: PlanDescriptor,
     ) -> Result<Vec<RemoteEnvelope>, RemoteError> {
+        if self
+            .profile_request_id
+            .is_some_and(|profile_request_id| request_id < profile_request_id)
+        {
+            return Err(RemoteError::new(
+                RemoteErrorCode::Cancelled,
+                false,
+                "plan belongs to a retired configuration generation",
+            ));
+        }
         if self.accepted_profile.is_none()
             || !matches!(self.phase, WorkerPhase::Idle | WorkerPhase::Ready)
         {
@@ -844,6 +929,16 @@ impl RemoteWorker {
         request_id: u64,
         properties: PropertySet,
     ) -> Result<Vec<RemoteEnvelope>, RemoteError> {
+        if self
+            .profile_request_id
+            .is_some_and(|profile_request_id| request_id < profile_request_id)
+        {
+            return Err(RemoteError::new(
+                RemoteErrorCode::Cancelled,
+                false,
+                "properties belong to a retired configuration generation",
+            ));
+        }
         if self.accepted_profile.is_none()
             || self.plan.is_none()
             || !matches!(self.phase, WorkerPhase::Idle | WorkerPhase::Ready)
@@ -877,6 +972,7 @@ impl RemoteWorker {
         thread_count: u32,
         mode: SampleSenderMode,
     ) -> Result<Vec<RemoteEnvelope>, RemoteError> {
+        validate_run_id(run_id)?;
         if self.phase == WorkerPhase::Running
             && self.run_id == Some(run_id)
             && self.thread_count == thread_count
@@ -891,7 +987,16 @@ impl RemoteWorker {
                 Some(thread_count),
             )]);
         }
-        if self.phase == WorkerPhase::Ready && self.last_run_id == Some(run_id) {
+        if self.phase == WorkerPhase::Ready
+            && self
+                .last_run_id
+                .is_some_and(|last_run_id| run_id == last_run_id)
+        {
+            return Err(RemoteError::state(
+                "worker run generation is stale or already consumed",
+            ));
+        }
+        if self.phase == WorkerPhase::Ready && self.consumed_run_ids.contains(&run_id) {
             return Err(RemoteError::state(
                 "worker run generation was already consumed",
             ));
@@ -949,10 +1054,12 @@ impl RemoteWorker {
             })?;
         self.run_id = Some(run_id);
         self.last_run_id = Some(run_id);
+        self.remember_run_id(run_id);
         self.thread_count = thread_count;
         self.sender_mode = Some(mode);
         self.sender = Some(SampleSender::new(config));
         self.next_sequence = 0;
+        self.delivered_watermark = 0;
         self.sample_envelope_ids.clear();
         self.phase = WorkerPhase::Running;
         Ok(vec![self.ack(
@@ -969,13 +1076,39 @@ impl RemoteWorker {
         run_id: RunId,
         mode: StopMode,
     ) -> Result<Vec<RemoteEnvelope>, RemoteError> {
+        validate_run_id(run_id)?;
         if self.run_id.is_none() && self.phase == WorkerPhase::Ready {
+            // A worker can be reconfigured for a new run while a stop frame
+            // from the previous generation is still in flight.  Treating
+            // that stale frame as a pre-start cancellation would move the
+            // freshly configured worker to `Stopped` and could make the next
+            // start appear to have been cancelled by the old run.  A
+            // pre-start stop is valid only for a generation that has not
+            // already been consumed by this worker.
+            if self
+                .last_run_id
+                .is_some_and(|last_run_id| run_id == last_run_id)
+            {
+                return Err(RemoteError::new(
+                    RemoteErrorCode::Cancelled,
+                    false,
+                    "worker stop belongs to a stale or already-consumed run generation",
+                ));
+            }
+            if self.consumed_run_ids.contains(&run_id) {
+                return Err(RemoteError::new(
+                    RemoteErrorCode::Cancelled,
+                    false,
+                    "worker stop belongs to a stale or already-consumed run generation",
+                ));
+            }
             // Immediate cancellation may race a start request that has not
             // reached this worker.  Turn that race into an idempotent stop
             // acknowledgement instead of resurrecting the run later.
             self.phase = WorkerPhase::Stopped;
             self.run_id = Some(run_id);
             self.last_run_id = Some(run_id);
+            self.remember_run_id(run_id);
             self.thread_count = 0;
             self.sender_mode = None;
             self.sender = None;
@@ -1002,7 +1135,7 @@ impl RemoteWorker {
                 AckStage::Stopped,
                 Some(run_id),
                 Some(self.thread_count),
-                Some(self.next_sequence),
+                Some(self.delivered_watermark),
             )]);
         }
         if !matches!(self.phase, WorkerPhase::Running | WorkerPhase::Stopping) {
@@ -1026,6 +1159,7 @@ impl RemoteWorker {
             } else {
                 sender.drain_delivered()
             };
+            self.note_delivered_samples(&delivered);
             self.prune_sample_envelope_ids(&BTreeSet::new(), &delivered);
             for sample in delivered {
                 let sample_request_id =
@@ -1050,7 +1184,11 @@ impl RemoteWorker {
             AckStage::Stopped,
             Some(run_id),
             Some(self.thread_count),
-            Some(self.next_sequence),
+            Some(if mode.drains_samples() {
+                self.next_sequence
+            } else {
+                self.delivered_watermark
+            }),
         ));
         Ok(responses)
     }
@@ -1132,6 +1270,8 @@ pub struct RemoteCoordinator {
     failure_policy: FailurePolicy,
     run_id: Option<RunId>,
     last_run_id: Option<RunId>,
+    consumed_run_ids: BTreeSet<RunId>,
+    consumed_run_order: VecDeque<RunId>,
     configured_threads: u32,
     sender_mode: Option<SampleSenderMode>,
     sender: Option<SampleSender>,
@@ -1163,6 +1303,7 @@ impl fmt::Debug for RemoteCoordinator {
             .field("phase", &self.phase)
             .field("run_id", &self.run_id)
             .field("last_run_id", &self.last_run_id)
+            .field("consumed_run_count", &self.consumed_run_ids.len())
             .field("worker_count", &self.workers.len())
             .field("healthy_worker_count", &self.healthy_worker_count())
             .field("has_plan", &self.plan.is_some())
@@ -1196,6 +1337,8 @@ impl RemoteCoordinator {
             failure_policy: FailurePolicy::Continue,
             run_id: None,
             last_run_id: None,
+            consumed_run_ids: BTreeSet::new(),
+            consumed_run_order: VecDeque::new(),
             configured_threads: 0,
             sender_mode: None,
             sender: None,
@@ -1414,7 +1557,7 @@ impl RemoteCoordinator {
             sender.set_max_samples(maximum)?;
         }
         self.max_samples = maximum;
-        self.trim_sample_request_history();
+        self.trim_request_history();
         Ok(())
     }
 
@@ -1625,6 +1768,11 @@ impl RemoteCoordinator {
                 "drain delivered samples before starting a new configuration",
             ));
         }
+        if !self.pending_requests.is_empty() {
+            return Err(RemoteError::state(
+                "complete pending lifecycle acknowledgements before reconfiguration",
+            ));
+        }
         if self.workers.is_empty() {
             return Err(RemoteError::new(
                 RemoteErrorCode::InvalidState,
@@ -1665,8 +1813,6 @@ impl RemoteCoordinator {
         self.accepted_bytes = 0;
         self.arrival_order.clear();
         self.pending_requests.clear();
-        self.invalid_requests.clear();
-        self.completed_requests.clear();
         self.stop_cause = None;
         self.stop_watermarks.clear();
         self.control_outbox.clear();
@@ -1767,10 +1913,19 @@ impl RemoteCoordinator {
         thread_count: u32,
         mode: SampleSenderMode,
     ) -> Result<Vec<RemoteEnvelope>, RemoteError> {
+        validate_run_id(run_id)?;
         if self.phase != CoordinatorPhase::Ready {
             return Err(RemoteError::state("start requires ready workers"));
         }
-        if self.last_run_id == Some(run_id) {
+        if self
+            .last_run_id
+            .is_some_and(|last_run_id| run_id == last_run_id)
+        {
+            return Err(RemoteError::state(
+                "run generation is stale or already consumed by the coordinator",
+            ));
+        }
+        if self.consumed_run_ids.contains(&run_id) {
             return Err(RemoteError::state(
                 "run generation was already consumed by the coordinator",
             ));
@@ -1805,10 +1960,6 @@ impl RemoteCoordinator {
             .map(|record| record.worker)
             .collect::<Vec<_>>();
         self.ensure_control_ids(workers.len())?;
-        self.run_id = Some(run_id);
-        self.last_run_id = Some(run_id);
-        self.configured_threads = thread_count;
-        self.sender_mode = Some(mode);
         let capacity = mode.capacity().unwrap_or(4096);
         let sender_config =
             SenderConfig::from_limits_and_codec(mode, capacity, self.wire_codec_limits)
@@ -1847,6 +1998,14 @@ impl RemoteCoordinator {
                     "batch time threshold must be non-zero",
                 )
             })?;
+        self.run_id = Some(run_id);
+        self.last_run_id = Some(run_id);
+        if self.consumed_run_ids.insert(run_id) {
+            self.consumed_run_order.push_back(run_id);
+        }
+        self.trim_consumed_run_ids();
+        self.configured_threads = thread_count;
+        self.sender_mode = Some(mode);
         self.sender = Some(SampleSender::new(sender_config));
         self.accepted.clear();
         self.accepted_sizes.clear();
@@ -2064,6 +2223,7 @@ impl RemoteCoordinator {
     /// Records a worker sample, preserving arrival order and deduplicating by
     /// `(worker, sequence)` before applying sender backpressure.
     pub fn record_sample(&mut self, sample: RemoteSample) -> Result<RecordOutcome, RemoteError> {
+        validate_run_id(sample.run_id())?;
         if !matches!(
             self.phase,
             CoordinatorPhase::Running | CoordinatorPhase::Stopping
@@ -2263,6 +2423,15 @@ impl RemoteCoordinator {
             .count()
     }
 
+    fn trim_consumed_run_ids(&mut self) {
+        while self.consumed_run_ids.len() > self.wire_codec_limits.max_samples() {
+            let Some(oldest) = self.consumed_run_order.pop_front() else {
+                break;
+            };
+            self.consumed_run_ids.remove(&oldest);
+        }
+    }
+
     fn apply_ack(
         &mut self,
         request_id: RequestId,
@@ -2367,6 +2536,9 @@ impl RemoteCoordinator {
                 }
             }
             AckStage::Started => {
+                if let Some(run_id) = run_id {
+                    validate_run_id(run_id)?;
+                }
                 if self.phase != CoordinatorPhase::Starting
                     || run_id != self.run_id
                     || thread_count != Some(self.configured_threads)
@@ -2382,6 +2554,9 @@ impl RemoteCoordinator {
                 }
             }
             AckStage::Stopped => {
+                if let Some(run_id) = run_id {
+                    validate_run_id(run_id)?;
+                }
                 if run_id != self.run_id || sample_watermark.is_none() {
                     return Err(RemoteError::new(
                         RemoteErrorCode::Protocol,
@@ -2432,16 +2607,19 @@ impl RemoteCoordinator {
                         "stop ack does not match coordinator stop",
                     ));
                 }
-                if matches!(self.stop_cause, Some(StopCause::User(StopMode::Graceful))) {
-                    let satisfied = self.stop_watermark_satisfied(worker, watermark);
-                    self.stop_watermarks.insert(worker, watermark);
-                    if satisfied && let Some(record) = self.workers.get_mut(&worker) {
-                        record.phase = WorkerPhase::Stopped;
-                    }
-                } else {
-                    if let Some(record) = self.workers.get_mut(&worker) {
-                        record.phase = WorkerPhase::Stopped;
-                    }
+                // The watermark is useful for both stop severities.  For a
+                // graceful stop it tells us which prefix must still arrive;
+                // for an immediate stop it is the exclusive upper bound of
+                // samples that were already admitted by the worker.  Keeping
+                // it in both cases makes ACK/sample reordering safe: a
+                // delayed sample that was cancelled by an immediate stop is
+                // rejected instead of being counted after the terminal
+                // decision, while an already-delivered sample remains
+                // admissible.
+                self.stop_watermarks.insert(worker, watermark);
+                let satisfied = self.stop_watermark_satisfied(worker, watermark);
+                if satisfied && let Some(record) = self.workers.get_mut(&worker) {
+                    record.phase = WorkerPhase::Stopped;
                 }
             }
         }
@@ -2468,6 +2646,9 @@ impl RemoteCoordinator {
         run_id: Option<RunId>,
         error: RemoteError,
     ) -> Result<(), RemoteError> {
+        if let Some(run_id) = run_id {
+            validate_run_id(run_id)?;
+        }
         if run_id != self.run_id {
             return Err(RemoteError::new(
                 RemoteErrorCode::Cancelled,
@@ -2819,7 +3000,10 @@ impl RemoteCoordinator {
     }
 
     fn advance_graceful_stop_workers(&mut self) {
-        if !matches!(self.stop_cause, Some(StopCause::User(StopMode::Graceful))) {
+        if !matches!(
+            self.stop_cause,
+            Some(StopCause::User(StopMode::Graceful | StopMode::Immediate))
+        ) {
             return;
         }
         let completed = self
@@ -3281,6 +3465,40 @@ mod tests {
     }
 
     #[test]
+    fn immediate_stop_waits_for_already_delivered_sample_when_ack_arrives_first() {
+        let mut coordinator = RemoteCoordinator::new(profile());
+        let mut worker = RemoteWorker::new(WorkerId::new(1), profile());
+        coordinator.add_worker(worker.id()).expect("worker");
+        configure(&mut coordinator, &mut worker);
+        for start in coordinator
+            .start(121, 1, SampleSenderMode::Standard)
+            .expect("start")
+        {
+            for response in worker.apply(start).expect("worker start") {
+                coordinator.apply(response).expect("start ack");
+            }
+        }
+        let sample = worker
+            .emit_sample(event("already-delivered"))
+            .expect("sample")
+            .into_iter()
+            .next()
+            .expect("sample envelope");
+        let stop = coordinator.stop(StopMode::Immediate).expect("stop");
+        let responses = worker.apply(stop[0].clone()).expect("worker stop");
+        let ack = responses
+            .iter()
+            .find(|response| matches!(response.message, RemoteMessage::Ack { .. }))
+            .cloned()
+            .expect("stop ack");
+        coordinator.apply(ack).expect("ack first");
+        assert_eq!(coordinator.phase(), CoordinatorPhase::Stopping);
+        coordinator.apply(sample).expect("sample after ack");
+        assert_eq!(coordinator.phase(), CoordinatorPhase::Stopped);
+        assert_eq!(coordinator.arrival_samples().len(), 1);
+    }
+
+    #[test]
     fn immediate_stop_escalation_supersedes_graceful_request_without_stale_ack_resurrection() {
         let mut coordinator = RemoteCoordinator::new(profile());
         let mut worker = RemoteWorker::new(WorkerId::new(1), profile());
@@ -3491,21 +3709,21 @@ mod tests {
                 .expect("sample")
                 .is_empty()
         );
-        assert!(worker.advance_time(9).expect("before threshold").is_empty());
-        let released = worker.advance_time(10).expect("threshold");
+        assert!(worker.advance_time(10).expect("at threshold").is_empty());
+        let released = worker.advance_time(11).expect("threshold");
         assert_eq!(released.len(), 1);
         let request_id = released[0].request_id;
         assert!(crate::is_sample_envelope_request_id(request_id));
         coordinator.apply(released[0].clone()).expect("sample");
         assert!(
             coordinator
-                .advance_time(9)
-                .expect("before coordinator threshold")
+                .advance_time(10)
+                .expect("at coordinator threshold")
                 .is_empty()
         );
         assert_eq!(
             coordinator
-                .advance_time(10)
+                .advance_time(11)
                 .expect("coordinator threshold")
                 .len(),
             1
@@ -3536,6 +3754,10 @@ mod tests {
             worker.apply(stale_start),
             Err(error) if error.code == RemoteErrorCode::InvalidState
         ));
+        assert!(matches!(
+            coordinator.start(19, 1, SampleSenderMode::Standard),
+            Err(error) if error.code == RemoteErrorCode::InvalidState
+        ));
         let next_start = coordinator
             .start(20, 1, SampleSenderMode::Standard)
             .expect("new run");
@@ -3546,6 +3768,256 @@ mod tests {
             coordinator.apply(response).expect("new start ack");
         }
         assert_eq!(worker.run_id(), Some(20));
+    }
+
+    #[test]
+    fn stale_stop_from_a_retired_run_generation_cannot_cancel_new_configuration() {
+        let mut worker = RemoteWorker::new(WorkerId::new(1), profile());
+        worker
+            .apply(RemoteEnvelope::new(
+                1,
+                RemoteMessage::Profile { profile: profile() },
+            ))
+            .expect("profile");
+        worker
+            .apply(RemoteEnvelope::new(
+                2,
+                RemoteMessage::Plan {
+                    plan: PlanDescriptor::new(b"plan".to_vec()),
+                },
+            ))
+            .expect("plan");
+        worker
+            .apply(RemoteEnvelope::new(
+                3,
+                RemoteMessage::Properties {
+                    properties: PropertySet::new(),
+                },
+            ))
+            .expect("properties");
+        worker
+            .apply(RemoteEnvelope::new(
+                4,
+                RemoteMessage::Start {
+                    run_id: 24,
+                    thread_count: 1,
+                    sender_mode: SampleSenderMode::Standard,
+                },
+            ))
+            .expect("start");
+        worker
+            .apply(RemoteEnvelope::new(
+                5,
+                RemoteMessage::Stop {
+                    run_id: 24,
+                    mode: StopMode::Immediate,
+                },
+            ))
+            .expect("stop");
+
+        // Reconfiguration retires the old run but deliberately retains its
+        // consumed generation as a stale-frame guard.
+        worker
+            .apply(RemoteEnvelope::new(
+                6,
+                RemoteMessage::Profile { profile: profile() },
+            ))
+            .expect("new profile");
+        worker
+            .apply(RemoteEnvelope::new(
+                7,
+                RemoteMessage::Plan {
+                    plan: PlanDescriptor::new(b"new-plan".to_vec()),
+                },
+            ))
+            .expect("new plan");
+        worker
+            .apply(RemoteEnvelope::new(
+                8,
+                RemoteMessage::Properties {
+                    properties: PropertySet::new(),
+                },
+            ))
+            .expect("new properties");
+        assert_eq!(worker.phase(), WorkerPhase::Ready);
+
+        assert!(matches!(
+            worker.apply(RemoteEnvelope::new(
+                9,
+                RemoteMessage::Stop {
+                    run_id: 24,
+                    mode: StopMode::Immediate,
+                },
+            )),
+            Err(error) if error.code == RemoteErrorCode::Cancelled
+        ));
+        assert_eq!(worker.phase(), WorkerPhase::Ready);
+        worker
+            .apply(RemoteEnvelope::new(
+                10,
+                RemoteMessage::Start {
+                    run_id: 25,
+                    thread_count: 1,
+                    sender_mode: SampleSenderMode::Standard,
+                },
+            ))
+            .expect("new run remains startable");
+    }
+
+    #[test]
+    fn stale_configuration_frames_cannot_replace_a_new_plan_generation() {
+        let mut worker = RemoteWorker::new(WorkerId::new(1), profile());
+        worker
+            .apply(RemoteEnvelope::new(
+                1,
+                RemoteMessage::Profile { profile: profile() },
+            ))
+            .expect("profile");
+        worker
+            .apply(RemoteEnvelope::new(
+                2,
+                RemoteMessage::Plan {
+                    plan: PlanDescriptor::new(b"old-plan".to_vec()),
+                },
+            ))
+            .expect("old plan");
+        worker
+            .apply(RemoteEnvelope::new(
+                3,
+                RemoteMessage::Properties {
+                    properties: PropertySet::new(),
+                },
+            ))
+            .expect("old properties");
+        worker
+            .apply(RemoteEnvelope::new(
+                4,
+                RemoteMessage::Start {
+                    run_id: 27,
+                    thread_count: 1,
+                    sender_mode: SampleSenderMode::Standard,
+                },
+            ))
+            .expect("old start");
+        worker
+            .apply(RemoteEnvelope::new(
+                5,
+                RemoteMessage::Stop {
+                    run_id: 27,
+                    mode: StopMode::Immediate,
+                },
+            ))
+            .expect("old stop");
+
+        worker
+            .apply(RemoteEnvelope::new(
+                10,
+                RemoteMessage::Profile { profile: profile() },
+            ))
+            .expect("new profile");
+        worker
+            .apply(RemoteEnvelope::new(
+                11,
+                RemoteMessage::Plan {
+                    plan: PlanDescriptor::new(b"new-plan".to_vec()),
+                },
+            ))
+            .expect("new plan");
+        worker
+            .apply(RemoteEnvelope::new(
+                12,
+                RemoteMessage::Properties {
+                    properties: PropertySet::new(),
+                },
+            ))
+            .expect("new properties");
+        assert_eq!(worker.plan().expect("plan").jmx(), b"new-plan");
+        assert_eq!(worker.phase(), WorkerPhase::Ready);
+
+        assert!(matches!(
+            worker.apply(RemoteEnvelope::new(
+                1,
+                RemoteMessage::Profile { profile: profile() },
+            )),
+            Err(error) if error.code == RemoteErrorCode::Cancelled
+        ));
+        assert!(matches!(
+            worker.apply(RemoteEnvelope::new(
+                2,
+                RemoteMessage::Plan {
+                    plan: PlanDescriptor::new(b"old-plan".to_vec()),
+                },
+            )),
+            Err(error) if error.code == RemoteErrorCode::Cancelled
+        ));
+        assert_eq!(worker.plan().expect("plan").jmx(), b"new-plan");
+        assert_eq!(worker.phase(), WorkerPhase::Ready);
+    }
+
+    #[test]
+    fn immediate_stop_watermark_excludes_sender_queue_not_released() {
+        let mut worker = RemoteWorker::new(WorkerId::new(1), profile());
+        worker
+            .apply(RemoteEnvelope::new(
+                1,
+                RemoteMessage::Profile { profile: profile() },
+            ))
+            .expect("profile");
+        worker
+            .apply(RemoteEnvelope::new(
+                2,
+                RemoteMessage::Plan {
+                    plan: PlanDescriptor::new(b"plan".to_vec()),
+                },
+            ))
+            .expect("plan");
+        worker
+            .apply(RemoteEnvelope::new(
+                3,
+                RemoteMessage::Properties {
+                    properties: PropertySet::new(),
+                },
+            ))
+            .expect("properties");
+        worker
+            .apply(RemoteEnvelope::new(
+                4,
+                RemoteMessage::Start {
+                    run_id: 26,
+                    thread_count: 1,
+                    sender_mode: SampleSenderMode::Hold,
+                },
+            ))
+            .expect("start");
+        assert!(
+            worker
+                .emit_sample(event("cancelled"))
+                .expect("sample")
+                .is_empty()
+        );
+
+        let responses = worker
+            .apply(RemoteEnvelope::new(
+                5,
+                RemoteMessage::Stop {
+                    run_id: 26,
+                    mode: StopMode::Immediate,
+                },
+            ))
+            .expect("immediate stop");
+        let watermark = responses.iter().find_map(|response| {
+            if let RemoteMessage::Ack {
+                stage: AckStage::Stopped,
+                sample_watermark,
+                ..
+            } = &response.message
+            {
+                *sample_watermark
+            } else {
+                None
+            }
+        });
+        assert_eq!(watermark, Some(0));
     }
 
     #[test]
@@ -3637,6 +4109,35 @@ mod tests {
             ),
             Err(error) if error.code == RemoteErrorCode::Cancelled
         ));
+    }
+
+    #[test]
+    fn zero_run_generation_is_rejected_at_lifecycle_boundaries() {
+        let mut coordinator = RemoteCoordinator::new(profile());
+        let mut worker = RemoteWorker::new(WorkerId::new(1), profile());
+        coordinator.add_worker(worker.id()).expect("worker");
+        configure(&mut coordinator, &mut worker);
+        assert!(matches!(
+            coordinator.start(0, 1, SampleSenderMode::Standard),
+            Err(error) if error.code == RemoteErrorCode::Protocol
+        ));
+        assert!(matches!(
+            worker.apply(RemoteEnvelope::new(
+                100,
+                RemoteMessage::Start {
+                    run_id: 0,
+                    thread_count: 1,
+                    sender_mode: SampleSenderMode::Standard,
+                },
+            )),
+            Err(error) if error.code == RemoteErrorCode::Protocol
+        ));
+        assert!(matches!(
+            coordinator.record_sample(RemoteSample::new(0, worker.id(), 0, event("invalid"))),
+            Err(error) if error.code == RemoteErrorCode::Protocol
+        ));
+        assert_eq!(coordinator.phase(), CoordinatorPhase::Ready);
+        assert_eq!(worker.phase(), WorkerPhase::Ready);
     }
 
     #[test]

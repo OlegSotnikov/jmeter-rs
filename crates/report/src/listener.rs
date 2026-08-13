@@ -341,8 +341,7 @@ impl ListenerReport {
     /// The operation is atomic.  On a limit, invalid-input, or overflow
     /// error, neither the total nor any label row is changed.
     pub fn add_result(&mut self, result: &SampleResult) -> Result<(), ReportError> {
-        let label = result.label().to_owned();
-        self.add_labeled_result(result, &label, SampleMetadata::sampler())
+        self.add_labeled_result(result, result.label(), SampleMetadata::sampler())
     }
 
     /// Adds a result with explicit controller metadata.  Listener top-error
@@ -353,8 +352,7 @@ impl ListenerReport {
         result: &SampleResult,
         metadata: SampleMetadata,
     ) -> Result<(), ReportError> {
-        let label = result.label().to_owned();
-        self.add_labeled_result(result, &label, metadata)
+        self.add_labeled_result(result, result.label(), metadata)
     }
 
     fn add_labeled_result(
@@ -401,7 +399,8 @@ impl ListenerReport {
             self.config.label_grouping(),
             event.thread().group(),
             event.result().label(),
-        );
+            self.config.limits(),
+        )?;
         self.add_labeled_result(event.result(), &label, SampleMetadata::sampler())
     }
 
@@ -415,7 +414,8 @@ impl ListenerReport {
             self.config.label_grouping(),
             event.thread().group(),
             event.result().label(),
-        );
+            self.config.limits(),
+        )?;
         self.add_labeled_result(event.result(), &label, metadata)
     }
 
@@ -797,7 +797,8 @@ impl SummaryReport {
             self.config.label_grouping(),
             event.thread().group(),
             event.result().label(),
-        );
+            self.config.limits(),
+        )?;
         self.add_labeled_result(event.result(), &label, SampleMetadata::sampler())
     }
 
@@ -811,7 +812,8 @@ impl SummaryReport {
             self.config.label_grouping(),
             event.thread().group(),
             event.result().label(),
-        );
+            self.config.limits(),
+        )?;
         self.add_labeled_result(event.result(), &label, metadata)
     }
 
@@ -991,12 +993,38 @@ pub type AggregateReport = ListenerReport;
 /// Compatibility name for listener-side aggregate state.
 pub type ListenerAggregate = ListenerReport;
 
-fn grouped_label(grouping: LabelGrouping, group: Option<&str>, label: &str) -> String {
+fn grouped_label(
+    grouping: LabelGrouping,
+    group: Option<&str>,
+    label: &str,
+    limits: crate::AggregateLimits,
+) -> Result<String, ReportError> {
+    // Validate before concatenating. Events created by a caller without the
+    // results crate's snapshot constructor are still untrusted at this
+    // boundary, and a giant thread-group name must not force an unbounded
+    // temporary allocation merely to produce a limit error.
+    validate_label(label, limits)?;
     match (grouping, group) {
         (LabelGrouping::ThreadGroup, Some(group)) if !group.is_empty() => {
-            format!("{group}:{label}")
+            let actual = group
+                .len()
+                .checked_add(1)
+                .and_then(|value| value.checked_add(label.len()))
+                .unwrap_or(usize::MAX);
+            if actual > limits.max_label_bytes() {
+                return Err(ReportError::LimitExceeded {
+                    resource: ReportLimit::LabelBytes,
+                    actual,
+                    maximum: limits.max_label_bytes(),
+                });
+            }
+            let mut qualified = String::with_capacity(actual);
+            qualified.push_str(group);
+            qualified.push(':');
+            qualified.push_str(label);
+            Ok(qualified)
         }
-        _ => label.to_owned(),
+        _ => Ok(label.to_owned()),
     }
 }
 
@@ -1904,6 +1932,261 @@ mod tests {
         );
         assert!(report.add_event(&event).is_ok());
         assert!(report.label("group:request").is_some());
+    }
+
+    #[test]
+    fn listener_aggregates_only_the_immutable_event_snapshot() {
+        let mut result = sample("before", 10, true, "200", "ok");
+        let mut variables = VariableSnapshot::new();
+        variables.insert("phase", "before");
+        let event = SampleEvent::snapshot(
+            &result,
+            "run-1",
+            ThreadIdentity::with_group("thread-1", Some("group-a".to_owned()), Some(1)),
+            "host-1",
+            variables,
+        )
+        .unwrap_or_else(|_| panic!("fixed event snapshot must validate"));
+
+        // Mutating the producer-owned values after notification must not
+        // change the event delivered to a run-owned listener.
+        result.set_label("after");
+        let mut report = ListenerReport::new(config());
+        report
+            .add_event(&event)
+            .unwrap_or_else(|_| panic!("snapshot event must aggregate"));
+        assert_eq!(report.label_count(), 1);
+        assert!(report.label("before").is_some());
+        assert!(report.label("after").is_none());
+        assert_eq!(event.result().label(), "before");
+        assert_eq!(event.thread().group(), Some("group-a"));
+        assert_eq!(
+            event
+                .variables()
+                .get("phase")
+                .and_then(|value| value.as_str()),
+            Some("before")
+        );
+    }
+
+    #[test]
+    fn listener_filtering_is_an_upstream_boundary_and_does_not_reinterpret_rows() {
+        // ResultCollector's error_logging/success_only policy is applied by
+        // the routing layer before a report sink.  The report algorithm must
+        // count exactly the stream it receives, including ignored and
+        // transaction-controller rows, rather than deriving policy from a
+        // label or a mutable result flag.
+        let mut success = sample("success", 10, true, "200", "ok");
+        let mut ignored = sample("ignored", 20, true, "200", "ok");
+        ignored.set_ignored(true);
+        let controller = sample("transaction", 30, false, "500", "failed");
+        let events = [
+            SampleEvent::new(
+                success.clone(),
+                "run",
+                ThreadIdentity::new("t"),
+                "host",
+                VariableSnapshot::new(),
+            ),
+            SampleEvent::new(
+                ignored,
+                "run",
+                ThreadIdentity::new("t"),
+                "host",
+                VariableSnapshot::new(),
+            ),
+            SampleEvent::new(
+                controller,
+                "run",
+                ThreadIdentity::new("t"),
+                "host",
+                VariableSnapshot::new(),
+            ),
+        ];
+        let mut report = ListenerReport::new(config());
+        for event in &events {
+            report
+                .add_event(event)
+                .unwrap_or_else(|_| panic!("fixed event must aggregate"));
+        }
+        assert_eq!(report.total().sample_count(), 3);
+        assert_eq!(report.total().error_count(), 1);
+
+        // A caller can construct a filtered stream explicitly.  This keeps
+        // the four truth-table combinations observable without silently
+        // making the report layer guess which collector flags were selected.
+        success.set_successful(false);
+        let filtered = SampleEvent::new(
+            success,
+            "run",
+            ThreadIdentity::new("t"),
+            "host",
+            VariableSnapshot::new(),
+        );
+        let mut filtered_report = ListenerReport::new(config());
+        filtered_report
+            .add_event(&filtered)
+            .unwrap_or_else(|_| panic!("filtered event must aggregate"));
+        assert_eq!(filtered_report.total().sample_count(), 1);
+        assert_eq!(filtered_report.total().error_count(), 1);
+    }
+
+    #[test]
+    fn listener_grouping_keeps_same_label_rows_distinct_by_thread_group() {
+        let listener_config = config().with_label_grouping(LabelGrouping::ThreadGroup);
+        let mut report = ListenerReport::new(listener_config);
+        for group in ["group-b", "group-a", "group-b"] {
+            let event = SampleEvent::new(
+                sample("request", 10, true, "200", "ok"),
+                "run",
+                ThreadIdentity::with_group("thread", Some(group.to_owned()), None),
+                "host",
+                VariableSnapshot::new(),
+            );
+            report
+                .add_event(&event)
+                .unwrap_or_else(|_| panic!("grouped event must aggregate"));
+        }
+        assert_eq!(report.total().sample_count(), 3);
+        assert_eq!(
+            report
+                .label("group-a:request")
+                .map(ListenerMetrics::sample_count),
+            Some(1)
+        );
+        assert_eq!(
+            report
+                .label("group-b:request")
+                .map(ListenerMetrics::sample_count),
+            Some(2)
+        );
+        assert_eq!(
+            report.labels().map(|(label, _)| label).collect::<Vec<_>>(),
+            ["group-a:request", "group-b:request"]
+        );
+    }
+
+    #[test]
+    fn listener_grouping_rejects_oversized_qualified_labels_before_allocation() {
+        let limits = crate::AggregateLimits::new(4, 4, 4)
+            .unwrap_or_else(|_| panic!("fixed limits must validate"))
+            .with_string_limits(8, 8)
+            .unwrap_or_else(|_| panic!("fixed string limits must validate"));
+        let mut report = ListenerReport::new(
+            config()
+                .with_limits(limits)
+                .with_label_grouping(LabelGrouping::ThreadGroup),
+        );
+        let event = SampleEvent::new(
+            sample("request", 10, true, "200", "ok"),
+            "run",
+            ThreadIdentity::with_group("thread", Some("group".to_owned()), None),
+            "host",
+            VariableSnapshot::new(),
+        );
+        assert_eq!(
+            report.add_event(&event),
+            Err(ReportError::LimitExceeded {
+                resource: ReportLimit::LabelBytes,
+                actual: 13,
+                maximum: 8,
+            })
+        );
+        assert_eq!(report.total().sample_count(), 0);
+        assert_eq!(report.label_count(), 0);
+    }
+
+    #[test]
+    fn listener_partitioned_workers_merge_deterministically() {
+        let partitions = vec![
+            vec![
+                sample("b", 300, true, "200", "ok"),
+                sample("a", 100, true, "200", "ok"),
+            ],
+            vec![
+                sample("b", 500, false, "500", "bad"),
+                sample("c", 200, true, "200", "ok"),
+            ],
+        ];
+        let worker_reports = std::thread::scope(|scope| {
+            let handles = partitions.iter().map(|partition| {
+                scope.spawn(move || {
+                    let mut report = ListenerReport::new(config());
+                    for result in partition {
+                        report
+                            .add_result(result)
+                            .unwrap_or_else(|_| panic!("fixed worker result must aggregate"));
+                    }
+                    report
+                })
+            });
+            handles
+                .map(|handle| {
+                    handle
+                        .join()
+                        .unwrap_or_else(|_| panic!("worker report must not panic"))
+                })
+                .collect::<Vec<_>>()
+        });
+
+        let mut merged = ListenerReport::new(config());
+        for report in &worker_reports {
+            merged
+                .merge(report)
+                .unwrap_or_else(|_| panic!("same-config worker reports must merge"));
+        }
+        let mut sequential = ListenerReport::new(config());
+        for partition in &partitions {
+            for result in partition {
+                sequential
+                    .add_result(result)
+                    .unwrap_or_else(|_| panic!("fixed sequential result must aggregate"));
+            }
+        }
+        assert_eq!(merged, sequential);
+        assert_eq!(merged.total().sample_count(), 4);
+        assert_eq!(merged.total().error_count(), 1);
+    }
+
+    #[test]
+    fn listener_received_byte_overflow_is_atomic() {
+        let mut report = ListenerReport::new(config());
+        let mut first = sample("bytes", 1, true, "200", "ok");
+        first.set_received_bytes(Some(ByteCount::new(u64::MAX)));
+        report
+            .add_result(&first)
+            .unwrap_or_else(|_| panic!("maximum byte count must fit once"));
+        let before = report.clone();
+
+        let mut second = sample("bytes", 1, true, "200", "ok");
+        second.set_received_bytes(Some(ByteCount::new(1)));
+        assert_eq!(
+            report.add_result(&second),
+            Err(ReportError::Overflow {
+                field: crate::ReportField::ReceivedBytes,
+            })
+        );
+        assert_eq!(report, before);
+    }
+
+    #[test]
+    fn listener_capacity_rejection_is_atomic_before_any_row_is_published() {
+        let limits = crate::AggregateLimits::new(1, 1, 1)
+            .unwrap_or_else(|_| panic!("fixed limits must validate"));
+        let mut report = ListenerReport::new(config().with_limits(limits));
+        report
+            .add_result(&sample("one", 1, true, "200", "ok"))
+            .unwrap_or_else(|_| panic!("first bounded result must fit"));
+        let before = report.clone();
+        assert!(matches!(
+            report.add_result(&sample("one", 2, true, "200", "ok")),
+            Err(ReportError::LimitExceeded {
+                resource: ReportLimit::PercentileSamples,
+                actual: 2,
+                maximum: 1,
+            })
+        ));
+        assert_eq!(report, before);
     }
 
     #[test]

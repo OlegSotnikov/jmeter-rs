@@ -51,26 +51,39 @@ impl SlotState {
         use SlotState::*;
         match (self, next) {
             (Free, Reserved) => true,
-            (Reserved, LaunchQueued | Creating | CleanupRequested) => true,
-            (LaunchQueued, Creating | CleanupRequested) => true,
-            (Creating, ChildOwned | CleanupRequested | ContainmentLost) => true,
-            (ChildOwned, ContainmentReady | CleanupRequested | ContainmentLost) => true,
-            (ContainmentReady, HandoffPending | CleanupRequested | ContainmentLost) => true,
-            (HandoffPending, Active | CleanupRequested | ContainmentLost) => true,
-            (Active, CleanupRequested | Observing | ContainmentLost) => true,
+            // Every occupied state can be degraded without first relying on
+            // a best-effort cleanup edge.  In particular, a panic or
+            // containment proof failure may be discovered while a request is
+            // still queued or while activation is being handed off.
+            (
+                Reserved,
+                LaunchQueued | Creating | CleanupRequested | ContainmentLost | Quarantined,
+            ) => true,
+            (LaunchQueued, Creating | CleanupRequested | ContainmentLost | Quarantined) => true,
+            (Creating, ChildOwned | CleanupRequested | ContainmentLost | Quarantined) => true,
+            (ChildOwned, ContainmentReady | CleanupRequested | ContainmentLost | Quarantined) => {
+                true
+            }
+            (
+                ContainmentReady,
+                HandoffPending | CleanupRequested | ContainmentLost | Quarantined,
+            ) => true,
+            (HandoffPending, Active | CleanupRequested | ContainmentLost | Quarantined) => true,
+            (Active, CleanupRequested | Observing | ContainmentLost | Quarantined) => true,
             (
                 CleanupRequested,
-                Observing | Terminating | RootWaitable | Reaping | HandlesClosing | ContainmentLost,
+                Observing | Terminating | RootWaitable | Reaping | HandlesClosing | ContainmentLost
+                | Quarantined,
             ) => true,
             (
                 Observing,
                 CleanupRequested | Terminating | RootWaitable | Reaping | ContainmentLost
                 | Quarantined,
             ) => true,
-            (Terminating, RootWaitable | Reaping | ContainmentLost) => true,
-            (RootWaitable, Reaping | HandlesClosing | ContainmentLost) => true,
+            (Terminating, RootWaitable | Reaping | ContainmentLost | Quarantined) => true,
+            (RootWaitable, Reaping | HandlesClosing | ContainmentLost | Quarantined) => true,
             (Reaping, CleanupRequested | HandlesClosing | ContainmentLost | Quarantined) => true,
-            (HandlesClosing, CleanupRequested | Complete | Quarantined) => true,
+            (HandlesClosing, CleanupRequested | Complete | ContainmentLost | Quarantined) => true,
             (ContainmentLost, CleanupRequested | RootWaitable | Complete | Quarantined) => true,
             (Complete, Free | Retired) => true,
             (Quarantined, CleanupRequested | Quarantined) => true,
@@ -387,6 +400,32 @@ mod tests {
         assert!(SlotState::Complete.can_transition(SlotState::Free));
         assert!(!SlotState::Free.can_transition(SlotState::Active));
         assert!(!SlotState::Active.can_transition(SlotState::Free));
+
+        // A failure can be discovered at every resource-bearing phase.  The
+        // model must therefore permit both degraded terminal paths without
+        // requiring an intermediate best-effort transition.
+        let occupied = [
+            SlotState::Reserved,
+            SlotState::LaunchQueued,
+            SlotState::Creating,
+            SlotState::ChildOwned,
+            SlotState::ContainmentReady,
+            SlotState::HandoffPending,
+            SlotState::Active,
+            SlotState::CleanupRequested,
+            SlotState::Observing,
+            SlotState::Terminating,
+            SlotState::RootWaitable,
+            SlotState::Reaping,
+            SlotState::HandlesClosing,
+        ];
+        for state in occupied {
+            assert!(
+                state.can_transition(SlotState::ContainmentLost),
+                "{state:?}"
+            );
+            assert!(state.can_transition(SlotState::Quarantined), "{state:?}");
+        }
     }
 
     #[test]

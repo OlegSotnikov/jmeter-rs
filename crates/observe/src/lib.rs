@@ -19,11 +19,10 @@ pub use router_adapter::{
     RouterDiagnosticError, RouterFinalizationDiagnosticInput, RouterFinalizationStage,
 };
 pub use standalone_telemetry::{
-    Decision0009CapabilityRejectionKind, Decision0009Disposition,
-    Decision0009DispositionInput, Decision0009Mode, Decision0009PathCount,
-    Decision0009PathInput, Decision0009PathKind, Decision0009PreflightInput,
-    Decision0009Telemetry, Decision0009TelemetryError, MAX_DECISION0009_PATHS,
-    MAX_DECISION0009_TEXT_BYTES,
+    Decision0009CapabilityRejectionKind, Decision0009Disposition, Decision0009DispositionInput,
+    Decision0009Mode, Decision0009PathCount, Decision0009PathInput, Decision0009PathKind,
+    Decision0009PreflightInput, Decision0009Telemetry, Decision0009TelemetryError,
+    MAX_DECISION0009_PATHS, MAX_DECISION0009_TEXT_BYTES,
 };
 
 use core::fmt;
@@ -313,7 +312,30 @@ fn contains_percent_encoded_control(value: &str, maximum: usize) -> bool {
     if !value.as_bytes().contains(&b'%') {
         return false;
     }
-    percent_decode(value, maximum).chars().any(char::is_control)
+    let mut decoded = value.to_owned();
+    for depth in 0..=MAX_REDACTION_DEPTH {
+        if percent_decode(&decoded, maximum)
+            .chars()
+            .any(char::is_control)
+        {
+            return true;
+        }
+        if !decoded.as_bytes().contains(&b'%') {
+            return false;
+        }
+        if depth == MAX_REDACTION_DEPTH {
+            // The remaining encoded structure cannot be classified within
+            // the bounded decode budget. Fail closed instead of allowing a
+            // deeply escaped control sequence to reach an exporter.
+            return true;
+        }
+        let next = percent_decode(&decoded, maximum);
+        if next == decoded {
+            return false;
+        }
+        decoded = next;
+    }
+    true
 }
 
 /// A deterministic, allocation-bounded digest used when an identity is too
@@ -1639,8 +1661,14 @@ impl RedactionPolicy {
             if self.contains_configured_secret(&decoded) {
                 return true;
             }
-            if decode_steps >= MAX_REDACTION_DEPTH || !decoded.as_bytes().contains(&b'%') {
+            if !decoded.as_bytes().contains(&b'%') {
                 return false;
+            }
+            if decode_steps >= MAX_REDACTION_DEPTH {
+                // A value which still has encoded structure after the shared
+                // recursion budget cannot be proven secret-free. Fail closed
+                // instead of retaining an opaque deeply encoded payload.
+                return true;
             }
             let next = percent_decode(&decoded, scan_limit);
             if next == decoded {
@@ -1738,6 +1766,27 @@ impl RedactionPolicy {
         }
         if sensitive_key(key) {
             return truncate_text(REDACTED, maximum);
+        }
+        if has_json_escape_layer(value, HARD_MAX_SCAN_BYTES) {
+            match decode_text_layers(value, HARD_MAX_SCAN_BYTES) {
+                Some(decoded)
+                    if decoded.chars().any(char::is_control)
+                        || self.contains_configured_secret(&decoded) =>
+                {
+                    // A URL or header branch may otherwise preserve JSON-style
+                    // escape bytes as opaque text.  Inspect the decoded
+                    // spelling before structural dispatch so escaped controls
+                    // and configured secrets cannot bypass the branch-specific
+                    // sanitizer.
+                    return truncate_text(REDACTED, maximum);
+                }
+                None => {
+                    // An invalid or too-deep mixed encoding cannot be
+                    // classified within the bounded inspection budget.
+                    return truncate_text(REDACTED, maximum);
+                }
+                Some(_) => {}
+            }
         }
 
         if contains_control_with_limit(key, HARD_MAX_KEY_BYTES)
@@ -1953,23 +2002,66 @@ fn sensitive_key(key: &str) -> bool {
     if sensitive_key_spelling(&bounded) {
         return true;
     }
-    if bounded.as_bytes().contains(&b'%') {
-        let mut decoded = percent_decode(&bounded, HARD_MAX_KEY_BYTES);
-        let mut decode_steps = 0;
-        while decoded != bounded && decode_steps < MAX_REDACTION_DEPTH {
-            if sensitive_key_spelling(&decoded) {
+    if bounded.as_bytes().contains(&b'%') || bounded.as_bytes().contains(&b'\\') {
+        let mut decoded = bounded.clone();
+        for depth in 0..=MAX_REDACTION_DEPTH {
+            if decoded
+                .chars()
+                .any(|character| !character.is_ascii() || character.is_control())
+                || sensitive_key_spelling(&decoded)
+            {
                 return true;
             }
-            if !decoded.as_bytes().contains(&b'%') {
-                break;
+
+            // Apply both decoders in each bounded step.  This catches mixed
+            // spellings such as `%5Cu0074oken`, where percent decoding first
+            // exposes a JSON escape which must then be classified as `token`.
+            let mut next = decoded.clone();
+            let mut changed = false;
+            if next.as_bytes().contains(&b'%') {
+                let percent_decoded = percent_decode(&next, HARD_MAX_KEY_BYTES);
+                if percent_decoded != next {
+                    next = percent_decoded;
+                    changed = true;
+                }
             }
-            let next = percent_decode(&decoded, HARD_MAX_KEY_BYTES);
-            if next == decoded {
-                break;
+            if next.as_bytes().contains(&b'\\') {
+                match decode_json_escaped_text(&next) {
+                    Some(json_decoded) if json_decoded != next => {
+                        next = json_decoded;
+                        changed = true;
+                    }
+                    Some(_) => {}
+                    None => {
+                        // Invalid JSON-style escapes cannot be classified as
+                        // harmless without risking an escaped sensitive name.
+                        return true;
+                    }
+                }
+            }
+            if !changed {
+                if next.as_bytes().contains(&b'%') || next.as_bytes().contains(&b'\\') {
+                    return true;
+                }
+                return false;
+            }
+            if next
+                .chars()
+                .any(|character| !character.is_ascii() || character.is_control())
+                || sensitive_key_spelling(&next)
+            {
+                return true;
+            }
+            if depth == MAX_REDACTION_DEPTH {
+                // Deeply encoded names cannot be classified safely within
+                // the bounded decode budget. Treat them as sensitive rather
+                // than allowing a repeated-escape spelling to bypass field
+                // name redaction.
+                return next.as_bytes().contains(&b'%') || next.as_bytes().contains(&b'\\');
             }
             decoded = next;
-            decode_steps = decode_steps.saturating_add(1);
         }
+        return true;
     }
     false
 }
@@ -2604,6 +2696,18 @@ fn redact_nested_value(
         return (marker, true);
     }
 
+    // A configured secret can be represented entirely through JSON escapes
+    // (`"\\u0074oken"`) and therefore be absent from the raw byte spelling.
+    // Decode one bounded copy before structural scanning so opaque nested JSON
+    // cannot bypass literal-secret replacement.
+    if value.as_bytes().contains(&b'\\')
+        && let Some(decoded) = decode_json_escaped_text(value)
+        && policy.contains_configured_secret(&decoded)
+    {
+        let (marker, _) = truncate_text(REDACTED, maximum);
+        return (marker, true);
+    }
+
     // A nested value does not need to look like a URL or assignment to carry
     // a percent-encoded configured secret.  Check the bounded decode chain
     // before structural classification so an opaque header payload cannot
@@ -2648,6 +2752,15 @@ fn redact_nested_value(
         redact_generic_text(source, policy, maximum, depth.saturating_add(1))
     };
 
+    if truncated {
+        // The scanner did not consume the complete nested value.  Returning
+        // its visible prefix could retain the beginning of a configured
+        // secret which crosses the output bound, so fail closed for the whole
+        // nested payload.
+        let (marker, _) = truncate_text(REDACTED, maximum);
+        return (marker, true);
+    }
+
     // A generic pass is followed by a literal pass so configured secrets are
     // removed even when they occur in ordinary prose, a URL userinfo value,
     // or an encoded value which was decoded only for inspection.
@@ -2658,6 +2771,154 @@ fn redact_nested_value(
     let (safe, final_truncated) = truncate_text(&safe, maximum);
     truncated |= final_truncated;
     (safe, truncated)
+}
+
+/// Decode JSON string escapes for bounded secret and key checks.
+fn decode_json_escaped_text(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut output = String::with_capacity(value.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'\\' {
+            let character = value[index..].chars().next()?;
+            output.push(character);
+            index += character.len_utf8();
+            continue;
+        }
+        index = index.saturating_add(1);
+        let escape = *bytes.get(index)?;
+        index = index.saturating_add(1);
+        match escape {
+            b'"' => output.push('"'),
+            b'\\' => output.push('\\'),
+            b'/' => output.push('/'),
+            b'b' => output.push('\u{0008}'),
+            b'f' => output.push('\u{000c}'),
+            b'n' => output.push('\n'),
+            b'r' => output.push('\r'),
+            b't' => output.push('\t'),
+            b'u' => {
+                let high = parse_json_escape_code_unit(bytes, &mut index)?;
+                if (0xD800..=0xDBFF).contains(&high) {
+                    if bytes.get(index..index.saturating_add(2)) != Some(b"\\u") {
+                        return None;
+                    }
+                    index = index.saturating_add(2);
+                    let low = parse_json_escape_code_unit(bytes, &mut index)?;
+                    if !(0xDC00..=0xDFFF).contains(&low) {
+                        return None;
+                    }
+                    let code_point =
+                        0x1_0000 + ((u32::from(high) - 0xD800) << 10) + (u32::from(low) - 0xDC00);
+                    output.push(char::from_u32(code_point)?);
+                } else if (0xDC00..=0xDFFF).contains(&high) {
+                    return None;
+                } else {
+                    output.push(char::from_u32(u32::from(high))?);
+                }
+            }
+            _ => return None,
+        }
+    }
+    Some(output)
+}
+
+fn parse_json_escape_code_unit(bytes: &[u8], index: &mut usize) -> Option<u16> {
+    let end = index.checked_add(4)?;
+    let digits = bytes.get(*index..end)?;
+    let mut value = 0_u16;
+    for digit in digits {
+        value = value
+            .checked_mul(16)?
+            .checked_add(u16::from(hex_value(*digit)?))?;
+    }
+    *index = end;
+    Some(value)
+}
+
+fn has_json_escape_layer(value: &str, maximum: usize) -> bool {
+    if value.as_bytes().contains(&b'\\') {
+        return true;
+    }
+    if !value.as_bytes().contains(&b'%') {
+        return false;
+    }
+    let mut decoded = value.to_owned();
+    for _ in 0..=MAX_REDACTION_DEPTH {
+        if !decoded.as_bytes().contains(&b'%') {
+            return false;
+        }
+        let next = percent_decode(&decoded, maximum);
+        if next == decoded {
+            return false;
+        }
+        if next.as_bytes().contains(&b'\\') {
+            return true;
+        }
+        decoded = next;
+    }
+    false
+}
+
+/// Decode bounded percent and JSON escape layers for hazard inspection.
+///
+/// The two encodings may be mixed (`%5Cu0074oken`), so applying either
+/// decoder only once is insufficient.  This helper is for classification,
+/// not output reconstruction; callers fail closed when the bounded layer
+/// budget or escape validity prevents a complete classification.
+fn decode_text_layers(value: &str, maximum: usize) -> Option<String> {
+    if value.len() > maximum {
+        return None;
+    }
+    let mut decoded = value.to_owned();
+    for depth in 0..=MAX_REDACTION_DEPTH {
+        let mut next = decoded.clone();
+        let mut changed = false;
+        if next.as_bytes().contains(&b'%') {
+            let percent_decoded = percent_decode(&next, maximum);
+            if percent_decoded != next {
+                next = percent_decoded;
+                changed = true;
+            }
+        }
+        if next.as_bytes().contains(&b'\\') {
+            match decode_json_escaped_text(&next) {
+                Some(json_decoded) if json_decoded != next => {
+                    next = json_decoded;
+                    changed = true;
+                }
+                Some(_) => {}
+                None => return None,
+            }
+        }
+        if !changed {
+            return Some(next);
+        }
+        if depth == MAX_REDACTION_DEPTH {
+            return None;
+        }
+        decoded = next;
+    }
+    None
+}
+
+fn generic_assignment_key_is_sensitive(policy: &RedactionPolicy, key: &str) -> bool {
+    if policy.is_sensitive_key(key) {
+        return true;
+    }
+    if !key.as_bytes().contains(&b'\\') {
+        return false;
+    }
+    decode_json_escaped_text(key).is_none_or(|decoded| policy.is_sensitive_key(&decoded))
+}
+
+fn generic_assignment_key_contains_secret(policy: &RedactionPolicy, key: &str) -> bool {
+    if policy.contains_configured_secret(key) {
+        return true;
+    }
+    key.as_bytes().contains(&b'\\')
+        && decode_json_escaped_text(key)
+            .is_some_and(|decoded| policy.contains_configured_secret(&decoded))
 }
 
 fn looks_like_jsonish(value: &str) -> bool {
@@ -2693,13 +2954,49 @@ fn redact_generic_text(
         return (marker, true);
     }
 
+    // JSON escapes can also occur in prose fragments rather than a complete
+    // object.  If the decoded bounded spelling contains a configured secret,
+    // reject the whole value before retaining any raw escaped prefix.
+    if value.as_bytes().contains(&b'\\')
+        && let Some(decoded) = decode_json_escaped_text(value)
+        && policy.contains_configured_secret(&decoded)
+    {
+        let (marker, _) = truncate_text(REDACTED, maximum);
+        return (marker, true);
+    }
+
+    // Decode JSON escapes before scanning a JSON-like generic value.  Without
+    // this pass, a quoted key/value such as `"raw\\u002dsecret"` is copied
+    // character-by-character and never reaches the nested assignment logic.
+    // The decoded spelling is bounded by the already bounded input and is
+    // used only when it is recognizably JSON-like.
+    if value.as_bytes().contains(&b'\\')
+        && let Some(decoded) = decode_json_escaped_text(value)
+        && decoded != value
+        && looks_like_jsonish(&decoded)
+    {
+        if decoded.chars().any(char::is_control) {
+            let (marker, _) = truncate_text(REDACTED, maximum);
+            return (marker, true);
+        }
+        return redact_generic_text(&decoded, policy, maximum, depth.saturating_add(1));
+    }
+
     let mut output = String::with_capacity(value.len().min(maximum));
     let mut cursor = 0;
     let mut truncated = false;
     while cursor < value.len() && output.len() < maximum {
         if let Some(assignment) = generic_assignment_at(value, cursor)
-            && policy.is_sensitive_key(assignment.key)
+            && generic_assignment_key_is_sensitive(policy, assignment.key)
         {
+            // A configured secret in a quoted key may only exist after JSON
+            // escape decoding.  Retaining that key while replacing just its
+            // value would still leak the configured secret, so fail closed for
+            // this bounded value.
+            if generic_assignment_key_contains_secret(policy, assignment.key) {
+                let (marker, _) = truncate_text(REDACTED, maximum);
+                return (marker, true);
+            }
             let quoted_value = value
                 .as_bytes()
                 .get(assignment.value_start)
@@ -2751,6 +3048,13 @@ fn redact_generic_text(
     }
 
     truncated |= cursor < value.len();
+    if truncated {
+        // The output bound was reached before the input was fully inspected.
+        // Do not retain a prefix whose final bytes could be the start of a
+        // configured secret or sensitive assignment.
+        let (marker, _) = truncate_text(REDACTED, maximum);
+        return (marker, true);
+    }
     let (replaced, replacement_truncated) =
         replace_configured_secrets(&output, &policy.secrets, maximum, true);
     truncated |= replacement_truncated;
@@ -5693,6 +5997,10 @@ pub enum MetricError {
     ValueOverflow,
     /// The registry was explicitly closed.
     Closed,
+    /// A policy rebind would mutate metric state shared by another registry
+    /// handle. Rebinding is rejected rather than leaving clones with
+    /// divergent redaction policies over one shared state.
+    SharedPolicy,
     /// Aggregate retained metric state exceeded its byte bound.
     ByteLimitExceeded {
         /// Configured aggregate byte limit.
@@ -5721,6 +6029,7 @@ impl MetricError {
             Self::HistogramBucketLimitExceeded { .. } => "observe.metric.bucket-limit",
             Self::ValueOverflow => "observe.metric.overflow",
             Self::Closed => "observe.metric.closed",
+            Self::SharedPolicy => "observe.metric.shared-policy",
             Self::ByteLimitExceeded { .. } => "observe.metric.bytes-limit",
         }
     }
@@ -5762,6 +6071,7 @@ impl fmt::Display for MetricError {
             }
             Self::ValueOverflow => formatter.write_str("observe.metric.overflow"),
             Self::Closed => formatter.write_str("observe.metric.closed"),
+            Self::SharedPolicy => formatter.write_str("observe.metric.shared-policy"),
             Self::ByteLimitExceeded { maximum } => {
                 write!(formatter, "observe.metric.bytes-limit (maximum {maximum})")
             }
@@ -6536,6 +6846,15 @@ impl MetricsRegistry {
         let mut state = lock_metrics_state(&self.state);
         if state.closed {
             return Err(MetricError::Closed);
+        }
+        if policy == self.policy {
+            return Ok(());
+        }
+        if Arc::strong_count(&self.state) > 1 {
+            // Clones share the metric entries but carry their policy by value.
+            // Updating one handle would let another handle admit identities
+            // under stale redaction rules, so fail closed before rebuilding.
+            return Err(MetricError::SharedPolicy);
         }
         let old_entries = state.entries.clone();
 
@@ -8247,6 +8566,92 @@ mod tests {
     }
 
     #[test]
+    fn generic_json_unicode_escapes_cannot_bypass_redaction() {
+        let policy = RedactionPolicy::new().with_secret("raw-secret");
+        let escaped_field_key = RedactionPolicy::new().field(r#"\u0074oken"#, "hidden");
+        assert_eq!(escaped_field_key.value(), REDACTED);
+        let malformed_field_key = RedactionPolicy::new().field(r#"\uD800"#, "hidden");
+        assert_eq!(malformed_field_key.value(), REDACTED);
+
+        let escaped_key = policy.field(
+            "message",
+            r#"{"\u0074\u006f\u006b\u0065\u006e":"hidden","safe":"ok"}"#,
+        );
+        assert!(!escaped_key.value().contains("hidden"));
+        assert!(escaped_key.value().contains("safe"));
+
+        let escaped_value = policy.field("message", r#"{"message":"raw\u002dsecret","safe":"ok"}"#);
+        assert!(!escaped_value.value().contains("raw\\u002dsecret"));
+        assert!(!escaped_value.value().contains("raw-secret"));
+
+        let escaped_prose = policy.field("message", r#"prefix raw\u002dsecret suffix"#);
+        assert!(!escaped_prose.value().contains("raw\\u002dsecret"));
+        assert!(!escaped_prose.value().contains("raw-secret"));
+
+        let escaped_url = policy.field("url", r#"https://example.test/?safe=raw\u002dsecret"#);
+        assert_eq!(escaped_url.value(), REDACTED);
+
+        let mixed_encoded_secret =
+            policy.field("message", r#"prefix %5Cu0072aw%5Cu002dsecret suffix"#);
+        assert_eq!(mixed_encoded_secret.value(), REDACTED);
+        let mixed_encoded_key =
+            RedactionPolicy::new().field("message", r#"{"%5Cu0074oken":"hidden","safe":"ok"}"#);
+        assert!(!mixed_encoded_key.value().contains("hidden"));
+
+        let malformed_escape = RedactionPolicy::new().field("message", r#"{"\uD800":"malformed"}"#);
+        assert!(!malformed_escape.value().contains("malformed"));
+        assert_eq!(
+            RedactionPolicy::new()
+                .field("message", r#"{"safe":"line\u000abreak"}"#)
+                .value(),
+            REDACTED
+        );
+        assert!(decode_json_escaped_text(r#"\uD83D\uDE00"#).is_some());
+        assert!(decode_json_escaped_text(r#"\uD800"#).is_none());
+    }
+
+    #[test]
+    fn nested_redaction_fails_closed_at_output_boundaries() {
+        let policy =
+            RedactionPolicy::with_limits(RedactionLimits::new(4, 32, 16)).with_secret("raw-secret");
+        let field = policy.field("headers", "X-Trace: prefix raw-secret");
+        assert!(field.is_truncated());
+        assert!(!field.value().contains("raw-secret"));
+        assert_eq!(field.value(), REDACTED);
+    }
+
+    #[test]
+    fn deeply_percent_encoded_values_fail_closed_at_decode_budget() {
+        let mut encoded_key = "%74%6f%6b%65%6e".to_owned();
+        for _ in 0..MAX_REDACTION_DEPTH {
+            encoded_key = encoded_key.replace('%', "%25");
+        }
+        let field = RedactionPolicy::new().field("message", &format!("{encoded_key}=hidden"));
+        assert!(!field.value().contains("hidden"));
+        assert!(field.value().contains(REDACTED));
+
+        let mut encoded_secret = "raw-secret"
+            .bytes()
+            .map(|byte| format!("%{byte:02x}"))
+            .collect::<String>();
+        for _ in 0..MAX_REDACTION_DEPTH {
+            encoded_secret = encoded_secret.replace('%', "%25");
+        }
+        let configured = RedactionPolicy::new().with_secret("raw-secret");
+        let field = configured.field("message", &encoded_secret);
+        assert_eq!(field.value(), REDACTED);
+
+        let mut encoded_control = "%0a".to_owned();
+        for _ in 0..MAX_REDACTION_DEPTH {
+            encoded_control = encoded_control.replace('%', "%25");
+        }
+        assert_eq!(
+            RedactionPolicy::new().field("url", &format!("/safe?x={encoded_control}")),
+            RedactionPolicy::new().field("url", REDACTED)
+        );
+    }
+
+    #[test]
     fn generic_text_scanner_keeps_large_plain_values_bounded() {
         let field = RedactionPolicy::new().field("message", &"x".repeat(64 * 1024));
         assert!(field.is_truncated());
@@ -8328,6 +8733,25 @@ mod tests {
             full_registry.increment("blocked", &MetricLabels::new()),
             Err(MetricError::ByteLimitExceeded { .. })
         ));
+    }
+
+    #[test]
+    fn metric_policy_rebind_rejects_shared_handles() {
+        let mut registry = MetricsRegistry::default_registry();
+        let shared = registry.clone();
+        let policy = RedactionPolicy::new().with_secret("shared-policy-secret");
+        assert_eq!(
+            registry.rebind_policy(policy.clone()),
+            Err(MetricError::SharedPolicy)
+        );
+        assert_eq!(registry.rebind_policy(RedactionPolicy::new()), Ok(()));
+        drop(shared);
+        assert_eq!(registry.rebind_policy(policy), Ok(()));
+        registry.close();
+        assert_eq!(
+            registry.rebind_policy(RedactionPolicy::new()),
+            Err(MetricError::Closed)
+        );
     }
 
     #[test]

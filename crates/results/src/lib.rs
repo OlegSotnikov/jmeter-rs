@@ -24,21 +24,29 @@ pub use csv::{
     read_csv, write_csv,
 };
 pub use data::{
-    DataEncoding, DataType, HeaderBlock, RequestData, RequestHeaders, ResponseData,
-    ResponseHeaders, SampleData,
+    BodyDiagnostic, BodyKind, BodyProjection, DataDiagnostic, DataEncoding, DataError,
+    DataErrorCode, DataField, DataLimits, DataType, DataTypeDiagnostic, EncodingDiagnostic,
+    FileReference, FileReferenceDiagnostic, FileReferenceProjection, HeaderBlock, HeaderDiagnostic,
+    RequestData, RequestHeaders, ResponseData, ResponseFileReference, ResponseHeaders, SampleBody,
+    SampleData, SampleDataProjection,
 };
 pub use error::{
-    AssertionViolation, HierarchyLimit, InputField, ResultError, ResultErrorCode, ResultField,
-    TimingViolation,
+    AssertionViolation, HierarchyLimit, InputField, MAX_RESULT_ERROR_CONTEXT_BYTES,
+    MAX_RESULT_ERROR_CONTEXT_DEPTH, ResultContextError, ResultError, ResultErrorCode,
+    ResultErrorContext, ResultField, ResultRetryability, ResultSourceContext, TimingViolation,
 };
 pub use event::{
     HostId, HostIdentity, RunId, RunIdentity, SampleEvent, ThreadId, ThreadIdentity,
     TransactionState, VariableSnapshot, VariableValue,
 };
 pub use jtl::{
-    AssertionResults, CsvColumn, CsvField, DateFormatProvider, JavaDateFormatProvider, JtlError,
-    JtlFormat, JtlLimits, LineEnding, MAX_DECODE_ALL_EVENTS, SampleSaveConfiguration,
-    TimestampFormat, XmlSampleElement,
+    AssertionResults, CsvColumn, CsvField, DateFormatProvider, JavaDateFormatProvider, JtlCounter,
+    JtlDecoder, JtlEncoder, JtlError, JtlFormat, JtlLimits, JtlOutputPolicy, LineEnding,
+    MAX_DECODE_ALL_EVENTS, MAX_JTL_ATTRIBUTE_BYTES, MAX_JTL_ATTRIBUTES, MAX_JTL_COLUMNS,
+    MAX_JTL_DEPTH, MAX_JTL_FIELDS, MAX_JTL_INPUT_BYTES, MAX_JTL_NODES, MAX_JTL_OUTPUT_BYTES,
+    MAX_JTL_PAYLOAD_BYTES, MAX_JTL_RECORD_BYTES, MAX_JTL_SAMPLES, SampleSaveConfiguration,
+    TimestampFormat, XmlSampleElement, decode_jtl, decode_jtl_with_limit, encode_jtl, read_jtl,
+    write_jtl,
 };
 pub use result::{
     AssertionOutcome, AssertionResult, ByteCount, ConnectTime, ElapsedTime, ErrorCount, IdleTime,
@@ -46,7 +54,9 @@ pub use result::{
     ThreadCount, ValidationLimits,
 };
 pub use save_config_resolution::*;
-pub use timing::{SampleTiming, Timestamp, TimestampMillis, WallTimestamp};
+pub use timing::{
+    SampleTiming, Timestamp, TimestampMillis, TimestampSource, TimingReading, WallTimestamp,
+};
 pub use xml::{
     XmlDecodeConfiguration, XmlDecoder, XmlEncoder, XmlReader, XmlWriter, decode_xml,
     decode_xml_with_configuration, decode_xml_with_limit, encode_xml, read_xml, write_xml,

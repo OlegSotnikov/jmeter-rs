@@ -71,11 +71,11 @@
     "max_plan_depth": 8
   },
   "source_references": [
-    {"path": "docs/architecture.md", "sha256": "37295bd9ad0e59cbcec25e200b4b794e5bb1126888aebbfbc94a4a874918fa47", "role": "execution phases, ordered topology, no-drop policy"},
+    {"path": "docs/architecture.md", "sha256": "d2c80cf96f1ca02b8fc7e36d99e87e93fb6b0f1c5068381c256264e5c9d7fd95", "role": "execution phases, ordered topology, no-drop policy"},
     {"path": "docs/research/compatibility-surface.md", "sha256": "229d15fc02c0bbf2e528b9225c978ae3b98f7c49df3cd85e654b3a5709de97bb", "role": "processor/extractor inventory and variable semantics"},
     {"path": "docs/research/upstream-semantics.md", "sha256": "81add4a5eb1f36e17d7a43219991c384763c902655087f2de71cf0d7583febcd", "role": "pipeline, scope, disabled and unknown behavior"},
-    {"path": "compat/README.md", "sha256": "b84e08f527c05436250227d1d52e5de0ce1d6f3d109fa1fcb4a9d3d1c8cd9d5c", "role": "fixture evidence and validation contract"},
-    {"path": "compat/profiles/jmeter-5.6.3.json", "sha256": "83ad63eb679cc16ffe6fa01f5f77e85203602d4d2cbfc311f74db44b6eac9497", "role": "active profile and ELEM-008 pin"}
+    {"path": "compat/README.md", "sha256": "0ae62b65ad6d15708958e4e5ae60934c0cc529bbcc3954f7cda05aa6348b763a", "role": "fixture evidence and validation contract"},
+    {"path": "compat/profiles/jmeter-5.6.3.json", "sha256": "949903e1a4198806ab90fa613eee1ce6e550bf50fc05776199650f653d826468", "role": "active profile and ELEM-008 pin"}
   ],
   "status": "not-run-static",
   "oracle_observation": {

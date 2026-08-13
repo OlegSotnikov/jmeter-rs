@@ -149,6 +149,11 @@ struct RandomState {
 #[derive(Clone)]
 pub struct DeterministicRandom {
     root_seed: RandomSeed,
+    /// The seed used to initialize this stream's cursor.
+    ///
+    /// The root seed is retained separately so a fixture can record one
+    /// replay seed while diagnostics can still identify a derived stream.
+    stream_seed: RandomSeed,
     path: Arc<[String]>,
     scope_bytes: usize,
     limits: RandomLimits,
@@ -160,6 +165,7 @@ impl fmt::Debug for DeterministicRandom {
         formatter
             .debug_struct("DeterministicRandom")
             .field("root_seed", &self.root_seed)
+            .field("stream_seed", &self.stream_seed)
             .field("scope_depth", &self.path.len())
             .field("scope_bytes", &self.scope_bytes)
             .field("limits", &self.limits)
@@ -178,13 +184,15 @@ impl DeterministicRandom {
     #[must_use]
     pub fn with_limits(seed: impl Into<RandomSeed>, limits: RandomLimits) -> Self {
         let root_seed = seed.into();
+        let stream_seed = RandomSeed::new(derive_seed(root_seed.value(), &[]));
         Self {
             root_seed,
+            stream_seed,
             path: Arc::from([]),
             scope_bytes: 0,
             limits,
             state: Arc::new(Mutex::new(RandomState {
-                state: derive_seed(root_seed.value(), &[]),
+                state: stream_seed.value(),
             })),
         }
     }
@@ -193,6 +201,25 @@ impl DeterministicRandom {
     #[must_use]
     pub const fn root_seed(&self) -> RandomSeed {
         self.root_seed
+    }
+
+    /// Returns the recorded root seed.
+    ///
+    /// This spelling is convenient for fixture metadata and is equivalent to
+    /// [`Self::root_seed`].  A child stream still reports the same root seed;
+    /// use [`Self::stream_seed`] to identify its derived cursor seed.
+    #[must_use]
+    pub const fn seed(&self) -> RandomSeed {
+        self.root_seed
+    }
+
+    /// Returns the deterministic seed used to initialize this stream's
+    /// cursor.  The root stream's value is derived from its root seed, while
+    /// a scoped stream's value additionally includes its length-delimited
+    /// path.
+    #[must_use]
+    pub const fn stream_seed(&self) -> RandomSeed {
+        self.stream_seed
     }
 
     /// Returns the scope path used to derive this stream.
@@ -251,13 +278,16 @@ impl DeterministicRandom {
         }
         let mut path = self.scope_path();
         path.push(scope.to_owned());
-        let seed = derive_seed(self.root_seed.value(), &path);
+        let stream_seed = RandomSeed::new(derive_seed(self.root_seed.value(), &path));
         Ok(Self {
             root_seed: self.root_seed,
+            stream_seed,
             path: Arc::from(path),
             scope_bytes,
             limits: self.limits,
-            state: Arc::new(Mutex::new(RandomState { state: seed })),
+            state: Arc::new(Mutex::new(RandomState {
+                state: stream_seed.value(),
+            })),
         })
     }
 
@@ -428,14 +458,46 @@ mod tests {
     }
 
     #[test]
+    fn recorded_root_and_derived_stream_seeds_are_stable() {
+        let root = DeterministicRandom::new(RandomSeed::new(41));
+        let child = root.scoped("virtual-user/0").unwrap();
+        let same_child = DeterministicRandom::new(41_u64)
+            .scoped("virtual-user/0")
+            .unwrap();
+
+        assert_eq!(root.seed(), RandomSeed::new(41));
+        assert_eq!(root.root_seed(), root.seed());
+        assert_eq!(child.root_seed(), root.seed());
+        assert_eq!(child.stream_seed(), same_child.stream_seed());
+        assert_ne!(root.stream_seed(), child.stream_seed());
+    }
+
+    #[test]
+    fn scope_component_boundaries_are_part_of_the_seed() {
+        let root = DeterministicRandom::new(17_u64);
+        let slash_component = root.scoped("a/b").unwrap();
+        let nested_components = root.scoped("a").unwrap().scoped("b").unwrap();
+        let first_pair = root.scoped("a").unwrap().scoped("bc").unwrap();
+        let second_pair = root.scoped("ab").unwrap().scoped("c").unwrap();
+
+        assert_ne!(
+            slash_component.stream_seed(),
+            nested_components.stream_seed()
+        );
+        assert_ne!(first_pair.stream_seed(), second_pair.stream_seed());
+    }
+
+    #[test]
     fn unrelated_scopes_are_independent() {
         let root = DeterministicRandom::new(99_u64);
+        let root_checkpoint = root.checkpoint();
         let user_zero = root.scoped("user/0").unwrap();
         let expected = user_zero.next_u64();
         let user_one = root.scoped("user/1").unwrap();
         for _ in 0..100 {
             let _ = user_one.next_u64();
         }
+        assert_eq!(root.checkpoint(), root_checkpoint);
         assert_eq!(root.scoped("user/0").unwrap().next_u64(), expected);
     }
 
@@ -466,6 +528,7 @@ mod tests {
     #[test]
     fn range_errors_and_bounds_are_deterministic() {
         let random = DeterministicRandom::new(12_u64);
+        let checkpoint = random.checkpoint();
         assert_eq!(
             random.range_u64(3..3).unwrap_err().code(),
             ErrorCode::RandomEmptyRange
@@ -477,9 +540,84 @@ mod tests {
                 .code(),
             ErrorCode::RandomEmptyRange
         );
+        assert_eq!(random.checkpoint(), checkpoint);
         for _ in 0..256 {
             let value = random.range_u64(10..15).unwrap();
             assert!((10..15).contains(&value));
+        }
+    }
+
+    #[test]
+    fn generated_ranges_stay_in_bounds_at_u64_edges() {
+        let widths = [1, 2, 3, 7, u64::MAX - 1, u64::MAX];
+        let starts = [0, 1, u64::MAX / 2];
+
+        for width in widths {
+            for start in starts {
+                if start > u64::MAX - width {
+                    continue;
+                }
+                let end = start + width;
+                let stream_name = format!("range/{start}/{width}");
+                let random = DeterministicRandom::new(0xA11C_E5E5_u64)
+                    .scoped(stream_name)
+                    .unwrap();
+                for _ in 0..64 {
+                    let value = random.range_u64(start..end).unwrap();
+                    assert!(value >= start);
+                    assert!(value < end);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn range_rejection_sampling_matches_an_independent_cursor() {
+        let ranges = [0..1, 1..3, 7..12, 0..u64::MAX, u64::MAX - 2..u64::MAX];
+
+        for (index, range) in ranges.into_iter().enumerate() {
+            let random = DeterministicRandom::new(0xC0FF_EE_u64)
+                .scoped(format!("range-reference/{index}"))
+                .unwrap();
+            let reference = DeterministicRandom::new(0xC0FF_EE_u64)
+                .scoped(format!("range-reference/{index}"))
+                .unwrap();
+            let width = range.end - range.start;
+            let threshold = (0_u64.wrapping_sub(width)) % width;
+            let expected = loop {
+                let value = reference.next_u64();
+                if value >= threshold {
+                    break range.start + value % width;
+                }
+            };
+
+            assert_eq!(random.range_u64(range).unwrap(), expected);
+            assert_eq!(random.checkpoint(), reference.checkpoint());
+        }
+    }
+
+    #[test]
+    fn inclusive_ranges_cover_singleton_and_full_domains_without_overflow() {
+        let random = DeterministicRandom::new(0xB0_u64);
+        assert_eq!(
+            random.range_inclusive_u64(u64::MAX..=u64::MAX).unwrap(),
+            u64::MAX
+        );
+
+        let full_domain = DeterministicRandom::new(0xB0_u64);
+        let reference = DeterministicRandom::new(0xB0_u64);
+        let expected = reference.next_u64();
+        assert_eq!(
+            full_domain.range_inclusive_u64(0..=u64::MAX).unwrap(),
+            expected
+        );
+        assert_eq!(full_domain.checkpoint(), reference.checkpoint());
+
+        for _ in 0..64 {
+            let value = random
+                .range_inclusive_u64((u64::MAX - 2)..=u64::MAX)
+                .unwrap();
+            assert!((u64::MAX - 2..=u64::MAX).contains(&value));
         }
     }
 
@@ -511,6 +649,40 @@ mod tests {
             random.scoped("abcd").unwrap_err(),
             RandomError::ScopeBytesExceeded { bytes: 4, limit: 3 }
         );
+    }
+
+    #[test]
+    fn rejected_scope_keeps_path_and_cursor_unchanged() {
+        let random = DeterministicRandom::with_limits(9_u64, RandomLimits::new(1, 3));
+        let before_path = random.scope_path();
+        let before_cursor = random.checkpoint();
+        let error = random.try_scoped("abcd").unwrap_err();
+
+        assert_eq!(
+            error,
+            RandomError::ScopeBytesExceeded { bytes: 4, limit: 3 }
+        );
+        assert_eq!(random.scope_path(), before_path);
+        assert_eq!(random.checkpoint(), before_cursor);
+    }
+
+    #[test]
+    fn scope_byte_addition_overflow_is_rejected_without_allocation() {
+        let mut random = DeterministicRandom::new(9_u64);
+        random.scope_bytes = usize::MAX;
+        let before_path = random.scope_path();
+        let before_cursor = random.checkpoint();
+
+        let error = random.try_scoped("x").unwrap_err();
+        assert_eq!(
+            error,
+            RandomError::ScopeBytesExceeded {
+                bytes: usize::MAX,
+                limit: random.limits.max_scope_bytes,
+            }
+        );
+        assert_eq!(random.scope_path(), before_path);
+        assert_eq!(random.checkpoint(), before_cursor);
     }
 
     #[test]

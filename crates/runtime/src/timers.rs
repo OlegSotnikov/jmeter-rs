@@ -8,7 +8,7 @@
 //! small, typed capability seam instead of silently pretending that a
 //! per-user copy is a serialized run-wide implementation.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::future::{self, Future};
 use std::num::NonZeroUsize;
@@ -17,14 +17,19 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
-use crate::{ComponentError, ComponentFuture, SampleContext, SchedulerError, Timer, TimerFactory};
+use crate::{
+    ComponentError, ComponentFuture, Deadline, MonotonicInstant, SampleContext, SchedulerError,
+    Timer, TimerFactory,
+};
 
-// A Duration can represent more than u64 nanoseconds.  The timer protocol
-// deliberately uses a bounded nanosecond representation so conversion and
-// accumulation never silently saturate.
+// Keep random retry loops and generated queues bounded. Duration arithmetic
+// itself uses the full representation supported by `std::time::Duration` and
+// fails explicitly on overflow.
 const MAX_RANDOM_ATTEMPTS: usize = 128;
+const MAX_POISSON_LAMBDA: i64 = i32::MAX as i64;
 const MAX_PRECISE_ARRIVALS_PER_WINDOW: u64 = 65_536;
-const MAX_PRECISE_WINDOW_ADVANCES: usize = 65_536;
+const MAX_PRECISE_SCOPES: usize = 65_536;
+const MAX_SYNCHRONIZING_PARTICIPANTS: usize = 65_536;
 const MAX_TIMER_NAME_BYTES: usize = 4_096;
 
 fn lock<T>(value: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -38,14 +43,16 @@ fn ready<T: 'static>(value: Result<T, ComponentError>) -> ComponentFuture<'stati
 }
 
 fn duration_from_nanos(value: u128) -> Result<Duration, ComponentError> {
-    let nanos = u64::try_from(value)
+    let seconds = value / 1_000_000_000;
+    let nanos = u32::try_from(value % 1_000_000_000)
         .map_err(|_| ComponentError::resource_limit("timer duration nanoseconds"))?;
-    Ok(Duration::from_nanos(nanos))
+    let seconds = u64::try_from(seconds)
+        .map_err(|_| ComponentError::resource_limit("timer duration seconds"))?;
+    Ok(Duration::new(seconds, nanos))
 }
 
-fn duration_nanos(value: Duration) -> Result<u64, ComponentError> {
-    u64::try_from(value.as_nanos())
-        .map_err(|_| ComponentError::resource_limit("timer duration nanoseconds"))
+fn duration_nanos(value: Duration) -> u128 {
+    value.as_nanos()
 }
 
 fn next_random(source: &dyn crate::RandomSource) -> Result<u64, ComponentError> {
@@ -57,6 +64,7 @@ fn next_random(source: &dyn crate::RandomSource) -> Result<u64, ComponentError> 
 /// `RandomSource` supplies the complete 64-bit domain.  Rejection sampling
 /// uses the largest multiple of `upper` contained in that domain and has a
 /// finite attempt bound so a broken/adversarial source cannot loop forever.
+#[cfg(test)]
 fn uniform_below(source: &dyn crate::RandomSource, upper: u64) -> Result<u64, ComponentError> {
     if upper == 0 {
         // Java's random timer still evaluates its random expression for a
@@ -80,25 +88,6 @@ fn random_unit_half_open(value: u64) -> f64 {
     (value >> 11) as f64 / 9_007_199_254_740_992.0
 }
 
-fn duration_from_float_nanos(value: f64) -> Result<Duration, ComponentError> {
-    if !value.is_finite() {
-        return Err(ComponentError::resource_limit(
-            "non-finite timer distribution result",
-        ));
-    }
-    if value <= 0.0 {
-        return Ok(Duration::ZERO);
-    }
-    // `u64::MAX as f64` rounds to 2^64.  Comparing against the exact power
-    // of two keeps the cast below the representable Duration bound.
-    if value >= 18_446_744_073_709_551_616.0 {
-        return Err(ComponentError::resource_limit(
-            "timer distribution duration overflow",
-        ));
-    }
-    duration_from_nanos(value.floor() as u128)
-}
-
 /// Converts a Java `double` to the `long` value used by JMeter's random
 /// timers.  Java narrows toward zero, maps NaN to zero, and saturates values
 /// outside the `long` range.  The caller applies JMeter's `Math.abs` before
@@ -118,17 +107,31 @@ fn java_long_from_double(value: f64) -> i64 {
 }
 
 /// Applies JMeter's `Math.abs` and Java `double`-to-`long` conversion to a
-/// delay expressed in milliseconds, then converts it to the runtime's
-/// bounded nanosecond representation.
+/// delay expressed in milliseconds, then converts it to a `Duration` without
+/// introducing a smaller runtime lifetime ceiling.
 fn jmeter_delay_from_millis(raw: f64) -> Result<Duration, ComponentError> {
     let millis = java_long_from_double(raw.abs());
     if millis <= 0 {
         return Ok(Duration::ZERO);
     }
-    let nanos = u128::from(millis as u64)
-        .checked_mul(1_000_000)
-        .ok_or_else(|| ComponentError::resource_limit("timer delay milliseconds"))?;
-    duration_from_nanos(nanos)
+    Ok(Duration::from_millis(millis as u64))
+}
+
+/// Implements `Math.round` for the non-negative doubles used by JMeter's
+/// timer properties. Java rounds to the nearest integral value (ties toward
+/// positive infinity) and saturates at `Long.MAX_VALUE`; Rust's float casts
+/// have different edge behavior, so keep the conversion explicit.
+fn java_round_nonnegative(value: f64) -> Result<i64, ComponentError> {
+    if value.is_nan() || value <= 0.0 {
+        return Ok(0);
+    }
+    const LONG_BOUND: f64 = 9_223_372_036_854_775_808.0; // 2^63
+    if value >= LONG_BOUND - 0.5 {
+        return Ok(i64::MAX);
+    }
+    let rounded = (value + 0.5).floor();
+    i64::try_from(rounded as u64)
+        .map_err(|_| ComponentError::resource_limit("timer rounded integer"))
 }
 
 fn duration_as_millis(value: Duration) -> f64 {
@@ -340,12 +343,12 @@ impl TimerFactory for GaussianRandomTimer {
     }
 }
 
-/// A Poisson/exponential random timer.
+/// A JMeter Poisson random timer.
 ///
 /// The one-argument constructor is retained for compatibility with the
-/// original runtime API and represents an exponential interval with no base
-/// delay.  [`Self::with_base_and_range`] corresponds to JMeter's base delay
-/// plus `RandomTimer.range` form used by the 5.6.3 fixtures.
+/// original runtime API and represents a zero-base Poisson range.  [`Self::with_base_and_range`]
+/// corresponds to JMeter's base delay plus `RandomTimer.range` form used by
+/// the 5.6.3 fixtures.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PoissonRandomTimer {
     base: Duration,
@@ -353,7 +356,7 @@ pub struct PoissonRandomTimer {
 }
 
 impl PoissonRandomTimer {
-    /// Creates a Poisson timer whose mean interval is `mean`.
+    /// Creates a Poisson timer whose range is `mean` milliseconds.
     #[must_use]
     pub const fn new(mean: Duration) -> Self {
         Self {
@@ -362,13 +365,13 @@ impl PoissonRandomTimer {
         }
     }
 
-    /// Creates a JMeter-style timer with a base delay and exponential range.
+    /// Creates a JMeter-style timer with a base delay and Poisson range.
     #[must_use]
     pub const fn with_base_and_range(base: Duration, range: Duration) -> Self {
         Self { base, range }
     }
 
-    /// Returns the configured exponential mean/range.
+    /// Returns the configured Poisson range.
     #[must_use]
     pub const fn mean(self) -> Duration {
         self.range
@@ -381,16 +384,93 @@ impl PoissonRandomTimer {
     }
 }
 
+fn poisson_log_factorial(value: i64) -> f64 {
+    if value <= 1 {
+        0.0
+    } else if value <= 254 {
+        (2..=value).map(|item| (item as f64).ln()).sum()
+    } else {
+        let x = value as f64 + 1.0;
+        (x - 0.5) * x.ln() - x + 0.5 * (2.0 * std::f64::consts::PI).ln() + 1.0 / (12.0 * x)
+    }
+}
+
+/// Generates the integer Poisson variate used by JMeter's
+/// `PoissonRandomTimer`. The low-lambda path is Knuth's product method; the
+/// high-lambda path is the rejection method used by the pinned source. The
+/// attempt bound prevents a hostile injected random source from looping
+/// forever.
+fn poisson_random(source: &dyn crate::RandomSource, lambda: i64) -> Result<i64, ComponentError> {
+    if !(0..=MAX_POISSON_LAMBDA).contains(&lambda) {
+        return Err(ComponentError::resource_limit("Poisson timer lambda"));
+    }
+    if lambda <= 30 {
+        let limit = (-(lambda as f64)).exp();
+        let mut probability = 1.0;
+        for count in 1..=MAX_RANDOM_ATTEMPTS {
+            probability *= random_unit_half_open(next_random(source)?);
+            if probability <= limit {
+                return i64::try_from(count - 1)
+                    .map_err(|_| ComponentError::resource_limit("Poisson timer variate"));
+            }
+        }
+        return Err(ComponentError::resource_limit(
+            "Poisson timer rejection-attempt bound",
+        ));
+    }
+
+    let lambda_float = lambda as f64;
+    let c = 0.767 - 3.36 / lambda_float;
+    let beta = std::f64::consts::PI / (3.0 * lambda_float).sqrt();
+    let alpha = beta * lambda_float;
+    let k = c.ln() - lambda_float - beta.ln();
+    for _ in 0..MAX_RANDOM_ATTEMPTS {
+        let unit = random_unit_half_open(next_random(source)?);
+        if unit <= 0.0 {
+            continue;
+        }
+        let x = (alpha - ((1.0 - unit) / unit).ln()) / beta;
+        if !x.is_finite() {
+            continue;
+        }
+        let n = (x + 0.5).floor() as i64;
+        if n < 0 {
+            continue;
+        }
+        let second = random_unit_half_open(next_random(source)?);
+        let y = alpha - beta * x;
+        let denominator = (1.0 + y.exp()).powi(2);
+        let lhs = y + (second / denominator).ln();
+        let rhs = k + (n as f64) * lambda_float.ln() - poisson_log_factorial(n);
+        if lhs <= rhs {
+            return Ok(n);
+        }
+    }
+    Err(ComponentError::resource_limit(
+        "Poisson timer rejection-attempt bound",
+    ))
+}
+
 fn poisson_delay(
     source: &dyn crate::RandomSource,
     base: Duration,
     range: Duration,
 ) -> Result<Duration, ComponentError> {
-    let random = next_random(source)?;
-    let unit = random_unit_half_open(random);
-    let extra = duration_from_float_nanos(-(1.0 - unit).ln() * range.as_nanos() as f64)?;
-    base.checked_add(extra)
-        .ok_or_else(|| ComponentError::resource_limit("Poisson timer duration"))
+    // JMeter rounds RandomTimer.range in milliseconds before narrowing it to
+    // an int for randomPoisson(). Values outside that domain are rejected.
+    let rounded_range = java_round_nonnegative(duration_as_millis(range))?;
+    if rounded_range > MAX_POISSON_LAMBDA {
+        return Err(ComponentError::resource_limit("Poisson timer lambda"));
+    }
+    let variate = poisson_random(source, rounded_range)?;
+    let base_millis = java_long_from_double(duration_as_millis(base));
+    let total_millis = base_millis
+        .checked_add(variate)
+        .ok_or_else(|| ComponentError::resource_limit("Poisson timer duration"))?;
+    if total_millis < 0 {
+        return Err(ComponentError::resource_limit("Poisson timer duration"));
+    }
+    Ok(Duration::from_millis(total_millis as u64))
 }
 
 impl Timer for PoissonRandomTimer {
@@ -462,6 +542,32 @@ pub struct ThroughputRequest {
 }
 
 impl ThroughputRequest {
+    /// Creates a request for a run-scoped throughput coordinator.
+    ///
+    /// The request is intentionally a value object: validation of participant
+    /// identity and duration bounds belongs to the selected coordinator so a
+    /// custom adapter can apply its own profile limits.
+    #[must_use]
+    pub fn new(
+        mode: ConstantThroughputMode,
+        period: Duration,
+        now: Duration,
+        thread_name: impl Into<String>,
+        thread_group: Option<String>,
+        thread_number: Option<u64>,
+        lifecycle_id: Option<u64>,
+    ) -> Self {
+        Self {
+            mode,
+            period,
+            now,
+            thread_name: thread_name.into(),
+            thread_group,
+            thread_number,
+            lifecycle_id,
+        }
+    }
+
     /// Returns the requested JMeter calculation mode.
     #[must_use]
     pub const fn mode(&self) -> ConstantThroughputMode {
@@ -597,9 +703,14 @@ impl ConstantThroughputTimer {
                 "constant throughput must be positive and finite",
             ));
         }
-        let seconds = 60.0 / samples_per_minute;
-        let period = Duration::try_from_secs_f64(seconds)
-            .map_err(|_| ComponentError::resource_limit("constant throughput period"))?;
+        // JMeter computes Math.round(60000 / rate), in whole milliseconds.
+        // Preserve that observable precision instead of retaining fractional
+        // nanoseconds in the native representation.
+        let milliseconds = java_round_nonnegative(60_000.0 / samples_per_minute)?;
+        let period = Duration::from_millis(
+            u64::try_from(milliseconds)
+                .map_err(|_| ComponentError::resource_limit("constant throughput period"))?,
+        );
         if period.is_zero() {
             return Err(ComponentError::resource_limit(
                 "constant throughput period precision",
@@ -637,9 +748,10 @@ impl Timer for ConstantThroughputTimer {
             };
             let thread = context.execution().thread();
             if thread.name().len() > MAX_TIMER_NAME_BYTES
-                || thread
-                    .group()
-                    .is_some_and(|group| group.len() > MAX_TIMER_NAME_BYTES)
+                || thread.name().chars().any(char::is_control)
+                || thread.group().is_some_and(|group| {
+                    group.len() > MAX_TIMER_NAME_BYTES || group.chars().any(char::is_control)
+                })
             {
                 return ready(Err(ComponentError::resource_limit(
                     "throughput participant identity",
@@ -654,11 +766,7 @@ impl Timer for ConstantThroughputTimer {
                 thread_number: thread.number(),
                 lifecycle_id: context.execution().lifecycle_id(),
             };
-            return ready(
-                coordinator
-                    .reserve(&request)
-                    .and_then(|delay| duration_nanos(delay).map(|_| delay)),
-            );
+            return ready(coordinator.reserve(&request));
         }
 
         let mut state = lock(&self.state);
@@ -695,31 +803,35 @@ impl TimerFactory for ConstantThroughputTimer {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct PreciseState {
     origin: Option<Duration>,
     window: u64,
-    fraction: f64,
     arrivals: VecDeque<Duration>,
 }
 
-impl Default for PreciseState {
-    fn default() -> Self {
-        Self {
-            origin: None,
-            window: 0,
-            fraction: 0.0,
-            arrivals: VecDeque::new(),
-        }
-    }
+/// Scope key for JMeter's static precise-throughput event producer.
+///
+/// JMeter keys the producer by thread-group identity and resets it for a new
+/// test run. A standalone context without a group has no such shared owner,
+/// so retain the virtual-user identity as a deterministic fallback.
+#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+struct PreciseScopeKey {
+    run_id: String,
+    thread_group: Option<String>,
+    thread_name: Option<String>,
+    thread_number: Option<u64>,
+    lifecycle_id: Option<u64>,
 }
 
-/// A precise-throughput timer using fixed-count Poisson arrivals per period.
-///
-/// Conditional on a period's exact arrival count, sorted independent uniform
-/// offsets are the Poisson-process arrival distribution.  This gives JMeter's
-/// precise count guarantee without an unbounded arrival queue or a statistical
-/// approximation of the configured target.
+#[derive(Debug, Default)]
+struct PreciseStateStore {
+    scopes: BTreeMap<PreciseScopeKey, PreciseState>,
+}
+
+/// A precise-throughput timer using JMeter's fixed-count Poisson arrival
+/// generator. The upstream timer shares one generated event stream for a
+/// thread group; clones therefore retain the same bounded state cursor.
 #[derive(Debug)]
 pub struct PreciseThroughputTimer {
     throughput: f64,
@@ -730,14 +842,14 @@ pub struct PreciseThroughputTimer {
     exact_limit: u64,
     allowed_throughput_surplus: f64,
     random_seed: Option<u64>,
-    state: Arc<Mutex<PreciseState>>,
+    state: Arc<Mutex<PreciseStateStore>>,
 }
 
 impl Clone for PreciseThroughputTimer {
     fn clone(&self) -> Self {
-        // Arrival queues and fractional carry are per-user state.  A clone
-        // therefore keeps configuration/capabilities but starts a fresh
-        // schedule rather than sharing a serialized cursor.
+        // JMeter's EventProducer is shared by all timer clones in one thread
+        // group. Keep that cursor shared; unlike most per-user components,
+        // this timer intentionally coordinates arrivals across users.
         Self {
             throughput: self.throughput,
             throughput_period: self.throughput_period,
@@ -747,7 +859,7 @@ impl Clone for PreciseThroughputTimer {
             exact_limit: self.exact_limit,
             allowed_throughput_surplus: self.allowed_throughput_surplus,
             random_seed: self.random_seed,
-            state: Arc::new(Mutex::new(PreciseState::default())),
+            state: Arc::clone(&self.state),
         }
     }
 }
@@ -758,13 +870,13 @@ impl PreciseThroughputTimer {
         Self::with_duration(throughput, throughput_period, None)
     }
 
-    /// Creates a precise timer with an optional finite active duration.
+    /// Creates a precise timer with an optional event-generation duration.
     pub fn with_duration(
         throughput: f64,
         throughput_period: Duration,
         duration: Option<Duration>,
     ) -> Result<Self, ComponentError> {
-        let period_nanos = duration_nanos(throughput_period)?;
+        let period_nanos = duration_nanos(throughput_period);
         if !throughput.is_finite() || throughput <= 0.0 {
             return Err(ComponentError::failure(
                 "precise throughput must be positive and finite",
@@ -775,9 +887,9 @@ impl PreciseThroughputTimer {
                 "precise throughput period must be positive",
             ));
         }
-        if throughput.ceil() > MAX_PRECISE_ARRIVALS_PER_WINDOW as f64 {
-            return Err(ComponentError::resource_limit(
-                "precise throughput arrivals per period",
+        if duration.is_some_and(|value| value.is_zero()) {
+            return Err(ComponentError::failure(
+                "precise throughput generation duration must be positive",
             ));
         }
         Ok(Self {
@@ -789,7 +901,7 @@ impl PreciseThroughputTimer {
             exact_limit: 0,
             allowed_throughput_surplus: 1.0,
             random_seed: None,
-            state: Arc::new(Mutex::new(PreciseState::default())),
+            state: Arc::new(Mutex::new(PreciseStateStore::default())),
         })
     }
 
@@ -811,7 +923,9 @@ impl PreciseThroughputTimer {
         Ok(self)
     }
 
-    /// Adds the configured inter-batch thread delay.
+    /// Retains the configured inter-batch delay property. JMeter 5.6.3's
+    /// `ConstantPoissonProcessGenerator` stores this value but does not apply
+    /// it when producing events.
     #[must_use]
     pub const fn with_batch_thread_delay(mut self, delay: Duration) -> Self {
         self.batch_thread_delay = delay;
@@ -867,7 +981,7 @@ impl PreciseThroughputTimer {
         self.throughput_period
     }
 
-    /// Returns the optional finite active duration.
+    /// Returns the optional event-generation duration.
     #[must_use]
     pub const fn duration(&self) -> Option<Duration> {
         self.duration
@@ -896,8 +1010,8 @@ impl PreciseThroughputTimer {
         period: Duration,
         window: u64,
     ) -> Result<Duration, ComponentError> {
-        let origin_nanos = u128::from(duration_nanos(origin)?);
-        let period_nanos = u128::from(duration_nanos(period)?);
+        let origin_nanos = duration_nanos(origin);
+        let period_nanos = duration_nanos(period);
         let offset = period_nanos
             .checked_mul(u128::from(window))
             .ok_or_else(|| ComponentError::resource_limit("precise throughput window"))?;
@@ -908,25 +1022,81 @@ impl PreciseThroughputTimer {
         )
     }
 
-    fn arrivals_for_window(&self, state: &mut PreciseState) -> Result<u64, ComponentError> {
-        let base = self.throughput.floor() as u64;
-        let fraction = self.throughput - base as f64;
-        state.fraction += fraction;
-        let extra = if state.fraction >= 1.0 {
-            state.fraction -= 1.0;
-            1
-        } else {
-            0
-        };
-        let count = base
-            .checked_add(extra)
-            .ok_or_else(|| ComponentError::resource_limit("precise throughput arrivals"))?;
-        if count > MAX_PRECISE_ARRIVALS_PER_WINDOW {
+    fn arrivals_for_window(&self, _state: &mut PreciseState) -> Result<u64, ComponentError> {
+        // ConstantPoissonProcessGenerator creates ceil(rate * duration)
+        // events for every generation window. There is no fractional carry
+        // between windows; each window independently has the exact rounded
+        // count promised by the configured generation duration.
+        let generation_duration = self.generation_duration();
+        let count_float = self.throughput * generation_duration.as_secs_f64()
+            / self.throughput_period.as_secs_f64();
+        if !count_float.is_finite() || count_float <= 0.0 {
             return Err(ComponentError::resource_limit(
                 "precise throughput arrivals per period",
             ));
         }
-        Ok(count)
+        // The upstream generator divides the rate by batchSize before taking
+        // ceil, then returns each generated offset batchSize times.
+        let generated = (count_float / self.batch_size as f64).ceil();
+        if generated > MAX_PRECISE_ARRIVALS_PER_WINDOW as f64
+            || generated * self.batch_size as f64 > MAX_PRECISE_ARRIVALS_PER_WINDOW as f64
+        {
+            return Err(ComponentError::resource_limit(
+                "precise throughput arrivals per period",
+            ));
+        }
+        Ok(generated as u64)
+    }
+
+    fn generation_duration(&self) -> Duration {
+        // JMeter's `duration` controls how far each generated event block
+        // extends. If omitted by the Rust convenience constructor, one
+        // throughput period is the bounded equivalent.
+        self.duration.unwrap_or(self.throughput_period)
+    }
+
+    fn scope_key(context: &SampleContext<'_>) -> Result<PreciseScopeKey, ComponentError> {
+        let execution = context.execution();
+        let run_id = execution.run().as_str();
+        let thread = execution.thread();
+        let thread_group = thread.group();
+        if thread.name().is_empty() || thread_group.is_some_and(str::is_empty) {
+            return Err(ComponentError::resource_limit(
+                "precise throughput scope identity",
+            ));
+        }
+        let exceeds_limit =
+            |value: &str| value.len() > MAX_TIMER_NAME_BYTES || value.chars().any(char::is_control);
+        if exceeds_limit(run_id)
+            || thread_group.is_some_and(exceeds_limit)
+            || (thread_group.is_none() && exceeds_limit(thread.name()))
+        {
+            return Err(ComponentError::resource_limit(
+                "precise throughput scope identity",
+            ));
+        }
+        Ok(PreciseScopeKey {
+            run_id: run_id.to_owned(),
+            thread_group: thread_group.map(str::to_owned),
+            thread_name: thread_group.is_none().then(|| thread.name().to_owned()),
+            thread_number: thread_group.is_none().then(|| thread.number()).flatten(),
+            lifecycle_id: thread_group
+                .is_none()
+                .then(|| execution.lifecycle_id())
+                .flatten(),
+        })
+    }
+
+    fn state_for_scope(
+        store: &mut PreciseStateStore,
+        key: PreciseScopeKey,
+    ) -> Result<&mut PreciseState, ComponentError> {
+        if !store.scopes.contains_key(&key) && store.scopes.len() >= MAX_PRECISE_SCOPES {
+            return Err(ComponentError::resource_limit(
+                "precise throughput scope registry",
+            ));
+        }
+        Ok(store.scopes.entry(key).or_default())
     }
 
     fn fill_next_window(
@@ -937,20 +1107,8 @@ impl PreciseThroughputTimer {
         let origin = state
             .origin
             .ok_or_else(|| ComponentError::failure("precise throughput origin missing"))?;
-        let start = Self::window_start(origin, self.throughput_period, state.window)?;
-        if let Some(duration) = self.duration {
-            let end = origin
-                .checked_add(duration)
-                .ok_or_else(|| ComponentError::resource_limit("precise throughput end"))?;
-            if start >= end {
-                state.arrivals.clear();
-                state.window = state
-                    .window
-                    .checked_add(1)
-                    .ok_or_else(|| ComponentError::resource_limit("precise throughput window"))?;
-                return Ok(());
-            }
-        }
+        let generation_duration = self.generation_duration();
+        let start = Self::window_start(origin, generation_duration, state.window)?;
 
         let count = self.arrivals_for_window(state)?;
         if count == 0 {
@@ -960,36 +1118,39 @@ impl PreciseThroughputTimer {
                 .ok_or_else(|| ComponentError::resource_limit("precise throughput window"))?;
             return Ok(());
         }
-        let period_nanos = duration_nanos(self.throughput_period)?;
+        let generation_millis = duration_as_millis(generation_duration);
+        if !generation_millis.is_finite() || generation_millis >= 9_223_372_036_854_775_808.0 {
+            return Err(ComponentError::resource_limit(
+                "precise throughput generation duration",
+            ));
+        }
         let mut offsets = Vec::with_capacity(count as usize);
         for _ in 0..count {
-            offsets.push(uniform_below(source, period_nanos)?);
+            let random = random_unit_half_open(next_random(source)?);
+            let offset = java_long_from_double(random * generation_millis);
+            let offset = u64::try_from(offset)
+                .map_err(|_| ComponentError::resource_limit("precise throughput arrival"))?;
+            offsets.push(offset);
         }
         offsets.sort_unstable();
-        for (index, offset) in offsets.into_iter().enumerate() {
-            let mut offset = duration_from_nanos(u128::from(offset))?;
-            if self.batch_size > 0 && index > 0 && (index as u64).is_multiple_of(self.batch_size) {
-                offset = offset
-                    .checked_add(self.batch_thread_delay)
-                    .ok_or_else(|| ComponentError::resource_limit("precise batch delay"))?;
-            }
+        let batch_size = usize::try_from(self.batch_size)
+            .map_err(|_| ComponentError::resource_limit("precise throughput batch size"))?;
+        for offset in offsets {
+            // `ConstantPoissonProcessGenerator` samples in seconds and the
+            // timer narrows `nextEvent * 1000` to a Java long. The generated
+            // integer therefore denotes milliseconds, not nanoseconds.
+            let offset = Duration::from_millis(offset);
             let target = start
                 .checked_add(offset)
                 .ok_or_else(|| ComponentError::resource_limit("precise throughput arrival"))?;
-            if let Some(duration) = self.duration {
-                let end = origin
-                    .checked_add(duration)
-                    .ok_or_else(|| ComponentError::resource_limit("precise throughput end"))?;
-                if target >= end {
-                    continue;
+            for _ in 0..batch_size {
+                if state.arrivals.len() >= MAX_PRECISE_ARRIVALS_PER_WINDOW as usize {
+                    return Err(ComponentError::resource_limit(
+                        "precise throughput arrival queue",
+                    ));
                 }
+                state.arrivals.push_back(target);
             }
-            if state.arrivals.len() >= MAX_PRECISE_ARRIVALS_PER_WINDOW as usize {
-                return Err(ComponentError::resource_limit(
-                    "precise throughput arrival queue",
-                ));
-            }
-            state.arrivals.push_back(target);
         }
         state.window = state
             .window
@@ -1003,42 +1164,34 @@ impl Timer for PreciseThroughputTimer {
     fn delay<'a>(&'a self, context: &'a mut SampleContext<'_>) -> ComponentFuture<'a, Duration> {
         let now = context.execution().capabilities().clock().now().monotonic;
         let source = context.execution().capabilities().random();
-        let mut state = lock(&self.state);
+        let key = match Self::scope_key(context) {
+            Ok(key) => key,
+            Err(error) => return ready(Err(error)),
+        };
+        let mut store = lock(&self.state);
+        let state = match Self::state_for_scope(&mut store, key) {
+            Ok(state) => state,
+            Err(error) => return ready(Err(error)),
+        };
         let result = (|| {
             if state.origin.is_none() {
                 state.origin = Some(now);
             }
-            for _ in 0..MAX_PRECISE_WINDOW_ADVANCES {
-                if let Some(target) = state.arrivals.pop_front() {
-                    return Ok(target
-                        .checked_sub(now)
-                        .map_or(Duration::ZERO, |delay| delay));
-                }
-                let before = state.window;
-                self.fill_next_window(&mut state, source)?;
-                if state.arrivals.is_empty() && state.window == before {
-                    return Err(ComponentError::resource_limit(
-                        "precise throughput window state",
-                    ));
-                }
-                if let Some(duration) = self.duration {
-                    let origin = state
-                        .origin
-                        .ok_or_else(|| ComponentError::failure("precise throughput origin"))?;
-                    let end = origin
-                        .checked_add(duration)
-                        .ok_or_else(|| ComponentError::resource_limit("precise throughput end"))?;
-                    if state.window > 0
-                        && Self::window_start(origin, self.throughput_period, state.window)? >= end
-                        && state.arrivals.is_empty()
-                    {
-                        return Ok(Duration::ZERO);
-                    }
-                }
+            if let Some(target) = state.arrivals.pop_front() {
+                return Ok(target
+                    .checked_sub(now)
+                    .map_or(Duration::ZERO, |delay| delay));
             }
-            Err(ComponentError::resource_limit(
-                "precise throughput window-advance bound",
-            ))
+            self.fill_next_window(state, source)?;
+            state
+                .arrivals
+                .pop_front()
+                .map(|target| {
+                    target
+                        .checked_sub(now)
+                        .map_or(Duration::ZERO, |delay| delay)
+                })
+                .ok_or_else(|| ComponentError::resource_limit("precise throughput window state"))
         })();
         ready(result)
     }
@@ -1060,7 +1213,7 @@ impl TimerFactory for PreciseThroughputTimer {
             exact_limit: self.exact_limit,
             allowed_throughput_surplus: self.allowed_throughput_surplus,
             random_seed: self.random_seed,
-            state: Arc::new(Mutex::new(PreciseState::default())),
+            state: Arc::clone(&self.state),
         })
     }
 }
@@ -1081,7 +1234,7 @@ impl SynchronizingGroupSize {
     fn from_configured(value: usize) -> Result<Self, ComponentError> {
         match NonZeroUsize::new(value) {
             None => Ok(Self::CurrentThreadGroup),
-            Some(value) if value.get() <= MAX_PRECISE_ARRIVALS_PER_WINDOW as usize => {
+            Some(value) if value.get() <= MAX_SYNCHRONIZING_PARTICIPANTS => {
                 Ok(Self::Explicit(value))
             }
             Some(_) => Err(ComponentError::resource_limit(
@@ -1117,6 +1270,72 @@ pub struct SynchronizingRequest {
 }
 
 impl SynchronizingRequest {
+    /// Creates a request for a synchronizing coordinator.
+    ///
+    /// A zero `group_size` retains JMeter's `groupSize=0` sentinel and asks
+    /// the coordinator to resolve the participant count from the current
+    /// thread group. It is never treated as a zero-participant barrier.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "preserve the public compatibility constructor's explicit request fields"
+    )]
+    pub fn new(
+        name: impl Into<String>,
+        group_size: usize,
+        timeout: Duration,
+        participant: impl Into<String>,
+        thread_name: impl Into<String>,
+        thread_group: Option<String>,
+        thread_number: Option<u64>,
+        lifecycle_id: Option<u64>,
+        now: Duration,
+    ) -> Result<Self, ComponentError> {
+        let name = name.into();
+        let participant = participant.into();
+        let thread_name = thread_name.into();
+        if participant.is_empty()
+            || thread_name.is_empty()
+            || participant.len() > MAX_TIMER_NAME_BYTES
+            || thread_name.len() > MAX_TIMER_NAME_BYTES
+            || thread_name.chars().any(char::is_control)
+            || participant.chars().any(char::is_control)
+            || thread_group.as_deref().is_some_and(|group| {
+                group.len() > MAX_TIMER_NAME_BYTES || group.chars().any(char::is_control)
+            })
+        {
+            return Err(ComponentError::resource_limit(
+                "synchronizing participant identity",
+            ));
+        }
+        if group_size == 0
+            && !thread_group
+                .as_deref()
+                .is_some_and(|group| !group.is_empty())
+        {
+            return Err(ComponentError::unsupported(
+                "synchronizing timer current-thread-group mode requires a non-empty thread-group identity for participant-count resolution",
+            ));
+        }
+        if now.checked_add(timeout).is_none() {
+            return Err(ComponentError::resource_limit(
+                "synchronizing timer timeout deadline",
+            ));
+        }
+        let group_size = SynchronizingGroupSize::from_configured(group_size)?;
+        validate_sync_config(&name, group_size, timeout)?;
+        Ok(Self {
+            name,
+            group_size,
+            timeout,
+            now,
+            participant,
+            thread_name,
+            thread_group,
+            thread_number,
+            lifecycle_id,
+        })
+    }
+
     /// Returns the barrier name.
     #[must_use]
     pub fn name(&self) -> &str {
@@ -1325,11 +1544,11 @@ fn validate_sync_config(
     group_size: SynchronizingGroupSize,
     _timeout: Duration,
 ) -> Result<(), ComponentError> {
-    if name.is_empty() || name.len() > MAX_TIMER_NAME_BYTES {
+    if name.is_empty() || name.len() > MAX_TIMER_NAME_BYTES || name.chars().any(char::is_control) {
         return Err(ComponentError::failure("invalid synchronizing timer name"));
     }
     if let SynchronizingGroupSize::Explicit(value) = group_size
-        && value.get() > MAX_PRECISE_ARRIVALS_PER_WINDOW as usize
+        && value.get() > MAX_SYNCHRONIZING_PARTICIPANTS
     {
         return Err(ComponentError::resource_limit(
             "synchronizing timer group size",
@@ -1345,6 +1564,11 @@ fn sync_request(
     validate_sync_config(&timer.name, timer.group_size, timer.timeout)?;
     let execution = context.execution();
     let now = execution.capabilities().clock().now().monotonic;
+    if now.checked_add(timer.timeout).is_none() {
+        return Err(ComponentError::resource_limit(
+            "synchronizing timer timeout deadline",
+        ));
+    }
     let thread = execution.thread();
     let thread_group = thread.group();
     if timer.group_size.is_current_thread_group()
@@ -1352,6 +1576,13 @@ fn sync_request(
     {
         return Err(ComponentError::unsupported(
             "synchronizing timer current-thread-group mode requires a non-empty thread-group identity for participant-count resolution",
+        ));
+    }
+    if thread.name().chars().any(char::is_control)
+        || thread_group.is_some_and(|group| group.chars().any(char::is_control))
+    {
+        return Err(ComponentError::resource_limit(
+            "synchronizing participant identity",
         ));
     }
     let group = thread_group.unwrap_or("");
@@ -1379,17 +1610,18 @@ fn sync_request(
             "synchronizing participant identity",
         ));
     }
-    Ok(SynchronizingRequest {
-        name: timer.name.clone(),
-        group_size: timer.group_size,
-        timeout: timer.timeout,
-        now,
+    let configured_group_size = timer.group_size.explicit().map_or(0, NonZeroUsize::get);
+    SynchronizingRequest::new(
+        timer.name.clone(),
+        configured_group_size,
+        timer.timeout,
         participant,
-        thread_name: thread.name().to_owned(),
-        thread_group: thread_group.map(str::to_owned),
-        thread_number: thread.number(),
-        lifecycle_id: execution.lifecycle_id(),
-    })
+        thread.name().to_owned(),
+        thread_group.map(str::to_owned),
+        thread.number(),
+        execution.lifecycle_id(),
+        now,
+    )
 }
 
 struct SynchronizingDelayFuture<'a, 'ctx> {
@@ -1401,9 +1633,15 @@ struct SynchronizingDelayFuture<'a, 'ctx> {
 }
 
 impl SynchronizingDelayFuture<'_, '_> {
-    fn cancel_registration(&mut self) {
+    fn cancel_registration(&mut self) -> Result<(), SchedulerError> {
         if let Some(registration) = self.registration.take() {
-            let _ = self.context.execution().scheduler().cancel(&registration);
+            self.context
+                .execution()
+                .scheduler()
+                .cancel(&registration)
+                .map(|_| ())
+        } else {
+            Ok(())
         }
     }
 
@@ -1412,14 +1650,39 @@ impl SynchronizingDelayFuture<'_, '_> {
         result: Result<Duration, ComponentError>,
         outcome: Option<SynchronizingOutcome>,
     ) -> Poll<Result<Duration, ComponentError>> {
-        self.cancel_registration();
+        let cancellation = self
+            .cancel_registration()
+            .err()
+            .map(scheduler_component_error);
         if let Some(outcome) = outcome {
             self.coordinator.complete(&self.request, outcome);
         } else {
             self.coordinator.cancel(&self.request);
         }
         self.completed = true;
+        let result = match cancellation {
+            None => result,
+            Some(error) => match result {
+                Ok(_) => Err(error),
+                Err(primary) => Err(ComponentError::Combined {
+                    primary: Box::new(primary),
+                    secondary: Box::new(error),
+                }),
+            },
+        };
         Poll::Ready(result)
+    }
+}
+
+fn scheduler_component_error(error: SchedulerError) -> ComponentError {
+    match error {
+        SchedulerError::Capacity { .. }
+        | SchedulerError::DeadlineOverflow { .. }
+        | SchedulerError::WakeIdOverflow => {
+            ComponentError::resource_limit("synchronizing timer wake cancellation")
+        }
+        SchedulerError::Unsupported(message) => ComponentError::unsupported(message),
+        other => ComponentError::failure(format!("synchronizing timer wake cancellation: {other}")),
     }
 }
 
@@ -1429,7 +1692,7 @@ impl Future for SynchronizingDelayFuture<'_, '_> {
     fn poll(self: Pin<&mut Self>, poll_context: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         let signal = this.context.execution().control_signal();
-        if signal.is_stop() {
+        if signal != crate::ControlSignal::Continue {
             return this.finish(Err(ComponentError::Control(signal)), None);
         }
         // The scheduler wake belongs to this barrier's timeout
@@ -1454,9 +1717,24 @@ impl Future for SynchronizingDelayFuture<'_, '_> {
                     .cancellation_token()
                     .register_waker(poll_context.waker());
                 if this.registration.is_none() && !this.request.timeout.is_zero() {
-                    match this.context.execution().register_wake_after(
+                    let deadline = match Deadline::after(
+                        MonotonicInstant::from_duration(this.request.now),
                         this.request.timeout,
+                    ) {
+                        Some(deadline) => deadline,
+                        None => {
+                            return this.finish(
+                                Err(ComponentError::resource_limit(
+                                    "synchronizing timer timeout deadline",
+                                )),
+                                None,
+                            );
+                        }
+                    };
+                    match this.context.execution().scheduler().register_wake(
+                        deadline,
                         stable_timer_key(&this.request.name),
+                        this.context.execution().cancellation_token(),
                     ) {
                         Ok(registration) => this.registration = Some(registration),
                         Err(SchedulerError::Unsupported(_)) => {
@@ -1492,7 +1770,7 @@ impl Future for SynchronizingDelayFuture<'_, '_> {
 impl Drop for SynchronizingDelayFuture<'_, '_> {
     fn drop(&mut self) {
         if !self.completed {
-            self.cancel_registration();
+            let _ = self.cancel_registration();
             self.coordinator.cancel(&self.request);
             self.completed = true;
         }
@@ -1643,6 +1921,19 @@ mod tests {
     }
 
     #[test]
+    fn duration_conversion_uses_the_full_std_duration_domain() {
+        let maximum = Duration::MAX;
+        assert_eq!(
+            duration_from_nanos(maximum.as_nanos()).expect("maximum duration"),
+            maximum
+        );
+        assert!(matches!(
+            duration_from_nanos(maximum.as_nanos().checked_add(1).expect("u128 room")),
+            Err(ComponentError::ResourceLimit(_))
+        ));
+    }
+
+    #[test]
     fn uniform_uses_float_milliseconds_then_java_long_truncation() {
         let source = SequenceRandom::new([1u64 << 63]);
         assert_eq!(
@@ -1656,6 +1947,18 @@ mod tests {
             jmeter_uniform_duration(&source, Duration::from_millis(7), Duration::from_millis(10),)
                 .expect("zero variate"),
             Duration::from_millis(7)
+        );
+    }
+
+    #[test]
+    fn java_round_matches_constant_throughput_millisecond_precision() {
+        assert_eq!(java_round_nonnegative(1_000.4).expect("round"), 1_000);
+        assert_eq!(java_round_nonnegative(1_000.5).expect("round tie"), 1_001);
+        assert_eq!(
+            ConstantThroughputTimer::new(3_600.0)
+                .expect("rate")
+                .period(),
+            Duration::from_millis(17)
         );
     }
 
@@ -1694,14 +1997,14 @@ mod tests {
             jmeter_delay_from_millis(f64::NAN).expect("NaN delay"),
             Duration::ZERO
         );
-        assert!(matches!(
-            jmeter_delay_from_millis(f64::INFINITY),
-            Err(ComponentError::ResourceLimit(_))
-        ));
-        assert!(matches!(
-            jmeter_delay_from_millis(f64::MAX),
-            Err(ComponentError::ResourceLimit(_))
-        ));
+        assert_eq!(
+            jmeter_delay_from_millis(f64::INFINITY).expect("Java long saturation"),
+            Duration::from_millis(i64::MAX as u64)
+        );
+        assert_eq!(
+            jmeter_delay_from_millis(f64::MAX).expect("Java long saturation"),
+            Duration::from_millis(i64::MAX as u64)
+        );
     }
 
     #[test]
@@ -1750,22 +2053,47 @@ mod tests {
                 .0,
             Duration::ZERO
         );
-        let source = SequenceRandom::new([0, u64::MAX]);
+        let source = SequenceRandom::new([0, u64::MAX, 0]);
         assert_eq!(
             poisson_delay(&source, Duration::from_millis(20), Duration::from_millis(5))
                 .expect("zero variate"),
             Duration::from_millis(20)
         );
-        assert!(
+        assert_eq!(
             poisson_delay(&source, Duration::from_millis(20), Duration::from_millis(5))
-                .expect("upper variate")
-                >= Duration::from_millis(20)
+                .expect("one-count variate"),
+            Duration::from_millis(21)
         );
         assert!(matches!(
             poisson_delay(
-                &SequenceRandom::new([u64::MAX]),
-                Duration::MAX,
-                Duration::from_nanos(1)
+                &SequenceRandom::new([u64::MAX, 0]),
+                Duration::from_millis(i64::MAX as u64),
+                Duration::from_millis(1)
+            ),
+            Err(ComponentError::ResourceLimit(_))
+        ));
+    }
+
+    #[test]
+    fn poisson_high_lambda_uses_log_lambda_rejection_bound() {
+        assert_eq!(
+            poisson_random(&SequenceRandom::new([1u64 << 63, 1u64 << 63]), 31)
+                .expect("accepted high-lambda sample"),
+            31
+        );
+        assert_eq!(
+            poisson_delay(
+                &SequenceRandom::new([1u64 << 63, 1u64 << 63]),
+                Duration::ZERO,
+                Duration::from_millis(31),
+            )
+            .expect("high-lambda timer sample"),
+            Duration::from_millis(31)
+        );
+        assert!(matches!(
+            poisson_random(
+                &SequenceRandom::new(vec![u64::MAX; MAX_RANDOM_ATTEMPTS * 2]),
+                31,
             ),
             Err(ComponentError::ResourceLimit(_))
         ));
@@ -1797,9 +2125,57 @@ mod tests {
 
         let precise =
             PreciseThroughputTimer::new(1.0, Duration::from_secs(1)).expect("valid precise timer");
-        lock(&precise.state).origin = Some(Duration::from_secs(2));
+        lock(&precise.state)
+            .scopes
+            .entry(PreciseScopeKey::default())
+            .or_default()
+            .origin = Some(Duration::from_secs(2));
         let precise_clone = precise.clone();
-        assert_eq!(lock(&precise_clone.state).origin, None);
+        assert_eq!(
+            lock(&precise_clone.state)
+                .scopes
+                .get(&PreciseScopeKey::default())
+                .and_then(|state| state.origin),
+            Some(Duration::from_secs(2))
+        );
+    }
+
+    #[test]
+    fn precise_scope_state_is_shared_by_group_but_separate_between_groups() {
+        let mut store = PreciseStateStore::default();
+        let group_a_user_1 = PreciseScopeKey {
+            run_id: "run".to_owned(),
+            thread_group: Some("group-a".to_owned()),
+            thread_name: None,
+            thread_number: None,
+            lifecycle_id: None,
+        };
+        let group_a_user_2 = PreciseScopeKey {
+            run_id: "run".to_owned(),
+            thread_group: Some("group-a".to_owned()),
+            thread_name: None,
+            thread_number: None,
+            lifecycle_id: None,
+        };
+        let group_b = PreciseScopeKey {
+            thread_group: Some("group-b".to_owned()),
+            ..group_a_user_1.clone()
+        };
+        PreciseThroughputTimer::state_for_scope(&mut store, group_a_user_1)
+            .expect("group scope")
+            .origin = Some(Duration::from_secs(1));
+        assert_eq!(
+            PreciseThroughputTimer::state_for_scope(&mut store, group_a_user_2)
+                .expect("same group scope")
+                .origin,
+            Some(Duration::from_secs(1))
+        );
+        assert_eq!(
+            PreciseThroughputTimer::state_for_scope(&mut store, group_b)
+                .expect("different group scope")
+                .origin,
+            None
+        );
     }
 
     #[test]
@@ -1825,12 +2201,26 @@ mod tests {
 
     #[test]
     fn precise_timer_rejects_unbounded_arrival_configuration() {
+        let timer = PreciseThroughputTimer::new(65_537.0, Duration::from_secs(1))
+            .expect("constructor defers count bound to generation");
+        let mut state = PreciseState {
+            origin: Some(Duration::ZERO),
+            ..PreciseState::default()
+        };
         assert!(matches!(
-            PreciseThroughputTimer::new(65_537.0, Duration::from_secs(1)),
+            timer.fill_next_window(&mut state, &SequenceRandom::new([])),
             Err(ComponentError::ResourceLimit(_))
         ));
         assert!(matches!(
             PreciseThroughputTimer::new(1.0, Duration::ZERO),
+            Err(ComponentError::Failure(_))
+        ));
+        assert!(matches!(
+            PreciseThroughputTimer::with_duration(
+                1.0,
+                Duration::from_secs(1),
+                Some(Duration::ZERO)
+            ),
             Err(ComponentError::Failure(_))
         ));
     }
@@ -1843,15 +2233,20 @@ mod tests {
             origin: Some(Duration::ZERO),
             ..PreciseState::default()
         };
-        // Zero is rejected for this non-power-of-two nanosecond range by
-        // rejection sampling.  Max is always in the accepted tail while
-        // remaining deterministic.
-        let source = SequenceRandom::new([u64::MAX; 4]);
+        // A midpoint source makes the Java millisecond-to-Duration boundary
+        // observable: an incorrect nanosecond conversion would yield 500ns.
+        let source = SequenceRandom::new([1u64 << 63; 4]);
         timer
             .fill_next_window(&mut state, &source)
             .expect("window generation");
         assert_eq!(state.arrivals.len(), 4);
         assert_eq!(state.window, 1);
+        assert!(
+            state
+                .arrivals
+                .iter()
+                .all(|target| *target == Duration::from_millis(500))
+        );
         assert!(
             state
                 .arrivals
@@ -1866,20 +2261,78 @@ mod tests {
                 .all(|(left, right)| left <= right)
         );
 
-        let finite = PreciseThroughputTimer::with_duration(
+        let generation_block = PreciseThroughputTimer::with_duration(
             4.0,
             Duration::from_secs(1),
             Some(Duration::from_millis(500)),
         )
-        .expect("finite timer");
-        let mut finite_state = PreciseState {
+        .expect("generation block");
+        let mut block_state = PreciseState {
             origin: Some(Duration::ZERO),
             ..PreciseState::default()
         };
-        finite
-            .fill_next_window(&mut finite_state, &SequenceRandom::new([u64::MAX; 4]))
-            .expect("finite window generation");
-        assert!(finite_state.arrivals.is_empty());
+        generation_block
+            .fill_next_window(&mut block_state, &SequenceRandom::new([1u64 << 63; 2]))
+            .expect("generation window");
+        assert_eq!(block_state.arrivals.len(), 2);
+        assert!(
+            block_state
+                .arrivals
+                .iter()
+                .all(|target| *target == Duration::from_millis(250))
+        );
+        assert!(
+            block_state
+                .arrivals
+                .iter()
+                .all(|target| *target < Duration::from_millis(500))
+        );
+    }
+
+    #[test]
+    fn precise_timer_batches_each_generated_offset_without_extra_delay() {
+        let timer = PreciseThroughputTimer::with_duration(
+            4.0,
+            Duration::from_secs(1),
+            Some(Duration::from_secs(1)),
+        )
+        .expect("precise timer")
+        .with_batch_size(2)
+        .expect("batch size")
+        .with_batch_thread_delay(Duration::from_secs(10));
+        let mut state = PreciseState {
+            origin: Some(Duration::ZERO),
+            ..PreciseState::default()
+        };
+        timer
+            .fill_next_window(&mut state, &SequenceRandom::new([1u64 << 63; 2]))
+            .expect("window generation");
+        assert_eq!(state.arrivals.len(), 4);
+        assert_eq!(state.arrivals[0], state.arrivals[1]);
+        assert_eq!(state.arrivals[2], state.arrivals[3]);
+        assert_eq!(state.arrivals[0], Duration::from_millis(500));
+        assert!(state.arrivals[1] < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn precise_timer_ceils_each_generation_window_without_fractional_carry() {
+        let timer =
+            PreciseThroughputTimer::new(1.5, Duration::from_secs(1)).expect("precise timer");
+        let source = SequenceRandom::new([1u64 << 62; 4]);
+        let mut state = PreciseState {
+            origin: Some(Duration::ZERO),
+            ..PreciseState::default()
+        };
+        timer
+            .fill_next_window(&mut state, &source)
+            .expect("first generation window");
+        assert_eq!(state.arrivals.len(), 2);
+        state.arrivals.clear();
+        timer
+            .fill_next_window(&mut state, &source)
+            .expect("second generation window");
+        assert_eq!(state.arrivals.len(), 2);
+        assert_eq!(state.window, 2);
     }
 
     #[derive(Default)]
@@ -1992,6 +2445,42 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Copy)]
+    struct FixedClock(Duration);
+
+    impl crate::Clock for FixedClock {
+        fn now(&self) -> crate::ClockReading {
+            crate::ClockReading {
+                wall: jmeter_rs_results::WallTimestamp::from_millis(0),
+                monotonic: self.0,
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct PendingBarrier {
+        completed: Mutex<Vec<SynchronizingOutcome>>,
+        cancelled: Mutex<usize>,
+    }
+
+    impl SynchronizingCoordinator for PendingBarrier {
+        fn poll_arrival(
+            &self,
+            _request: &SynchronizingRequest,
+            _waker: &Waker,
+        ) -> Poll<Result<SynchronizingOutcome, ComponentError>> {
+            Poll::Pending
+        }
+
+        fn cancel(&self, _request: &SynchronizingRequest) {
+            *lock(&self.cancelled) += 1;
+        }
+
+        fn complete(&self, _request: &SynchronizingRequest, outcome: SynchronizingOutcome) {
+            lock(&self.completed).push(outcome);
+        }
+    }
+
     struct NoopSampler;
 
     impl crate::Sampler for NoopSampler {
@@ -2085,6 +2574,134 @@ mod tests {
     }
 
     #[test]
+    fn synchronizing_timeout_registers_at_injected_absolute_deadline() {
+        let scheduler = Arc::new(crate::DeterministicScheduler::new(
+            crate::MonotonicInstant::zero(),
+            4,
+        ));
+        let capabilities = crate::RuntimeCapabilities::default()
+            .with_clock(Arc::new(FixedClock(Duration::from_millis(500))))
+            .with_scheduler(scheduler.clone());
+        let mut execution = crate::ExecutionContext::with_capabilities(capabilities);
+        execution.set_thread(jmeter_rs_results::ThreadIdentity::with_group(
+            "thread",
+            Some("group".to_owned()),
+            Some(1),
+        ));
+        let coordinator = Arc::new(PendingBarrier::default());
+        let timer = SynchronizingTimer::with_coordinator(
+            "gate",
+            2,
+            Duration::from_secs(1),
+            coordinator.clone(),
+        )
+        .expect("barrier");
+        let package =
+            crate::SamplePackage::new(jmeter_rs_model::NodeId::new(1), Arc::new(NoopSampler))
+                .with_timers(vec![Arc::new(timer)]);
+        let mut future = package.execute(&mut execution);
+        let waker = Waker::noop();
+        let mut poll_context = Context::from_waker(waker);
+        assert!(matches!(
+            Pin::new(&mut future).poll(&mut poll_context),
+            Poll::Pending
+        ));
+        assert_eq!(
+            scheduler
+                .next_deadline()
+                .expect("timeout registration")
+                .instant()
+                .as_duration(),
+            Duration::from_millis(1_500)
+        );
+
+        scheduler
+            .advance_to(crate::MonotonicInstant::from_duration(Duration::from_secs(
+                1,
+            )))
+            .expect("advance before deadline");
+        assert!(matches!(
+            Pin::new(&mut future).poll(&mut poll_context),
+            Poll::Pending
+        ));
+        scheduler
+            .advance_to(crate::MonotonicInstant::from_duration(
+                Duration::from_millis(1_500),
+            ))
+            .expect("advance to deadline");
+        assert!(matches!(
+            Pin::new(&mut future).poll(&mut poll_context),
+            Poll::Ready(Ok(_))
+        ));
+        assert_eq!(
+            lock(&coordinator.completed).as_slice(),
+            &[SynchronizingOutcome::TimedOut]
+        );
+        assert_eq!(*lock(&coordinator.cancelled), 0);
+    }
+
+    #[test]
+    fn synchronizing_pending_drop_cancels_registration_and_arrival() {
+        let scheduler = Arc::new(crate::DeterministicScheduler::new(
+            crate::MonotonicInstant::zero(),
+            4,
+        ));
+        let capabilities = crate::RuntimeCapabilities::default().with_scheduler(scheduler.clone());
+        let mut execution = crate::ExecutionContext::with_capabilities(capabilities);
+        execution.set_thread(jmeter_rs_results::ThreadIdentity::new("thread"));
+        let coordinator = Arc::new(PendingBarrier::default());
+        let timer = SynchronizingTimer::with_coordinator(
+            "gate",
+            2,
+            Duration::from_secs(1),
+            coordinator.clone(),
+        )
+        .expect("barrier");
+        let package =
+            crate::SamplePackage::new(jmeter_rs_model::NodeId::new(1), Arc::new(NoopSampler))
+                .with_timers(vec![Arc::new(timer)]);
+        let mut future = package.execute(&mut execution);
+        let waker = Waker::noop();
+        let mut poll_context = Context::from_waker(waker);
+        assert!(matches!(
+            Pin::new(&mut future).poll(&mut poll_context),
+            Poll::Pending
+        ));
+        assert!(scheduler.next_deadline().is_some());
+        drop(future);
+        assert!(scheduler.next_deadline().is_none());
+        assert_eq!(*lock(&coordinator.cancelled), 1);
+    }
+
+    #[test]
+    fn synchronizing_pending_control_signal_returns_explicit_cancellation() {
+        let mut execution = crate::ExecutionContext::new();
+        execution.set_thread(jmeter_rs_results::ThreadIdentity::new("thread"));
+        let token = execution.cancellation_token().clone();
+        let coordinator = Arc::new(PendingBarrier::default());
+        let timer =
+            SynchronizingTimer::with_coordinator("gate", 2, Duration::ZERO, coordinator.clone())
+                .expect("barrier");
+        let package =
+            crate::SamplePackage::new(jmeter_rs_model::NodeId::new(1), Arc::new(NoopSampler))
+                .with_timers(vec![Arc::new(timer)]);
+        let mut future = package.execute(&mut execution);
+        let waker = Waker::noop();
+        let mut poll_context = Context::from_waker(waker);
+        assert!(matches!(
+            Pin::new(&mut future).poll(&mut poll_context),
+            Poll::Pending
+        ));
+
+        token.request(crate::ControlSignal::NextLoop);
+        assert!(matches!(
+            Pin::new(&mut future).poll(&mut poll_context),
+            Poll::Ready(Ok(_))
+        ));
+        assert_eq!(*lock(&coordinator.cancelled), 1);
+    }
+
+    #[test]
     fn synchronizing_zero_group_size_is_deferred_for_coordinator_admission() {
         let recorder = Arc::new(GroupSizeRecorder::default());
         let timer =
@@ -2122,6 +2739,52 @@ mod tests {
         assert!(SynchronizingTimer::with_group("gate", 0, Duration::ZERO).is_ok());
         assert!(SynchronizingTimer::with_group("", 2, Duration::ZERO).is_err());
         assert!(!SynchronizingTimer::new("gate").is_modifiable());
+    }
+
+    #[test]
+    fn synchronizing_request_constructor_enforces_group_identity_mode() {
+        assert!(matches!(
+            SynchronizingRequest::new(
+                "gate",
+                0,
+                Duration::ZERO,
+                "participant",
+                "thread",
+                None,
+                Some(1),
+                Some(2),
+                Duration::ZERO,
+            ),
+            Err(ComponentError::Unsupported(_))
+        ));
+        assert!(matches!(
+            SynchronizingRequest::new(
+                "gate",
+                2,
+                Duration::ZERO,
+                "participant\n",
+                "thread",
+                None,
+                Some(1),
+                Some(2),
+                Duration::ZERO,
+            ),
+            Err(ComponentError::ResourceLimit(_))
+        ));
+        assert!(matches!(
+            SynchronizingRequest::new(
+                "gate",
+                2,
+                Duration::from_nanos(1),
+                "participant",
+                "thread",
+                None,
+                Some(1),
+                Some(2),
+                Duration::MAX,
+            ),
+            Err(ComponentError::ResourceLimit(_))
+        ));
     }
 
     #[test]

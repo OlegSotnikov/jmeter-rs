@@ -181,13 +181,59 @@ fn push_text(output: &mut String, value: &str, limit: usize) -> Result<(), Canon
 ///
 /// The raw name and value remain available for explicit fixture comparison;
 /// diagnostic formatting uses [`CanonicalField::redacted`] so values cannot
-/// accidentally enter logs or assertion output.
+/// accidentally enter logs or assertion output. A field also carries an
+/// explicit value type. Most JMeter wire fields are text, but a test harness
+/// must not make a boolean, number, or opaque value equal to the same spelling
+/// represented as text.
 #[derive(Clone, PartialEq, Eq)]
 pub struct CanonicalField {
     /// Field name.
     pub name: String,
     /// Field value.
     pub value: String,
+    /// Explicit semantic type of the value; no type is inferred.
+    pub value_type: CanonicalValueType,
+}
+
+/// Explicit type metadata for a canonical field value.
+///
+/// Canonicalization does not infer a type from a string. For example,
+/// `"true"` as [`Self::Text`] and `"true"` as [`Self::Boolean`] remain
+/// different values. This prevents a comparison projection from hiding a
+/// wire/type distinction merely because both values have the same spelling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CanonicalValueType {
+    /// A UTF-8 text value.
+    Text,
+    /// A boolean value represented by the caller's declared spelling.
+    Boolean,
+    /// A signed integer value represented by the caller's declared spelling.
+    SignedInteger,
+    /// An unsigned integer value represented by the caller's declared spelling.
+    UnsignedInteger,
+    /// A floating-point value represented by the caller's declared spelling.
+    Float,
+    /// An opaque byte value represented by a caller-selected reversible text encoding.
+    Bytes,
+    /// An explicitly absent/null value. Its payload remains retained.
+    Null,
+}
+
+impl CanonicalValueType {
+    /// Returns a stable, format-independent spelling for diagnostics and typed
+    /// delimited projections.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Boolean => "boolean",
+            Self::SignedInteger => "signed-integer",
+            Self::UnsignedInteger => "unsigned-integer",
+            Self::Float => "float",
+            Self::Bytes => "bytes",
+            Self::Null => "null",
+        }
+    }
 }
 
 /// A redacted diagnostic view of one canonical field.
@@ -197,16 +243,55 @@ pub struct CanonicalFieldDiagnostic {
     pub name: String,
     /// Number of UTF-8 bytes in the raw field value.
     pub value_bytes: usize,
+    /// Type retained so diagnostics distinguish equal spellings with
+    /// different semantic types without exposing the value itself.
+    pub value_type: CanonicalValueType,
 }
 
 impl CanonicalField {
     /// Creates one field without sorting or normalization.
     #[must_use]
     pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
+        Self::typed(name, value, CanonicalValueType::Text)
+    }
+
+    /// Creates a field with explicit type metadata and no inferred
+    /// normalization.
+    #[must_use]
+    pub fn typed(
+        name: impl Into<String>,
+        value: impl Into<String>,
+        value_type: CanonicalValueType,
+    ) -> Self {
         Self {
             name: name.into(),
             value: value.into(),
+            value_type,
         }
+    }
+
+    /// Creates an explicitly absent/null field. The empty payload is retained
+    /// and remains distinct from [`Self::new`] with an empty text value.
+    #[must_use]
+    pub fn absent(name: impl Into<String>) -> Self {
+        Self::typed(name, String::new(), CanonicalValueType::Null)
+    }
+
+    /// Returns the declared value type.
+    #[must_use]
+    pub const fn value_type(&self) -> CanonicalValueType {
+        self.value_type
+    }
+
+    /// Returns a copy with a different explicitly declared type.
+    ///
+    /// This method does not parse or alter the payload. A caller that changes
+    /// the type is responsible for supplying a representation valid for that
+    /// type, which keeps canonicalization from silently coercing values.
+    #[must_use]
+    pub fn with_type(mut self, value_type: CanonicalValueType) -> Self {
+        self.value_type = value_type;
+        self
     }
 
     /// Returns an explicit redacted diagnostic projection.
@@ -215,6 +300,7 @@ impl CanonicalField {
         CanonicalFieldDiagnostic {
             name: self.name.clone(),
             value_bytes: self.value.len(),
+            value_type: self.value_type,
         }
     }
 }
@@ -258,6 +344,21 @@ impl Default for CanonicalLimits {
     fn default() -> Self {
         Self::default_bounded()
     }
+}
+
+/// Order policy for an ordered canonical record.
+///
+/// Insertion order is the safe default because JMX/JTL trees and event
+/// streams are ordered wire data. `NameSorted` is an explicit opt-in for a
+/// source field set whose contract is a map; it must not be used for children,
+/// samples, or repeated wire elements.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CanonicalRecordOrder {
+    /// Preserve source insertion order exactly.
+    #[default]
+    Insertion,
+    /// Sort by field name using stable ordering.
+    NameSorted,
 }
 
 /// Errors returned by bounded canonical record and stream helpers.
@@ -506,6 +607,18 @@ impl CanonicalRecord {
         self
     }
 
+    /// Appends a field with explicit type metadata while preserving insertion
+    /// order and duplicates.
+    #[must_use]
+    pub fn push_typed(
+        self,
+        name: impl Into<String>,
+        value: impl Into<String>,
+        value_type: CanonicalValueType,
+    ) -> Self {
+        self.push_field(CanonicalField::typed(name, value, value_type))
+    }
+
     /// Appends one field and returns a typed bound error immediately.
     pub fn try_push(
         &mut self,
@@ -513,6 +626,17 @@ impl CanonicalRecord {
         value: impl Into<String>,
     ) -> Result<(), CanonicalError> {
         self.try_push_field(CanonicalField::new(name, value))
+    }
+
+    /// Appends one explicitly typed field and returns a typed bound error
+    /// immediately.
+    pub fn try_push_typed(
+        &mut self,
+        name: impl Into<String>,
+        value: impl Into<String>,
+        value_type: CanonicalValueType,
+    ) -> Result<(), CanonicalError> {
+        self.try_push_field(CanonicalField::typed(name, value, value_type))
     }
 
     /// Appends one pre-built field and returns a typed bound error immediately.
@@ -581,6 +705,15 @@ impl CanonicalRecord {
         }
     }
 
+    /// Returns a copy ordered according to an explicit policy.
+    #[must_use]
+    pub fn ordered(&self, order: CanonicalRecordOrder) -> Self {
+        match order {
+            CanonicalRecordOrder::Insertion => self.clone(),
+            CanonicalRecordOrder::NameSorted => self.sorted_by_name(),
+        }
+    }
+
     /// Returns a deterministic line representation without escaping or field
     /// removal.  The delimiter is supplied by the caller as part of the
     /// fixture's format contract.
@@ -598,6 +731,91 @@ impl CanonicalRecord {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    /// Returns a bounded delimited projection of this record.
+    pub fn try_to_delimited(
+        &self,
+        delimiter: char,
+        limits: CanonicalTextLimits,
+    ) -> Result<String, CanonicalError> {
+        if let Some(error) = &self.pending_error {
+            return Err(error.clone());
+        }
+        if self.total_bytes > limits.max_input_bytes {
+            return Err(CanonicalError::TextTooLarge {
+                direction: CanonicalTextDirection::Input,
+                actual: self.total_bytes,
+                limit: limits.max_input_bytes,
+            });
+        }
+        let mut output = String::with_capacity(self.total_bytes.min(limits.max_output_bytes));
+        for (index, field) in self.fields.iter().enumerate() {
+            if index != 0 {
+                push_text(&mut output, "\n", limits.max_output_bytes)?;
+            }
+            push_escaped_component_bounded(
+                &mut output,
+                &field.name,
+                delimiter,
+                limits.max_output_bytes,
+            )?;
+            push_char(&mut output, delimiter, limits.max_output_bytes)?;
+            push_escaped_component_bounded(
+                &mut output,
+                &field.value,
+                delimiter,
+                limits.max_output_bytes,
+            )?;
+        }
+        Ok(output)
+    }
+
+    /// Returns a bounded three-column projection containing field name,
+    /// explicit value type, and value. Equal spellings with different types
+    /// remain distinguishable.
+    pub fn try_to_typed_delimited(
+        &self,
+        delimiter: char,
+        limits: CanonicalTextLimits,
+    ) -> Result<String, CanonicalError> {
+        if let Some(error) = &self.pending_error {
+            return Err(error.clone());
+        }
+        if self.total_bytes > limits.max_input_bytes {
+            return Err(CanonicalError::TextTooLarge {
+                direction: CanonicalTextDirection::Input,
+                actual: self.total_bytes,
+                limit: limits.max_input_bytes,
+            });
+        }
+        let mut output = String::with_capacity(self.total_bytes.min(limits.max_output_bytes));
+        for (index, field) in self.fields.iter().enumerate() {
+            if index != 0 {
+                push_text(&mut output, "\n", limits.max_output_bytes)?;
+            }
+            push_escaped_component_bounded(
+                &mut output,
+                &field.name,
+                delimiter,
+                limits.max_output_bytes,
+            )?;
+            push_char(&mut output, delimiter, limits.max_output_bytes)?;
+            push_escaped_component_bounded(
+                &mut output,
+                field.value_type.as_str(),
+                delimiter,
+                limits.max_output_bytes,
+            )?;
+            push_char(&mut output, delimiter, limits.max_output_bytes)?;
+            push_escaped_component_bounded(
+                &mut output,
+                &field.value,
+                delimiter,
+                limits.max_output_bytes,
+            )?;
+        }
+        Ok(output)
     }
 }
 
@@ -935,6 +1153,32 @@ fn escape_component(value: &str, delimiter: char) -> String {
     escaped
 }
 
+fn push_char(output: &mut String, value: char, limit: usize) -> Result<(), CanonicalError> {
+    let mut encoded = [0_u8; 4];
+    push_text(output, value.encode_utf8(&mut encoded), limit)
+}
+
+fn push_escaped_component_bounded(
+    output: &mut String,
+    value: &str,
+    delimiter: char,
+    limit: usize,
+) -> Result<(), CanonicalError> {
+    for character in value.chars() {
+        match character {
+            '\\' => push_text(output, "\\\\", limit)?,
+            '\n' => push_text(output, "\\n", limit)?,
+            '\r' => push_text(output, "\\r", limit)?,
+            character if character == delimiter => {
+                push_char(output, '\\', limit)?;
+                push_char(output, character, limit)?;
+            }
+            character => push_char(output, character, limit)?,
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
@@ -1032,6 +1276,76 @@ mod tests {
         assert_eq!(record.fields()[0].value, url);
         assert_eq!(record.redacted().fields[0].value_bytes, url.len());
         assert!(record.to_delimited('~').contains(url));
+    }
+
+    #[test]
+    fn typed_fields_keep_equal_spellings_distinct() {
+        let text = CanonicalField::new("enabled", "true");
+        let boolean = CanonicalField::typed("enabled", "true", CanonicalValueType::Boolean);
+        assert_ne!(text, boolean);
+        assert_ne!(text.redacted(), boolean.redacted());
+        assert_eq!(boolean.value_type(), CanonicalValueType::Boolean);
+
+        let record = CanonicalRecord::new()
+            .push_field(text)
+            .push_field(boolean)
+            .push_field(CanonicalField::absent("missing"));
+        assert_eq!(
+            record
+                .try_to_typed_delimited('|', CanonicalTextLimits::new(128, 128))
+                .unwrap(),
+            "enabled|text|true\nenabled|boolean|true\nmissing|null|"
+        );
+    }
+
+    #[test]
+    fn explicit_order_policy_does_not_sort_event_like_fields_by_default() {
+        let record = CanonicalRecord::new()
+            .push("second", "2")
+            .push("first", "1")
+            .push("second", "duplicate");
+        assert_eq!(
+            record
+                .ordered(CanonicalRecordOrder::Insertion)
+                .fields()
+                .iter()
+                .map(|field| field.value.as_str())
+                .collect::<Vec<_>>(),
+            ["2", "1", "duplicate"]
+        );
+        assert_eq!(
+            record
+                .ordered(CanonicalRecordOrder::NameSorted)
+                .fields()
+                .iter()
+                .map(|field| field.value.as_str())
+                .collect::<Vec<_>>(),
+            ["1", "2", "duplicate"]
+        );
+    }
+
+    #[test]
+    fn bounded_delimited_projection_rejects_pending_errors_and_expansion() {
+        let pending = CanonicalRecord::with_limits(CanonicalLimits::new(0, 32, 32)).push("a", "b");
+        assert_eq!(
+            pending
+                .try_to_delimited('=', CanonicalTextLimits::new(32, 32))
+                .unwrap_err()
+                .code(),
+            ErrorCode::CanonicalCapacity
+        );
+
+        let record = CanonicalRecord::new().push("a", "\\\n");
+        let error = record
+            .try_to_delimited('=', CanonicalTextLimits::new(3, 3))
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            CanonicalError::TextTooLarge {
+                direction: CanonicalTextDirection::Output,
+                ..
+            }
+        ));
     }
 
     #[test]

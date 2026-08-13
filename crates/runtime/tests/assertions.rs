@@ -205,7 +205,17 @@ fn response_wire_url_and_request_fields_are_decoded() {
         ResponseField::from_wire("Assertion.sample_label"),
         ResponseField::Url
     );
-    let result = sample("request body");
+    let mut result = sample("request body");
+    result.set_request_data_bytes(SampleData::from("typed request data"));
+    result.set_sampler_data_text("sampler request data");
+    let request_data = ResponseAssertion::single(
+        "request-data",
+        ResponseField::RequestData,
+        ResponsePatternMode::Substring,
+        "sampler request",
+    );
+    let report = run(request_data, result.clone()).expect("samplerData request field succeeds");
+    assert!(assertion_result(&report).outcome().is_success());
     let request = ResponseAssertion::single(
         "request",
         ResponseField::RequestHeaders,
@@ -222,6 +232,130 @@ fn response_wire_url_and_request_fields_are_decoded() {
     );
     let report = run(url, result).expect("URL succeeds");
     assert!(assertion_result(&report).outcome().is_success());
+}
+
+#[test]
+fn response_assertion_empty_and_or_semantics_match_jmeter() {
+    assert!(ResponsePatternMode::from_wire_test_type(0x40).is_err());
+
+    let mut empty = sample("");
+    empty.set_response_data_bytes(SampleData::from(""));
+    let report = run(
+        ResponseAssertion::single(
+            "not-empty",
+            ResponseField::ResponseData,
+            ResponsePatternMode::Substring,
+            "anything",
+        )
+        .with_negate(true),
+        empty.clone(),
+    )
+    .expect("NOT against an empty field is a pass");
+    assert!(assertion_result(&report).outcome().is_success());
+
+    let mut missing_response = SampleResult::new("missing-response");
+    missing_response.set_successful(true);
+    let report = run(
+        ResponseAssertion::single(
+            "not-missing",
+            ResponseField::ResponseData,
+            ResponsePatternMode::Substring,
+            "anything",
+        )
+        .with_negate(true),
+        missing_response,
+    )
+    .expect("NOT against a missing field is a pass");
+    assert!(assertion_result(&report).outcome().is_success());
+
+    let report = run(
+        ResponseAssertion::new(
+            "no-patterns",
+            ResponseField::ResponseData,
+            ResponsePatternMode::Substring,
+            std::iter::empty::<&str>(),
+        ),
+        sample("value"),
+    )
+    .expect("an empty pattern collection passes like JMeter");
+    assert!(assertion_result(&report).outcome().is_success());
+
+    let report = run(
+        ResponseAssertion::new(
+            "or-failure",
+            ResponseField::ResponseData,
+            ResponsePatternMode::Substring,
+            ["first", "second"],
+        )
+        .with_or(true),
+        sample("value"),
+    )
+    .expect("OR mismatch is assertion data");
+    let message = assertion_result(&report)
+        .failure_message()
+        .expect("OR diagnostic");
+    assert!(message.contains("first"));
+    assert!(message.contains("second"));
+    assert!(message.contains("expected something using"));
+
+    let report = run(
+        ResponseAssertion::new(
+            "or-no-patterns",
+            ResponseField::ResponseData,
+            ResponsePatternMode::Substring,
+            std::iter::empty::<&str>(),
+        )
+        .with_or(true),
+        sample("value"),
+    )
+    .expect("OR with no patterns is assertion data");
+    assert_eq!(assertion_result(&report).failure_message(), Some("\t"));
+
+    let report = run(
+        ResponseAssertion::single(
+            "empty-custom",
+            ResponseField::ResponseData,
+            ResponsePatternMode::Substring,
+            "missing",
+        )
+        .with_custom_failure_message(Some(String::new())),
+        sample("value"),
+    )
+    .expect("empty custom message uses the standard diagnostic");
+    assert!(
+        assertion_result(&report)
+            .failure_message()
+            .is_some_and(|message| message.contains("expected to contain"))
+    );
+}
+
+#[test]
+fn size_variables_are_numeric_and_xml_errors_retain_both_flags() {
+    let mut result = sample("abc");
+    let package = SamplePackage::new(
+        NodeId::new(902),
+        Arc::new(StaticSampler {
+            result: result.clone(),
+        }),
+    )
+    .with_assertions(vec![Arc::new(SizeAssertion::new(
+        "size-variable",
+        SizeField::Variable("n".to_owned()),
+        SizeComparison::Equal,
+        42,
+    ))]);
+    let capabilities = RuntimeCapabilities::default().with_clock(Arc::new(TwoPointClock::new()));
+    let mut context = ExecutionContext::with_capabilities(capabilities);
+    context.set_variable("n", "42");
+    let report =
+        block_on(ExecutionPipeline::execute(&package, &mut context)).expect("numeric variable");
+    assert!(assertion_result(&report).outcome().is_success());
+
+    result.set_response_data_bytes(SampleData::from("<root>"));
+    let report = run(XmlAssertion::new("invalid-xml"), result).expect("XML result is data");
+    let assertion = assertion_result(&report);
+    assert!(assertion.is_failure());
+    assert!(assertion.is_error());
 }
 
 #[test]
@@ -296,6 +430,15 @@ fn duration_and_size_assertions_cover_boundary_operators() {
     let report = run(negative, result).expect("negative size is a failure");
     assert!(assertion_result(&report).is_failure());
 
+    let negative_comparison = SizeAssertion::new(
+        "negative-comparison",
+        SizeField::ResponseBody,
+        SizeComparison::Greater,
+        -1,
+    );
+    let report = run(negative_comparison, sample("abc")).expect("signed size comparison");
+    assert!(assertion_result(&report).outcome().is_success());
+
     let invalid = SizeAssertion::from_wire(
         "invalid-size",
         "SizeAssertion.response_code",
@@ -319,6 +462,11 @@ fn md5_xml_xpath_and_json_capability_boundaries_are_explicit() {
     let report = run(digest, digest_input.clone()).expect("MD5 mismatch is data");
     assert!(assertion_result(&report).is_failure());
 
+    let empty_digest = Md5HexAssertion::new("empty-md5", "d41d8cd98f00b204e9800998ecf8427e");
+    let report = run(empty_digest, sample("")).expect("empty body is assertion data");
+    assert!(assertion_result(&report).is_failure());
+    assert!(!assertion_result(&report).is_error());
+
     let xml = XmlAssertion::new("xml");
     digest_input
         .set_response_data_bytes(SampleData::from("<root><item id=\"x\">value</item></root>"));
@@ -336,6 +484,15 @@ fn md5_xml_xpath_and_json_capability_boundaries_are_explicit() {
     let report = run(XmlAssertion::new("invalid-xml"), invalid_xml)
         .expect("invalid XML is an assertion failure");
     assert!(assertion_result(&report).is_failure());
+
+    let report = run(XmlAssertion::new("empty-xml"), sample("")).expect("empty XML is data");
+    assert!(assertion_result(&report).is_failure());
+    assert!(!assertion_result(&report).is_error());
+
+    let report = run(XPathAssertion::new("empty-xpath", "/root"), sample(""))
+        .expect("empty XPath input is data");
+    assert!(assertion_result(&report).is_failure());
+    assert!(!assertion_result(&report).is_error());
 
     let mut dtd_xml = digest_input.clone();
     dtd_xml.set_response_data_bytes(SampleData::from("<!DOCTYPE root><root><item/></root>"));
@@ -384,6 +541,18 @@ fn assertion_inputs_and_diagnostics_are_bounded() {
             ..
         })
     ));
+
+    let mut unrelated_request = sample("abc");
+    unrelated_request.set_request_headers_text("x".repeat(128));
+    let assertion = ResponseAssertion::single(
+        "selected-field-only",
+        ResponseField::ResponseData,
+        ResponsePatternMode::Substring,
+        "a",
+    )
+    .with_limits(AssertionLimits::default().with_response_limit(3));
+    let report = run(assertion, unrelated_request).expect("only the selected field is bounded");
+    assert!(assertion_result(&report).outcome().is_success());
 
     let pattern_limit = AssertionLimits::default().with_pattern_limit(1);
     let assertion = ResponseAssertion::new(

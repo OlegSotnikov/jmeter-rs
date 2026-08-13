@@ -3,6 +3,66 @@
 
 use core::fmt;
 
+/// Maximum number of UTF-8 bytes retained in a report diagnostic.
+///
+/// Report errors are also returned by the application edge, where diagnostic
+/// text may be persisted in a run outcome. Keep this bound local to the pure
+/// report crate so malformed result metadata cannot make an error diagnostic
+/// grow without limit.
+pub const MAX_REPORT_DIAGNOSTIC_BYTES: usize = 512;
+
+const REDACTED_REPORT_CONTEXT: &str = "<redacted>";
+
+/// Stable machine-readable categories for report failures.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum ReportErrorCode {
+    /// A report configuration value is invalid.
+    InvalidConfig,
+    /// A report interval is invalid.
+    InvalidInterval,
+    /// A percentile is outside its supported domain.
+    InvalidPercentile,
+    /// Checked report arithmetic overflowed.
+    Overflow,
+    /// A report resource bound was exceeded.
+    LimitExceeded,
+    /// Two report aggregates cannot be merged.
+    IncompatibleMerge,
+    /// A sample contains contradictory aggregate counts.
+    InvalidSample,
+    /// Report output cannot represent a value.
+    Serialization,
+    /// A requested report capability is unavailable.
+    Unsupported,
+    /// A graph row has no usable timestamp.
+    MissingTimestamp,
+}
+
+impl ReportErrorCode {
+    /// Returns the stable wire/log spelling for this category.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidConfig => "report.invalid_config",
+            Self::InvalidInterval => "report.invalid_interval",
+            Self::InvalidPercentile => "report.invalid_percentile",
+            Self::Overflow => "report.overflow",
+            Self::LimitExceeded => "report.limit_exceeded",
+            Self::IncompatibleMerge => "report.incompatible_merge",
+            Self::InvalidSample => "report.invalid_sample",
+            Self::Serialization => "report.serialization",
+            Self::Unsupported => "report.unsupported",
+            Self::MissingTimestamp => "report.missing_timestamp",
+        }
+    }
+}
+
+impl fmt::Display for ReportErrorCode {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 /// Fields whose checked arithmetic is performed by an aggregate.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ReportField {
@@ -235,20 +295,55 @@ pub enum ReportError {
 }
 
 impl ReportError {
-    /// Returns a stable machine-readable error code.
-    pub const fn stable_code(self) -> &'static str {
+    /// Returns the stable machine-readable category.
+    #[must_use]
+    pub const fn code(self) -> ReportErrorCode {
         match self {
-            Self::InvalidConfig { .. } => "report.invalid_config",
-            Self::InvalidInterval { .. } => "report.invalid_interval",
-            Self::InvalidPercentile => "report.invalid_percentile",
-            Self::Overflow { .. } => "report.overflow",
-            Self::LimitExceeded { .. } => "report.limit_exceeded",
-            Self::IncompatibleMerge => "report.incompatible_merge",
-            Self::InvalidSample { .. } => "report.invalid_sample",
-            Self::Serialization => "report.serialization",
-            Self::Unsupported { .. } => "report.unsupported",
-            Self::MissingTimestamp { .. } => "report.missing_timestamp",
+            Self::InvalidConfig { .. } => ReportErrorCode::InvalidConfig,
+            Self::InvalidInterval { .. } => ReportErrorCode::InvalidInterval,
+            Self::InvalidPercentile => ReportErrorCode::InvalidPercentile,
+            Self::Overflow { .. } => ReportErrorCode::Overflow,
+            Self::LimitExceeded { .. } => ReportErrorCode::LimitExceeded,
+            Self::IncompatibleMerge => ReportErrorCode::IncompatibleMerge,
+            Self::InvalidSample { .. } => ReportErrorCode::InvalidSample,
+            Self::Serialization => ReportErrorCode::Serialization,
+            Self::Unsupported { .. } => ReportErrorCode::Unsupported,
+            Self::MissingTimestamp { .. } => ReportErrorCode::MissingTimestamp,
         }
+    }
+
+    /// Returns a stable machine-readable error code.
+    #[must_use]
+    pub const fn stable_code(self) -> &'static str {
+        self.code().as_str()
+    }
+
+    /// Reports are deterministic, pure computations. No report error is
+    /// safe to retry unchanged: a retry would either reproduce the same
+    /// invalid input or risk duplicating a caller-visible output operation.
+    #[must_use]
+    pub const fn retryable(self) -> bool {
+        false
+    }
+
+    /// Alias for callers that use the positive/verb-style spelling.
+    #[must_use]
+    pub const fn is_retryable(self) -> bool {
+        self.retryable()
+    }
+
+    /// Returns a bounded, redacted diagnostic suitable for logs or a run
+    /// outcome. Stable codes remain available through [`Self::stable_code`]
+    /// and are never derived from this human-readable text.
+    #[must_use]
+    pub fn redacted_message(self) -> String {
+        bounded_redacted(self.to_string().as_str())
+    }
+
+    /// Alias for adapters that call diagnostic sanitization explicitly.
+    #[must_use]
+    pub fn sanitized_message(self) -> String {
+        self.redacted_message()
     }
 }
 
@@ -275,14 +370,201 @@ impl fmt::Display for ReportError {
             Self::IncompatibleMerge => formatter.write_str(self.stable_code()),
             Self::InvalidSample { field } => write!(formatter, "{}: {field}", self.stable_code()),
             Self::Serialization => formatter.write_str(self.stable_code()),
-            Self::Unsupported { capability } => {
-                write!(formatter, "{}: {capability}", self.stable_code())
-            }
-            Self::MissingTimestamp { section } => {
-                write!(formatter, "{}: {section}", self.stable_code())
-            }
+            Self::Unsupported { capability } => write!(
+                formatter,
+                "{}: {}",
+                self.stable_code(),
+                bounded_redacted(capability)
+            ),
+            Self::MissingTimestamp { section } => write!(
+                formatter,
+                "{}: {}",
+                self.stable_code(),
+                bounded_redacted(section)
+            ),
         }
     }
 }
 
-impl std::error::Error for ReportError {}
+impl std::error::Error for ReportError {
+    /// Report aggregation has no wrapped I/O or adapter source. Callers that
+    /// need source-node/run identity attach it at their boundary; returning
+    /// `None` here prevents a caller from accidentally treating report text
+    /// as a compatibility key or exposing an unbounded cause chain.
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
+}
+
+fn bounded_redacted(value: &str) -> String {
+    if report_context_is_sensitive(value) {
+        return REDACTED_REPORT_CONTEXT.to_owned();
+    }
+
+    if value.len() <= MAX_REPORT_DIAGNOSTIC_BYTES {
+        return value.to_owned();
+    }
+
+    let mut end = MAX_REPORT_DIAGNOSTIC_BYTES.saturating_sub(3);
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut result = value[..end].to_owned();
+    result.push('…');
+    result
+}
+
+fn report_context_is_sensitive(value: &str) -> bool {
+    if value.chars().any(char::is_control) {
+        return true;
+    }
+
+    let lower = value.to_ascii_lowercase();
+    [
+        "password",
+        "passwd",
+        "secret",
+        "token",
+        "authorization",
+        "bearer",
+        "cookie",
+        "credential",
+        "api_key",
+        "apikey",
+        "access_key",
+        "private_key",
+        "session",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+        || lower.contains('/')
+        || lower.contains('\\')
+        || lower.contains("://")
+        || lower
+            .as_bytes()
+            .windows(2)
+            .any(|window| window[0].is_ascii_alphabetic() && window[1] == b':')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_report_error_has_one_stable_code() {
+        let cases = [
+            (
+                ReportError::InvalidConfig {
+                    field: ConfigField::MaxLabels,
+                },
+                ReportErrorCode::InvalidConfig,
+                "report.invalid_config",
+            ),
+            (
+                ReportError::InvalidInterval { start: 2, end: 1 },
+                ReportErrorCode::InvalidInterval,
+                "report.invalid_interval",
+            ),
+            (
+                ReportError::InvalidPercentile,
+                ReportErrorCode::InvalidPercentile,
+                "report.invalid_percentile",
+            ),
+            (
+                ReportError::Overflow {
+                    field: ReportField::SampleCount,
+                },
+                ReportErrorCode::Overflow,
+                "report.overflow",
+            ),
+            (
+                ReportError::LimitExceeded {
+                    resource: ReportLimit::Labels,
+                    actual: 2,
+                    maximum: 1,
+                },
+                ReportErrorCode::LimitExceeded,
+                "report.limit_exceeded",
+            ),
+            (
+                ReportError::IncompatibleMerge,
+                ReportErrorCode::IncompatibleMerge,
+                "report.incompatible_merge",
+            ),
+            (
+                ReportError::InvalidSample {
+                    field: SampleField::ErrorCount,
+                },
+                ReportErrorCode::InvalidSample,
+                "report.invalid_sample",
+            ),
+            (
+                ReportError::Serialization,
+                ReportErrorCode::Serialization,
+                "report.serialization",
+            ),
+            (
+                ReportError::Unsupported {
+                    capability: "graph.section",
+                },
+                ReportErrorCode::Unsupported,
+                "report.unsupported",
+            ),
+            (
+                ReportError::MissingTimestamp { section: "graph" },
+                ReportErrorCode::MissingTimestamp,
+                "report.missing_timestamp",
+            ),
+        ];
+
+        for (error, code, stable_code) in cases {
+            assert_eq!(error.code(), code);
+            assert_eq!(error.code().to_string(), stable_code);
+            assert_eq!(error.stable_code(), stable_code);
+        }
+    }
+
+    #[test]
+    fn pure_report_failures_are_not_retryable() {
+        let error = ReportError::LimitExceeded {
+            resource: ReportLimit::PercentileSamples,
+            actual: 2,
+            maximum: 1,
+        };
+        assert!(!error.retryable());
+        assert!(!error.is_retryable());
+        assert!(!ReportError::Serialization.retryable());
+    }
+
+    #[test]
+    fn diagnostic_is_bounded_and_redacts_sensitive_context() {
+        let long = "a".repeat(MAX_REPORT_DIAGNOSTIC_BYTES + 64);
+        let diagnostic = bounded_redacted(&long);
+        assert!(diagnostic.len() <= MAX_REPORT_DIAGNOSTIC_BYTES);
+        assert!(diagnostic.ends_with('…'));
+
+        for sensitive in [
+            "password=secret-value",
+            "https://user:password@example.invalid/report",
+            "/tmp/run-secret/report.json",
+            "line\nwith-control",
+        ] {
+            assert_eq!(bounded_redacted(sensitive), REDACTED_REPORT_CONTEXT);
+        }
+
+        let error = ReportError::Unsupported {
+            capability: "token=secret-value",
+        };
+        let display = error.to_string();
+        assert_eq!(display, "report.unsupported: <redacted>");
+        assert!(!display.contains("secret-value"));
+        assert!(error.redacted_message().len() <= MAX_REPORT_DIAGNOSTIC_BYTES);
+        assert_eq!(error.redacted_message(), error.sanitized_message());
+    }
+
+    #[test]
+    fn report_errors_have_no_unbounded_source_chain() {
+        let error = ReportError::Serialization;
+        assert!(std::error::Error::source(&error).is_none());
+    }
+}

@@ -1444,7 +1444,10 @@ impl<'a> Scanner<'a> {
             return Err(self.error(
                 SyntaxErrorKind::MismatchedTag,
                 start,
-                format!("expected </{}>, found </{}>", open.name.raw(), name.raw()),
+                // Tag spellings are source-controlled input.  Keep the
+                // public diagnostic stable and redacted rather than copying
+                // either spelling into Display/Debug output.
+                "end tag does not match its start tag",
             ));
         }
         let span = Span { start, end: cursor };
@@ -2045,6 +2048,17 @@ mod tests {
             assert_eq!(error.code(), code);
             assert!(error.position().is_some());
         }
+    }
+
+    #[test]
+    fn mismatched_tag_errors_redact_source_tag_names() {
+        let error = parse(b"<root secret-start='1'></secret-user-token>")
+            .expect_err("mismatched tag must be rejected");
+        assert_eq!(error.code(), "jmx.syntax.mismatched_tag");
+        let rendered = format!("{error:?} {error}");
+        assert!(!rendered.contains("secret-start"));
+        assert!(!rendered.contains("secret-user-token"));
+        assert!(rendered.contains("jmx.syntax.mismatched_tag"));
     }
 
     #[test]

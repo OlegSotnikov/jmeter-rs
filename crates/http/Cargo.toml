@@ -11,3 +11,6 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+jmeter-rs-results = { version = "0.1.0", path = "../results" }

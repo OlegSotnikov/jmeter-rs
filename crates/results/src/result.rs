@@ -3,7 +3,7 @@
 
 use core::fmt;
 
-use crate::data::{DataEncoding, DataType, HeaderBlock, SampleData};
+use crate::data::{DataEncoding, DataType, HeaderBlock, ResponseFileReference, SampleData};
 use crate::error::{HierarchyLimit, InputField, ResultError, ResultField};
 use crate::timing::SampleTiming;
 
@@ -82,6 +82,9 @@ count_type!(
 );
 
 impl ByteCount {
+    /// No bytes.
+    pub const ZERO: Self = Self(0);
+
     /// Creates a byte count and is equivalent to [`ByteCount::from_u64`].
     pub const fn new(value: u64) -> Self {
         Self::from_u64(value)
@@ -360,6 +363,7 @@ pub struct SampleFlags {
     stop_test: bool,
     stop_test_now: bool,
     start_next_loop: bool,
+    break_current_loop: bool,
     logical_action: Option<LogicalAction>,
     ignored: bool,
 }
@@ -383,6 +387,15 @@ impl SampleFlags {
     /// Returns whether the next thread-loop iteration should begin.
     pub const fn start_next_loop(&self) -> bool {
         self.start_next_loop
+    }
+
+    /// Returns whether the current controller loop should be broken.
+    ///
+    /// JMeter keeps this control separate from the older logical-action enum;
+    /// retaining it as an independent flag avoids collapsing a newer bridge
+    /// value into an unrelated stop action.
+    pub const fn break_current_loop(&self) -> bool {
+        self.break_current_loop
     }
 
     /// Returns the optional logical action.
@@ -413,6 +426,11 @@ impl SampleFlags {
     /// Sets the start-next-loop flag.
     pub const fn set_start_next_loop(&mut self, value: bool) {
         self.start_next_loop = value;
+    }
+
+    /// Sets whether the current controller loop should be broken.
+    pub const fn set_break_current_loop(&mut self, value: bool) {
+        self.break_current_loop = value;
     }
 
     /// Sets or clears the logical action.
@@ -502,13 +520,23 @@ pub struct SampleResult {
     failure_message: Option<String>,
     data_type: Option<DataType>,
     data_encoding: Option<DataEncoding>,
+    /// Full content-type text, including parameters such as `charset`.
+    /// Unlike [`data_encoding`](Self::data_encoding), this value is not
+    /// parsed or normalized.
+    content_type: Option<String>,
     request_data: Option<SampleData>,
     response_data: Option<SampleData>,
     request_headers: Option<HeaderBlock>,
     response_headers: Option<HeaderBlock>,
     sampler_data: Option<String>,
-    response_file: Option<String>,
+    response_file: Option<ResponseFileReference>,
     url: Option<String>,
+    /// The sampler's byte-count override (`SampleResult.bytes`).  JMeter's
+    /// serialized `by` value is represented separately by
+    /// [`received_bytes`](Self::received_bytes).
+    bytes_override: Option<ByteCount>,
+    headers_size: Option<ByteCount>,
+    body_size: Option<ByteCount>,
     received_bytes: Option<ByteCount>,
     sent_bytes: Option<ByteCount>,
     group_threads: Option<ThreadCount>,
@@ -562,6 +590,10 @@ impl fmt::Debug for SampleResult {
                     .map(|value| value.as_str().len()),
             )
             .field(
+                "content_type_len",
+                &self.content_type.as_ref().map(String::len),
+            )
+            .field(
                 "request_data_len",
                 &self.request_data.as_ref().map(SampleData::len),
             )
@@ -591,9 +623,12 @@ impl fmt::Debug for SampleResult {
             )
             .field(
                 "response_file_len",
-                &self.response_file.as_ref().map(String::len),
+                &self.response_file.as_ref().map(ResponseFileReference::len),
             )
             .field("url_len", &self.url.as_ref().map(String::len))
+            .field("bytes_override", &self.bytes_override)
+            .field("headers_size", &self.headers_size)
+            .field("body_size", &self.body_size)
             .field("received_bytes", &self.received_bytes)
             .field("sent_bytes", &self.sent_bytes)
             .field("group_threads", &self.group_threads)
@@ -637,6 +672,7 @@ impl SampleResult {
             failure_message: None,
             data_type: None,
             data_encoding: None,
+            content_type: None,
             request_data: None,
             response_data: None,
             request_headers: None,
@@ -644,6 +680,9 @@ impl SampleResult {
             sampler_data: None,
             response_file: None,
             url: None,
+            bytes_override: None,
+            headers_size: None,
+            body_size: None,
             received_bytes: None,
             sent_bytes: None,
             group_threads: None,
@@ -772,6 +811,64 @@ impl SampleResult {
         self.timing.set_end(value)
     }
 
+    /// Records a sample start from a supplied wall timestamp, rejecting a
+    /// duplicate start instead of replacing the original.
+    pub fn sample_start_at(&mut self, at: crate::WallTimestamp) -> crate::Result<()> {
+        self.timing.sample_start_at(at)
+    }
+
+    /// Records a sample start and projects the serialized timestamp using an
+    /// explicit save-service timestamp mode.
+    pub fn sample_start_at_with_source(
+        &mut self,
+        at: crate::WallTimestamp,
+        source: crate::TimestampSource,
+    ) -> crate::Result<()> {
+        self.timing.sample_start_at_with_source(at, source)
+    }
+
+    /// Records a sample end from a supplied wall timestamp and derives the
+    /// elapsed duration after idle time.
+    pub fn sample_end_at(&mut self, at: crate::WallTimestamp) -> crate::Result<()> {
+        self.timing.sample_end_at(at)
+    }
+
+    /// Records a sample end and projects the serialized timestamp using an
+    /// explicit save-service timestamp mode.
+    pub fn sample_end_at_with_source(
+        &mut self,
+        at: crate::WallTimestamp,
+        source: crate::TimestampSource,
+    ) -> crate::Result<()> {
+        self.timing.sample_end_at_with_source(at, source)
+    }
+
+    /// Starts a pause using a supplied wall timestamp.
+    pub fn sample_pause_at(&mut self, at: crate::WallTimestamp) -> crate::Result<()> {
+        self.timing.sample_pause_at(at)
+    }
+
+    /// Resumes a paused sample and returns the newly accumulated idle time.
+    pub fn sample_resume_at(&mut self, at: crate::WallTimestamp) -> crate::Result<IdleTime> {
+        self.timing.sample_resume_at(at)
+    }
+
+    /// Records the first-response marker and derives checked latency.
+    pub fn latency_end_at(&mut self, at: crate::WallTimestamp) -> crate::Result<Latency> {
+        self.timing.latency_end_at(at)
+    }
+
+    /// Records the connection-complete marker and derives checked connect
+    /// time.
+    pub fn connect_end_at(&mut self, at: crate::WallTimestamp) -> crate::Result<ConnectTime> {
+        self.timing.connect_end_at(at)
+    }
+
+    /// Returns the active pause start, if this result is currently paused.
+    pub const fn pause_start(&self) -> Option<crate::WallTimestamp> {
+        self.timing.pause_start()
+    }
+
     /// Sets the optional elapsed duration.
     pub fn set_elapsed(&mut self, value: Option<ElapsedTime>) -> crate::Result<()> {
         self.timing.set_elapsed(value)
@@ -883,6 +980,23 @@ impl SampleResult {
         self.data_encoding = Some(DataEncoding::new(value));
     }
 
+    /// Returns the full response content type, preserving parameters and
+    /// exact casing.  This is distinct from the optional data encoding.
+    pub fn content_type(&self) -> Option<&str> {
+        self.content_type.as_deref()
+    }
+
+    /// Sets the optional full response content type without parsing or
+    /// normalizing it.
+    pub fn set_content_type(&mut self, value: Option<String>) {
+        self.content_type = value;
+    }
+
+    /// Sets a present full response content type.
+    pub fn set_content_type_text(&mut self, value: impl Into<String>) {
+        self.content_type = Some(value.into());
+    }
+
     /// Returns optional request bytes.
     pub fn request_data(&self) -> Option<&SampleData> {
         self.request_data.as_ref()
@@ -960,20 +1074,65 @@ impl SampleResult {
 
     /// Returns optional response-file reference.
     pub fn response_file(&self) -> Option<&str> {
-        self.response_file.as_deref()
+        self.response_file
+            .as_ref()
+            .map(ResponseFileReference::as_str)
     }
 
-    /// Sets optional response-file reference.
+    /// Sets optional response-file reference text.
+    ///
+    /// The stored value is an opaque [`ResponseFileReference`]. This
+    /// compatibility setter intentionally keeps the historical `String`
+    /// argument; callers that already have the typed wrapper can use
+    /// [`SampleResult::set_response_file_reference`].
     pub fn set_response_file(&mut self, value: Option<String>) {
+        self.response_file = value.map(ResponseFileReference::new);
+    }
+
+    /// Returns the typed opaque response-file reference.
+    pub fn response_file_reference(&self) -> Option<&ResponseFileReference> {
+        self.response_file.as_ref()
+    }
+
+    /// Sets an optional typed opaque response-file reference.
+    pub fn set_response_file_reference(&mut self, value: Option<ResponseFileReference>) {
         self.response_file = value;
     }
 
     /// Sets a present response-file reference.
     pub fn set_response_file_text(&mut self, value: impl Into<String>) {
-        self.response_file = Some(value.into());
+        self.response_file = Some(ResponseFileReference::new(value));
+    }
+
+    /// Returns the JMeter `resultFileName` value.  JTL XML calls the same
+    /// opaque field `responseFile`; both names intentionally share storage.
+    pub fn result_file_name(&self) -> Option<&str> {
+        self.response_file()
+    }
+
+    /// Sets the optional JMeter `resultFileName`/JTL `responseFile` value.
+    pub fn set_result_file_name(&mut self, value: Option<String>) {
+        self.set_response_file(value);
+    }
+
+    /// Sets a present result-file reference without granting filesystem
+    /// capabilities.
+    pub fn set_result_file_name_text(&mut self, value: impl Into<String>) {
+        self.set_response_file_text(value);
+    }
+
+    /// Returns the opaque result-file reference under its JMeter name.
+    pub fn result_file_reference(&self) -> Option<&ResponseFileReference> {
+        self.response_file_reference()
     }
 
     /// Returns optional sampler URL text.
+    ///
+    /// JMeter holds this value as a `java.net.URL` while JTL carries its text
+    /// spelling. The pure results model deliberately preserves that spelling
+    /// as opaque text: parsing or normalizing it here could reject plugin URL
+    /// schemes or change a round-tripped value. URL interpretation belongs to
+    /// the sampler/transport boundary.
     pub fn url(&self) -> Option<&str> {
         self.url.as_deref()
     }
@@ -988,6 +1147,64 @@ impl SampleResult {
         self.url = Some(value.into());
     }
 
+    /// Returns the JMeter `bytes` override, if one was supplied separately
+    /// from the serialized/effective received-byte count.
+    pub const fn bytes_override(&self) -> Option<ByteCount> {
+        self.bytes_override
+    }
+
+    /// Sets the optional JMeter `bytes` override.
+    pub const fn set_bytes_override(&mut self, value: Option<ByteCount>) {
+        self.bytes_override = value;
+    }
+
+    /// Alias matching JMeter's `setBytes` terminology.
+    pub const fn set_bytes(&mut self, value: Option<ByteCount>) {
+        self.set_bytes_override(value);
+    }
+
+    /// Returns the effective JMeter `getBytesAsLong` projection.
+    pub fn bytes(&self) -> crate::Result<Option<ByteCount>> {
+        self.effective_received_bytes()
+    }
+
+    /// Explicit alias for the fallible effective-byte projection.
+    pub fn try_bytes(&self) -> crate::Result<Option<ByteCount>> {
+        self.effective_received_bytes()
+    }
+
+    /// Returns the optional response-header byte count.
+    pub const fn headers_size(&self) -> Option<ByteCount> {
+        self.headers_size
+    }
+
+    /// Sets the optional response-header byte count.
+    pub const fn set_headers_size(&mut self, value: Option<ByteCount>) {
+        self.headers_size = value;
+    }
+
+    /// Returns the optional response-body byte count.  A present zero follows
+    /// JMeter's sentinel behavior and falls back to retained response-data
+    /// length when [`SampleResult::effective_body_size`] is queried.
+    pub const fn body_size(&self) -> Option<ByteCount> {
+        self.body_size
+    }
+
+    /// Sets the optional response-body byte count.
+    pub const fn set_body_size(&mut self, value: Option<ByteCount>) {
+        self.body_size = value;
+    }
+
+    /// Alias used by bounded bridge projections for header bytes.
+    pub const fn header_bytes(&self) -> Option<ByteCount> {
+        self.headers_size()
+    }
+
+    /// Alias used by bounded bridge projections for body bytes.
+    pub const fn body_bytes(&self) -> Option<ByteCount> {
+        self.body_size()
+    }
+
     /// Returns optional received byte count.
     pub const fn received_bytes(&self) -> Option<ByteCount> {
         self.received_bytes
@@ -996,6 +1213,58 @@ impl SampleResult {
     /// Sets optional received byte count.
     pub const fn set_received_bytes(&mut self, value: Option<ByteCount>) {
         self.received_bytes = value;
+    }
+
+    /// Alias for the serialized received-byte count.
+    pub const fn response_bytes(&self) -> Option<ByteCount> {
+        self.received_bytes()
+    }
+
+    /// Computes the body size using JMeter's `bodySize == 0` fallback to the
+    /// retained response-data length.  `None` means no body-size signal was
+    /// available; it is not guessed as zero.
+    pub fn effective_body_size(&self) -> crate::Result<Option<ByteCount>> {
+        match (self.body_size, self.response_data.as_ref()) {
+            (Some(value), Some(data)) if value.as_u64() == 0 => {
+                usize_to_byte_count(data.len()).map(Some)
+            }
+            (Some(value), _) => Ok(Some(value)),
+            (None, Some(data)) => usize_to_byte_count(data.len()).map(Some),
+            (None, None) => Ok(None),
+        }
+    }
+
+    /// Computes the effective received-byte count using JMeter's
+    /// `headersSize + bodySize`, then `bytes` fallback, rule.  An explicitly
+    /// serialized received count takes precedence because it is the value
+    /// observed on a JTL wire record.  `None` remains unknown.
+    pub fn effective_received_bytes(&self) -> crate::Result<Option<ByteCount>> {
+        if let Some(value) = self.received_bytes {
+            return Ok(Some(value));
+        }
+        let body = self.effective_body_size()?;
+        let has_signal =
+            self.bytes_override.is_some() || self.headers_size.is_some() || body.is_some();
+        if !has_signal {
+            return Ok(None);
+        }
+        let header = self.headers_size.unwrap_or(ByteCount::ZERO);
+        let body = body.unwrap_or(ByteCount::ZERO);
+        let sum = header
+            .checked_add(body)
+            .map_err(|_| ResultError::Overflow {
+                field: ResultField::ReceivedBytes,
+            })?;
+        if sum.as_u64() == 0 {
+            Ok(Some(self.bytes_override.unwrap_or(ByteCount::ZERO)))
+        } else {
+            Ok(Some(sum))
+        }
+    }
+
+    /// Alias for the checked effective response-byte projection.
+    pub fn effective_response_bytes(&self) -> crate::Result<Option<ByteCount>> {
+        self.effective_received_bytes()
     }
 
     /// Returns optional sent byte count.
@@ -1033,6 +1302,25 @@ impl SampleResult {
         self.sample_count
     }
 
+    /// Returns the represented sample count using JMeter's ordinary-sample
+    /// default when the wire field is absent.
+    ///
+    /// JMeter writes `SampleCount=1` for an ordinary `SampleResult`, while a
+    /// JTL reader must still preserve an omitted `sc` attribute.  Callers
+    /// doing arithmetic over events should use this projection rather than
+    /// turning the optional wire field into a lossy stored value.
+    pub const fn represented_sample_count(&self) -> SampleCount {
+        match self.sample_count {
+            Some(value) => value,
+            None => SampleCount::ONE,
+        }
+    }
+
+    /// Alias for [`SampleResult::represented_sample_count`].
+    pub const fn sample_count_or_one(&self) -> SampleCount {
+        self.represented_sample_count()
+    }
+
     /// Sets optional represented sample count.
     pub const fn set_sample_count(&mut self, value: Option<SampleCount>) {
         self.sample_count = value;
@@ -1054,6 +1342,50 @@ impl SampleResult {
                 Some(false) => Some(ErrorCount::new(1)),
                 None => None,
             },
+        }
+    }
+
+    /// Returns only the error count explicitly present on the wire/result
+    /// record, without deriving an ordinary-sample value from `success`.
+    ///
+    /// This presence-preserving accessor is useful to report and diagnostic
+    /// consumers that must distinguish an omitted `ec` field from an explicit
+    /// `ec="1"`. XML and CSV codecs continue to use [`SampleResult::error_count`]
+    /// for their existing JMeter-compatible effective-value behavior.
+    pub const fn explicit_error_count(&self) -> Option<ErrorCount> {
+        self.error_count
+    }
+
+    /// Returns whether an error count was explicitly supplied by the result
+    /// source. This remains false when [`SampleResult::error_count`] derives a
+    /// value from the sample outcome.
+    pub const fn has_explicit_error_count(&self) -> bool {
+        self.error_count.is_some()
+    }
+
+    /// Returns the represented error count using JMeter's ordinary-sample
+    /// zero-error default when no success/error field was supplied.
+    pub const fn represented_error_count(&self) -> ErrorCount {
+        match self.error_count() {
+            Some(value) => value,
+            None => ErrorCount::ZERO,
+        }
+    }
+
+    /// Alias for [`SampleResult::represented_error_count`].
+    pub const fn error_count_or_zero(&self) -> ErrorCount {
+        self.represented_error_count()
+    }
+
+    /// Returns whether this result represents a failed ordinary sample.
+    ///
+    /// An absent wire `s` field is not a successful result in JMeter's
+    /// `SampleResult` boolean projection, but remains distinguishable through
+    /// [`SampleResult::success`].
+    pub const fn is_failed(&self) -> bool {
+        match self.success {
+            Some(value) => !value,
+            None => true,
         }
     }
 
@@ -1082,6 +1414,18 @@ impl SampleResult {
     /// Returns the XML wire thread name retained for this node, if any.
     pub(crate) fn wire_thread_name(&self) -> Option<&str> {
         self.wire_thread_name.as_deref()
+    }
+
+    /// Returns the optional JTL thread-name field retained on this result.
+    /// A present empty name remains distinct from an omitted attribute.
+    pub fn thread_name(&self) -> Option<&str> {
+        self.wire_thread_name()
+    }
+
+    /// Sets the optional JTL thread-name field without deriving one from an
+    /// ambient executor thread.
+    pub fn set_thread_name(&mut self, value: Option<String>) {
+        self.wire_thread_name = value;
     }
 
     /// Returns the XML wire host retained for this node, if any.
@@ -1240,6 +1584,18 @@ impl SampleResult {
         self.flags.set_start_next_loop(value);
     }
 
+    /// Returns whether this result requests breaking the current controller
+    /// loop.
+    pub const fn break_current_loop(&self) -> bool {
+        self.flags.break_current_loop()
+    }
+
+    /// Sets the current-controller-loop break control independently from
+    /// legacy logical actions.
+    pub const fn set_break_current_loop(&mut self, value: bool) {
+        self.flags.set_break_current_loop(value);
+    }
+
     /// Returns the optional logical action.
     pub const fn logical_action(&self) -> Option<LogicalAction> {
         self.flags.logical_action()
@@ -1282,7 +1638,7 @@ impl SampleResult {
     /// parent when a check fails.
     pub fn try_add_sub_result(
         &mut self,
-        child: SampleResult,
+        mut child: SampleResult,
         limits: impl Into<ValidationLimits>,
     ) -> crate::Result<()> {
         let limits = limits.into();
@@ -1320,8 +1676,18 @@ impl SampleResult {
         let mut candidate_timing = self.timing.clone();
         candidate_timing.aggregate_child(&child.timing)?;
         let received_bytes = checked_optional_sum(
-            self.received_bytes,
-            child.received_bytes,
+            self.effective_received_bytes()?,
+            child.effective_received_bytes()?,
+            ResultField::ReceivedBytes,
+        )?;
+        let headers_size = checked_optional_sum(
+            self.headers_size,
+            child.headers_size,
+            ResultField::ReceivedBytes,
+        )?;
+        let body_size = checked_optional_sum(
+            self.effective_body_size()?,
+            child.effective_body_size()?,
             ResultField::ReceivedBytes,
         )?;
         let sent_bytes =
@@ -1331,11 +1697,26 @@ impl SampleResult {
             child.sample_count,
             ResultField::SampleCount,
         )?;
-        let error_count =
-            checked_optional_sum(self.error_count, child.error_count, ResultField::ErrorCount)?;
+        // JMeter's ordinary result derives its error count from success. Use
+        // that projection when aggregating execution-time children so a
+        // failed child whose wire `ec` field was omitted still contributes one
+        // error. `try_add_sub_result_raw` below intentionally leaves wire
+        // counters untouched for parsed JTL trees.
+        let error_count = checked_optional_sum(
+            self.error_count(),
+            child.error_count(),
+            ResultField::ErrorCount,
+        )?;
 
         self.timing = candidate_timing;
+        // JMeter mutates its internal `bytes` override during execution-time
+        // child aggregation. Keep that value in sync with the effective
+        // aggregate; the explicit `received_bytes` field remains the
+        // presence-preserving wire projection used by codecs.
+        self.bytes_override = received_bytes;
         self.received_bytes = received_bytes;
+        self.headers_size = headers_size;
+        self.body_size = body_size;
         self.sent_bytes = sent_bytes;
         self.sample_count = sample_count;
         self.error_count = error_count;
@@ -1343,6 +1724,12 @@ impl SampleResult {
             self.success = Some(false);
         } else if self.success.is_none() {
             self.success = child.success;
+        }
+        // JMeter gives a sub-result the parent's thread name when one is
+        // already known.  A missing parent name remains missing: a pure model
+        // has no ambient thread handle from which to invent one.
+        if let Some(thread_name) = self.wire_thread_name.clone() {
+            child.wire_thread_name = Some(thread_name);
         }
         self.sub_results.push(child);
         Ok(())
@@ -1504,7 +1891,9 @@ impl SampleResult {
         let mut pending = 1usize;
 
         while let Some((node, depth)) = stack.pop() {
-            pending = pending.saturating_sub(1);
+            pending = pending.checked_sub(1).ok_or(ResultError::Overflow {
+                field: ResultField::SubResults,
+            })?;
             if depth > limits.max_depth() {
                 return Err(ResultError::HierarchyLimitExceeded {
                     limit: HierarchyLimit::Depth,
@@ -1526,6 +1915,13 @@ impl SampleResult {
             if validate_timing {
                 node.timing.validate()?;
             }
+            if let (Some(samples), Some(errors)) = (node.sample_count, node.error_count())
+                && errors.as_u64() > samples.as_u64()
+            {
+                return Err(ResultError::InvalidHierarchy {
+                    field: ResultField::ErrorCount,
+                });
+            }
             for assertion in &node.assertions {
                 assertion.validate()?;
             }
@@ -1536,13 +1932,13 @@ impl SampleResult {
                 pending = pending.checked_add(1).ok_or(ResultError::Overflow {
                     field: ResultField::SubResults,
                 })?;
-                if nodes
-                    .checked_add(pending)
-                    .is_some_and(|count| count > limits.max_nodes())
-                {
+                let queued = nodes.checked_add(pending).ok_or(ResultError::Overflow {
+                    field: ResultField::SubResults,
+                })?;
+                if queued > limits.max_nodes() {
                     return Err(ResultError::HierarchyLimitExceeded {
                         limit: HierarchyLimit::Nodes,
-                        actual: nodes.saturating_add(pending),
+                        actual: queued,
                         maximum: limits.max_nodes(),
                     });
                 }
@@ -1562,6 +1958,7 @@ impl SampleResult {
             failure_message: self.failure_message.clone(),
             data_type: self.data_type.clone(),
             data_encoding: self.data_encoding.clone(),
+            content_type: self.content_type.clone(),
             request_data: self.request_data.clone(),
             response_data: self.response_data.clone(),
             request_headers: self.request_headers.clone(),
@@ -1569,6 +1966,9 @@ impl SampleResult {
             sampler_data: self.sampler_data.clone(),
             response_file: self.response_file.clone(),
             url: self.url.clone(),
+            bytes_override: self.bytes_override,
+            headers_size: self.headers_size,
+            body_size: self.body_size,
             received_bytes: self.received_bytes,
             sent_bytes: self.sent_bytes,
             group_threads: self.group_threads,
@@ -1672,6 +2072,14 @@ where
     }
 }
 
+fn usize_to_byte_count(value: usize) -> crate::Result<ByteCount> {
+    u64::try_from(value)
+        .map(ByteCount::from_u64)
+        .map_err(|_| ResultError::Overflow {
+            field: ResultField::ReceivedBytes,
+        })
+}
+
 trait CheckedAdd: Copy {
     fn checked_add_value(self, other: Self, field: ResultField) -> crate::Result<Self>;
 }
@@ -1692,7 +2100,8 @@ checked_add_impl!(ByteCount, SampleCount, ErrorCount, ThreadCount);
 
 #[cfg(test)]
 mod tests {
-    use super::{ErrorCount, SampleResult};
+    use super::{ByteCount, ErrorCount, SampleCount, SampleResult};
+    use crate::{ResponseFileReference, ResultError, ResultField, SampleData, ValidationLimits};
 
     #[test]
     fn ordinary_error_count_derives_from_success() {
@@ -1713,5 +2122,255 @@ mod tests {
         result.set_error_count(Some(ErrorCount::new(3)));
 
         assert_eq!(result.error_count(), Some(ErrorCount::new(3)));
+    }
+
+    #[test]
+    fn represented_counts_keep_jmeter_defaults_without_losing_wire_absence() {
+        let mut result = SampleResult::new("ordinary");
+        assert_eq!(result.sample_count(), None);
+        assert_eq!(result.represented_sample_count(), SampleCount::ONE);
+        assert_eq!(result.sample_count_or_one(), SampleCount::ONE);
+        assert_eq!(result.error_count(), None);
+        assert_eq!(result.represented_error_count(), ErrorCount::ZERO);
+        assert_eq!(result.error_count_or_zero(), ErrorCount::ZERO);
+        assert!(result.is_failed());
+
+        result.set_successful(true);
+        assert!(!result.is_failed());
+        assert_eq!(result.represented_error_count(), ErrorCount::ZERO);
+
+        result.set_successful(false);
+        assert!(result.is_failed());
+        assert_eq!(result.error_count(), Some(ErrorCount::new(1)));
+        assert_eq!(result.represented_error_count(), ErrorCount::new(1));
+    }
+
+    #[test]
+    fn explicit_error_count_presence_is_distinct_from_derived_value() {
+        let mut result = SampleResult::new("wire");
+        result.set_successful(false);
+
+        // An omitted ec derives to one for ordinary-result arithmetic, but is
+        // still distinguishable from an explicitly encoded ec="1".
+        assert_eq!(result.error_count(), Some(ErrorCount::new(1)));
+        assert_eq!(result.explicit_error_count(), None);
+        assert!(!result.has_explicit_error_count());
+
+        result.set_error_count(Some(ErrorCount::new(1)));
+        assert_eq!(result.error_count(), Some(ErrorCount::new(1)));
+        assert_eq!(result.explicit_error_count(), Some(ErrorCount::new(1)));
+        assert!(result.has_explicit_error_count());
+
+        // Explicit zero also takes precedence over a failed success flag and
+        // remains present for report/diagnostic consumers.
+        result.set_error_count(Some(ErrorCount::ZERO));
+        assert_eq!(result.error_count(), Some(ErrorCount::ZERO));
+        assert_eq!(result.explicit_error_count(), Some(ErrorCount::ZERO));
+        assert!(result.has_explicit_error_count());
+
+        result.set_error_count(None);
+        assert_eq!(result.explicit_error_count(), None);
+        assert!(!result.has_explicit_error_count());
+        assert_eq!(result.error_count(), Some(ErrorCount::new(1)));
+    }
+
+    #[test]
+    fn validation_rejects_error_count_above_sample_count() {
+        let mut explicit = SampleResult::new("explicit-counts");
+        explicit.set_sample_count(Some(SampleCount::new(1)));
+        explicit.set_error_count(Some(ErrorCount::new(2)));
+        assert_eq!(
+            explicit.validate(),
+            Err(ResultError::InvalidHierarchy {
+                field: ResultField::ErrorCount,
+            })
+        );
+
+        let mut derived = SampleResult::new("derived-count");
+        derived.set_sample_count(Some(SampleCount::new(0)));
+        derived.set_successful(false);
+        assert_eq!(
+            derived.validate(),
+            Err(ResultError::InvalidHierarchy {
+                field: ResultField::ErrorCount,
+            })
+        );
+        assert!(
+            derived
+                .validate_wire_with_limits(ValidationLimits::default())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn sample_count_aggregation_overflow_is_atomic() {
+        let mut parent = SampleResult::new("parent");
+        parent.set_sample_count(Some(SampleCount::new(u64::MAX)));
+        let mut child = SampleResult::new("child");
+        child.set_sample_count(Some(SampleCount::ONE));
+
+        assert_eq!(
+            parent.try_add_sub_result(child, ValidationLimits::default()),
+            Err(ResultError::Overflow {
+                field: ResultField::SampleCount,
+            })
+        );
+        assert!(parent.sub_results().is_empty());
+        assert_eq!(parent.sample_count(), Some(SampleCount::new(u64::MAX)));
+    }
+
+    #[test]
+    fn error_count_aggregation_overflow_is_atomic() {
+        let mut parent = SampleResult::new("parent");
+        parent.set_successful(true);
+        parent.set_error_count(Some(ErrorCount::new(u64::MAX)));
+        let mut child = SampleResult::new("child");
+        child.set_successful(false);
+
+        assert_eq!(
+            parent.try_add_sub_result(child, ValidationLimits::default()),
+            Err(ResultError::Overflow {
+                field: ResultField::ErrorCount,
+            })
+        );
+        assert!(parent.sub_results().is_empty());
+        assert_eq!(parent.error_count(), Some(ErrorCount::new(u64::MAX)));
+        assert_eq!(parent.success(), Some(true));
+    }
+
+    #[test]
+    fn execution_aggregation_counts_failed_child_without_wire_error_count() {
+        let mut parent = SampleResult::new("parent");
+        parent.set_successful(true);
+        let mut child = SampleResult::new("child");
+        child.set_successful(false);
+        assert!(
+            parent
+                .try_add_sub_result(child, ValidationLimits::default())
+                .is_ok()
+        );
+        assert_eq!(parent.success(), Some(false));
+        assert_eq!(parent.error_count(), Some(ErrorCount::new(1)));
+    }
+
+    #[test]
+    fn response_file_is_stored_as_an_opaque_typed_reference() {
+        let mut result = SampleResult::new("file");
+        result.set_response_file_text("../result.bin");
+        assert_eq!(result.response_file(), Some("../result.bin"));
+        assert_eq!(
+            result
+                .response_file_reference()
+                .map(ResponseFileReference::as_str),
+            Some("../result.bin")
+        );
+
+        result.set_response_file_reference(Some(ResponseFileReference::new("opaque")));
+        assert_eq!(result.response_file(), Some("opaque"));
+        result.set_response_file(None);
+        assert!(result.response_file_reference().is_none());
+    }
+
+    #[test]
+    fn effective_byte_projection_preserves_absence_and_jmeter_fallbacks() {
+        let mut result = SampleResult::new("bytes");
+        assert_eq!(result.effective_body_size(), Ok(None));
+        assert_eq!(result.effective_received_bytes(), Ok(None));
+
+        result.set_response_data(Some(SampleData::empty()));
+        assert_eq!(result.effective_body_size(), Ok(Some(ByteCount::ZERO)));
+        assert_eq!(result.effective_received_bytes(), Ok(Some(ByteCount::ZERO)));
+
+        result.set_headers_size(Some(ByteCount::new(4)));
+        result.set_body_size(Some(ByteCount::ZERO));
+        result.set_bytes_override(Some(ByteCount::new(99)));
+        // A non-zero header/body sum takes precedence over the bytes override.
+        assert_eq!(
+            result.effective_received_bytes(),
+            Ok(Some(ByteCount::new(4)))
+        );
+
+        result.set_received_bytes(Some(ByteCount::new(77)));
+        assert_eq!(
+            result.effective_received_bytes(),
+            Ok(Some(ByteCount::new(77)))
+        );
+    }
+
+    #[test]
+    fn execution_subresult_aggregation_includes_header_and_body_counts() {
+        let mut parent = SampleResult::new("parent");
+        parent.set_headers_size(Some(ByteCount::new(2)));
+        parent.set_body_size(Some(ByteCount::new(3)));
+        parent.set_sent_bytes(Some(ByteCount::new(1)));
+
+        let mut child = SampleResult::new("child");
+        child.set_headers_size(Some(ByteCount::new(4)));
+        child.set_response_data(Some(SampleData::from(vec![1_u8, 2, 3, 4, 5])));
+        child.set_sent_bytes(Some(ByteCount::new(6)));
+        assert!(
+            parent
+                .try_add_sub_result(child, ValidationLimits::default())
+                .is_ok(),
+            "aggregate counts"
+        );
+
+        assert_eq!(parent.headers_size(), Some(ByteCount::new(6)));
+        assert_eq!(parent.body_size(), Some(ByteCount::new(8)));
+        assert_eq!(parent.received_bytes(), Some(ByteCount::new(14)));
+        assert_eq!(parent.sent_bytes(), Some(ByteCount::new(7)));
+    }
+
+    #[test]
+    fn byte_aggregation_overflow_is_atomic() {
+        let mut parent = SampleResult::new("parent");
+        parent.set_headers_size(Some(ByteCount::new(u64::MAX)));
+        let mut child = SampleResult::new("child");
+        child.set_headers_size(Some(ByteCount::new(1)));
+        assert_eq!(
+            parent.try_add_sub_result(child, ValidationLimits::default()),
+            Err(ResultError::Overflow {
+                field: ResultField::ReceivedBytes,
+            })
+        );
+        assert!(parent.sub_results().is_empty());
+        assert_eq!(parent.headers_size(), Some(ByteCount::new(u64::MAX)));
+    }
+
+    #[test]
+    fn content_type_file_alias_and_break_control_retain_empty_values() {
+        let mut result = SampleResult::new("metadata");
+        result.set_content_type(Some(String::new()));
+        result.set_result_file_name(Some(String::new()));
+        result.set_break_current_loop(true);
+        assert_eq!(result.content_type(), Some(""));
+        assert_eq!(result.result_file_name(), Some(""));
+        assert!(result.break_current_loop());
+    }
+
+    #[test]
+    fn thread_name_presence_is_explicit_and_marker_wrappers_delegate() {
+        let mut result = SampleResult::new("markers");
+        assert_eq!(result.thread_name(), None);
+        result.set_thread_name(Some(String::new()));
+        assert_eq!(result.thread_name(), Some(""));
+        assert!(
+            result
+                .sample_start_at_with_source(
+                    crate::WallTimestamp::from_millis(10),
+                    crate::TimestampSource::Start,
+                )
+                .is_ok(),
+            "start"
+        );
+        assert_eq!(
+            result.timestamp(),
+            Some(crate::WallTimestamp::from_millis(10))
+        );
+        assert_eq!(
+            result.latency_end_at(crate::WallTimestamp::from_millis(12)),
+            Ok(super::Latency::from_millis(2))
+        );
+        assert_eq!(result.latency(), Some(super::Latency::from_millis(2)));
     }
 }

@@ -16,18 +16,28 @@ use crate::metrics::{CountMode, represented_counts};
 
 /// JMeter's documented default BackendListener queue size.
 pub const DEFAULT_BACKEND_QUEUE_CAPACITY: usize = 5_000;
+/// Hard product ceiling for queued events accepted by one backend listener.
+pub const MAX_BACKEND_QUEUE_CAPACITY: usize = 100_000;
 /// Default maximum bytes retained by a backend queue.
 pub const DEFAULT_BACKEND_QUEUE_BYTES: usize = 64 * 1024 * 1024;
+/// Hard product ceiling for bytes retained by one backend queue.
+pub const MAX_BACKEND_QUEUE_BYTES: usize = 256 * 1024 * 1024;
 /// Default number of events admitted to one backend send.
 pub const DEFAULT_BACKEND_BATCH_CAPACITY: usize = 1_024;
+/// Hard product ceiling for events admitted to one backend send.
+pub const MAX_BACKEND_BATCH_CAPACITY: usize = 16 * 1_024;
 /// Default maximum encoded payload size.
 pub const DEFAULT_BACKEND_BATCH_BYTES: usize = 4 * 1024 * 1024;
+/// Hard product ceiling for one encoded backend payload.
+pub const MAX_BACKEND_BATCH_BYTES: usize = 64 * 1024 * 1024;
 /// Default Graphite send interval in milliseconds.
 pub const DEFAULT_GRAPHITE_SEND_INTERVAL_MILLIS: u64 = 1_000;
 /// Default InfluxDB send interval in milliseconds.
 pub const DEFAULT_INFLUX_SEND_INTERVAL_MILLIS: u64 = 5_000;
 /// Default bounded percentile window used by JMeter backend metrics.
 pub const DEFAULT_BACKEND_WINDOW_SAMPLES: usize = 100;
+/// Hard product ceiling for retained backend percentile observations.
+pub const MAX_BACKEND_WINDOW_SAMPLES: usize = 5_000;
 /// Maximum number of distinct transaction contexts retained in one interval.
 pub const DEFAULT_BACKEND_MAX_CONTEXTS: usize = 4_096;
 /// Maximum number of annotation events retained in one interval.
@@ -48,6 +58,12 @@ pub const MAX_BACKEND_ARGUMENTS: usize = 256;
 pub const MAX_BACKEND_ARGUMENT_BYTES: usize = 64 * 1024;
 /// Maximum number of regex matcher states explored for one label.
 const MAX_REGEX_STATES: usize = 8_192;
+/// Maximum bytes in a backend token or line-protocol text value.
+const MAX_BACKEND_TEXT_BYTES: usize = 16 * 1024;
+/// Maximum tags retained on one Influx point.
+const MAX_BACKEND_TAGS: usize = 256;
+/// Maximum fields retained on one Influx point.
+const MAX_BACKEND_FIELDS: usize = 256;
 
 /// Stable configuration fields used in backend errors.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -94,6 +110,12 @@ pub enum BackendConfigField {
     Profile,
     /// Java listener argument.
     Argument,
+    /// Influx annotation title.
+    TestTitle,
+    /// Influx annotation tags.
+    EventTags,
+    /// Influx custom tag.
+    CustomTag,
 }
 
 impl fmt::Display for BackendConfigField {
@@ -120,6 +142,9 @@ impl fmt::Display for BackendConfigField {
             Self::ClassName => "class_name",
             Self::Profile => "profile",
             Self::Argument => "argument",
+            Self::TestTitle => "test_title",
+            Self::EventTags => "event_tags",
+            Self::CustomTag => "custom_tag",
         };
         formatter.write_str(value)
     }
@@ -452,9 +477,23 @@ impl BackendQueueConfig {
                 field: BackendConfigField::QueueCapacity,
             });
         }
+        if self.capacity > MAX_BACKEND_QUEUE_CAPACITY {
+            return Err(BackendError::LimitExceeded {
+                resource: BackendResource::QueueItems,
+                actual: self.capacity,
+                maximum: MAX_BACKEND_QUEUE_CAPACITY,
+            });
+        }
         if self.max_bytes == 0 {
             return Err(BackendError::InvalidConfig {
                 field: BackendConfigField::QueueBytes,
+            });
+        }
+        if self.max_bytes > MAX_BACKEND_QUEUE_BYTES {
+            return Err(BackendError::LimitExceeded {
+                resource: BackendResource::QueueBytes,
+                actual: self.max_bytes,
+                maximum: MAX_BACKEND_QUEUE_BYTES,
             });
         }
         if self.batch_capacity == 0 {
@@ -462,9 +501,23 @@ impl BackendQueueConfig {
                 field: BackendConfigField::BatchCapacity,
             });
         }
+        if self.batch_capacity > MAX_BACKEND_BATCH_CAPACITY {
+            return Err(BackendError::LimitExceeded {
+                resource: BackendResource::BatchItems,
+                actual: self.batch_capacity,
+                maximum: MAX_BACKEND_BATCH_CAPACITY,
+            });
+        }
         if self.batch_bytes == 0 {
             return Err(BackendError::InvalidConfig {
                 field: BackendConfigField::BatchBytes,
+            });
+        }
+        if self.batch_bytes > MAX_BACKEND_BATCH_BYTES {
+            return Err(BackendError::LimitExceeded {
+                resource: BackendResource::BatchBytes,
+                actual: self.batch_bytes,
+                maximum: MAX_BACKEND_BATCH_BYTES,
             });
         }
         Ok(())
@@ -533,6 +586,13 @@ impl BackendWindowConfig {
         {
             return Err(BackendError::InvalidConfig {
                 field: BackendConfigField::Window,
+            });
+        }
+        if self.max_samples > MAX_BACKEND_WINDOW_SAMPLES {
+            return Err(BackendError::LimitExceeded {
+                resource: BackendResource::PercentileSamples,
+                actual: self.max_samples,
+                maximum: MAX_BACKEND_WINDOW_SAMPLES,
             });
         }
         Ok(())
@@ -663,7 +723,10 @@ impl SamplerFilter {
 }
 
 fn validate_filter_text(value: &str) -> Result<(), BackendError> {
-    if value.is_empty() || value.len() > MAX_BACKEND_FILTER_BYTES || value.contains(['\n', '\r']) {
+    if value.is_empty()
+        || value.len() > MAX_BACKEND_FILTER_BYTES
+        || value.chars().any(|character| character.is_ascii_control())
+    {
         return Err(BackendError::InvalidConfig {
             field: BackendConfigField::SamplerFilter,
         });
@@ -811,7 +874,14 @@ impl GraphiteConfig {
                 capability: "graphite.pickle".to_owned(),
             });
         }
-        if self.host.is_empty() || self.host.contains(['\n', '\r', ' ']) {
+        if self.host.is_empty()
+            || self.host.len() > MAX_BACKEND_TEXT_BYTES
+            || self.host.contains(' ')
+            || self
+                .host
+                .chars()
+                .any(|character| character.is_ascii_control())
+        {
             return Err(BackendError::InvalidConfig {
                 field: BackendConfigField::Host,
             });
@@ -866,7 +936,10 @@ impl BackendSecret {
     /// Stores a token without exposing it in debug output.
     pub fn new(value: impl Into<String>) -> Result<Self, BackendError> {
         let value = value.into();
-        if value.is_empty() || value.contains(['\n', '\r']) {
+        if value.is_empty()
+            || value.len() > MAX_BACKEND_TEXT_BYTES
+            || value.chars().any(|character| character.is_ascii_control())
+        {
             return Err(BackendError::InvalidConfig {
                 field: BackendConfigField::Token,
             });
@@ -926,9 +999,12 @@ impl fmt::Debug for InfluxConfig {
             .field("summary_only", &self.summary_only)
             .field("sampler_filter", &self.sampler_filter)
             .field("percentiles", &self.percentiles)
-            .field("test_title", &self.test_title)
-            .field("event_tags", &self.event_tags)
-            .field("custom_tags", &self.custom_tags)
+            .field("test_title_bytes", &self.test_title.len())
+            .field(
+                "event_tags_bytes",
+                &self.event_tags.as_ref().map(String::len),
+            )
+            .field("custom_tags", &redact_custom_tags(&self.custom_tags))
             .field("timestamp_precision", &self.timestamp_precision)
             .finish()
     }
@@ -947,9 +1023,9 @@ impl InfluxConfig {
             token: None,
             application: application.into(),
             measurement: "jmeter".to_owned(),
-            summary_only: true,
-            sampler_filter: SamplerFilter::None,
-            percentiles: default_percentiles()?,
+            summary_only: false,
+            sampler_filter: SamplerFilter::regex_find(".*")?,
+            percentiles: influx_default_percentiles(),
             test_title: "Test name".to_owned(),
             event_tags: None,
             custom_tags: BTreeMap::new(),
@@ -994,8 +1070,8 @@ impl InfluxConfig {
     ) -> Result<Self, BackendError> {
         let name = name.into();
         let value = value.into();
-        validate_influx_text(&name, BackendResource::Tags)?;
-        validate_influx_text(&value, BackendResource::Tags)?;
+        validate_influx_text(&name, BackendConfigField::CustomTag)?;
+        validate_influx_text(&value, BackendConfigField::CustomTag)?;
         self.custom_tags.insert(name, value);
         self.validate()?;
         Ok(self)
@@ -1010,11 +1086,11 @@ impl InfluxConfig {
     pub fn validate(&self) -> Result<(), BackendError> {
         self.runtime.validate()?;
         validate_influx_url(&self.url)?;
-        validate_influx_text(&self.application, BackendResource::Tags)?;
-        validate_influx_text(&self.measurement, BackendResource::Tags)?;
-        validate_influx_text(&self.test_title, BackendResource::BodyBytes)?;
+        validate_influx_text(&self.application, BackendConfigField::Application)?;
+        validate_influx_text(&self.measurement, BackendConfigField::Measurement)?;
+        validate_influx_text_allow_empty(&self.test_title, BackendConfigField::TestTitle)?;
         if let Some(value) = &self.event_tags {
-            validate_influx_text(value, BackendResource::Tags)?;
+            validate_influx_text_allow_empty(value, BackendConfigField::EventTags)?;
         }
         if self.timestamp_precision == InfluxTimestampPrecision::Unsupported {
             return Err(BackendError::Unsupported {
@@ -1047,9 +1123,9 @@ impl Default for InfluxConfig {
             token: None,
             application: "application".to_owned(),
             measurement: "jmeter".to_owned(),
-            summary_only: true,
-            sampler_filter: SamplerFilter::None,
-            percentiles: Vec::new(),
+            summary_only: false,
+            sampler_filter: SamplerFilter::regex_find(".*").unwrap_or(SamplerFilter::None),
+            percentiles: influx_default_percentiles(),
             test_title: "Test name".to_owned(),
             event_tags: None,
             custom_tags: BTreeMap::new(),
@@ -1185,6 +1261,14 @@ fn default_percentiles() -> Result<Vec<BackendPercentile>, BackendError> {
         .collect()
 }
 
+fn influx_default_percentiles() -> Vec<BackendPercentile> {
+    vec![
+        BackendPercentile(9_900),
+        BackendPercentile(9_500),
+        BackendPercentile(9_000),
+    ]
+}
+
 fn validate_percentile_list(values: &[BackendPercentile]) -> Result<(), BackendError> {
     if values.is_empty() || values.len() > 16 {
         return Err(BackendError::InvalidConfig {
@@ -1195,7 +1279,11 @@ fn validate_percentile_list(values: &[BackendPercentile]) -> Result<(), BackendE
 }
 
 fn validate_metric_prefix(value: &str) -> Result<(), BackendError> {
-    if value.is_empty() || value.len() > 16 * 1024 || value.contains(['\n', '\r', ' ']) {
+    if value.is_empty()
+        || value.len() > MAX_BACKEND_TEXT_BYTES
+        || value.contains(' ')
+        || value.chars().any(|character| character.is_ascii_control())
+    {
         return Err(BackendError::InvalidConfig {
             field: BackendConfigField::RootMetricsPrefix,
         });
@@ -1205,8 +1293,8 @@ fn validate_metric_prefix(value: &str) -> Result<(), BackendError> {
 
 fn validate_influx_url(value: &str) -> Result<(), BackendError> {
     if value.is_empty()
-        || value.len() > 16 * 1024
-        || value.contains(['\n', '\r'])
+        || value.len() > MAX_BACKEND_TEXT_BYTES
+        || value.chars().any(|character| character.is_ascii_control())
         || !(value.starts_with("http://") || value.starts_with("https://"))
     {
         return Err(BackendError::InvalidConfig {
@@ -1216,61 +1304,90 @@ fn validate_influx_url(value: &str) -> Result<(), BackendError> {
     Ok(())
 }
 
-fn validate_influx_text(value: &str, resource: BackendResource) -> Result<(), BackendError> {
-    if value.is_empty() || value.len() > 16 * 1024 || value.contains(['\n', '\r']) {
-        return Err(BackendError::InvalidConfig {
-            field: if resource == BackendResource::Tags {
-                BackendConfigField::Application
-            } else {
-                BackendConfigField::Measurement
-            },
-        });
+fn validate_influx_text(value: &str, field: BackendConfigField) -> Result<(), BackendError> {
+    validate_influx_text_inner(value, field, false)
+}
+
+fn validate_influx_text_allow_empty(
+    value: &str,
+    field: BackendConfigField,
+) -> Result<(), BackendError> {
+    validate_influx_text_inner(value, field, true)
+}
+
+fn validate_influx_text_inner(
+    value: &str,
+    field: BackendConfigField,
+    allow_empty: bool,
+) -> Result<(), BackendError> {
+    if (!allow_empty && value.is_empty())
+        || value.len() > MAX_BACKEND_TEXT_BYTES
+        || value.chars().any(|character| character.is_ascii_control())
+    {
+        return Err(BackendError::InvalidConfig { field });
     }
     Ok(())
 }
 
+fn redact_custom_tags(tags: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    tags.iter()
+        .map(|(name, value)| (name.clone(), redact_argument(name, value)))
+        .collect()
+}
+
 fn redact_argument(name: &str, value: &str) -> String {
-    let lower = name.to_ascii_lowercase();
-    if lower.contains("token")
-        || lower.contains("password")
-        || lower.contains("secret")
-        || lower.contains("authorization")
-        || lower.contains("credential")
-    {
+    if is_sensitive_name(name) {
         "<redacted>".to_owned()
     } else {
         value.to_owned()
     }
 }
 
+fn is_sensitive_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.contains("token")
+        || lower.contains("password")
+        || lower.contains("secret")
+        || lower.contains("authorization")
+        || lower.contains("credential")
+}
+
 fn redact_url(value: &str) -> String {
     let mut redacted = value.to_owned();
     if let Some(authority_start) = redacted.find("://") {
         let host_start = authority_start + 3;
-        if let Some(path_start) = redacted[host_start..]
+        let authority_end = redacted[host_start..]
             .find(['/', '?', '#'])
-            .map(|index| host_start + index)
-        {
-            let authority = &redacted[host_start..path_start];
-            if let Some(at) = authority.rfind('@') {
-                redacted.replace_range(host_start..host_start + at + 1, "<redacted>@");
-            }
+            .map_or(redacted.len(), |index| host_start + index);
+        let authority = &redacted[host_start..authority_end];
+        if let Some(at) = authority.rfind('@') {
+            redacted.replace_range(host_start..host_start + at + 1, "<redacted>@");
         }
     }
-    for key in ["token", "password", "secret", "authorization", "credential"] {
-        let mut cursor = 0;
-        while let Some(relative) = redacted[cursor..].find(&format!("{key}=")) {
-            let start = cursor + relative + key.len() + 1;
-            let end = redacted[start..]
-                .find('&')
-                .map_or(redacted.len(), |offset| start + offset);
-            redacted.replace_range(start..end, "<redacted>");
-            cursor = start + "<redacted>".len();
-            if cursor >= redacted.len() {
-                break;
-            }
+    let Some(query_start) = redacted.find('?') else {
+        return redacted;
+    };
+    let query_end = redacted[query_start..]
+        .find('#')
+        .map_or(redacted.len(), |offset| query_start + offset);
+    let query = &redacted[query_start + 1..query_end];
+    let mut sanitized = String::with_capacity(query.len());
+    for (index, item) in query.split('&').enumerate() {
+        if index > 0 {
+            sanitized.push('&');
+        }
+        let Some(equal) = item.find('=') else {
+            sanitized.push_str(item);
+            continue;
+        };
+        sanitized.push_str(&item[..equal + 1]);
+        if is_sensitive_name(&item[..equal]) {
+            sanitized.push_str("<redacted>");
+        } else {
+            sanitized.push_str(&item[equal + 1..]);
         }
     }
+    redacted.replace_range(query_start + 1..query_end, &sanitized);
     redacted
 }
 
@@ -1296,9 +1413,30 @@ pub fn encode_graphite_plaintext(
             field: BackendConfigField::BatchBytes,
         });
     }
+    if max_line_bytes > MAX_BACKEND_BATCH_BYTES {
+        return Err(BackendError::LimitExceeded {
+            resource: BackendResource::LineBytes,
+            actual: max_line_bytes,
+            maximum: MAX_BACKEND_BATCH_BYTES,
+        });
+    }
+    if max_body_bytes > MAX_BACKEND_BATCH_BYTES {
+        return Err(BackendError::LimitExceeded {
+            resource: BackendResource::BodyBytes,
+            actual: max_body_bytes,
+            maximum: MAX_BACKEND_BATCH_BYTES,
+        });
+    }
     let mut output = Vec::new();
     for line in lines {
-        if line.path.is_empty() || line.path.contains(['\n', '\r', ' ']) || !line.value.is_finite()
+        if line.path.is_empty()
+            || line.path.len() > MAX_BACKEND_TEXT_BYTES
+            || line.path.contains(' ')
+            || line
+                .path
+                .chars()
+                .any(|character| character.is_ascii_control())
+            || !line.value.is_finite()
         {
             return Err(BackendError::Protocol);
         }
@@ -1334,7 +1472,10 @@ pub fn encode_graphite_plaintext(
 
 /// Replaces the path characters documented by JMeter's Graphite sender.
 pub fn sanitize_graphite_context(value: &str) -> Result<String, BackendError> {
-    if value.is_empty() || value.contains(['\n', '\r']) {
+    if value.is_empty()
+        || value.len() > MAX_BACKEND_TEXT_BYTES
+        || value.chars().any(|character| character.is_ascii_control())
+    {
         return Err(BackendError::Protocol);
     }
     let mut result = String::with_capacity(value.len());
@@ -1414,6 +1555,13 @@ impl InfluxPoint {
         let value = value.into();
         validate_line_text(&key, BackendResource::Tags)?;
         validate_line_text(&value, BackendResource::Tags)?;
+        if self.tags.len() >= MAX_BACKEND_TAGS {
+            return Err(BackendError::LimitExceeded {
+                resource: BackendResource::Tags,
+                actual: self.tags.len() + 1,
+                maximum: MAX_BACKEND_TAGS,
+            });
+        }
         if self.tags.iter().any(|tag| tag.key == key) {
             return Err(BackendError::Protocol);
         }
@@ -1429,14 +1577,17 @@ impl InfluxPoint {
     ) -> Result<(), BackendError> {
         let key = key.into();
         validate_line_text(&key, BackendResource::Fields)?;
+        if self.fields.len() >= MAX_BACKEND_FIELDS {
+            return Err(BackendError::LimitExceeded {
+                resource: BackendResource::Fields,
+                actual: self.fields.len() + 1,
+                maximum: MAX_BACKEND_FIELDS,
+            });
+        }
         if self.fields.iter().any(|(field, _)| field == &key) {
             return Err(BackendError::Protocol);
         }
-        if let InfluxFieldValue::Float(value) = value
-            && !value.is_finite()
-        {
-            return Err(BackendError::Protocol);
-        }
+        validate_field_value(&value)?;
         self.fields.push((key, value));
         Ok(())
     }
@@ -1453,9 +1604,24 @@ pub fn encode_influx_line_protocol(
             field: BackendConfigField::BatchBytes,
         });
     }
+    if max_line_bytes > MAX_BACKEND_BATCH_BYTES {
+        return Err(BackendError::LimitExceeded {
+            resource: BackendResource::LineBytes,
+            actual: max_line_bytes,
+            maximum: MAX_BACKEND_BATCH_BYTES,
+        });
+    }
+    if max_body_bytes > MAX_BACKEND_BATCH_BYTES {
+        return Err(BackendError::LimitExceeded {
+            resource: BackendResource::BodyBytes,
+            actual: max_body_bytes,
+            maximum: MAX_BACKEND_BATCH_BYTES,
+        });
+    }
     let mut body = Vec::new();
     for point in points {
         validate_line_text(&point.measurement, BackendResource::Tags)?;
+        validate_point_members(point)?;
         if point.fields.is_empty() {
             return Err(BackendError::Protocol);
         }
@@ -1504,13 +1670,73 @@ pub fn encode_influx_line_protocol(
     Ok(body)
 }
 
+fn validate_point_members(point: &InfluxPoint) -> Result<(), BackendError> {
+    if point.tags.len() > MAX_BACKEND_TAGS {
+        return Err(BackendError::LimitExceeded {
+            resource: BackendResource::Tags,
+            actual: point.tags.len(),
+            maximum: MAX_BACKEND_TAGS,
+        });
+    }
+    if point.fields.len() > MAX_BACKEND_FIELDS {
+        return Err(BackendError::LimitExceeded {
+            resource: BackendResource::Fields,
+            actual: point.fields.len(),
+            maximum: MAX_BACKEND_FIELDS,
+        });
+    }
+    for (index, tag) in point.tags.iter().enumerate() {
+        validate_line_text(&tag.key, BackendResource::Tags)?;
+        validate_line_text(&tag.value, BackendResource::Tags)?;
+        if point.tags[..index]
+            .iter()
+            .any(|previous| previous.key == tag.key)
+        {
+            return Err(BackendError::Protocol);
+        }
+    }
+    for (index, (key, value)) in point.fields.iter().enumerate() {
+        validate_line_text(key, BackendResource::Fields)?;
+        validate_field_value(value)?;
+        if point.fields[..index]
+            .iter()
+            .any(|(previous, _)| previous == key)
+        {
+            return Err(BackendError::Protocol);
+        }
+    }
+    Ok(())
+}
+
+fn validate_field_value(value: &InfluxFieldValue) -> Result<(), BackendError> {
+    match value {
+        InfluxFieldValue::Float(value) if !value.is_finite() => Err(BackendError::Protocol),
+        InfluxFieldValue::String(value) if value.len() > MAX_BACKEND_TEXT_BYTES => {
+            Err(BackendError::LimitExceeded {
+                resource: BackendResource::Fields,
+                actual: value.len(),
+                maximum: MAX_BACKEND_TEXT_BYTES,
+            })
+        }
+        InfluxFieldValue::String(value)
+            if value.chars().any(|character| character.is_ascii_control()) =>
+        {
+            Err(BackendError::Protocol)
+        }
+        _ => Ok(()),
+    }
+}
+
 fn validate_line_text(value: &str, resource: BackendResource) -> Result<(), BackendError> {
-    if value.is_empty() || value.len() > 16 * 1024 || value.contains(['\n', '\r']) {
+    if value.is_empty() || value.len() > MAX_BACKEND_TEXT_BYTES {
         return Err(BackendError::LimitExceeded {
             resource,
             actual: value.len(),
-            maximum: 16 * 1024,
+            maximum: MAX_BACKEND_TEXT_BYTES,
         });
+    }
+    if value.chars().any(|character| character.is_ascii_control()) {
+        return Err(BackendError::Protocol);
     }
     Ok(())
 }
@@ -1652,9 +1878,17 @@ pub fn graphite_metric_lines(
     timestamp_millis: i64,
 ) -> Result<Vec<GraphiteMetricLine>, BackendError> {
     config.validate()?;
+    validate_snapshot_bounds(snapshot)?;
     let timestamp_seconds = timestamp_millis.div_euclid(1_000);
     let mut lines = Vec::new();
     for (context, metrics) in &snapshot.contexts {
+        // Pinned Graphite addMetrics returns before writing an empty metric.
+        if metrics.all.count == 0 {
+            continue;
+        }
+        if context != "all" && (config.summary_only || !config.sampler_filter.matches(context)?) {
+            continue;
+        }
         let context = sanitize_graphite_context(context)?;
         let prefix = format!("{}{context}.", config.root_metrics_prefix);
         append_graphite_count(&mut lines, &prefix, "ok", &metrics.ok, timestamp_seconds);
@@ -1816,42 +2050,65 @@ pub fn influx_points(
     timestamp_millis: i64,
 ) -> Result<Vec<InfluxPoint>, BackendError> {
     config.validate()?;
+    validate_snapshot_bounds(snapshot)?;
     let mut points = Vec::new();
     for (transaction, metrics) in &snapshot.contexts {
-        let mut all = InfluxPoint::new(&config.measurement, Some(timestamp_millis));
-        add_common_tags(&mut all, config, transaction, "all")?;
-        add_context_fields(&mut all, metrics, &config.percentiles)?;
-        points.push(all);
-        if !config.summary_only && config.sampler_filter.matches(transaction)? {
-            append_influx_status_point(
-                &mut points,
-                config,
-                InfluxStatusSpec {
-                    transaction,
-                    status: "ok",
-                    metrics: &metrics.ok,
-                    hit_count: metrics.hit_count,
-                    sent_bytes: metrics.sent_bytes,
-                    received_bytes: metrics.received_bytes,
-                    percentiles: &config.percentiles,
-                    timestamp_millis,
-                },
-            )?;
-            append_influx_status_point(
-                &mut points,
-                config,
-                InfluxStatusSpec {
-                    transaction,
-                    status: "ko",
-                    metrics: &metrics.ko,
-                    hit_count: metrics.hit_count,
-                    sent_bytes: metrics.sent_bytes,
-                    received_bytes: metrics.received_bytes,
-                    percentiles: &config.percentiles,
-                    timestamp_millis,
-                },
-            )?;
+        // Pinned Influx addMetric/addCumulatedMetrics skip zero totals.
+        if metrics.all.count == 0 {
+            continue;
         }
+        if transaction == "all" {
+            let mut all = InfluxPoint::new(&config.measurement, Some(timestamp_millis));
+            add_common_tags(&mut all, config, transaction, "all")?;
+            add_cumulated_fields(&mut all, metrics, &config.percentiles)?;
+            points.push(all);
+            continue;
+        }
+        if config.summary_only || !config.sampler_filter.matches(transaction)? {
+            continue;
+        }
+        append_influx_status_point(
+            &mut points,
+            config,
+            InfluxStatusSpec {
+                transaction,
+                status: "all",
+                metrics: &metrics.all,
+                hit_count: metrics.hit_count,
+                sent_bytes: metrics.sent_bytes,
+                received_bytes: metrics.received_bytes,
+                percentiles: &config.percentiles,
+                timestamp_millis,
+            },
+        )?;
+        append_influx_status_point(
+            &mut points,
+            config,
+            InfluxStatusSpec {
+                transaction,
+                status: "ok",
+                metrics: &metrics.ok,
+                hit_count: metrics.hit_count,
+                sent_bytes: metrics.sent_bytes,
+                received_bytes: metrics.received_bytes,
+                percentiles: &config.percentiles,
+                timestamp_millis,
+            },
+        )?;
+        append_influx_status_point(
+            &mut points,
+            config,
+            InfluxStatusSpec {
+                transaction,
+                status: "ko",
+                metrics: &metrics.ko,
+                hit_count: metrics.hit_count,
+                sent_bytes: metrics.sent_bytes,
+                received_bytes: metrics.received_bytes,
+                percentiles: &config.percentiles,
+                timestamp_millis,
+            },
+        )?;
         for error in snapshot
             .errors
             .iter()
@@ -1891,14 +2148,41 @@ pub fn influx_points(
     for annotation in &snapshot.annotations {
         let mut point = InfluxPoint::new("events", Some(annotation.timestamp_millis));
         point.add_tag("application", &config.application)?;
-        point.add_tag("title", &config.test_title)?;
-        if let Some(tags) = &config.event_tags {
+        point.add_tag("title", "ApacheJMeter")?;
+        if let Some(tags) = &config.event_tags
+            && !tags.is_empty()
+        {
             point.add_tag("tags", tags)?;
         }
         point.add_field("text", InfluxFieldValue::String(annotation.text.clone()))?;
         points.push(point);
     }
     Ok(points)
+}
+
+fn validate_snapshot_bounds(snapshot: &BackendMetricsSnapshot) -> Result<(), BackendError> {
+    if snapshot.contexts.len() > DEFAULT_BACKEND_MAX_CONTEXTS {
+        return Err(BackendError::LimitExceeded {
+            resource: BackendResource::MetricContexts,
+            actual: snapshot.contexts.len(),
+            maximum: DEFAULT_BACKEND_MAX_CONTEXTS,
+        });
+    }
+    if snapshot.errors.len() > 4_096 {
+        return Err(BackendError::LimitExceeded {
+            resource: BackendResource::ErrorKeys,
+            actual: snapshot.errors.len(),
+            maximum: 4_096,
+        });
+    }
+    if snapshot.annotations.len() > DEFAULT_BACKEND_MAX_ANNOTATIONS {
+        return Err(BackendError::LimitExceeded {
+            resource: BackendResource::BodyBytes,
+            actual: snapshot.annotations.len(),
+            maximum: DEFAULT_BACKEND_MAX_ANNOTATIONS,
+        });
+    }
+    Ok(())
 }
 
 fn append_influx_error_point(
@@ -1966,20 +2250,37 @@ fn append_influx_status_point(
     Ok(())
 }
 
-fn add_context_fields(
+fn add_cumulated_fields(
     point: &mut InfluxPoint,
     context: &BackendContextSnapshot,
     percentiles: &[BackendPercentile],
 ) -> Result<(), BackendError> {
-    add_status_fields(
-        point,
-        &context.all,
-        context.hit_count,
-        context.sent_bytes,
-        context.received_bytes,
-        Some(context.error_count),
-        percentiles,
-    )
+    point.add_field("count", InfluxFieldValue::Unsigned(context.all.count))?;
+    point.add_field(
+        "countError",
+        InfluxFieldValue::Unsigned(context.error_count),
+    )?;
+    if let Some(value) = context.ok.average_millis {
+        point.add_field("avg", InfluxFieldValue::Float(value))?;
+    }
+    if let Some(value) = context.ok.min_millis {
+        point.add_field("min", InfluxFieldValue::Unsigned(value))?;
+    }
+    if let Some(value) = context.ok.max_millis {
+        point.add_field("max", InfluxFieldValue::Unsigned(value))?;
+    }
+    point.add_field("hit", InfluxFieldValue::Unsigned(context.hit_count))?;
+    point.add_field("sb", InfluxFieldValue::Unsigned(context.sent_bytes))?;
+    point.add_field("rb", InfluxFieldValue::Unsigned(context.received_bytes))?;
+    for percentile in percentiles {
+        if let Some(value) = context.all.percentiles.get(percentile) {
+            point.add_field(
+                format!("pct{}", percentile.influx_suffix()),
+                InfluxFieldValue::Float(*value),
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn add_status_fields(
@@ -2278,7 +2579,7 @@ impl BackendListener {
             return Err(error);
         }
         self.sender_started = true;
-        let due = match self.next_deadline() {
+        let due = match self.initial_deadline() {
             Ok(due) => due,
             Err(error) => {
                 let _ = self.sender.teardown();
@@ -2333,7 +2634,11 @@ impl BackendListener {
                 BackendError::QueueClosed
             });
         }
-        let estimated_bytes = estimate_event_bytes(&event)?;
+        let estimated_bytes = estimate_event_bytes(&event);
+        let next_sequence = self
+            .next_sequence
+            .checked_add(1)
+            .ok_or(BackendError::Overflow)?;
         let queue = &self.runtime_config.queue;
         if self.queue.len() >= queue.capacity
             || self
@@ -2359,10 +2664,7 @@ impl BackendListener {
             event,
             estimated_bytes,
         });
-        self.next_sequence = self
-            .next_sequence
-            .checked_add(1)
-            .ok_or(BackendError::Overflow)?;
+        self.next_sequence = next_sequence;
         Ok(EnqueueOutcome::Accepted)
     }
 
@@ -2412,26 +2714,42 @@ impl BackendListener {
             return Ok(FlushOutcome::Idle);
         }
         let queue_config = &self.runtime().queue;
-        let take = self.queue.len().min(queue_config.batch_capacity);
-        let mut candidate = self.metrics.clone();
-        let now = self.clock.now_millis();
+        let mut take = 0_usize;
         let mut batch_bytes = 0_usize;
-        for queued in self.queue.iter().take(take) {
-            batch_bytes = batch_bytes
+        for queued in self.queue.iter().take(queue_config.batch_capacity) {
+            let next_bytes = batch_bytes
                 .checked_add(queued.estimated_bytes)
                 .ok_or(BackendError::Overflow)?;
-            candidate.record(&queued.event, now, self.selection(), self.runtime().window)?;
+            if next_bytes > queue_config.batch_bytes {
+                if take == 0 {
+                    return Err(BackendError::LimitExceeded {
+                        resource: BackendResource::BatchBytes,
+                        actual: next_bytes,
+                        maximum: queue_config.batch_bytes,
+                    });
+                }
+                break;
+            }
+            batch_bytes = next_bytes;
+            take += 1;
         }
-        if batch_bytes > queue_config.batch_bytes {
-            return Err(BackendError::LimitExceeded {
-                resource: BackendResource::BatchBytes,
-                actual: batch_bytes,
-                maximum: queue_config.batch_bytes,
-            });
+        let mut candidate = self.metrics.clone();
+        let now = self.clock.now_millis();
+        for queued in self.queue.iter().take(take) {
+            candidate.record(&queued.event, now, self.selection(), self.runtime().window)?;
         }
         let snapshot = candidate.snapshot(now, self.percentiles())?;
         let payload = self.payload(&snapshot, now)?;
-        self.sender.send(&payload)?;
+        let mut retries = 0_usize;
+        loop {
+            match self.sender.send(&payload) {
+                Ok(()) => break,
+                Err(error) if error.retryable() && retries < self.runtime().max_retries => {
+                    retries = retries.checked_add(1).ok_or(BackendError::Overflow)?;
+                }
+                Err(error) => return Err(error),
+            }
+        }
         for _ in 0..take {
             if let Some(queued) = self.queue.pop_front() {
                 self.queue_bytes = self
@@ -2682,71 +3000,24 @@ impl BackendListener {
             .checked_add(interval)
             .ok_or(BackendError::Overflow)
     }
+
+    fn initial_deadline(&self) -> Result<i64, BackendError> {
+        match &self.endpoint {
+            BackendEndpoint::Influx(_) => Ok(self.clock.now_millis()),
+            BackendEndpoint::Graphite(_) | BackendEndpoint::Java(_) => self.next_deadline(),
+        }
+    }
 }
 
-fn estimate_event_bytes(event: &SampleEvent) -> Result<usize, BackendError> {
-    fn result_bytes(result: &SampleResult, depth: usize) -> Result<usize, BackendError> {
-        if depth > 128 {
-            return Err(BackendError::LimitExceeded {
-                resource: BackendResource::EventBytes,
-                actual: depth,
-                maximum: 128,
-            });
-        }
-        let mut size = 64_usize;
-        for amount in [
-            result.label().len(),
-            result.response_code().map_or(0, str::len),
-            result.response_message().map_or(0, str::len),
-            result.failure_message().map_or(0, str::len),
-            result.sampler_data().map_or(0, str::len),
-            result.response_file().map_or(0, str::len),
-            result.url().map_or(0, str::len),
-            result.request_data().map_or(0, |value| value.len()),
-            result.response_data().map_or(0, |value| value.len()),
-            result
-                .request_headers()
-                .map_or(0, |value| value.as_str().len()),
-            result
-                .response_headers()
-                .map_or(0, |value| value.as_str().len()),
-        ] {
-            size = size.checked_add(amount).ok_or(BackendError::Overflow)?;
-        }
-        for assertion in result.assertions() {
-            for amount in [
-                assertion.name().len(),
-                assertion.failure_message().map_or(0, str::len),
-                assertion.error_message().map_or(0, str::len),
-            ] {
-                size = size.checked_add(amount).ok_or(BackendError::Overflow)?;
-            }
-        }
-        for child in result.sub_results() {
-            size = size
-                .checked_add(result_bytes(child, depth + 1)?)
-                .ok_or(BackendError::Overflow)?;
-        }
-        Ok(size)
-    }
-    let mut size = result_bytes(event.result(), 0)?;
-    for amount in [
-        event.run().as_str().len(),
-        event.thread().name().len(),
-        event.thread().group().map_or(0, str::len),
-        event.host().as_str().len(),
-    ] {
-        size = size.checked_add(amount).ok_or(BackendError::Overflow)?;
-    }
-    for (name, value) in event.variables().iter() {
-        size = size.checked_add(name.len()).ok_or(BackendError::Overflow)?;
-        if let Some(value) = value.as_str() {
-            size = size
-                .checked_add(value.len())
-                .ok_or(BackendError::Overflow)?;
-        }
-    }
-    Ok(size)
+fn estimate_event_bytes(event: &SampleEvent) -> usize {
+    // `SampleEvent::estimated_bytes` includes fixed Rust object layout in
+    // addition to dynamic payload bytes. Queue limits describe retained event
+    // content, so remove the root container overhead while retaining every
+    // string/data/extension byte accounted for by `results`.
+    event
+        .estimated_bytes()
+        .saturating_sub(std::mem::size_of::<SampleEvent>())
+        .saturating_sub(std::mem::size_of::<SampleResult>())
 }
 
 #[derive(Clone, Copy)]
@@ -2922,8 +3193,7 @@ impl ContextState {
     }
 
     fn add(&mut self, result: &SampleResult, now: i64) -> Result<(), BackendError> {
-        let counts =
-            represented_counts(result, CountMode::Weighted).map_err(|_| BackendError::Protocol)?;
+        let counts = backend_weighted_counts(result)?;
         let count = counts.samples;
         if count == 0 {
             return Err(BackendError::Protocol);
@@ -2979,6 +3249,32 @@ impl ContextState {
         self.received_bytes = 0;
         self.error_count = 0;
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct BackendWeightedCounts {
+    samples: u64,
+    errors: u64,
+}
+
+fn backend_weighted_counts(result: &SampleResult) -> Result<BackendWeightedCounts, BackendError> {
+    let counts =
+        represented_counts(result, CountMode::Weighted).map_err(|_| BackendError::Protocol)?;
+    // `SampleResult::error_count` derives one error from an ordinary failed
+    // sample when the wire omits `ec`. JMeter's backend listener treats that
+    // ordinary result as a failed sample, not as an explicit partial count
+    // over a statistical batch. Preserve the wire-presence distinction so an
+    // explicit `ec=1` on a weighted row still follows the typed unsupported
+    // path below when its timing cannot be attributed by status.
+    let errors = if result.success() == Some(false) && !result.has_explicit_error_count() {
+        counts.samples
+    } else {
+        counts.errors
+    };
+    Ok(BackendWeightedCounts {
+        samples: counts.samples,
+        errors,
+    })
 }
 
 fn hit_count(result: &SampleResult) -> Result<u64, BackendError> {
@@ -3056,6 +3352,12 @@ impl MetricState {
         _window: BackendWindowConfig,
     ) -> Result<(), BackendError> {
         let label = event.result().label().to_owned();
+        if label.is_empty()
+            || label.len() > MAX_BACKEND_TEXT_BYTES
+            || label.chars().any(|character| character.is_ascii_control())
+        {
+            return Err(BackendError::Protocol);
+        }
         let include_detail = !selection.summary_only && selection.filter.matches(&label)?;
         let mut labels = Vec::new();
         labels.push("all".to_owned());
@@ -3079,9 +3381,7 @@ impl MetricState {
             entry.add(event.result(), now)?;
         }
         let result = event.result();
-        let count = represented_counts(result, CountMode::Weighted)
-            .map_err(|_| BackendError::Protocol)?
-            .errors;
+        let count = backend_weighted_counts(result)?.errors;
         if count > 0 {
             let response_code = result
                 .response_code()
@@ -3433,5 +3733,338 @@ impl RepeatContext<'_> {
             self.walk(next, count + 1)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn influx_defaults_match_pinned_listener_arguments() {
+        let config = InfluxConfig::new("http://127.0.0.1:8086/write?db=jmeter", "application")
+            .expect("default Influx configuration");
+        assert!(!config.summary_only);
+        assert!(config.sampler_filter.matches("any sampler").unwrap());
+        assert_eq!(
+            config
+                .percentiles
+                .iter()
+                .map(|percentile| percentile.influx_suffix())
+                .collect::<Vec<_>>(),
+            ["99.0", "95.0", "90.0"]
+        );
+    }
+
+    #[test]
+    fn custom_tag_debug_redacts_sensitive_values() {
+        let config = InfluxConfig::new("https://example.invalid/write", "application")
+            .expect("configuration")
+            .with_custom_tag("TAG_apiToken", "secret-value")
+            .expect("custom tag");
+        let debug = format!("{config:?}");
+        assert!(!debug.contains("secret-value"));
+        assert!(debug.contains("<redacted>"));
+    }
+
+    #[test]
+    fn zero_contexts_are_not_emitted_as_backend_metrics() {
+        let mut snapshot = BackendMetricsSnapshot::default();
+        snapshot
+            .contexts
+            .insert("empty".to_owned(), BackendContextSnapshot::default());
+        let graphite = GraphiteConfig::new("127.0.0.1", 2_003).expect("configuration");
+        assert!(
+            graphite_metric_lines(&graphite, &snapshot, 1_704_067_200_000)
+                .expect("Graphite lines")
+                .is_empty()
+        );
+        let influx = InfluxConfig::new("http://127.0.0.1:8086/write?db=jmeter", "application")
+            .expect("configuration");
+        assert!(
+            influx_points(&influx, &snapshot, 1_704_067_200_000)
+                .expect("Influx points")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn public_snapshot_encoders_reject_unbounded_context_maps() {
+        let mut snapshot = BackendMetricsSnapshot::default();
+        for index in 0..=DEFAULT_BACKEND_MAX_CONTEXTS {
+            snapshot.contexts.insert(
+                format!("context-{index}"),
+                BackendContextSnapshot::default(),
+            );
+        }
+        let graphite = GraphiteConfig::new("127.0.0.1", 2_003).expect("configuration");
+        let graphite_error = graphite_metric_lines(&graphite, &snapshot, 1_704_067_200_000)
+            .expect_err("context map must be bounded");
+        assert!(matches!(
+            graphite_error,
+            BackendError::LimitExceeded {
+                resource: BackendResource::MetricContexts,
+                actual,
+                maximum: DEFAULT_BACKEND_MAX_CONTEXTS,
+            } if actual == DEFAULT_BACKEND_MAX_CONTEXTS + 1
+        ));
+        let influx = InfluxConfig::new("http://127.0.0.1:8086/write?db=jmeter", "application")
+            .expect("configuration");
+        let influx_error = influx_points(&influx, &snapshot, 1_704_067_200_000)
+            .expect_err("context map must be bounded");
+        assert!(matches!(
+            influx_error,
+            BackendError::LimitExceeded {
+                resource: BackendResource::MetricContexts,
+                actual,
+                maximum: DEFAULT_BACKEND_MAX_CONTEXTS,
+            } if actual == DEFAULT_BACKEND_MAX_CONTEXTS + 1
+        ));
+    }
+
+    #[test]
+    fn influx_cumulative_fields_use_success_timing_and_all_percentiles() {
+        let percentile = BackendPercentile::from_percent(99.0).expect("percentile");
+        let mut ok = BackendStatusSnapshot {
+            count: 1,
+            min_millis: Some(10),
+            max_millis: Some(20),
+            average_millis: Some(15.0),
+            ..BackendStatusSnapshot::default()
+        };
+        ok.percentiles.insert(percentile, 17.0);
+        let mut all = BackendStatusSnapshot {
+            count: 2,
+            min_millis: Some(1),
+            max_millis: Some(99),
+            average_millis: Some(50.0),
+            ..BackendStatusSnapshot::default()
+        };
+        all.percentiles.insert(percentile, 88.0);
+        let mut snapshot = BackendMetricsSnapshot::default();
+        snapshot.contexts.insert(
+            "all".to_owned(),
+            BackendContextSnapshot {
+                ok,
+                all,
+                hit_count: 2,
+                sent_bytes: 3,
+                received_bytes: 4,
+                error_count: 1,
+                ..BackendContextSnapshot::default()
+            },
+        );
+        let config = InfluxConfig::new("http://127.0.0.1:8086/write?db=jmeter", "application")
+            .expect("configuration");
+        let points = influx_points(&config, &snapshot, 1_704_067_200_000).expect("points");
+        let body = String::from_utf8(
+            encode_influx_line_protocol(&points, 4_096, 16_384).expect("line protocol"),
+        )
+        .expect("UTF-8 body");
+        assert!(body.contains("count=2u,countError=1u,avg=15"));
+        assert!(body.contains("min=10u,max=20u"));
+        assert!(body.contains("pct99.0=88"));
+    }
+
+    #[test]
+    fn influx_detail_rows_use_all_ok_ko_without_cumulative_error_field() {
+        let status = BackendStatusSnapshot {
+            count: 1,
+            min_millis: Some(10),
+            max_millis: Some(10),
+            average_millis: Some(10.0),
+            ..BackendStatusSnapshot::default()
+        };
+        let mut snapshot = BackendMetricsSnapshot::default();
+        snapshot.contexts.insert(
+            "all".to_owned(),
+            BackendContextSnapshot {
+                ok: status.clone(),
+                all: status.clone(),
+                hit_count: 1,
+                error_count: 0,
+                ..BackendContextSnapshot::default()
+            },
+        );
+        snapshot.contexts.insert(
+            "backend/login".to_owned(),
+            BackendContextSnapshot {
+                ok: status.clone(),
+                ko: status.clone(),
+                all: status,
+                hit_count: 1,
+                ..BackendContextSnapshot::default()
+            },
+        );
+        let config = InfluxConfig::new("http://127.0.0.1:8086/write?db=jmeter", "application")
+            .expect("configuration")
+            .with_summary_only(false)
+            .with_sampler_filter(SamplerFilter::exact(["backend/login"]).expect("filter"));
+        let points = influx_points(&config, &snapshot, 1_704_067_200_000).expect("points");
+        assert_eq!(points.len(), 4);
+        assert_eq!(points[0].tags[1].value, "all");
+        assert_eq!(points[1].tags[1].value, "backend/login");
+        assert_eq!(points[1].tags[2].value, "all");
+        assert_eq!(points[2].tags[2].value, "ok");
+        assert_eq!(points[3].tags[2].value, "ko");
+        assert!(
+            !points[1]
+                .fields
+                .iter()
+                .any(|(name, _)| name == "countError")
+        );
+    }
+
+    #[test]
+    fn influx_point_limits_tags_and_rejects_control_text() {
+        let mut point = InfluxPoint::new("jmeter", None);
+        for index in 0..MAX_BACKEND_TAGS {
+            point
+                .add_tag(format!("tag{index}"), "value")
+                .expect("bounded tag");
+        }
+        assert!(matches!(
+            point.add_tag("one-too-many", "value"),
+            Err(BackendError::LimitExceeded {
+                resource: BackendResource::Tags,
+                ..
+            })
+        ));
+        assert_eq!(
+            InfluxPoint::new("jmeter", None).add_tag("bad\0key", "value"),
+            Err(BackendError::Protocol)
+        );
+    }
+
+    #[test]
+    fn public_queue_and_window_limits_reject_unbounded_values() {
+        assert!(matches!(
+            BackendQueueConfig::new(usize::MAX, 1, 1, 1),
+            Err(BackendError::LimitExceeded {
+                resource: BackendResource::QueueItems,
+                actual: usize::MAX,
+                maximum: MAX_BACKEND_QUEUE_CAPACITY,
+            })
+        ));
+        assert!(matches!(
+            BackendQueueConfig::new(1, usize::MAX, 1, 1),
+            Err(BackendError::LimitExceeded {
+                resource: BackendResource::QueueBytes,
+                actual: usize::MAX,
+                maximum: MAX_BACKEND_QUEUE_BYTES,
+            })
+        ));
+        assert!(matches!(
+            BackendQueueConfig::new(1, 1, usize::MAX, 1),
+            Err(BackendError::LimitExceeded {
+                resource: BackendResource::BatchItems,
+                actual: usize::MAX,
+                maximum: MAX_BACKEND_BATCH_CAPACITY,
+            })
+        ));
+        assert!(matches!(
+            BackendQueueConfig::new(1, 1, 1, usize::MAX),
+            Err(BackendError::LimitExceeded {
+                resource: BackendResource::BatchBytes,
+                actual: usize::MAX,
+                maximum: MAX_BACKEND_BATCH_BYTES,
+            })
+        ));
+        assert!(matches!(
+            BackendWindowConfig::fixed(usize::MAX),
+            Err(BackendError::LimitExceeded {
+                resource: BackendResource::PercentileSamples,
+                actual: usize::MAX,
+                maximum: MAX_BACKEND_WINDOW_SAMPLES,
+            })
+        ));
+        assert!(matches!(
+            encode_graphite_plaintext(&[], 1, usize::MAX),
+            Err(BackendError::LimitExceeded {
+                resource: BackendResource::BodyBytes,
+                actual: usize::MAX,
+                maximum: MAX_BACKEND_BATCH_BYTES,
+            })
+        ));
+        assert!(matches!(
+            encode_influx_line_protocol(&[], 1, usize::MAX),
+            Err(BackendError::LimitExceeded {
+                resource: BackendResource::BodyBytes,
+                actual: usize::MAX,
+                maximum: MAX_BACKEND_BATCH_BYTES,
+            })
+        ));
+    }
+
+    #[test]
+    fn retryable_sender_failures_retry_within_the_configured_budget() {
+        struct RetrySender {
+            attempts: usize,
+        }
+
+        impl BackendSender for RetrySender {
+            fn setup(&mut self, _endpoint: &BackendEndpoint) -> Result<(), BackendError> {
+                Ok(())
+            }
+
+            fn send(&mut self, _payload: &BackendPayload) -> Result<(), BackendError> {
+                self.attempts += 1;
+                if self.attempts == 1 {
+                    Err(BackendError::Transport {
+                        kind: BackendTransportErrorKind::Write,
+                        retryable: true,
+                    })
+                } else {
+                    Ok(())
+                }
+            }
+
+            fn teardown(&mut self) -> Result<(), BackendError> {
+                Ok(())
+            }
+        }
+
+        struct Clock;
+        impl BackendClock for Clock {
+            fn now_millis(&self) -> i64 {
+                1_704_067_200_000
+            }
+        }
+
+        struct Scheduler;
+        impl BackendScheduler for Scheduler {
+            fn schedule(&mut self, _at_millis: i64) -> Result<(), BackendError> {
+                Ok(())
+            }
+
+            fn cancel(&mut self) -> Result<(), BackendError> {
+                Ok(())
+            }
+        }
+
+        let mut config = GraphiteConfig::new("127.0.0.1", 2_003).expect("configuration");
+        config.runtime.max_retries = 1;
+        config.runtime.queue.batch_capacity = 1;
+        let mut listener = BackendListener::new(
+            BackendEndpoint::Graphite(config),
+            Box::new(RetrySender { attempts: 0 }),
+            Box::new(Clock),
+            Box::new(Scheduler),
+        )
+        .expect("listener");
+        listener.start().expect("start");
+        listener
+            .enqueue(SampleEvent::new(
+                SampleResult::new("retry"),
+                "run",
+                "thread",
+                "host",
+                jmeter_rs_results::VariableSnapshot::new(),
+            ))
+            .expect("enqueue");
+        assert_eq!(listener.flush(), Ok(FlushOutcome::Sent { events: 1 }));
+        assert_eq!(listener.queued_events(), 0);
+        listener.finish().expect("finish");
     }
 }

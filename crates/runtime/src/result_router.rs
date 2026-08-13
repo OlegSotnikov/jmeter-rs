@@ -21,12 +21,15 @@
     reason = "legacy lifecycle adapters remain callable until consolidation adopts revision 3"
 )]
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::future::{self, Future};
+use std::num::NonZeroU64;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::Waker;
+use std::time::Duration;
 
 use jmeter_rs_model::NodeId;
 use jmeter_rs_results::{
@@ -65,6 +68,12 @@ const MAX_TYPED_PLAN_PATH: usize = 4_096;
 const MAX_LEDGER_TRANSITIONS: usize = 1_000_000;
 const MAX_IDENTITY_TEXT_BYTES: usize = 4_096;
 const MAX_PROFILE_CAPABILITIES: usize = 4_096;
+
+// A sink queue cannot require more transition records than the bounded
+// ledger can retain.  Keeping this admission bound explicit also prevents a
+// trusted but nonsensical `usize::MAX` queue setting from turning a run into
+// an effectively unbounded resource reservation.
+const MAX_TYPED_QUEUE_ITEMS: usize = MAX_LEDGER_TRANSITIONS / 2;
 
 /// Appends a length-delimited field tag.  Every canonical identity and
 /// payload field uses this helper so adjacent values cannot be confused with
@@ -134,7 +143,88 @@ fn append_optional_canonical_i64(value: &mut Vec<u8>, tag: &[u8], number: Option
     }
 }
 
+fn redact_diagnostic(mut value: String) -> String {
+    // Sink and ledger diagnostics can originate at an effectful adapter.  Do
+    // not retain the common credential-shaped fields even when an adapter
+    // accidentally includes them in an error.  This deliberately stays
+    // dependency-free and deterministic; it is not intended to parse a
+    // general configuration language.
+    const SECRET_KEYS: [&str; 9] = [
+        "password",
+        "passwd",
+        "token",
+        "secret",
+        "authorization",
+        "api_key",
+        "apikey",
+        "access_key",
+        "client_secret",
+    ];
+    // Bound the scan before cloning so a misbehaving adapter cannot make the
+    // redaction pass retain an unbounded second copy of its diagnostic.
+    let scan_limit = MAX_DIAGNOSTIC_BYTES.saturating_add(256);
+    if value.len() > scan_limit {
+        let mut end = scan_limit;
+        while end > 0 && !value.is_char_boundary(end) {
+            end -= 1;
+        }
+        value.truncate(end);
+    }
+    let original = value.clone();
+    let mut output = String::with_capacity(original.len());
+    let mut cursor = 0;
+    while cursor < original.len() {
+        let Some(relative) = original[cursor..]
+            .find(|character: char| character.is_ascii_alphabetic() || character == '_')
+        else {
+            output.push_str(&original[cursor..]);
+            break;
+        };
+        let start = cursor + relative;
+        output.push_str(&original[cursor..start]);
+        let end = original[start..]
+            .find(|character: char| {
+                !(character.is_ascii_alphanumeric() || character == '_' || character == '-')
+            })
+            .map_or(original.len(), |offset| start + offset);
+        let word = &original[start..end];
+        let lower = word.to_ascii_lowercase();
+        let is_boundary = start == 0
+            || !original[..start]
+                .chars()
+                .next_back()
+                .is_some_and(|character| character.is_ascii_alphanumeric() || character == '_');
+        let key = SECRET_KEYS
+            .iter()
+            .find(|candidate| lower.eq_ignore_ascii_case(candidate));
+        let after = &original[end..];
+        let separator = after
+            .chars()
+            .next()
+            .filter(|character| *character == '=' || *character == ':');
+        if is_boundary && key.is_some() && separator.is_some() {
+            output.push_str(word);
+            output.push(after.chars().next().unwrap_or('='));
+            output.push_str("<redacted>");
+            let mut skip = end + 1;
+            while skip < original.len()
+                && !matches!(original.as_bytes()[skip], b' ' | b'\t' | b',' | b';' | b')')
+            {
+                skip += 1;
+            }
+            cursor = skip;
+        } else {
+            output.push_str(word);
+            cursor = end;
+        }
+    }
+    value.clear();
+    value.push_str(&output);
+    value
+}
+
 fn bounded_text_with_limit(mut value: String, limit: usize) -> String {
+    value = redact_diagnostic(value);
     if value.len() <= limit {
         return value;
     }
@@ -232,6 +322,8 @@ pub enum IdentityError {
     Collision,
     /// A canonical identity list was not sorted or contained a duplicate.
     NonCanonical { field: &'static str },
+    /// Checked accounting for an identity or immutable envelope overflowed.
+    Overflow { field: &'static str },
 }
 
 impl fmt::Display for IdentityError {
@@ -248,6 +340,7 @@ impl fmt::Display for IdentityError {
             Self::NonCanonical { field } => {
                 write!(formatter, "identity.{field}.non-canonical")
             }
+            Self::Overflow { field } => write!(formatter, "identity.{field}.overflow"),
         }
     }
 }
@@ -1716,16 +1809,46 @@ pub enum BudgetError {
     RetryBudgetExhausted,
     /// The requested duration could not be represented by the clock domain.
     DeadlineOverflow,
+    /// The fallible monotonic clock could not produce a reading.
+    Clock(ResultClockError),
+    /// The operation window was zero and therefore could not own a pending
+    /// operation.
+    ZeroOperationWindow,
+    /// The run-owned operation identity allocator exhausted its checked
+    /// non-zero domain.
+    OperationIdExhausted,
+    /// A checked attempt ordinal could not be represented.
+    AttemptOrdinalOverflow,
+    /// The application wait registrar rejected this operation's exact wait.
+    Wait(ResultWaitError),
+    /// A sink is outside the authority's bound run or selected sink set.
+    ScopeMismatch,
+    /// Finalization was requested more than once with a different authority
+    /// state.
+    FinalizationAlreadyStarted,
 }
 
 impl fmt::Display for BudgetError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::Cancelled => "result.budget.cancelled",
-            Self::Expired => "result.budget.expired",
-            Self::RetryBudgetExhausted => "result.budget.retry-exhausted",
-            Self::DeadlineOverflow => "result.budget.deadline-overflow",
-        })
+        match self {
+            Self::Clock(error) => error.fmt(formatter),
+            Self::Cancelled => formatter.write_str("result.budget.cancelled"),
+            Self::Expired => formatter.write_str("result.budget.expired"),
+            Self::RetryBudgetExhausted => formatter.write_str("result.budget.retry-exhausted"),
+            Self::DeadlineOverflow => formatter.write_str("result.budget.deadline-overflow"),
+            Self::ZeroOperationWindow => formatter.write_str("result.budget.zero-operation-window"),
+            Self::OperationIdExhausted => {
+                formatter.write_str("result.budget.operation-id-exhausted")
+            }
+            Self::AttemptOrdinalOverflow => {
+                formatter.write_str("result.budget.attempt-ordinal-overflow")
+            }
+            Self::Wait(error) => error.fmt(formatter),
+            Self::ScopeMismatch => formatter.write_str("result.budget.scope-mismatch"),
+            Self::FinalizationAlreadyStarted => {
+                formatter.write_str("result.budget.finalization-already-started")
+            }
+        }
     }
 }
 
@@ -1740,7 +1863,7 @@ pub trait MonotonicClock {
 
 /// A caller-owned cancellation source.  Registration is advisory: callers
 /// must still call [`RunOperationBudget::check`] at every bounded boundary.
-pub trait CancellationSignal {
+pub trait CancellationSignal: Send + Sync {
     /// Returns whether cancellation has been requested.
     fn is_cancelled(&self) -> bool;
 
@@ -1797,7 +1920,10 @@ impl<'a> RunOperationBudget<'a> {
         let deadline = self
             .phase_deadline_ticks
             .map_or(self.deadline_ticks, |phase| phase.min(self.deadline_ticks));
-        deadline.saturating_sub(self.clock.now_ticks())
+        match deadline.checked_sub(self.clock.now_ticks()) {
+            Some(remaining) => remaining,
+            None => 0,
+        }
     }
 
     /// Returns the shared retry budget without resetting it.
@@ -1845,6 +1971,908 @@ pub trait BudgetedOperation {
         &'operation self,
         budget: &'operation mut RunOperationBudget<'budget>,
     ) -> BudgetedFuture<'operation, ()>;
+}
+
+// ---------------------------------------------------------------------------
+// Decision 0015: run-owned result-delivery liveness
+// ---------------------------------------------------------------------------
+//
+// `RunOperationBudget` above is retained as a deprecated compatibility seam
+// for older embedders.  It must not be used by the typed production router:
+// its borrowed shape and one absolute deadline describe the superseded
+// arbitrary run-start budget.  The types below make the authority explicit,
+// share retry accounting through one allocation, and give every semantic
+// operation one finite, non-refreshing lease.
+
+/// A fallible error from the run's monotonic clock.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ResultClockError {
+    /// The clock provider could not produce a reading.
+    Unavailable,
+    /// A provider returned a reading earlier than its previous reading.
+    Reversed {
+        /// The last accepted reading.
+        previous: crate::MonotonicInstant,
+        /// The invalid reading.
+        current: crate::MonotonicInstant,
+    },
+    /// The provider returned a value that could not be represented in the
+    /// shared monotonic domain.
+    Overflow,
+}
+
+impl fmt::Display for ResultClockError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unavailable => formatter.write_str("result.clock.unavailable"),
+            Self::Reversed { .. } => formatter.write_str("result.clock.reversed"),
+            Self::Overflow => formatter.write_str("result.clock.overflow"),
+        }
+    }
+}
+
+impl std::error::Error for ResultClockError {}
+
+/// Supplies the one monotonic time domain used by all result operations.
+///
+/// The trait is intentionally fallible.  A sink must not turn a failed clock
+/// read into a large deadline or otherwise continue with an invented time.
+pub trait ResultMonotonicClock: Send + Sync {
+    /// Reads the current absolute monotonic instant.
+    fn now(&self) -> Result<crate::MonotonicInstant, ResultClockError>;
+}
+
+impl<F> ResultMonotonicClock for F
+where
+    F: Fn() -> Result<crate::MonotonicInstant, ResultClockError> + Send + Sync,
+{
+    fn now(&self) -> Result<crate::MonotonicInstant, ResultClockError> {
+        self()
+    }
+}
+
+/// Compatibility alias for callers that prefer the decision's terminology.
+pub use ResultMonotonicClock as FallibleMonotonicClock;
+
+/// The semantic operation whose liveness is bounded by one lease.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ResultOperationKind {
+    /// Sink startup/readiness handshake.
+    Start,
+    /// Queue admission blocked by a full sink.
+    AdmissionBackpressure,
+    /// Processing one event for one sink, including retries.
+    Process,
+    /// Flushing accepted sink data.
+    Flush,
+    /// Finishing/closing one sink.
+    Finish,
+    /// Recovering one result transaction.
+    Recovery,
+}
+
+/// The run and selected sink scope owned by a result-delivery authority.
+///
+/// A sink-set scope is used for run-wide admission and finalization work. A
+/// sink scope is allocated for effectful work against one qualified sink. The
+/// authority validates the sink binding before allocating the operation ID,
+/// so a provider cannot accidentally wait under another sink's identity.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ResultOperationScope {
+    /// The selected sink set for one run and plan generation.
+    SinkSet {
+        /// Run identity.
+        run: TypedRunId,
+        /// Selected sink-plan generation.
+        sink_plan_generation: SinkPlanGeneration,
+    },
+    /// One sink in the selected set.
+    Sink {
+        /// Run identity.
+        run: TypedRunId,
+        /// Fully qualified sink identity.
+        sink: QualifiedSinkId,
+    },
+}
+
+impl ResultOperationScope {
+    /// Creates the run-wide selected sink-set scope.
+    #[must_use]
+    pub const fn sink_set(run: TypedRunId, sink_plan_generation: SinkPlanGeneration) -> Self {
+        Self::SinkSet {
+            run,
+            sink_plan_generation,
+        }
+    }
+
+    /// Returns the run identity bound to this scope.
+    #[must_use]
+    pub const fn run(self) -> TypedRunId {
+        match self {
+            Self::SinkSet { run, .. } | Self::Sink { run, .. } => run,
+        }
+    }
+
+    /// Returns whether this scope contains the qualified sink.
+    #[must_use]
+    pub fn contains(self, sink: QualifiedSinkId) -> bool {
+        match self {
+            Self::SinkSet {
+                run,
+                sink_plan_generation,
+            } => sink.run_id() == run && sink.sink_plan_generation() == sink_plan_generation,
+            Self::Sink {
+                run,
+                sink: selected,
+            } => run == sink.run_id() && selected == sink,
+        }
+    }
+
+    /// Narrows a selected sink-set scope to one sink.
+    fn for_sink(self, sink: QualifiedSinkId) -> Option<Self> {
+        if self.contains(sink) {
+            Some(Self::Sink {
+                run: self.run(),
+                sink,
+            })
+        } else {
+            None
+        }
+    }
+}
+
+impl ResultOperationKind {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Start => "start",
+            Self::AdmissionBackpressure => "admission-backpressure",
+            Self::Process => "process",
+            Self::Flush => "flush",
+            Self::Finish => "finish",
+            Self::Recovery => "recovery",
+        }
+    }
+}
+
+/// Explicit finite windows admitted for each result operation kind.
+///
+/// No `Default` implementation is provided deliberately: a production run
+/// must select its operation policy explicitly and no value here limits the
+/// duration of the load test itself.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ResultOperationWindows {
+    start: Duration,
+    admission_backpressure: Duration,
+    process: Duration,
+    flush: Duration,
+    finish: Duration,
+    recovery: Duration,
+    finalization: Duration,
+}
+
+impl ResultOperationWindows {
+    /// Creates explicit windows for every semantic operation and the shared
+    /// finalization cap.
+    #[must_use]
+    pub const fn new(
+        start: Duration,
+        admission_backpressure: Duration,
+        process: Duration,
+        flush: Duration,
+        finish: Duration,
+        recovery: Duration,
+        finalization: Duration,
+    ) -> Self {
+        Self {
+            start,
+            admission_backpressure,
+            process,
+            flush,
+            finish,
+            recovery,
+            finalization,
+        }
+    }
+
+    /// Builds explicit uniform operation windows while keeping a separately
+    /// selected finalization cap.
+    #[must_use]
+    pub const fn uniform(operation: Duration, finalization: Duration) -> Self {
+        Self::new(
+            operation,
+            operation,
+            operation,
+            operation,
+            operation,
+            operation,
+            finalization,
+        )
+    }
+
+    fn window(self, kind: ResultOperationKind) -> Duration {
+        match kind {
+            ResultOperationKind::Start => self.start,
+            ResultOperationKind::AdmissionBackpressure => self.admission_backpressure,
+            ResultOperationKind::Process => self.process,
+            ResultOperationKind::Flush => self.flush,
+            ResultOperationKind::Finish => self.finish,
+            ResultOperationKind::Recovery => self.recovery,
+        }
+    }
+
+    fn validate(self) -> Result<(), BudgetError> {
+        let windows = [
+            (ResultOperationKind::Start, self.start),
+            (
+                ResultOperationKind::AdmissionBackpressure,
+                self.admission_backpressure,
+            ),
+            (ResultOperationKind::Process, self.process),
+            (ResultOperationKind::Flush, self.flush),
+            (ResultOperationKind::Finish, self.finish),
+            (ResultOperationKind::Recovery, self.recovery),
+        ];
+        if windows
+            .iter()
+            .any(|(_, duration)| *duration == Duration::ZERO)
+            || self.finalization == Duration::ZERO
+        {
+            return Err(BudgetError::ZeroOperationWindow);
+        }
+        Ok(())
+    }
+
+    /// Returns the selected finalization cap.
+    #[must_use]
+    pub const fn finalization(self) -> Duration {
+        self.finalization
+    }
+}
+
+/// Configuration for one run-owned result-delivery authority.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ResultDeliveryBudgetConfig {
+    /// Run and selected sink-set identity bound to every allocated lease.
+    pub scope: ResultOperationScope,
+    /// Explicit operation windows.
+    pub windows: ResultOperationWindows,
+    /// Shared retry attempts across all operations and sinks.
+    pub max_retry_attempts: u32,
+    /// Optional invocation/profile-provided whole-run deadline. `None` is the
+    /// normal value and does not impose a run-duration ceiling.
+    pub whole_run_deadline: Option<crate::MonotonicInstant>,
+}
+
+impl ResultDeliveryBudgetConfig {
+    /// Creates explicit result-delivery policy.
+    #[must_use]
+    pub const fn new(
+        scope: ResultOperationScope,
+        windows: ResultOperationWindows,
+        max_retry_attempts: u32,
+        whole_run_deadline: Option<crate::MonotonicInstant>,
+    ) -> Self {
+        Self {
+            scope,
+            windows,
+            max_retry_attempts,
+            whole_run_deadline,
+        }
+    }
+}
+
+/// A checked, non-zero operation identity allocated by one run authority.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ResultOperationId(NonZeroU64);
+
+impl ResultOperationId {
+    /// Creates an operation identity, rejecting zero.
+    #[must_use]
+    pub const fn new(value: u64) -> Option<Self> {
+        match NonZeroU64::new(value) {
+            Some(value) => Some(Self(value)),
+            None => None,
+        }
+    }
+
+    /// Returns its non-zero numeric representation.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0.get()
+    }
+}
+
+/// Stable error from the narrow result wait-registration capability.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ResultWaitError {
+    /// The registrar rejected the bounded registration.
+    Rejected,
+    /// The registrar has already shut down.
+    Shutdown,
+    /// The exact registration was retired already.
+    AlreadyRetired,
+    /// The capability is not installed for this production path.
+    Unavailable,
+}
+
+impl fmt::Display for ResultWaitError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Rejected => "result.wait.rejected",
+            Self::Shutdown => "result.wait.shutdown",
+            Self::AlreadyRetired => "result.wait.already-retired",
+            Self::Unavailable => "result.wait.unavailable",
+        })
+    }
+}
+
+impl std::error::Error for ResultWaitError {}
+
+/// Bounded input to a result wait registrar.  The waker is an executor token,
+/// not a run future or result payload.
+#[derive(Debug)]
+pub struct ResultWaitSpec {
+    /// Operation that owns this wait.
+    pub operation: ResultOperationId,
+    /// Typed wait owner supplied by the runtime/application boundary.
+    pub owner: crate::WaitOwnerClass,
+    /// One absolute, already-established deadline.
+    pub deadline: crate::MonotonicInstant,
+    /// Exact executor wake token.
+    pub waker: Waker,
+}
+
+/// A registrar supplied by the application time owner.
+pub trait ResultWaitRegistrar: Send + Sync {
+    /// Registers one finite provider/queue wait before a future returns
+    /// `Pending`.
+    fn register(
+        &self,
+        spec: ResultWaitSpec,
+    ) -> Result<Box<dyn ResultWaitRegistrationHandle>, ResultWaitError>;
+}
+
+/// The owned handle returned by a result wait registrar.
+pub trait ResultWaitRegistrationHandle: Send {
+    /// Retires the exact registration.
+    fn retire(&mut self) -> Result<(), ResultWaitError>;
+}
+
+/// RAII guard for one exact result wait registration.
+pub struct ResultWaitRegistration {
+    handle: Option<Box<dyn ResultWaitRegistrationHandle>>,
+}
+
+impl fmt::Debug for ResultWaitRegistration {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ResultWaitRegistration")
+            .field("active", &self.handle.is_some())
+            .finish()
+    }
+}
+
+impl ResultWaitRegistration {
+    fn new(handle: Box<dyn ResultWaitRegistrationHandle>) -> Self {
+        Self {
+            handle: Some(handle),
+        }
+    }
+
+    /// Retires this exact registration and consumes the guard.
+    pub fn retire(mut self) -> Result<(), ResultWaitError> {
+        if let Some(mut handle) = self.handle.take() {
+            handle.retire()
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Returns whether the exact registration is still owned by this guard.
+    #[must_use]
+    pub const fn is_active(&self) -> bool {
+        self.handle.is_some()
+    }
+}
+
+impl Drop for ResultWaitRegistration {
+    fn drop(&mut self) {
+        if let Some(mut handle) = self.handle.take() {
+            let _ = handle.retire();
+        }
+    }
+}
+
+/// Operation lease shared by a sink future and its retry path.
+///
+/// The lease is intentionally not `Clone`.  A caller can borrow it for the
+/// lifetime of one sink future, but no operation can mint a second deadline
+/// by polling, waking, retrying, or changing phase.
+pub struct ResultOperationLease {
+    authority: Arc<ResultDeliveryBudgetState>,
+    id: ResultOperationId,
+    scope: ResultOperationScope,
+    kind: ResultOperationKind,
+    deadline: crate::MonotonicInstant,
+    allow_cancelled: bool,
+}
+
+impl fmt::Debug for ResultOperationLease {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ResultOperationLease")
+            .field("id", &self.id)
+            .field("scope", &self.scope)
+            .field("kind", &self.kind)
+            .field("deadline", &self.deadline)
+            .finish()
+    }
+}
+
+impl ResultOperationLease {
+    /// Returns the immutable operation identity.
+    #[must_use]
+    pub const fn id(&self) -> ResultOperationId {
+        self.id
+    }
+
+    /// Returns the run/sink scope bound to this lease.
+    #[must_use]
+    pub fn scope(&self) -> ResultOperationScope {
+        self.scope
+    }
+
+    /// Returns the semantic operation kind.
+    #[must_use]
+    pub const fn kind(&self) -> ResultOperationKind {
+        self.kind
+    }
+
+    /// Returns the one absolute, non-refreshing deadline.
+    #[must_use]
+    pub const fn deadline(&self) -> crate::MonotonicInstant {
+        self.deadline
+    }
+
+    /// Checks clock health and this lease's fixed deadline. Normal work also
+    /// checks cancellation; cleanup leases intentionally continue to the
+    /// shared finalization cap so accepted work is accounted for after a
+    /// primary failure or cancellation request.
+    pub fn check(&self) -> Result<(), BudgetError> {
+        if !self.allow_cancelled && self.authority.cancellation.is_cancelled() {
+            return Err(BudgetError::Cancelled);
+        }
+        let now = self.authority.now()?;
+        if now >= self.deadline {
+            return Err(BudgetError::Expired);
+        }
+        Ok(())
+    }
+
+    /// Returns the finite remaining duration without rebuilding a deadline.
+    pub fn remaining(&self) -> Result<Duration, BudgetError> {
+        self.check()?;
+        self.deadline
+            .duration_since(self.authority.now()?)
+            .ok_or(BudgetError::Expired)
+    }
+
+    /// Consumes one retry from the shared run attempt ledger. Polls and
+    /// ordinary progress do not consume attempts.
+    pub fn consume_retry(&self) -> Result<AttemptOrdinal, BudgetError> {
+        self.check()?;
+        self.authority.consume_attempt()
+    }
+
+    /// Returns shared attempts remaining for a ledger diagnostic.
+    #[must_use]
+    pub fn attempts_remaining(&self) -> u32 {
+        self.authority.attempts_remaining()
+    }
+
+    /// Registers the exact provider/queue wait before a sink future returns
+    /// `Pending`. Completion, cancellation, timeout, and drop must retire the
+    /// returned guard.
+    pub fn register_wait(
+        &self,
+        registrar: &dyn ResultWaitRegistrar,
+        owner: crate::WaitOwnerClass,
+        waker: &Waker,
+    ) -> Result<ResultWaitRegistration, BudgetError> {
+        self.check()?;
+        let waker = waker.clone();
+        registrar
+            .register(ResultWaitSpec {
+                operation: self.id,
+                owner,
+                deadline: self.deadline,
+                waker,
+            })
+            .map(ResultWaitRegistration::new)
+            .map_err(BudgetError::Wait)
+    }
+
+    /// Registers this run's cancellation wake source for a pending provider
+    /// future. The lease supplies the exact shared authority; adapters do not
+    /// mint or retain a second cancellation token.
+    pub fn register_waker(&self, waker: &Waker) {
+        self.authority.cancellation.register_waker(waker);
+    }
+}
+
+struct SharedAttemptLedger {
+    remaining: u32,
+    next_ordinal: u32,
+}
+
+impl SharedAttemptLedger {
+    fn consume(&mut self) -> Result<AttemptOrdinal, BudgetError> {
+        if self.remaining == 0 {
+            return Err(BudgetError::RetryBudgetExhausted);
+        }
+        let ordinal = AttemptOrdinal::new(self.next_ordinal)
+            .map_err(|_| BudgetError::AttemptOrdinalOverflow)?;
+        self.next_ordinal = self
+            .next_ordinal
+            .checked_add(1)
+            .ok_or(BudgetError::AttemptOrdinalOverflow)?;
+        self.remaining -= 1;
+        Ok(ordinal)
+    }
+}
+
+struct ResultDeliveryBudgetState {
+    scope: ResultOperationScope,
+    clock: Arc<dyn ResultMonotonicClock>,
+    cancellation: Arc<dyn CancellationSignal>,
+    windows: ResultOperationWindows,
+    attempts: Mutex<SharedAttemptLedger>,
+    last_now: Mutex<crate::MonotonicInstant>,
+    next_operation: AtomicU64,
+    whole_run_deadline: Option<crate::MonotonicInstant>,
+    finalization_deadline: Mutex<Option<crate::MonotonicInstant>>,
+}
+
+impl ResultDeliveryBudgetState {
+    fn now(&self) -> Result<crate::MonotonicInstant, BudgetError> {
+        let current = self.clock.now().map_err(BudgetError::Clock)?;
+        let mut last = lock(&self.last_now);
+        if current < *last {
+            return Err(BudgetError::Clock(ResultClockError::Reversed {
+                previous: *last,
+                current,
+            }));
+        }
+        *last = current;
+        Ok(current)
+    }
+
+    fn allocate_operation_id(&self) -> Result<ResultOperationId, BudgetError> {
+        let mut current = self.next_operation.load(Ordering::Acquire);
+        loop {
+            let next = current
+                .checked_add(1)
+                .ok_or(BudgetError::OperationIdExhausted)?;
+            match self.next_operation.compare_exchange_weak(
+                current,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    return ResultOperationId::new(current)
+                        .ok_or(BudgetError::OperationIdExhausted);
+                }
+                Err(observed) => current = observed,
+            }
+        }
+    }
+
+    fn effective_deadline(
+        &self,
+        kind: ResultOperationKind,
+        now: crate::MonotonicInstant,
+    ) -> Result<crate::MonotonicInstant, BudgetError> {
+        if let Some(deadline) = self.whole_run_deadline
+            && deadline <= now
+        {
+            return Err(BudgetError::Expired);
+        }
+        let mut deadline = now
+            .checked_add(self.windows.window(kind))
+            .ok_or(BudgetError::DeadlineOverflow)?;
+        if let Some(run_deadline) = self.whole_run_deadline {
+            deadline = deadline.min(run_deadline);
+        }
+        if let Some(finalization_deadline) = *lock(&self.finalization_deadline) {
+            deadline = deadline.min(finalization_deadline);
+        }
+        if deadline <= now {
+            return Err(BudgetError::Expired);
+        }
+        Ok(deadline)
+    }
+
+    fn consume_attempt(&self) -> Result<AttemptOrdinal, BudgetError> {
+        lock(&self.attempts).consume()
+    }
+
+    fn attempts_remaining(&self) -> u32 {
+        lock(&self.attempts).remaining
+    }
+}
+
+/// One run-owned result-delivery authority. Clones share cancellation, clock,
+/// operation identity allocation, finalization narrowing, and attempt state.
+#[derive(Clone)]
+pub struct ResultDeliveryBudget {
+    state: Arc<ResultDeliveryBudgetState>,
+}
+
+impl fmt::Debug for ResultDeliveryBudget {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ResultDeliveryBudget")
+            .field("attempts_remaining", &self.attempts_remaining())
+            .field("whole_run_deadline", &self.state.whole_run_deadline)
+            .field(
+                "finalization_deadline",
+                &lock(&self.state.finalization_deadline),
+            )
+            .finish()
+    }
+}
+
+impl ResultDeliveryBudget {
+    /// Creates one explicit run-owned authority.
+    pub fn new(
+        clock: Arc<dyn ResultMonotonicClock>,
+        cancellation: Arc<dyn CancellationSignal>,
+        config: ResultDeliveryBudgetConfig,
+    ) -> Result<Self, BudgetError> {
+        if let ResultOperationScope::Sink { run, sink } = config.scope
+            && run != sink.run_id()
+        {
+            return Err(BudgetError::ScopeMismatch);
+        }
+        config.windows.validate()?;
+        // Read once at construction so an unavailable clock fails before any
+        // sink starts, while `None` still leaves the run duration unbounded.
+        let now = clock.now().map_err(BudgetError::Clock)?;
+        if let Some(deadline) = config.whole_run_deadline
+            && deadline <= now
+        {
+            return Err(BudgetError::Expired);
+        }
+        Ok(Self {
+            state: Arc::new(ResultDeliveryBudgetState {
+                scope: config.scope,
+                clock,
+                cancellation,
+                windows: config.windows,
+                attempts: Mutex::new(SharedAttemptLedger {
+                    remaining: config.max_retry_attempts,
+                    next_ordinal: 1,
+                }),
+                last_now: Mutex::new(now),
+                next_operation: AtomicU64::new(1),
+                whole_run_deadline: config.whole_run_deadline,
+                finalization_deadline: Mutex::new(None),
+            }),
+        })
+    }
+
+    /// Convenience constructor retaining all policy as explicit arguments.
+    pub fn from_parts(
+        scope: ResultOperationScope,
+        clock: Arc<dyn ResultMonotonicClock>,
+        cancellation: Arc<dyn CancellationSignal>,
+        windows: ResultOperationWindows,
+        max_retry_attempts: u32,
+        whole_run_deadline: Option<crate::MonotonicInstant>,
+    ) -> Result<Self, BudgetError> {
+        Self::new(
+            clock,
+            cancellation,
+            ResultDeliveryBudgetConfig::new(scope, windows, max_retry_attempts, whole_run_deadline),
+        )
+    }
+
+    /// Returns the run/sink-set scope selected for this authority.
+    #[must_use]
+    pub fn scope(&self) -> ResultOperationScope {
+        self.state.scope
+    }
+
+    /// Starts one finite semantic operation lease. The deadline is fixed and
+    /// automatically narrowed by whole-run/finalization deadlines.
+    pub fn begin_operation(
+        &self,
+        kind: ResultOperationKind,
+    ) -> Result<ResultOperationLease, BudgetError> {
+        if self.state.cancellation.is_cancelled() {
+            return Err(BudgetError::Cancelled);
+        }
+        self.begin_operation_in_scope(self.state.scope, kind, false)
+    }
+
+    fn begin_operation_in_scope(
+        &self,
+        scope: ResultOperationScope,
+        kind: ResultOperationKind,
+        allow_cancelled: bool,
+    ) -> Result<ResultOperationLease, BudgetError> {
+        if !allow_cancelled && self.state.cancellation.is_cancelled() {
+            return Err(BudgetError::Cancelled);
+        }
+        let now = self.state.now()?;
+        let deadline = self.state.effective_deadline(kind, now)?;
+        let id = self.state.allocate_operation_id()?;
+        Ok(ResultOperationLease {
+            authority: Arc::clone(&self.state),
+            id,
+            scope,
+            kind,
+            deadline,
+            allow_cancelled,
+        })
+    }
+
+    /// Starts one normal effectful operation bound to one configured sink.
+    /// The operation ID is still allocated by this shared run authority.
+    pub fn begin_sink_operation(
+        &self,
+        sink: QualifiedSinkId,
+        kind: ResultOperationKind,
+    ) -> Result<ResultOperationLease, BudgetError> {
+        let scope = self
+            .state
+            .scope
+            .for_sink(sink)
+            .ok_or(BudgetError::ScopeMismatch)?;
+        self.begin_operation_in_scope(scope, kind, false)
+    }
+
+    /// Alias using the decision's admitted-operation wording.
+    pub fn admit_operation(
+        &self,
+        kind: ResultOperationKind,
+    ) -> Result<ResultOperationLease, BudgetError> {
+        self.begin_operation(kind)
+    }
+
+    /// Establishes one shared finalization deadline. Repeated calls return a
+    /// view of the same absolute cap rather than refreshing it.
+    pub fn begin_finalization(&self) -> Result<ResultFinalizationLease, BudgetError> {
+        if let Some(deadline) = *lock(&self.state.finalization_deadline) {
+            return Ok(ResultFinalizationLease {
+                budget: self.clone(),
+                deadline,
+            });
+        }
+        let now = self.state.now()?;
+        if let Some(run_deadline) = self.state.whole_run_deadline
+            && run_deadline <= now
+        {
+            return Err(BudgetError::Expired);
+        }
+        let mut deadline = now
+            .checked_add(self.state.windows.finalization())
+            .ok_or(BudgetError::DeadlineOverflow)?;
+        if let Some(run_deadline) = self.state.whole_run_deadline {
+            deadline = deadline.min(run_deadline);
+        }
+        if deadline <= now {
+            return Err(BudgetError::Expired);
+        }
+        let mut finalization = lock(&self.state.finalization_deadline);
+        if let Some(existing) = *finalization {
+            deadline = existing;
+        } else {
+            *finalization = Some(deadline);
+        }
+        Ok(ResultFinalizationLease {
+            budget: self.clone(),
+            deadline,
+        })
+    }
+
+    /// Returns the shared finalization cap, if finalization has started.
+    #[must_use]
+    pub fn finalization_deadline(&self) -> Option<crate::MonotonicInstant> {
+        *lock(&self.state.finalization_deadline)
+    }
+
+    /// Returns shared retry attempts remaining without resetting them.
+    #[must_use]
+    pub fn attempts_remaining(&self) -> u32 {
+        self.state.attempts_remaining()
+    }
+}
+
+/// A view proving that one shared finalization cap has been established.
+#[derive(Clone, Debug)]
+pub struct ResultFinalizationLease {
+    budget: ResultDeliveryBudget,
+    deadline: crate::MonotonicInstant,
+}
+
+impl ResultFinalizationLease {
+    /// Returns the one shared absolute finalization deadline.
+    #[must_use]
+    pub const fn deadline(&self) -> crate::MonotonicInstant {
+        self.deadline
+    }
+
+    /// Starts a sink operation narrowed by the shared finalization cap.
+    pub fn operation(
+        &self,
+        kind: ResultOperationKind,
+    ) -> Result<ResultOperationLease, BudgetError> {
+        self.budget
+            .begin_operation_in_scope(self.budget.state.scope, kind, true)
+    }
+
+    /// Starts one cleanup operation narrowed to the selected sink and shared
+    /// finalization cap. Cancellation does not invalidate this lease.
+    pub fn sink_operation(
+        &self,
+        sink: QualifiedSinkId,
+        kind: ResultOperationKind,
+    ) -> Result<ResultOperationLease, BudgetError> {
+        let scope = self
+            .budget
+            .state
+            .scope
+            .for_sink(sink)
+            .ok_or(BudgetError::ScopeMismatch)?;
+        self.budget.begin_operation_in_scope(scope, kind, true)
+    }
+}
+
+/// A no-op registrar used only by the legacy constructor. Any pending sink
+/// must use the explicit application registrar constructor instead.
+#[derive(Debug, Default)]
+pub struct UnavailableResultWaitRegistrar;
+
+impl ResultWaitRegistrar for UnavailableResultWaitRegistrar {
+    fn register(
+        &self,
+        _spec: ResultWaitSpec,
+    ) -> Result<Box<dyn ResultWaitRegistrationHandle>, ResultWaitError> {
+        Err(ResultWaitError::Unavailable)
+    }
+}
+
+impl ResultWaitRegistrationHandle for crate::progress::WaitRegistration {
+    fn retire(&mut self) -> Result<(), ResultWaitError> {
+        crate::progress::WaitRegistration::retire(self).map_err(|error| match error {
+            crate::progress::WaitRegistryError::AlreadyRetired { .. } => {
+                ResultWaitError::AlreadyRetired
+            }
+            crate::progress::WaitRegistryError::Shutdown => ResultWaitError::Shutdown,
+            _ => ResultWaitError::Rejected,
+        })
+    }
+}
+
+impl ResultWaitRegistrar for crate::progress::WaitRegistry {
+    fn register(
+        &self,
+        spec: ResultWaitSpec,
+    ) -> Result<Box<dyn ResultWaitRegistrationHandle>, ResultWaitError> {
+        let identity = crate::progress::OpaqueWaitIdentity::from_u64(spec.operation.get());
+        let wait_spec =
+            crate::progress::WaitRegistrationSpec::new(spec.owner, identity, spec.deadline)
+                .with_waker(&spec.waker)
+                .map_err(|_| ResultWaitError::Rejected)?;
+        self.register(wait_spec)
+            .map(|registration| Box::new(registration) as Box<dyn ResultWaitRegistrationHandle>)
+            .map_err(|error| match error {
+                crate::progress::WaitRegistryError::Shutdown => ResultWaitError::Shutdown,
+                _ => ResultWaitError::Rejected,
+            })
+    }
 }
 
 /// The boundary at which a sink's acknowledgement becomes durable.
@@ -2063,6 +3091,8 @@ pub struct LedgerTransition {
     pub remaining_budget: u32,
     /// Optional acknowledgement boundary.
     pub boundary: Option<DurabilityBoundary>,
+    /// Optional bounded acknowledgement/durability token digest.
+    pub acknowledgement_digest: Option<Digest32>,
     /// Optional bounded diagnostic.
     pub diagnostic: Option<BoundedDiagnostic>,
 }
@@ -2087,10 +3117,22 @@ pub enum LedgerError {
     RetryAfterUnknownOutcome,
     /// No shared retry/finalization budget remained.
     RetryBudgetExhausted,
+    /// A retry would exceed the sink's finite waiting queue.
+    RetryQueueFull,
+    /// A retry or acknowledgement did not have an active processing lease.
+    LeaseMissing,
+    /// Finalization would exceed a sink's explicit finite operation bound.
+    FinalizationLimit,
     /// Diagnosed drop was attempted without explicit non-compatibility policy.
     DiagnosedDropNotAllowed,
     /// The bounded transition ledger exhausted its configured capacity.
     TransitionLimit,
+    /// A bounded queue/accounting counter could not be represented without
+    /// silently wrapping or clamping its value.
+    ArithmeticOverflow {
+        /// Stable counter name used in diagnostics.
+        field: &'static str,
+    },
     /// Selected/accepted/terminal counts did not conserve every admission.
     ConservationViolation {
         /// Stable explanation.
@@ -2121,10 +3163,16 @@ impl fmt::Display for LedgerError {
             Self::RetryBudgetExhausted => {
                 formatter.write_str("result.ledger.retry-budget-exhausted")
             }
+            Self::RetryQueueFull => formatter.write_str("result.ledger.retry-queue-full"),
+            Self::LeaseMissing => formatter.write_str("result.ledger.lease-missing"),
+            Self::FinalizationLimit => formatter.write_str("result.ledger.finalization-limit"),
             Self::DiagnosedDropNotAllowed => {
                 formatter.write_str("result.ledger.diagnosed-drop-not-allowed")
             }
             Self::TransitionLimit => formatter.write_str("result.ledger.transition-limit"),
+            Self::ArithmeticOverflow { field } => {
+                write!(formatter, "result.ledger.arithmetic-overflow.{field}")
+            }
             Self::ConservationViolation { detail } => {
                 write!(formatter, "result.ledger.conservation: {detail}")
             }
@@ -2217,6 +3265,7 @@ impl DeliveryLedger {
             remaining_budget,
             None,
             None,
+            None,
         )
     }
 
@@ -2232,6 +3281,7 @@ impl DeliveryLedger {
             0,
             None,
             None,
+            None,
         )
     }
 
@@ -2241,6 +3291,7 @@ impl DeliveryLedger {
             key,
             LedgerState::Disposition(LedgerDisposition::Queued),
             remaining_budget,
+            None,
             None,
             None,
         )
@@ -2258,6 +3309,7 @@ impl DeliveryLedger {
             key,
             LedgerState::Disposition(LedgerDisposition::Processing),
             remaining_budget,
+            None,
             None,
             None,
         )?;
@@ -2290,6 +3342,7 @@ impl DeliveryLedger {
             LedgerState::Disposition(LedgerDisposition::Durable),
             remaining_budget,
             Some(ack.boundary()),
+            Some(ack.idempotency_key()),
             None,
         )
     }
@@ -2308,6 +3361,7 @@ impl DeliveryLedger {
             key,
             LedgerState::Disposition(LedgerDisposition::DiagnosedDrop(reason.clone())),
             0,
+            None,
             None,
             Some(reason),
         )
@@ -2335,6 +3389,47 @@ impl DeliveryLedger {
             LedgerState::Disposition(LedgerDisposition::Failed(reason)),
             0,
             None,
+            None,
+            diagnostic,
+        )
+    }
+
+    /// Converts a retryable failure into a terminal failure during bounded
+    /// cancellation/finalization.  A retryable failure remains incomplete
+    /// until the caller either requeues it or explicitly closes it.
+    pub fn terminalize_retryable(
+        &mut self,
+        key: DeliveryKey,
+        reason: FailureReason,
+    ) -> Result<(), LedgerError> {
+        if matches!(&reason, FailureReason::Retryable(_)) {
+            return Err(LedgerError::InvalidTransition {
+                state: self.state(key)?,
+                operation: "terminalize-retryable",
+            });
+        }
+        let state = self.state(key)?;
+        if !matches!(
+            &state,
+            LedgerState::Disposition(LedgerDisposition::Failed(FailureReason::Retryable(_)))
+        ) {
+            return Err(LedgerError::InvalidTransition {
+                state,
+                operation: "terminalize-retryable",
+            });
+        }
+        let diagnostic = match &reason {
+            FailureReason::Retryable(message)
+            | FailureReason::UnknownOutcome(message)
+            | FailureReason::Permanent(message) => Some(message.clone()),
+            FailureReason::Cancelled => Some(BoundedDiagnostic::new("cancelled")),
+        };
+        self.transition(
+            key,
+            LedgerState::Disposition(LedgerDisposition::Failed(reason)),
+            0,
+            None,
+            None,
             diagnostic,
         )
     }
@@ -2356,8 +3451,62 @@ impl DeliveryLedger {
                 });
             }
         }
+        // Preflight fallible conditions before consuming the shared budget.
+        // A failed retry must not spend an attempt while leaving no matching
+        // queue item for the ledger state.
+        if self.transitions.len() >= MAX_LEDGER_TRANSITIONS {
+            return Err(LedgerError::TransitionLimit);
+        }
+        let next = self
+            .entry(key)?
+            .attempts
+            .get()
+            .checked_add(1)
+            .ok_or(LedgerError::RetryBudgetExhausted)?;
         if !budget.consume() {
             return Err(LedgerError::RetryBudgetExhausted);
+        }
+        self.transition(
+            key,
+            LedgerState::Disposition(LedgerDisposition::Queued),
+            budget.remaining(),
+            None,
+            None,
+            None,
+        )?;
+        self.entry_mut(key)?.attempts = AttemptOrdinal::new(next)?;
+        Ok(())
+    }
+
+    /// Requeues one retryable delivery using an attempt already charged by
+    /// the run-owned `ResultDeliveryBudget`. This keeps the pure ledger's
+    /// legacy retry counter available to old callers while the typed
+    /// production adapter uses one shared authority for all sink attempts.
+    pub fn retry_with_remaining(
+        &mut self,
+        key: DeliveryKey,
+        remaining_budget: u32,
+    ) -> Result<AttemptOrdinal, LedgerError> {
+        let state = self.state(key)?;
+        if !matches!(
+            &state,
+            LedgerState::Disposition(LedgerDisposition::Failed(FailureReason::Retryable(_)))
+        ) {
+            if matches!(
+                &state,
+                LedgerState::Disposition(LedgerDisposition::Failed(FailureReason::UnknownOutcome(
+                    _
+                )))
+            ) {
+                return Err(LedgerError::RetryAfterUnknownOutcome);
+            }
+            return Err(LedgerError::InvalidTransition {
+                state,
+                operation: "retry-with-remaining",
+            });
+        }
+        if self.transitions.len() >= MAX_LEDGER_TRANSITIONS {
+            return Err(LedgerError::TransitionLimit);
         }
         let next = self
             .entry(key)?
@@ -2368,12 +3517,14 @@ impl DeliveryLedger {
         self.transition(
             key,
             LedgerState::Disposition(LedgerDisposition::Queued),
-            budget.remaining(),
+            remaining_budget,
+            None,
             None,
             None,
         )?;
-        self.entry_mut(key)?.attempts = AttemptOrdinal::new(next)?;
-        Ok(())
+        let attempt = AttemptOrdinal::new(next)?;
+        self.entry_mut(key)?.attempts = attempt;
+        Ok(attempt)
     }
 
     /// Returns the current state, or a typed transition error if absent.
@@ -2435,7 +3586,20 @@ impl DeliveryLedger {
                     summary.diagnosed_drop += 1;
                 }
                 LedgerState::Disposition(LedgerDisposition::Failed(_)) => {
-                    if entry.admitted {
+                    if matches!(
+                        &entry.state,
+                        LedgerState::Disposition(LedgerDisposition::Failed(
+                            FailureReason::Retryable(_)
+                        ))
+                    ) {
+                        if entry.admitted {
+                            summary.admitted += 1;
+                            summary.accepted += 1;
+                            summary.incomplete += 1;
+                        } else {
+                            summary.not_admitted += 1;
+                        }
+                    } else if entry.admitted {
                         summary.admitted += 1;
                         summary.accepted += 1;
                         summary.failed_after_admission += 1;
@@ -2522,6 +3686,7 @@ impl DeliveryLedger {
         to: LedgerState,
         remaining_budget: u32,
         boundary: Option<DurabilityBoundary>,
+        acknowledgement_digest: Option<Digest32>,
         diagnostic: Option<BoundedDiagnostic>,
     ) -> Result<(), LedgerError> {
         let entry = self.entry(key)?.clone();
@@ -2551,9 +3716,21 @@ impl DeliveryLedger {
         ) {
             entry.admitted = true;
         }
-        self.record(key, to, bytes, remaining_budget, boundary, diagnostic)
+        self.record(
+            key,
+            to,
+            bytes,
+            remaining_budget,
+            boundary,
+            acknowledgement_digest,
+            diagnostic,
+        )
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the transition record keeps each bounded audit field explicit"
+    )]
     fn record(
         &mut self,
         key: DeliveryKey,
@@ -2561,6 +3738,7 @@ impl DeliveryLedger {
         bytes: usize,
         remaining_budget: u32,
         boundary: Option<DurabilityBoundary>,
+        acknowledgement_digest: Option<Digest32>,
         diagnostic: Option<BoundedDiagnostic>,
     ) -> Result<(), LedgerError> {
         let from =
@@ -2581,6 +3759,7 @@ impl DeliveryLedger {
             bytes,
             remaining_budget,
             boundary,
+            acknowledgement_digest,
             diagnostic,
         });
         Ok(())
@@ -2614,6 +3793,9 @@ fn legal_transition(from: &LedgerState, to: &LedgerState) -> bool {
         ) | (
             LedgerState::Disposition(LedgerDisposition::Failed(FailureReason::Retryable(_))),
             LedgerState::Disposition(LedgerDisposition::Queued),
+        ) | (
+            LedgerState::Disposition(LedgerDisposition::Failed(FailureReason::Retryable(_))),
+            LedgerState::Disposition(LedgerDisposition::Failed(_)),
         )
     )
 }
@@ -2773,13 +3955,13 @@ impl FinalizationReport {
             report.selected += 1;
             if report
                 .first_event_id
-                .map_or(true, |first| event_id_in_run_order(key.event_id, first))
+                .is_none_or(|first| event_id_in_run_order(key.event_id, first))
             {
                 report.first_event_id = Some(key.event_id);
             }
             if report
                 .last_event_id
-                .map_or(true, |last| event_id_in_run_order(last, key.event_id))
+                .is_none_or(|last| event_id_in_run_order(last, key.event_id))
             {
                 report.last_event_id = Some(key.event_id);
             }
@@ -2808,7 +3990,22 @@ impl FinalizationReport {
                     report.diagnosed_drop += 1;
                 }
                 LedgerState::Disposition(LedgerDisposition::Failed(_)) => {
-                    if entry.admitted {
+                    if matches!(
+                        &entry.state,
+                        LedgerState::Disposition(LedgerDisposition::Failed(
+                            FailureReason::Retryable(_)
+                        ))
+                    ) {
+                        if entry.admitted {
+                            report.admitted += 1;
+                            report.incomplete.push(IncompleteDelivery {
+                                key: *key,
+                                disposition: entry.state.clone(),
+                            });
+                        } else {
+                            report.not_admitted += 1;
+                        }
+                    } else if entry.admitted {
                         report.admitted += 1;
                         report.failed_after_admission += 1;
                         report.failed += 1;
@@ -2927,9 +4124,93 @@ impl TypedSinkPlan {
     }
 }
 
+/// Explicit identity inputs required to bind one runtime worker to a typed
+/// result router.  None of these values are inferred from labels, raw
+/// document-local node numbers, or a legacy run string.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct TypedRouterIdentity {
+    plan_domain: PlanDomain,
+    run: TypedRunId,
+    run_generation: RunGeneration,
+    worker: WorkerId,
+    worker_generation: WorkerGeneration,
+}
+
+impl TypedRouterIdentity {
+    /// Creates a complete run/worker identity binding.
+    #[must_use]
+    pub const fn new(
+        plan_domain: PlanDomain,
+        run: TypedRunId,
+        run_generation: RunGeneration,
+        worker: WorkerId,
+        worker_generation: WorkerGeneration,
+    ) -> Self {
+        Self {
+            plan_domain,
+            run,
+            run_generation,
+            worker,
+            worker_generation,
+        }
+    }
+
+    /// Returns the executable-plan domain.
+    #[must_use]
+    pub const fn plan_domain(self) -> PlanDomain {
+        self.plan_domain
+    }
+
+    /// Returns the typed run identity.
+    #[must_use]
+    pub const fn run(self) -> TypedRunId {
+        self.run
+    }
+
+    /// Returns the run generation.
+    #[must_use]
+    pub const fn run_generation(self) -> RunGeneration {
+        self.run_generation
+    }
+
+    /// Returns the worker identity.
+    #[must_use]
+    pub const fn worker(self) -> WorkerId {
+        self.worker
+    }
+
+    /// Returns the worker generation.
+    #[must_use]
+    pub const fn worker_generation(self) -> WorkerGeneration {
+        self.worker_generation
+    }
+
+    /// Qualifies one document-local node in this immutable plan domain.
+    pub fn node(self, node: NodeId) -> Result<PlanNodeRef, IdentityError> {
+        PlanNodeRef::new(self.plan_domain, node)
+    }
+
+    /// Qualifies an ordered document-local path without changing its order.
+    pub fn path(self, path: &[NodeId]) -> Result<Vec<PlanNodeRef>, IdentityError> {
+        if path.is_empty() {
+            return Err(IdentityError::Empty { field: "plan-path" });
+        }
+        if path.len() > MAX_TYPED_PLAN_PATH {
+            return Err(IdentityError::TooLong {
+                field: "plan-path",
+                max: MAX_TYPED_PLAN_PATH,
+            });
+        }
+        path.iter().copied().map(|node| self.node(node)).collect()
+    }
+}
+
 /// Explicit admission outcomes for the revision 4 pure router.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TypedAdmissionOutcome {
+    /// The sample was explicitly marked ignored by the sampler result.  It
+    /// never enters the ledger or a sink queue and does not advance sequence.
+    Ignored,
     /// Reserved in every sink queue.
     Accepted {
         /// Immutable event identity.
@@ -3001,7 +4282,15 @@ struct TypedSinkState {
     failed: Option<BoundedDiagnostic>,
 }
 
-/// A deterministic executor-neutral model of the revision 3 router.  Effectful
+#[derive(Clone, Copy)]
+struct PendingAdmission {
+    event_id: EventId,
+    sink_id: QualifiedSinkId,
+    bytes: usize,
+    attempts: u32,
+}
+
+/// A deterministic executor-neutral model of the revision 4 router.  Effectful
 /// sinks consume [`DeliveryLease`] values and return [`DurabilityAck`] values;
 /// no filesystem, Tokio, or network behavior is embedded here.
 #[derive(Clone)]
@@ -3013,6 +4302,10 @@ pub struct TypedResultRouter {
     arbiter_cursor: usize,
     shared_budget: RetryBudget,
     sinks: Vec<TypedSinkState>,
+    /// A full/backpressure admission remains bound to its original EventId
+    /// until it either commits or the run is cancelled.  This prevents a
+    /// caller from retrying the same sequence with a different payload.
+    pending_admissions: BTreeMap<TypedRunSequence, PendingAdmission>,
     ledger: DeliveryLedger,
 }
 
@@ -3035,6 +4328,10 @@ pub enum TypedRouterError {
     /// The injected finite operation budget or cancellation source stopped
     /// the requested boundary.
     Budget(BudgetError),
+    /// A typed sink returned a category-preserving effectful error.
+    Sink(TypedSinkError),
+    /// A sink future could not obtain or retire its exact wait registration.
+    Wait(ResultWaitError),
     /// Ledger transition failure.
     Ledger(LedgerError),
     /// Duplicate or excessive sink configuration.
@@ -3046,6 +4343,9 @@ pub enum TypedRouterError {
         /// Requested operation.
         operation: &'static str,
     },
+    /// Admission could not reserve every selected sink without dropping the
+    /// original immutable event.
+    Admission(TypedAdmissionOutcome),
     /// Primary work and finalization both failed; neither diagnostic is lost.
     Combined {
         /// Primary failure.
@@ -3078,12 +4378,17 @@ impl fmt::Display for TypedRouterError {
         match self {
             Self::Identity(error) => error.fmt(formatter),
             Self::Budget(error) => error.fmt(formatter),
+            Self::Sink(error) => error.fmt(formatter),
+            Self::Wait(error) => error.fmt(formatter),
             Self::Ledger(error) => error.fmt(formatter),
             Self::InvalidConfiguration(detail) => {
                 write!(formatter, "result.router.configuration: {detail}")
             }
             Self::InvalidState { phase, operation } => {
                 write!(formatter, "result.router.state.{operation}: {phase:?}")
+            }
+            Self::Admission(outcome) => {
+                write!(formatter, "result.router.admission: {outcome:?}")
             }
             Self::Combined { primary, secondary } => {
                 write!(
@@ -3130,6 +4435,22 @@ impl TypedResultRouter {
                 BoundedDiagnostic::new("sink finalization limit must be non-zero"),
             ));
         }
+        if plans
+            .iter()
+            .any(|plan| plan.limits.max_items > MAX_TYPED_QUEUE_ITEMS)
+        {
+            return Err(TypedRouterError::InvalidConfiguration(
+                BoundedDiagnostic::new("sink queue item limit exceeds ledger bound"),
+            ));
+        }
+        if plans
+            .iter()
+            .any(|plan| plan.limits.max_finalization_steps > MAX_LEDGER_TRANSITIONS)
+        {
+            return Err(TypedRouterError::InvalidConfiguration(
+                BoundedDiagnostic::new("sink finalization limit exceeds ledger bound"),
+            ));
+        }
         Ok(Self {
             run_id,
             run_generation,
@@ -3147,6 +4468,7 @@ impl TypedResultRouter {
                     failed: None,
                 })
                 .collect(),
+            pending_admissions: BTreeMap::new(),
             ledger: DeliveryLedger::new(),
         })
     }
@@ -3155,6 +4477,29 @@ impl TypedResultRouter {
     #[must_use]
     pub const fn phase(&self) -> TypedRouterPhase {
         self.phase
+    }
+
+    /// Returns the run identity bound at construction.
+    #[must_use]
+    pub const fn run_id(&self) -> TypedRunId {
+        self.run_id
+    }
+
+    /// Returns the run generation bound at construction.
+    #[must_use]
+    pub const fn run_generation(&self) -> RunGeneration {
+        self.run_generation
+    }
+
+    /// Returns the next sequence that a caller must bind into an envelope.
+    pub fn next_sequence(&self) -> Result<TypedRunSequence, TypedRouterError> {
+        TypedRunSequence::new(self.next_sequence).map_err(TypedRouterError::Identity)
+    }
+
+    /// Returns all configured sink identities in stable admission order.
+    #[must_use]
+    pub fn sink_ids(&self) -> Vec<QualifiedSinkId> {
+        self.sinks.iter().map(|sink| sink.plan.id).collect()
     }
 
     /// Returns the shared remaining budget.
@@ -3187,6 +4532,56 @@ impl TypedResultRouter {
     /// Returns mutable ledger access for deterministic fake-sink harnesses.
     pub fn ledger_mut(&mut self) -> &mut DeliveryLedger {
         &mut self.ledger
+    }
+
+    fn ensure_ledger_capacity(&self, sink_steps: usize) -> Result<(), TypedRouterError> {
+        let required = self
+            .sinks
+            .len()
+            .checked_mul(sink_steps)
+            .ok_or(TypedRouterError::Ledger(LedgerError::TransitionLimit))?;
+        let available = self
+            .ledger
+            .transitions
+            .len()
+            .checked_add(required)
+            .ok_or(TypedRouterError::Ledger(LedgerError::TransitionLimit))?;
+        if available > MAX_LEDGER_TRANSITIONS {
+            return Err(TypedRouterError::Ledger(LedgerError::TransitionLimit));
+        }
+        Ok(())
+    }
+
+    fn record_not_admitted(
+        &mut self,
+        event_id: EventId,
+        bytes: usize,
+        reason: NotAdmittedReason,
+    ) -> Result<(), TypedRouterError> {
+        let next_sequence = self.next_sequence.checked_add(1).ok_or_else(|| {
+            TypedRouterError::InvalidConfiguration(BoundedDiagnostic::new("run sequence exhausted"))
+        })?;
+        self.ensure_ledger_capacity(2)?;
+        let mut keys = Vec::with_capacity(self.sinks.len());
+        for state in &self.sinks {
+            let key = DeliveryKey {
+                event_id,
+                sink_id: state.plan.id,
+            };
+            self.ledger.select_with_boundary(
+                key,
+                bytes,
+                self.shared_budget.remaining(),
+                state.plan.durability_boundary,
+            )?;
+            keys.push(key);
+        }
+        for key in keys {
+            self.ledger.not_admitted(key, reason.clone())?;
+        }
+        self.pending_admissions.remove(&event_id.sequence());
+        self.next_sequence = next_sequence;
+        Ok(())
     }
 
     /// Checks an injected finite budget before admitting an original event.
@@ -3228,46 +4623,75 @@ impl TypedResultRouter {
         }
         let event_id = envelope.event_id();
         let bytes = envelope.byte_size();
+        if let Some(pending) = self.pending_admissions.get(&envelope.event_id().sequence()) {
+            if pending.event_id != event_id || pending.bytes != bytes {
+                return Err(TypedRouterError::InvalidConfiguration(
+                    BoundedDiagnostic::new("backpressure retry identity collision"),
+                ));
+            }
+            // A pending admission may only be committed through
+            // `retry_admission`, which is the sole path that consumes the
+            // bounded backpressure budget.  Calling `admit` again cannot
+            // bypass that budget even if the queue has since drained.
+            return Ok(TypedAdmissionOutcome::Full {
+                sink_id: pending.sink_id,
+                event_id,
+                bytes,
+            });
+        }
+        if envelope.event().result().is_ignored() {
+            return Ok(TypedAdmissionOutcome::Ignored);
+        }
         if let Some(sink) = self.sinks.iter().find(|sink| sink.failed.is_some()) {
             let error = sink
                 .failed
                 .clone()
                 .unwrap_or_else(|| BoundedDiagnostic::new("sink failed"));
-            for state in &self.sinks {
-                let key = DeliveryKey {
-                    event_id,
-                    sink_id: state.plan.id,
-                };
-                self.ledger.select_with_boundary(
-                    key,
-                    bytes,
-                    self.shared_budget.remaining(),
-                    state.plan.durability_boundary,
-                )?;
-            }
-            for state in &self.sinks {
-                let key = DeliveryKey {
-                    event_id,
-                    sink_id: state.plan.id,
-                };
-                self.ledger
-                    .not_admitted(key, NotAdmittedReason::FailedBeforeAdmission(error.clone()))?;
-            }
+            let sink_id = sink.plan.id;
+            self.record_not_admitted(
+                event_id,
+                bytes,
+                NotAdmittedReason::FailedBeforeAdmission(error.clone()),
+            )?;
             return Ok(TypedAdmissionOutcome::Failed {
-                sink_id: Some(sink.plan.id),
+                sink_id: Some(sink_id),
                 error,
             });
         }
-        let full_sink = self.sinks.iter().find(|sink| {
-            sink.queue.len() >= sink.plan.limits.max_items
-                || sink.queued_bytes.saturating_add(bytes) > sink.plan.limits.max_bytes
-        });
-        if let Some(sink) = full_sink {
-            if let FullPolicy::Backpressure { deadline } = &sink.plan.full_policy {
-                if deadline.remaining() == 0 || self.shared_budget.remaining() == 0 {
+        let mut full_index = None;
+        for (index, sink) in self.sinks.iter().enumerate() {
+            let queued_bytes =
+                sink.queued_bytes
+                    .checked_add(bytes)
+                    .ok_or(TypedRouterError::Ledger(LedgerError::ArithmeticOverflow {
+                        field: "queued-bytes",
+                    }))?;
+            if sink.queue.len() >= sink.plan.limits.max_items
+                || queued_bytes > sink.plan.limits.max_bytes
+            {
+                full_index = Some(index);
+                break;
+            }
+        }
+        if let Some(full_index) = full_index {
+            let full_id = self.sinks[full_index].plan.id;
+            let full_policy = self.sinks[full_index].plan.full_policy.clone();
+            if matches!(full_policy, FullPolicy::Backpressure { .. }) {
+                let deadline_exhausted = matches!(
+                    &full_policy,
+                    FullPolicy::Backpressure { deadline } if deadline.remaining() == 0
+                );
+                if deadline_exhausted || self.shared_budget.remaining() == 0 {
+                    self.record_not_admitted(
+                        event_id,
+                        bytes,
+                        NotAdmittedReason::FailedBeforeAdmission(BoundedDiagnostic::new(
+                            "backpressure budget exhausted",
+                        )),
+                    )?;
                     self.phase = TypedRouterPhase::Failed;
                     return Ok(TypedAdmissionOutcome::Failed {
-                        sink_id: Some(sink.plan.id),
+                        sink_id: Some(full_id),
                         error: BoundedDiagnostic::new("shared backpressure budget exhausted"),
                     });
                 }
@@ -3275,41 +4699,23 @@ impl TypedResultRouter {
                 // caller successfully reserves it.  This is what permits the
                 // same EventId/payload to be retried without manufacturing a
                 // second semantic event or violating terminal ledger closure.
+                self.pending_admissions
+                    .entry(envelope.event_id().sequence())
+                    .or_insert(PendingAdmission {
+                        event_id,
+                        sink_id: full_id,
+                        bytes,
+                        attempts: 0,
+                    });
                 return Ok(TypedAdmissionOutcome::Full {
-                    sink_id: sink.plan.id,
+                    sink_id: full_id,
                     event_id,
                     bytes,
                 });
             }
-            for state in &self.sinks {
-                let key = DeliveryKey {
-                    event_id,
-                    sink_id: state.plan.id,
-                };
-                self.ledger.select_with_boundary(
-                    key,
-                    bytes,
-                    self.shared_budget.remaining(),
-                    state.plan.durability_boundary,
-                )?;
-            }
-            let full_id = sink.plan.id;
+            self.record_not_admitted(event_id, bytes, NotAdmittedReason::Full)?;
             let reason = BoundedDiagnostic::new("finite sink queue is full");
-            for state in &self.sinks {
-                let key = DeliveryKey {
-                    event_id,
-                    sink_id: state.plan.id,
-                };
-                if state.plan.id == full_id {
-                    // A full queue rejects admission. Diagnosed drops are
-                    // reserved for work that was admitted and later released
-                    // by an explicit post-admission outcome.
-                    self.ledger.not_admitted(key, NotAdmittedReason::Full)?;
-                } else {
-                    self.ledger.not_admitted(key, NotAdmittedReason::Full)?;
-                }
-            }
-            if matches!(&sink.plan.full_policy, FullPolicy::FailRun) {
+            if matches!(full_policy, FullPolicy::FailRun) {
                 self.phase = TypedRouterPhase::Failed;
                 return Ok(TypedAdmissionOutcome::Failed {
                     sink_id: Some(full_id),
@@ -3323,6 +4729,20 @@ impl TypedResultRouter {
             });
         }
 
+        let next_sequence = self.next_sequence.checked_add(1).ok_or_else(|| {
+            TypedRouterError::InvalidConfiguration(BoundedDiagnostic::new("run sequence exhausted"))
+        })?;
+        self.ensure_ledger_capacity(2)?;
+        // Check every sink before mutating the ledger so an accounting
+        // overflow cannot leave a partially reserved all-sink admission.
+        for state in &self.sinks {
+            state
+                .queued_bytes
+                .checked_add(bytes)
+                .ok_or(TypedRouterError::Ledger(LedgerError::ArithmeticOverflow {
+                    field: "queued-bytes",
+                }))?;
+        }
         let envelope = Arc::new(envelope);
         let mut keys = Vec::with_capacity(self.sinks.len());
         for state in &self.sinks {
@@ -3340,15 +4760,20 @@ impl TypedResultRouter {
         }
         for (state, key) in self.sinks.iter_mut().zip(keys) {
             self.ledger.queued(key, self.shared_budget.remaining())?;
-            state.queued_bytes = state.queued_bytes.saturating_add(bytes);
+            state.queued_bytes =
+                state
+                    .queued_bytes
+                    .checked_add(bytes)
+                    .ok_or(TypedRouterError::Ledger(LedgerError::ArithmeticOverflow {
+                        field: "queued-bytes",
+                    }))?;
             state.queue.push_back(TypedQueued {
                 envelope: Arc::clone(&envelope),
                 bytes,
             });
         }
-        self.next_sequence = self.next_sequence.checked_add(1).ok_or_else(|| {
-            TypedRouterError::InvalidConfiguration(BoundedDiagnostic::new("run sequence exhausted"))
-        })?;
+        self.pending_admissions.remove(&event_id.sequence());
+        self.next_sequence = next_sequence;
         Ok(TypedAdmissionOutcome::Accepted { event_id, bytes })
     }
 
@@ -3358,10 +4783,86 @@ impl TypedResultRouter {
         &mut self,
         envelope: TypedResultEnvelope,
     ) -> Result<TypedAdmissionOutcome, TypedRouterError> {
+        match self.phase {
+            TypedRouterPhase::Open => {}
+            TypedRouterPhase::Cancelled => return Ok(TypedAdmissionOutcome::Cancelled),
+            TypedRouterPhase::New
+            | TypedRouterPhase::AdmissionStopped
+            | TypedRouterPhase::Draining
+            | TypedRouterPhase::Flushed
+            | TypedRouterPhase::Finished
+            | TypedRouterPhase::Failed => return Ok(TypedAdmissionOutcome::Closed),
+        }
+        let sequence = envelope.event_id().sequence();
+        let pending = self
+            .pending_admissions
+            .get(&sequence)
+            .copied()
+            .ok_or_else(|| {
+                TypedRouterError::InvalidConfiguration(BoundedDiagnostic::new(
+                    "no pending backpressure admission",
+                ))
+            })?;
+        if pending.event_id != envelope.event_id() || pending.bytes != envelope.byte_size() {
+            return Err(TypedRouterError::InvalidConfiguration(
+                BoundedDiagnostic::new("backpressure retry identity collision"),
+            ));
+        }
+        let index = self.sink_index(pending.sink_id)?;
+        let deadline_limit = match &self.sinks[index].plan.full_policy {
+            FullPolicy::Backpressure { deadline } => deadline.remaining(),
+            FullPolicy::FailRun | FullPolicy::DiagnosedDrop { .. } => 0,
+        };
+        if pending.attempts >= deadline_limit {
+            self.record_not_admitted(
+                pending.event_id,
+                pending.bytes,
+                NotAdmittedReason::FailedBeforeAdmission(BoundedDiagnostic::new(
+                    "backpressure deadline exhausted",
+                )),
+            )?;
+            self.phase = TypedRouterPhase::Failed;
+            return Ok(TypedAdmissionOutcome::Failed {
+                sink_id: Some(pending.sink_id),
+                error: BoundedDiagnostic::new("backpressure deadline exhausted"),
+            });
+        }
+        if self.shared_budget.remaining() == 0 {
+            self.record_not_admitted(
+                pending.event_id,
+                pending.bytes,
+                NotAdmittedReason::FailedBeforeAdmission(BoundedDiagnostic::new(
+                    "shared backpressure budget exhausted",
+                )),
+            )?;
+            self.phase = TypedRouterPhase::Failed;
+            return Ok(TypedAdmissionOutcome::Failed {
+                sink_id: Some(pending.sink_id),
+                error: BoundedDiagnostic::new("shared backpressure budget exhausted"),
+            });
+        }
+        let shared_before = self.shared_budget;
+        self.pending_admissions.remove(&sequence);
         if !self.shared_budget.consume() {
+            self.pending_admissions.insert(sequence, pending);
             return Err(TypedRouterError::Ledger(LedgerError::RetryBudgetExhausted));
         }
-        self.admit(envelope)
+        let outcome = self.admit(envelope);
+        if outcome.is_err() {
+            self.shared_budget = shared_before;
+            self.pending_admissions.insert(sequence, pending);
+        } else if matches!(&outcome, Ok(TypedAdmissionOutcome::Full { .. })) {
+            let mut next_pending = pending;
+            next_pending.attempts =
+                next_pending
+                    .attempts
+                    .checked_add(1)
+                    .ok_or(TypedRouterError::Ledger(LedgerError::ArithmeticOverflow {
+                        field: "backpressure-attempts",
+                    }))?;
+            self.pending_admissions.insert(sequence, next_pending);
+        }
+        outcome
     }
 
     /// Stops new admission while retaining queued work for draining.
@@ -3401,11 +4902,9 @@ impl TypedResultRouter {
             if self.sinks[index].failed.is_some() {
                 continue;
             }
-            let Some(item) = self.sinks[index].queue.pop_front() else {
+            let Some(item) = self.sinks[index].queue.front().cloned() else {
                 continue;
             };
-            self.sinks[index].queued_bytes =
-                self.sinks[index].queued_bytes.saturating_sub(item.bytes);
             let key = DeliveryKey {
                 event_id: item.envelope.event_id(),
                 sink_id: self.sinks[index].plan.id,
@@ -3413,6 +4912,14 @@ impl TypedResultRouter {
             let attempt = self
                 .ledger
                 .processing(key, self.shared_budget.remaining())?;
+            let queued_bytes = self.sinks[index]
+                .queued_bytes
+                .checked_sub(item.bytes)
+                .ok_or(TypedRouterError::Ledger(LedgerError::ArithmeticOverflow {
+                    field: "queued-bytes-underflow",
+                }))?;
+            let _ = self.sinks[index].queue.pop_front();
+            self.sinks[index].queued_bytes = queued_bytes;
             self.sinks[index].in_flight.insert(
                 key.event_id,
                 TypedInFlight {
@@ -3441,11 +4948,19 @@ impl TypedResultRouter {
             TypedRouterPhase::AdmissionStopped
                 | TypedRouterPhase::Draining
                 | TypedRouterPhase::Flushed
+                | TypedRouterPhase::Failed
         ) {
             return Err(TypedRouterError::InvalidState {
                 phase: self.phase,
                 operation: "flush",
             });
+        }
+        if !self.pending_admissions.is_empty() {
+            return Err(TypedRouterError::Ledger(
+                LedgerError::ConservationViolation {
+                    detail: "flush reached with pending backpressure admissions".to_owned(),
+                },
+            ));
         }
         if self.ledger.entries.values().any(|entry| {
             matches!(
@@ -3453,6 +4968,9 @@ impl TypedResultRouter {
                 LedgerState::Selected
                     | LedgerState::Disposition(LedgerDisposition::Queued)
                     | LedgerState::Disposition(LedgerDisposition::Processing)
+                    | LedgerState::Disposition(LedgerDisposition::Failed(
+                        FailureReason::Retryable(_)
+                    ))
             )
         }) {
             return Err(TypedRouterError::Ledger(
@@ -3472,8 +4990,20 @@ impl TypedResultRouter {
             sink_id: ack.sink_id(),
         };
         let index = self.sink_index(key.sink_id)?;
+        let active = self.sinks[index]
+            .in_flight
+            .get(&key.event_id)
+            .ok_or(TypedRouterError::Ledger(LedgerError::LeaseMissing))?;
+        if active.attempt != ack.attempt() {
+            return Err(TypedRouterError::Ledger(
+                LedgerError::AcknowledgementMismatch,
+            ));
+        }
         self.ledger.durable(ack, self.shared_budget.remaining())?;
-        self.sinks[index].in_flight.remove(&key.event_id);
+        self.sinks[index]
+            .in_flight
+            .remove(&key.event_id)
+            .ok_or(TypedRouterError::Ledger(LedgerError::LeaseMissing))?;
         Ok(())
     }
 
@@ -3493,8 +5023,14 @@ impl TypedResultRouter {
                 LedgerError::DiagnosedDropNotAllowed,
             ));
         }
+        if !self.sinks[index].in_flight.contains_key(&key.event_id) {
+            return Err(TypedRouterError::Ledger(LedgerError::LeaseMissing));
+        }
         self.ledger.diagnosed_drop(key, reason, true)?;
-        self.sinks[index].in_flight.remove(&key.event_id);
+        self.sinks[index]
+            .in_flight
+            .remove(&key.event_id)
+            .ok_or(TypedRouterError::Ledger(LedgerError::LeaseMissing))?;
         Ok(())
     }
 
@@ -3506,6 +5042,42 @@ impl TypedResultRouter {
         reason: FailureReason,
     ) -> Result<(), TypedRouterError> {
         let index = self.sink_index(key.sink_id)?;
+        if !self.sinks[index].in_flight.contains_key(&key.event_id) {
+            return Err(TypedRouterError::Ledger(LedgerError::LeaseMissing));
+        }
+        if !matches!(&reason, FailureReason::Retryable(_)) {
+            let queued = self
+                .ledger
+                .entries
+                .iter()
+                .filter(|(pending_key, entry)| {
+                    pending_key.sink_id == key.sink_id
+                        && matches!(
+                            &entry.state,
+                            LedgerState::Selected
+                                | LedgerState::Disposition(LedgerDisposition::Queued)
+                        )
+                })
+                .count();
+            let other_in_flight = self.sinks[index].in_flight.len().checked_sub(1).ok_or(
+                TypedRouterError::Ledger(LedgerError::ArithmeticOverflow {
+                    field: "in-flight-count-underflow",
+                }),
+            )?;
+            let required = 1usize
+                .checked_add(queued)
+                .and_then(|count| count.checked_add(other_in_flight))
+                .ok_or(TypedRouterError::Ledger(LedgerError::TransitionLimit))?;
+            let available = self
+                .ledger
+                .transitions
+                .len()
+                .checked_add(required)
+                .ok_or(TypedRouterError::Ledger(LedgerError::TransitionLimit))?;
+            if available > MAX_LEDGER_TRANSITIONS {
+                return Err(TypedRouterError::Ledger(LedgerError::TransitionLimit));
+            }
+        }
         self.ledger.failed(key, reason.clone())?;
         if !matches!(&reason, FailureReason::Retryable(_)) {
             self.sinks[index].in_flight.remove(&key.event_id);
@@ -3533,6 +5105,26 @@ impl TypedResultRouter {
                 self.ledger
                     .failed(pending_key, FailureReason::Permanent(diagnostic.clone()))?;
             }
+            let in_flight = self.sinks[index]
+                .in_flight
+                .keys()
+                .copied()
+                .filter(|event_id| *event_id != key.event_id)
+                .map(|event_id| DeliveryKey {
+                    event_id,
+                    sink_id: key.sink_id,
+                })
+                .collect::<Vec<_>>();
+            for in_flight_key in in_flight {
+                self.ledger.failed(
+                    in_flight_key,
+                    FailureReason::UnknownOutcome(diagnostic.clone()),
+                )?;
+            }
+            self.phase = TypedRouterPhase::Failed;
+            // The queued entries are now terminal in the ledger.  They may be
+            // released from memory, but only after that accounting transition.
+            self.sinks[index].in_flight.clear();
             self.sinks[index].queue.clear();
             self.sinks[index].queued_bytes = 0;
         }
@@ -3542,16 +5134,120 @@ impl TypedResultRouter {
         Ok(())
     }
 
+    /// Converts a pending backpressure attempt into explicit non-admission
+    /// ledger entries when a run is finalized without another retry.
+    fn close_pending_admissions(
+        &mut self,
+        reason: NotAdmittedReason,
+    ) -> Result<(), TypedRouterError> {
+        let pending_count = self.pending_admissions.len();
+        let required = pending_count
+            .checked_mul(
+                self.sinks
+                    .len()
+                    .checked_mul(2)
+                    .ok_or(TypedRouterError::Ledger(LedgerError::ArithmeticOverflow {
+                        field: "sink-finalization-count",
+                    }))?,
+            )
+            .ok_or(TypedRouterError::Ledger(LedgerError::TransitionLimit))?;
+        let available = self
+            .ledger
+            .transitions
+            .len()
+            .checked_add(required)
+            .ok_or(TypedRouterError::Ledger(LedgerError::TransitionLimit))?;
+        if available > MAX_LEDGER_TRANSITIONS {
+            return Err(TypedRouterError::Ledger(LedgerError::TransitionLimit));
+        }
+        let pending = std::mem::take(&mut self.pending_admissions);
+        for (_, pending) in pending {
+            self.record_not_admitted(pending.event_id, pending.bytes, reason.clone())?;
+        }
+        Ok(())
+    }
+
+    fn ensure_finalization_capacity(&self) -> Result<(), TypedRouterError> {
+        let pending_steps = self
+            .pending_admissions
+            .len()
+            .checked_mul(2)
+            .ok_or(TypedRouterError::Ledger(LedgerError::FinalizationLimit))?;
+        for sink in &self.sinks {
+            let queued_steps = self
+                .ledger
+                .entries
+                .iter()
+                .filter(|(key, entry)| {
+                    key.sink_id == sink.plan.id
+                        && matches!(
+                            &entry.state,
+                            LedgerState::Disposition(LedgerDisposition::Queued)
+                                | LedgerState::Disposition(LedgerDisposition::Processing)
+                                | LedgerState::Disposition(LedgerDisposition::Failed(
+                                    FailureReason::Retryable(_)
+                                ))
+                        )
+                })
+                .count();
+            let required = pending_steps
+                .checked_add(queued_steps)
+                .ok_or(TypedRouterError::Ledger(LedgerError::FinalizationLimit))?;
+            if required > sink.plan.limits.max_finalization_steps {
+                return Err(TypedRouterError::Ledger(LedgerError::FinalizationLimit));
+            }
+        }
+        Ok(())
+    }
+
     /// Requeues a retryable lease with the same event/sink idempotency key.
     pub fn retry(&mut self, key: DeliveryKey) -> Result<(), TypedRouterError> {
         let index = self.sink_index(key.sink_id)?;
+        match self.ledger.state(key)? {
+            LedgerState::Disposition(LedgerDisposition::Failed(FailureReason::Retryable(_))) => {}
+            LedgerState::Disposition(LedgerDisposition::Failed(FailureReason::UnknownOutcome(
+                _,
+            ))) => {
+                return Err(TypedRouterError::Ledger(
+                    LedgerError::RetryAfterUnknownOutcome,
+                ));
+            }
+            state => {
+                return Err(TypedRouterError::Ledger(LedgerError::InvalidTransition {
+                    state,
+                    operation: "retry",
+                }));
+            }
+        }
+        let in_flight = self.sinks[index]
+            .in_flight
+            .get(&key.event_id)
+            .cloned()
+            .ok_or(TypedRouterError::Ledger(LedgerError::LeaseMissing))?;
+        let queued_bytes = self.sinks[index]
+            .queued_bytes
+            .checked_add(in_flight.envelope.byte_size())
+            .ok_or(TypedRouterError::Ledger(LedgerError::ArithmeticOverflow {
+                field: "queued-bytes",
+            }))?;
+        if self.sinks[index].queue.len() >= self.sinks[index].plan.limits.max_items
+            || queued_bytes > self.sinks[index].plan.limits.max_bytes
+        {
+            return Err(TypedRouterError::Ledger(LedgerError::RetryQueueFull));
+        }
         self.ledger.retry(key, &mut self.shared_budget)?;
         let in_flight = self.sinks[index]
             .in_flight
             .remove(&key.event_id)
-            .ok_or(LedgerError::RetryAfterUnknownOutcome)?;
+            .ok_or(LedgerError::LeaseMissing)?;
         let bytes = in_flight.envelope.byte_size();
-        self.sinks[index].queued_bytes = self.sinks[index].queued_bytes.saturating_add(bytes);
+        self.sinks[index].queued_bytes =
+            self.sinks[index]
+                .queued_bytes
+                .checked_add(bytes)
+                .ok_or(TypedRouterError::Ledger(LedgerError::ArithmeticOverflow {
+                    field: "queued-bytes",
+                }))?;
         self.sinks[index].queue.push_back(TypedQueued {
             envelope: in_flight.envelope,
             bytes,
@@ -3559,20 +5255,62 @@ impl TypedResultRouter {
         Ok(())
     }
 
+    /// Reuses one semantic process operation after a retryable sink outcome.
+    /// The supplied remaining attempt count comes from the shared run-owned
+    /// authority; no adapter-local retry budget is reset or consumed here.
+    fn retry_for_operation(
+        &mut self,
+        key: DeliveryKey,
+        reason: BoundedDiagnostic,
+        remaining_attempts: u32,
+    ) -> Result<DeliveryLease, TypedRouterError> {
+        let index = self.sink_index(key.sink_id)?;
+        let in_flight = self.sinks[index]
+            .in_flight
+            .get(&key.event_id)
+            .cloned()
+            .ok_or(TypedRouterError::Ledger(LedgerError::LeaseMissing))?;
+        self.ledger.failed(key, FailureReason::Retryable(reason))?;
+        let attempt = self.ledger.retry_with_remaining(key, remaining_attempts)?;
+        self.ledger.processing(key, remaining_attempts)?;
+        self.sinks[index]
+            .in_flight
+            .get_mut(&key.event_id)
+            .ok_or(TypedRouterError::Ledger(LedgerError::LeaseMissing))?
+            .attempt = attempt;
+        Ok(DeliveryLease {
+            key,
+            envelope: in_flight.envelope,
+            attempt,
+            idempotency_key: self.ledger.idempotency_key(key)?,
+            durability_boundary: self.sinks[index].plan.durability_boundary,
+        })
+    }
+
     /// Cancels and explicitly accounts every queued/processing pair.
     pub fn cancel(&mut self) -> Result<(), TypedRouterError> {
         if self.phase == TypedRouterPhase::Finished {
             return Ok(());
         }
+        self.ensure_finalization_capacity()?;
         self.phase = TypedRouterPhase::Cancelled;
+        self.close_pending_admissions(NotAdmittedReason::Cancelled)?;
         let keys = self.pending_keys();
         for key in keys {
+            let state = self.ledger.state(key)?;
             if matches!(
-                self.ledger.state(key)?,
-                LedgerState::Disposition(LedgerDisposition::Queued)
+                &state,
+                LedgerState::Selected
+                    | LedgerState::Disposition(LedgerDisposition::Queued)
                     | LedgerState::Disposition(LedgerDisposition::Processing)
             ) {
                 self.ledger.failed(key, FailureReason::Cancelled)?;
+            } else if matches!(
+                &state,
+                LedgerState::Disposition(LedgerDisposition::Failed(FailureReason::Retryable(_)))
+            ) {
+                self.ledger
+                    .terminalize_retryable(key, FailureReason::Cancelled)?;
             }
         }
         for sink in &mut self.sinks {
@@ -3580,13 +5318,21 @@ impl TypedResultRouter {
             sink.queued_bytes = 0;
             sink.in_flight.clear();
         }
+        self.pending_admissions.clear();
         Ok(())
     }
 
     /// Stops admission, accounts pending work, and returns a report ready for
     /// effectful flush/close publication.
     pub fn finish(&mut self) -> Result<FinalizationReport, TypedRouterError> {
-        if self.phase == TypedRouterPhase::Open {
+        if self.phase == TypedRouterPhase::Finished {
+            let report = self
+                .ledger
+                .finalization_report_for(self.sinks.iter().map(|sink| sink.plan.id));
+            report.validate_conservation()?;
+            return Ok(report);
+        }
+        if matches!(self.phase, TypedRouterPhase::New | TypedRouterPhase::Open) {
             self.phase = TypedRouterPhase::AdmissionStopped;
         }
         if self.phase == TypedRouterPhase::Cancelled {
@@ -3595,14 +5341,24 @@ impl TypedResultRouter {
                 operation: "finish",
             });
         }
+        self.ensure_finalization_capacity()?;
+        self.close_pending_admissions(NotAdmittedReason::Closed)?;
         let keys = self.pending_keys();
         for key in keys {
+            let state = self.ledger.state(key)?;
             if matches!(
-                self.ledger.state(key)?,
-                LedgerState::Disposition(LedgerDisposition::Queued)
+                &state,
+                LedgerState::Selected
+                    | LedgerState::Disposition(LedgerDisposition::Queued)
                     | LedgerState::Disposition(LedgerDisposition::Processing)
             ) {
                 self.ledger.failed(key, FailureReason::Cancelled)?;
+            } else if matches!(
+                &state,
+                LedgerState::Disposition(LedgerDisposition::Failed(FailureReason::Retryable(_)))
+            ) {
+                self.ledger
+                    .terminalize_retryable(key, FailureReason::Cancelled)?;
             }
         }
         for sink in &mut self.sinks {
@@ -3610,6 +5366,7 @@ impl TypedResultRouter {
             sink.queued_bytes = 0;
             sink.in_flight.clear();
         }
+        self.pending_admissions.clear();
         self.flush()?;
         self.phase = TypedRouterPhase::Finished;
         let report = self
@@ -3626,8 +5383,12 @@ impl TypedResultRouter {
             .filter_map(|(key, entry)| {
                 matches!(
                     &entry.state,
-                    LedgerState::Disposition(LedgerDisposition::Queued)
+                    LedgerState::Selected
+                        | LedgerState::Disposition(LedgerDisposition::Queued)
                         | LedgerState::Disposition(LedgerDisposition::Processing)
+                        | LedgerState::Disposition(LedgerDisposition::Failed(
+                            FailureReason::Retryable(_)
+                        ))
                 )
                 .then_some(*key)
             })
@@ -3706,20 +5467,633 @@ impl DeliveryLease {
     }
 }
 
+/// Executor-neutral future returned by one typed sink adapter operation.
+pub type TypedSinkFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, TypedSinkError>> + 'a>>;
+
+/// Errors from an effectful typed sink adapter.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TypedSinkError {
+    /// The operation may be retried with the same lease/idempotency key.
+    Retryable(BoundedDiagnostic),
+    /// The adapter cannot establish whether the event was durable. It must
+    /// never be retried implicitly.
+    UnknownOutcome(BoundedDiagnostic),
+    /// The event or lifecycle operation failed permanently.
+    Permanent(BoundedDiagnostic),
+    /// The operation observed run cancellation.
+    Cancelled,
+    /// The shared finite operation budget stopped the operation.
+    Budget(BudgetError),
+}
+
+impl TypedSinkError {
+    /// Creates a bounded retryable sink error.
+    #[must_use]
+    pub fn retryable(value: impl Into<String>) -> Self {
+        Self::Retryable(BoundedDiagnostic::new(value))
+    }
+
+    /// Creates a bounded unknown-outcome sink error.
+    #[must_use]
+    pub fn unknown_outcome(value: impl Into<String>) -> Self {
+        Self::UnknownOutcome(BoundedDiagnostic::new(value))
+    }
+
+    /// Creates a bounded permanent sink error.
+    #[must_use]
+    pub fn permanent(value: impl Into<String>) -> Self {
+        Self::Permanent(BoundedDiagnostic::new(value))
+    }
+
+    /// Returns the stable machine-readable category.
+    #[must_use]
+    pub const fn code(&self) -> &'static str {
+        match self {
+            Self::Retryable(_) => "runtime.typed-sink.retryable",
+            Self::UnknownOutcome(_) => "runtime.typed-sink.unknown-outcome",
+            Self::Permanent(_) => "runtime.typed-sink.permanent",
+            Self::Cancelled => "runtime.typed-sink.cancelled",
+            Self::Budget(_) => "runtime.typed-sink.budget",
+        }
+    }
+}
+
+impl fmt::Display for TypedSinkError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Retryable(detail) | Self::UnknownOutcome(detail) | Self::Permanent(detail) => {
+                write!(formatter, "{}: {detail}", self.code())
+            }
+            Self::Cancelled => formatter.write_str(self.code()),
+            Self::Budget(error) => write!(formatter, "{}: {error}", self.code()),
+        }
+    }
+}
+
+impl std::error::Error for TypedSinkError {}
+
+/// One run-owned, executor-neutral typed result destination.
+///
+/// A sink receives the original [`TypedResultEnvelope`] through a
+/// [`DeliveryLease`]. It must return an acknowledgement made from that lease;
+/// the router verifies the event, sink, attempt, payload digest, idempotency
+/// key, and durability boundary before terminalizing the ledger entry.
+pub trait TypedSinkAdapter: Send + Sync {
+    /// Starts the sink before sampling begins.
+    fn start<'a>(
+        &'a self,
+        operation: &'a ResultOperationLease,
+        wait_registrar: &'a dyn ResultWaitRegistrar,
+    ) -> TypedSinkFuture<'a, ()> {
+        let _ = (operation, wait_registrar);
+        Box::pin(future::ready(Ok(())))
+    }
+
+    /// Processes one leased original event and returns its bound durability
+    /// acknowledgement.
+    fn process<'a>(
+        &'a self,
+        lease: &'a DeliveryLease,
+        operation: &'a ResultOperationLease,
+        wait_registrar: &'a dyn ResultWaitRegistrar,
+    ) -> TypedSinkFuture<'a, DurabilityAck>;
+
+    /// Flushes all events already acknowledged by this sink.
+    fn flush<'a>(
+        &'a self,
+        operation: &'a ResultOperationLease,
+        wait_registrar: &'a dyn ResultWaitRegistrar,
+    ) -> TypedSinkFuture<'a, ()> {
+        let _ = (operation, wait_registrar);
+        Box::pin(future::ready(Ok(())))
+    }
+
+    /// Finishes and closes the sink. Implementations must be idempotent.
+    fn finish<'a>(
+        &'a self,
+        operation: &'a ResultOperationLease,
+        wait_registrar: &'a dyn ResultWaitRegistrar,
+    ) -> TypedSinkFuture<'a, ()> {
+        let _ = (operation, wait_registrar);
+        Box::pin(future::ready(Ok(())))
+    }
+
+    /// Requests bounded cancellation. This method must not block.
+    fn cancel(&self) -> Result<(), TypedSinkError> {
+        Ok(())
+    }
+}
+
+/// A run-owned shared typed router and its effectful sink adapters.
+///
+/// `TypedResultRouter` is the deterministic ledger/queue model. This adapter
+/// is the only production-facing bridge that lets a runtime engine start,
+/// admit, lease, acknowledge, drain, flush, and finish those queues. The
+/// router is shared across scheduler clones; it is never cloned per user.
+#[derive(Clone)]
+pub struct TypedResultRouterAdapter {
+    router: Arc<Mutex<TypedResultRouter>>,
+    identity: TypedRouterIdentity,
+    sinks: Arc<BTreeMap<QualifiedSinkId, Arc<dyn TypedSinkAdapter>>>,
+    started: Arc<Mutex<BTreeSet<QualifiedSinkId>>>,
+    budget: ResultDeliveryBudget,
+    wait_registrar: Arc<dyn ResultWaitRegistrar>,
+}
+
+impl fmt::Debug for TypedResultRouterAdapter {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TypedResultRouterAdapter")
+            .field("identity", &self.identity)
+            .field("phase", &lock(&self.router).phase())
+            .field("sink_count", &self.sinks.len())
+            .finish()
+    }
+}
+
+impl TypedResultRouterAdapter {
+    /// Creates one shared typed router/sink binding and validates every sink
+    /// identity before any adapter is started.
+    #[deprecated(
+        note = "use new_with_liveness; typed production routing requires an explicit shared authority"
+    )]
+    pub fn new(
+        router: TypedResultRouter,
+        identity: TypedRouterIdentity,
+        adapters: impl IntoIterator<Item = (QualifiedSinkId, Arc<dyn TypedSinkAdapter>)>,
+    ) -> Result<Self, TypedRouterError> {
+        let _ = (router, identity, adapters);
+        Err(TypedRouterError::InvalidConfiguration(
+            BoundedDiagnostic::new(
+                "typed sink requires an explicit ResultDeliveryBudget and wait registrar",
+            ),
+        ))
+    }
+
+    /// Creates a typed router binding with the one run-owned liveness
+    /// authority and application wait registrar.  No default operation
+    /// duration or implicit run deadline is manufactured here.
+    pub fn new_with_liveness(
+        router: TypedResultRouter,
+        identity: TypedRouterIdentity,
+        adapters: impl IntoIterator<Item = (QualifiedSinkId, Arc<dyn TypedSinkAdapter>)>,
+        budget: ResultDeliveryBudget,
+        wait_registrar: Arc<dyn ResultWaitRegistrar>,
+    ) -> Result<Self, TypedRouterError> {
+        if router.run_id() != identity.run || router.run_generation() != identity.run_generation {
+            return Err(TypedRouterError::InvalidConfiguration(
+                BoundedDiagnostic::new("typed router identity does not match its run"),
+            ));
+        }
+        let expected = router.sink_ids();
+        let budget_scope = budget.scope();
+        if budget_scope.run() != identity.run
+            || expected
+                .iter()
+                .copied()
+                .any(|sink_id| !budget_scope.contains(sink_id))
+        {
+            return Err(TypedRouterError::InvalidConfiguration(
+                BoundedDiagnostic::new(
+                    "result budget scope does not cover the router run and selected sinks",
+                ),
+            ));
+        }
+        let mut sinks = BTreeMap::new();
+        for (sink_id, adapter) in adapters {
+            if expected.binary_search(&sink_id).is_err() || sinks.insert(sink_id, adapter).is_some()
+            {
+                return Err(TypedRouterError::InvalidConfiguration(
+                    BoundedDiagnostic::new("typed sink adapter identity is not unique/configured"),
+                ));
+            }
+        }
+        if sinks.len() != expected.len() {
+            return Err(TypedRouterError::InvalidConfiguration(
+                BoundedDiagnostic::new("typed router is missing a sink adapter"),
+            ));
+        }
+        Ok(Self {
+            router: Arc::new(Mutex::new(router)),
+            identity,
+            sinks: Arc::new(sinks),
+            started: Arc::new(Mutex::new(BTreeSet::new())),
+            budget,
+            wait_registrar,
+        })
+    }
+
+    /// Returns the shared run-owned liveness authority.
+    #[must_use]
+    pub fn budget(&self) -> ResultDeliveryBudget {
+        self.budget.clone()
+    }
+
+    /// Returns the shared wait-registration capability.
+    #[must_use]
+    pub fn wait_registrar(&self) -> Arc<dyn ResultWaitRegistrar> {
+        Arc::clone(&self.wait_registrar)
+    }
+
+    /// Returns the explicit plan/run/worker identity binding.
+    #[must_use]
+    pub const fn identity(&self) -> TypedRouterIdentity {
+        self.identity
+    }
+
+    /// Returns the shared router phase.
+    #[must_use]
+    pub fn phase(&self) -> TypedRouterPhase {
+        lock(&self.router).phase()
+    }
+
+    /// Returns the immutable ledger snapshot under the shared router lock.
+    #[must_use]
+    pub fn ledger_snapshot(&self) -> DeliveryLedger {
+        lock(&self.router).ledger().clone()
+    }
+
+    /// Returns the next event sequence to bind to a new envelope.
+    pub fn next_sequence(&self) -> Result<TypedRunSequence, TypedRouterError> {
+        lock(&self.router).next_sequence()
+    }
+
+    /// Qualifies one source node using the explicit plan domain.
+    pub fn node(&self, node: NodeId) -> Result<PlanNodeRef, IdentityError> {
+        self.identity.node(node)
+    }
+
+    /// Qualifies an ordered source path using the explicit plan domain.
+    pub fn path(&self, path: &[NodeId]) -> Result<Vec<PlanNodeRef>, IdentityError> {
+        self.identity.path(path)
+    }
+
+    /// Starts all sink adapters in stable sink identity order. If one start
+    /// fails, already-started adapters are synchronously cancelled and the
+    /// router is cancelled before the error is returned.
+    pub async fn start(&self) -> Result<(), TypedRouterError> {
+        {
+            let mut router = lock(&self.router);
+            router.start()?;
+        }
+        for (sink_id, adapter) in self.sinks.iter() {
+            let operation = match self
+                .budget
+                .begin_sink_operation(*sink_id, ResultOperationKind::Start)
+            {
+                Ok(operation) => operation,
+                Err(error) => {
+                    let mut aggregate = Some(TypedRouterError::Budget(error));
+                    for secondary in self.cancel_started_errors() {
+                        Self::append_error(&mut aggregate, secondary);
+                    }
+                    if let Err(secondary) = lock(&self.router).cancel() {
+                        Self::append_error(&mut aggregate, secondary);
+                    }
+                    if let Some(error) = aggregate {
+                        return Err(error);
+                    }
+                    return Ok(());
+                }
+            };
+            if let Err(error) = adapter
+                .start(&operation, self.wait_registrar.as_ref())
+                .await
+            {
+                let mut aggregate = Some(Self::sink_error(error));
+                for secondary in self.cancel_started_errors() {
+                    Self::append_error(&mut aggregate, secondary);
+                }
+                if let Err(secondary) = lock(&self.router).cancel() {
+                    Self::append_error(&mut aggregate, secondary);
+                }
+                if let Some(error) = aggregate {
+                    return Err(error);
+                }
+                return Ok(());
+            }
+            lock(&self.started).insert(*sink_id);
+        }
+        Ok(())
+    }
+
+    /// Admits one immutable event transactionally into all selected sinks.
+    pub fn admit(
+        &self,
+        envelope: TypedResultEnvelope,
+    ) -> Result<TypedAdmissionOutcome, TypedRouterError> {
+        lock(&self.router).admit(envelope)
+    }
+
+    /// Retries a previously full admission while preserving its exact event
+    /// identity and payload digest.
+    pub fn retry_admission(
+        &self,
+        envelope: TypedResultEnvelope,
+    ) -> Result<TypedAdmissionOutcome, TypedRouterError> {
+        lock(&self.router).retry_admission(envelope)
+    }
+
+    /// Processes every queued lease in deterministic bounded round-robin
+    /// order. A sink acknowledgement is accepted only after exact validation.
+    /// One process lease is reused for retryable outcomes, so polling and
+    /// retries cannot refresh the operation deadline.
+    pub async fn deliver(&self) -> Result<(), TypedRouterError> {
+        self.deliver_inner(None).await
+    }
+
+    /// Drains accepted work under the one shared finalization cap. The
+    /// cleanup lease deliberately remains usable after execution cancellation
+    /// so accepted events receive a durable acknowledgement or an explicit
+    /// terminal error.
+    async fn deliver_finalization(
+        &self,
+        finalization: &ResultFinalizationLease,
+    ) -> Result<(), TypedRouterError> {
+        self.deliver_inner(Some(finalization)).await
+    }
+
+    async fn deliver_inner(
+        &self,
+        finalization: Option<&ResultFinalizationLease>,
+    ) -> Result<(), TypedRouterError> {
+        loop {
+            let initial_lease = { lock(&self.router).next_delivery()? };
+            let Some(mut lease) = initial_lease else {
+                return Ok(());
+            };
+            let sink_id = lease.key().sink_id;
+            let adapter = self.sinks.get(&sink_id).ok_or_else(|| {
+                TypedRouterError::InvalidConfiguration(BoundedDiagnostic::new(
+                    "lease references an unconfigured sink adapter",
+                ))
+            })?;
+            let operation = match finalization {
+                Some(finalization) => {
+                    finalization.sink_operation(sink_id, ResultOperationKind::Process)
+                }
+                None => self
+                    .budget
+                    .begin_sink_operation(sink_id, ResultOperationKind::Process),
+            }
+            .map_err(TypedRouterError::Budget)?;
+            loop {
+                if let Err(error) = operation.check() {
+                    return Err(self.fail_delivery(
+                        lease.key(),
+                        TypedRouterError::Budget(error),
+                        FailureReason::Cancelled,
+                    ));
+                }
+                let outcome = adapter
+                    .process(&lease, &operation, self.wait_registrar.as_ref())
+                    .await;
+                match outcome {
+                    Ok(ack) => {
+                        lock(&self.router).acknowledge(ack)?;
+                        break;
+                    }
+                    Err(TypedSinkError::Retryable(reason)) => {
+                        let retry_primary =
+                            TypedRouterError::Sink(TypedSinkError::Retryable(reason.clone()));
+                        // The same operation lease is retained across this
+                        // retry. The router only advances the delivery
+                        // attempt ordinal and returns the next bound lease.
+                        if let Err(error) = operation.check() {
+                            return Err(self.fail_delivery(
+                                lease.key(),
+                                Self::combine_errors(
+                                    retry_primary.clone(),
+                                    TypedRouterError::Budget(error),
+                                ),
+                                FailureReason::Cancelled,
+                            ));
+                        }
+                        if let Err(error) = operation.consume_retry() {
+                            return Err(self.fail_delivery(
+                                lease.key(),
+                                Self::combine_errors(
+                                    retry_primary.clone(),
+                                    TypedRouterError::Budget(error),
+                                ),
+                                FailureReason::Cancelled,
+                            ));
+                        }
+                        lease = match lock(&self.router).retry_for_operation(
+                            lease.key(),
+                            reason,
+                            operation.attempts_remaining(),
+                        ) {
+                            Ok(lease) => lease,
+                            Err(error) => {
+                                return Err(Self::combine_errors(retry_primary, error));
+                            }
+                        };
+                    }
+                    Err(error) => {
+                        let reason = match &error {
+                            TypedSinkError::UnknownOutcome(detail) => {
+                                FailureReason::UnknownOutcome(detail.clone())
+                            }
+                            TypedSinkError::Permanent(detail) => {
+                                FailureReason::Permanent(detail.clone())
+                            }
+                            TypedSinkError::Cancelled => FailureReason::Cancelled,
+                            TypedSinkError::Budget(_) => FailureReason::Cancelled,
+                            TypedSinkError::Retryable(_) => {
+                                return Err(TypedRouterError::Sink(error));
+                            }
+                        };
+                        let primary = Self::sink_error(error);
+                        return Err(self.fail_delivery(lease.key(), primary, reason));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Stops admission, drains accepted work, flushes adapters, and closes
+    /// the pure router. Primary and cleanup errors are retained together.
+    pub async fn finish(&self) -> Result<FinalizationReport, TypedRouterError> {
+        let mut primary = None;
+        let finalization = match self.budget.begin_finalization() {
+            Ok(finalization) => Some(finalization),
+            Err(error) => {
+                primary = Some(TypedRouterError::Budget(error));
+                None
+            }
+        };
+        if let Err(error) = lock(&self.router).stop_admission() {
+            Self::append_error(&mut primary, error);
+        }
+        if let Some(finalization) = finalization.as_ref()
+            && let Err(error) = self.deliver_finalization(finalization).await
+        {
+            Self::append_error(&mut primary, error);
+        }
+        if let Some(finalization) = finalization.as_ref() {
+            for (sink_id, adapter) in self.sinks.iter() {
+                if !lock(&self.started).contains(sink_id) {
+                    continue;
+                }
+                let operation =
+                    match finalization.sink_operation(*sink_id, ResultOperationKind::Flush) {
+                        Ok(operation) => operation,
+                        Err(error) => {
+                            Self::append_error(&mut primary, TypedRouterError::Budget(error));
+                            continue;
+                        }
+                    };
+                if let Err(error) = adapter
+                    .flush(&operation, self.wait_registrar.as_ref())
+                    .await
+                {
+                    Self::append_error(&mut primary, Self::sink_error(error));
+                }
+            }
+        }
+        // Every started adapter gets one finish attempt, even after another
+        // adapter's flush/finish failed. The pure router is not allowed to
+        // enter Finished until this whole owner cleanup phase succeeds.
+        if let Some(finalization) = finalization.as_ref() {
+            for (sink_id, adapter) in self.sinks.iter() {
+                if !lock(&self.started).contains(sink_id) {
+                    continue;
+                }
+                let operation =
+                    match finalization.sink_operation(*sink_id, ResultOperationKind::Finish) {
+                        Ok(operation) => operation,
+                        Err(error) => {
+                            Self::append_error(&mut primary, TypedRouterError::Budget(error));
+                            continue;
+                        }
+                    };
+                if let Err(error) = adapter
+                    .finish(&operation, self.wait_registrar.as_ref())
+                    .await
+                {
+                    Self::append_error(&mut primary, Self::sink_error(error));
+                }
+            }
+        }
+        if let Some(error) = primary {
+            let mut aggregate = Some(error);
+            for secondary in self.cancel_started_errors() {
+                Self::append_error(&mut aggregate, secondary);
+            }
+            if let Err(secondary) = lock(&self.router).cancel() {
+                Self::append_error(&mut aggregate, secondary);
+            }
+            if let Some(error) = aggregate {
+                return Err(error);
+            }
+        }
+        match lock(&self.router).finish() {
+            Ok(report) => Ok(report),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Cancels every started adapter and explicitly terminalizes every
+    /// accepted/queued delivery. This path is synchronous and bounded so a
+    /// dropped engine future cannot silently lose a reservation.
+    pub fn cancel(&self) -> Result<(), TypedRouterError> {
+        let mut primary = lock(&self.router).cancel().err();
+        for error in self.cancel_started_errors() {
+            if let Some(existing) = primary.take() {
+                primary = Some(TypedRouterError::Combined {
+                    primary: Box::new(existing),
+                    secondary: Box::new(error),
+                });
+            } else {
+                primary = Some(error);
+            }
+        }
+        match primary {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
+    fn cancel_started(&self) -> Option<TypedRouterError> {
+        let errors = self.cancel_started_errors();
+        let mut aggregate = None;
+        for error in errors {
+            if let Some(existing) = aggregate.take() {
+                aggregate = Some(TypedRouterError::Combined {
+                    primary: Box::new(existing),
+                    secondary: Box::new(error),
+                });
+            } else {
+                aggregate = Some(error);
+            }
+        }
+        aggregate
+    }
+
+    fn cancel_started_errors(&self) -> Vec<TypedRouterError> {
+        let started = lock(&self.started).clone();
+        started
+            .into_iter()
+            .filter_map(|_sink_id| {
+                self.sinks
+                    .get(&_sink_id)
+                    .and_then(|adapter| adapter.cancel().err().map(Self::sink_error))
+            })
+            .collect()
+    }
+
+    fn sink_error(error: TypedSinkError) -> TypedRouterError {
+        match error {
+            TypedSinkError::Budget(error) => TypedRouterError::Budget(error),
+            other => TypedRouterError::Sink(other),
+        }
+    }
+
+    fn combine_errors(primary: TypedRouterError, secondary: TypedRouterError) -> TypedRouterError {
+        TypedRouterError::Combined {
+            primary: Box::new(primary),
+            secondary: Box::new(secondary),
+        }
+    }
+
+    fn fail_delivery(
+        &self,
+        key: DeliveryKey,
+        primary: TypedRouterError,
+        reason: FailureReason,
+    ) -> TypedRouterError {
+        match lock(&self.router).fail(key, reason) {
+            Ok(()) => primary,
+            Err(secondary) => Self::combine_errors(primary, secondary),
+        }
+    }
+
+    fn append_error(target: &mut Option<TypedRouterError>, error: TypedRouterError) {
+        if let Some(existing) = target.take() {
+            *target = Some(TypedRouterError::Combined {
+                primary: Box::new(existing),
+                secondary: Box::new(error),
+            });
+        } else {
+            *target = Some(error);
+        }
+    }
+}
+
+/// A cancellation view for the executor-neutral typed sink budget.
+impl CancellationSignal for crate::CancellationToken {
+    fn is_cancelled(&self) -> bool {
+        self.is_cancelled()
+    }
+
+    fn register_waker(&self, waker: &Waker) {
+        self.register_waker(waker);
+    }
+}
+
 fn bounded_text(value: impl Into<String>) -> String {
-    let value = value.into();
-    if value.len() <= MAX_DIAGNOSTIC_BYTES {
-        return value;
-    }
-    let suffix = "...";
-    let mut end = MAX_DIAGNOSTIC_BYTES.saturating_sub(suffix.len());
-    while end > 0 && !value.is_char_boundary(end) {
-        end -= 1;
-    }
-    let mut value = value;
-    value.truncate(end);
-    value.push_str(suffix);
-    value
+    bounded_text_with_limit(value.into(), MAX_DIAGNOSTIC_BYTES)
 }
 
 /// A monotonic sequence assigned once to a result emitted by one run.
@@ -3888,6 +6262,310 @@ impl ResultOrigin {
     }
 }
 
+/// Execution scope at which a listener receives a result.
+///
+/// JMeter notifies listeners at the end of the owning scope.  Keeping the
+/// phase on the immutable event metadata lets a run-level collector preserve
+/// setup/main/teardown routing without guessing from a label or plan node.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ListenerPhase {
+    /// A result emitted by a setup thread group.
+    Setup,
+    /// A normal sampler or transaction result.
+    #[default]
+    Main,
+    /// A result emitted by a teardown thread group.
+    Teardown,
+}
+
+/// Result-success selection used by the JMeter ResultCollector flags.
+///
+/// `ErrorsOnly` and `SuccessesOnly` are separate flags in JMeter.  The
+/// combination is intentionally represented as `Both` and rejected during
+/// router configuration until the pinned oracle establishes the exact
+/// four-row truth table for that combination.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ListenerFilterMode {
+    /// Deliver every non-ignored root sample.
+    #[default]
+    All,
+    /// Deliver only samples whose root result is unsuccessful.
+    ErrorsOnly,
+    /// Deliver only samples whose root result is successful.
+    SuccessesOnly,
+    /// Both source flags were set; this is not silently interpreted.
+    Both,
+}
+
+/// The event shape exposed to a listener route.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ListenerSampleSelection {
+    /// Preserve the complete root event, including its nested sub-results.
+    #[default]
+    CompleteEvent,
+    /// UI-only child-sample projection, which is not an independent
+    /// notification in the pure run-level router.
+    ChildSamplesOnly,
+}
+
+/// Pure listener selection policy attached to one sink specification.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ListenerRoutePolicy {
+    enabled: bool,
+    order: Option<u64>,
+    phase: Option<ListenerPhase>,
+    filter: ListenerFilterMode,
+    scope_prefix: Option<Arc<[NodeId]>>,
+    sample_selection: ListenerSampleSelection,
+}
+
+impl Default for ListenerRoutePolicy {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            order: None,
+            phase: None,
+            filter: ListenerFilterMode::All,
+            scope_prefix: None,
+            sample_selection: ListenerSampleSelection::CompleteEvent,
+        }
+    }
+}
+
+impl ListenerRoutePolicy {
+    /// Creates the default enabled all-results route.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets whether this listener is enabled.  Disabled listeners remain in
+    /// the plan for diagnostics and ordering but never start or receive data.
+    #[must_use]
+    pub fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    /// Disables this listener without removing its configured identity.
+    #[must_use]
+    pub fn disabled(self) -> Self {
+        self.enabled(false)
+    }
+
+    /// Assigns a stable listener order.  Equal orders retain input order.
+    #[must_use]
+    pub fn ordered(mut self, order: u64) -> Self {
+        self.order = Some(order);
+        self
+    }
+
+    /// Selects the setup, main, or teardown phase.
+    #[must_use]
+    pub fn phase(mut self, phase: ListenerPhase) -> Self {
+        self.phase = Some(phase);
+        self
+    }
+
+    /// Selects only unsuccessful root samples.
+    #[must_use]
+    pub fn errors_only(mut self) -> Self {
+        self.filter = ListenerFilterMode::ErrorsOnly;
+        self
+    }
+
+    /// Selects only successful root samples.
+    #[must_use]
+    pub fn successes_only(mut self) -> Self {
+        self.filter = ListenerFilterMode::SuccessesOnly;
+        self
+    }
+
+    /// Selects all non-ignored root samples.
+    #[must_use]
+    pub fn all_results(mut self) -> Self {
+        self.filter = ListenerFilterMode::All;
+        self
+    }
+
+    /// Applies the two source ResultCollector flags with an explicit
+    /// unsupported result for the unverified both-enabled combination.
+    pub fn with_result_flags(
+        mut self,
+        error_only: bool,
+        success_only: bool,
+    ) -> Result<Self, ResultRouterError> {
+        self.filter = match (error_only, success_only) {
+            (false, false) => ListenerFilterMode::All,
+            (true, false) => ListenerFilterMode::ErrorsOnly,
+            (false, true) => ListenerFilterMode::SuccessesOnly,
+            (true, true) => {
+                return Err(ResultRouterError::InvalidConfiguration {
+                    detail: "result.filter.unverified: errors-only and successes-only together"
+                        .to_owned(),
+                });
+            }
+        };
+        Ok(self)
+    }
+
+    /// Alias using the JMeter ResultCollector terminology.
+    pub fn result_collector_flags(
+        self,
+        error_logging: bool,
+        success_only: bool,
+    ) -> Result<Self, ResultRouterError> {
+        self.with_result_flags(error_logging, success_only)
+    }
+
+    /// Restricts the route to results whose source path starts with the
+    /// supplied listener scope path.
+    pub fn scoped_to(mut self, path: impl Into<Vec<NodeId>>) -> Result<Self, ResultRouterError> {
+        let path = path.into();
+        if path.len() > MAX_PLAN_PATH {
+            return Err(ResultRouterError::InvalidConfiguration {
+                detail: "result listener scope path exceeds runtime bound".to_owned(),
+            });
+        }
+        self.scope_prefix = Some(path.into());
+        Ok(self)
+    }
+
+    /// Retains the complete root event.  This is the only notification shape
+    /// supported by the pure router; serialization decides which sub-result
+    /// fields are written.
+    #[must_use]
+    pub fn complete_event(mut self) -> Self {
+        self.sample_selection = ListenerSampleSelection::CompleteEvent;
+        self
+    }
+
+    /// Rejects the UI-only child-sample projection explicitly.  Child
+    /// samples remain inside the root envelope and are never silently
+    /// flattened into independent listener events.
+    pub fn child_samples_only(self) -> Result<Self, ResultRouterError> {
+        Err(ResultRouterError::InvalidConfiguration {
+            detail: "result.listener.child-samples-only-unsupported".to_owned(),
+        })
+    }
+
+    /// JMeter's label-regex controls belong to individual visualizers, not
+    /// the run-level ResultCollector.  Refuse them rather than accepting a
+    /// UI-only option and silently dropping data.
+    pub fn label_regex(self, _pattern: impl AsRef<str>) -> Result<Self, ResultRouterError> {
+        Err(ResultRouterError::InvalidConfiguration {
+            detail: "result.listener.label-regex-unsupported".to_owned(),
+        })
+    }
+
+    /// There is no generic listener thread predicate in the pinned JMeter
+    /// listener contract; reject one as an explicit capability error.
+    pub fn thread_predicate(self, _predicate: impl AsRef<str>) -> Result<Self, ResultRouterError> {
+        Err(ResultRouterError::InvalidConfiguration {
+            detail: "result.listener.thread-predicate-unsupported".to_owned(),
+        })
+    }
+
+    /// Returns whether this listener is enabled.
+    #[must_use]
+    pub const fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// Returns the configured stable order, if any.
+    #[must_use]
+    pub const fn order(&self) -> Option<u64> {
+        self.order
+    }
+
+    /// Returns this policy's event-shape selection.
+    #[must_use]
+    pub const fn sample_selection(&self) -> ListenerSampleSelection {
+        self.sample_selection
+    }
+
+    fn validate(&self) -> Result<(), ResultRouterError> {
+        if self.filter == ListenerFilterMode::Both {
+            return Err(ResultRouterError::InvalidConfiguration {
+                detail: "result.filter.unverified: both result flags".to_owned(),
+            });
+        }
+        if self.sample_selection == ListenerSampleSelection::ChildSamplesOnly {
+            return Err(ResultRouterError::InvalidConfiguration {
+                detail: "result.listener.child-samples-only-unsupported".to_owned(),
+            });
+        }
+        if self
+            .scope_prefix
+            .as_ref()
+            .is_some_and(|path| path.len() > MAX_PLAN_PATH)
+        {
+            return Err(ResultRouterError::InvalidConfiguration {
+                detail: "result listener scope path exceeds runtime bound".to_owned(),
+            });
+        }
+        Ok(())
+    }
+
+    fn matches_metadata(
+        &self,
+        event: &SampleEvent,
+        metadata: &ResultEventMetadata,
+    ) -> Result<bool, SinkError> {
+        if !self.enabled {
+            return Ok(false);
+        }
+        if self.phase.is_some_and(|phase| phase != metadata.phase) {
+            return Ok(false);
+        }
+        if self
+            .scope_prefix
+            .as_ref()
+            .is_some_and(|prefix| !metadata.plan_path.starts_with(prefix))
+        {
+            return Ok(false);
+        }
+        self.matches_result(event.result())
+    }
+
+    fn matches_envelope(&self, envelope: &ResultEnvelope) -> Result<bool, SinkError> {
+        if !self.enabled {
+            return Ok(false);
+        }
+        if self.phase.is_some_and(|phase| phase != envelope.phase) {
+            return Ok(false);
+        }
+        if self
+            .scope_prefix
+            .as_ref()
+            .is_some_and(|prefix| !envelope.plan_path.starts_with(prefix))
+        {
+            return Ok(false);
+        }
+        self.matches_result(envelope.event.result())
+    }
+
+    fn matches_result(&self, result: &SampleResult) -> Result<bool, SinkError> {
+        match self.sample_selection {
+            ListenerSampleSelection::CompleteEvent => {}
+            ListenerSampleSelection::ChildSamplesOnly => {
+                return Err(SinkError::unsupported(
+                    "result.listener.child-samples-only-unsupported",
+                ));
+            }
+        }
+        let successful = result.is_successful();
+        match self.filter {
+            ListenerFilterMode::All => Ok(true),
+            ListenerFilterMode::ErrorsOnly => Ok(!successful),
+            ListenerFilterMode::SuccessesOnly => Ok(successful),
+            ListenerFilterMode::Both => Err(SinkError::unsupported(
+                "result.filter.unverified: both result flags",
+            )),
+        }
+    }
+}
+
 /// Metadata supplied by the runtime at listener-notification time.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResultEventMetadata {
@@ -3902,6 +6580,8 @@ pub struct ResultEventMetadata {
     pub sample: SampleIdentity,
     /// Sampler-versus-transaction origin and parentage.
     pub origin: ResultOrigin,
+    /// Setup/main/teardown scope at which this event was emitted.
+    pub phase: ListenerPhase,
 }
 
 impl ResultEventMetadata {
@@ -3934,7 +6614,35 @@ impl ResultEventMetadata {
             user,
             sample,
             origin,
+            phase: ListenerPhase::Main,
         })
+    }
+
+    /// Sets the explicit setup/main/teardown scope for this notification.
+    #[must_use]
+    pub fn with_phase(mut self, phase: ListenerPhase) -> Self {
+        self.phase = phase;
+        self
+    }
+
+    /// Marks this notification as setup-scope without requiring callers to
+    /// construct the phase enum directly.
+    #[must_use]
+    pub fn setup(self) -> Self {
+        self.with_phase(ListenerPhase::Setup)
+    }
+
+    /// Marks this notification as main-scope.
+    #[must_use]
+    pub fn main(self) -> Self {
+        self.with_phase(ListenerPhase::Main)
+    }
+
+    /// Marks this notification as teardown-scope without requiring callers
+    /// to construct the phase enum directly.
+    #[must_use]
+    pub fn teardown(self) -> Self {
+        self.with_phase(ListenerPhase::Teardown)
     }
 }
 
@@ -3953,6 +6661,7 @@ pub struct ResultEnvelope {
     thread: ThreadIdentity,
     sample: SampleIdentity,
     origin: ResultOrigin,
+    phase: ListenerPhase,
     event: Arc<SampleEvent>,
     byte_size: usize,
 }
@@ -3973,6 +6682,38 @@ impl ResultEnvelope {
         thread: ThreadIdentity,
         sample: SampleIdentity,
         origin: ResultOrigin,
+        event: SampleEvent,
+    ) -> Result<Self, ResultRouterError> {
+        Self::new_with_phase(
+            sequence,
+            source_node,
+            plan_path,
+            run,
+            user,
+            thread,
+            sample,
+            origin,
+            ListenerPhase::Main,
+            event,
+        )
+    }
+
+    /// Creates an immutable envelope while retaining the listener execution
+    /// phase.  The legacy constructor defaults to [`ListenerPhase::Main`].
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the envelope boundary keeps every compatibility identity explicit"
+    )]
+    pub fn new_with_phase(
+        sequence: RunSequence,
+        source_node: NodeId,
+        plan_path: Vec<NodeId>,
+        run: RunIdentity,
+        user: UserIdentity,
+        thread: ThreadIdentity,
+        sample: SampleIdentity,
+        origin: ResultOrigin,
+        phase: ListenerPhase,
         event: SampleEvent,
     ) -> Result<Self, ResultRouterError> {
         if !sequence.is_valid() || !sample.is_valid() {
@@ -4027,6 +6768,7 @@ impl ResultEnvelope {
             thread,
             sample,
             origin,
+            phase,
             event: Arc::new(event),
             byte_size: byte_size.max(1),
         })
@@ -4080,6 +6822,12 @@ impl ResultEnvelope {
         self.origin
     }
 
+    /// Returns the setup/main/teardown phase captured at notification time.
+    #[must_use]
+    pub const fn phase(&self) -> ListenerPhase {
+        self.phase
+    }
+
     /// Returns the original immutable event snapshot.
     #[must_use]
     pub fn event(&self) -> &SampleEvent {
@@ -4117,6 +6865,17 @@ fn estimate_event_bytes(event: &SampleEvent) -> usize {
         pending.extend(result.sub_results());
     }
     bytes
+}
+
+fn checked_event_bytes(event: &SampleEvent, plan_path_len: usize) -> Option<usize> {
+    let event_bytes = estimate_event_bytes(event);
+    if event_bytes == usize::MAX {
+        return None;
+    }
+    event_bytes
+        .checked_add(plan_path_len.checked_mul(std::mem::size_of::<NodeId>())?)?
+        .checked_add(std::mem::size_of::<ResultEnvelope>())
+        .map(|bytes| bytes.max(1))
 }
 
 fn result_bytes(result: &SampleResult) -> usize {
@@ -4210,7 +6969,9 @@ impl SinkLimits {
             // Compatibility callers historically supplied only queue limits;
             // retain a finite derived bound until consolidation supplies an
             // explicit profile value.
-            max_finalization_steps: if max_items == 0 { 1 } else { max_items },
+            // One pending backpressure admission may require a bounded
+            // select-plus-not-admitted pair in addition to queued work.
+            max_finalization_steps: max_items.saturating_add(2),
         }
     }
 
@@ -4340,6 +7101,9 @@ pub struct ResultSinkSpec {
     pub limits: SinkLimits,
     /// Sink implementation owned once by the run.
     pub sink: Arc<dyn ResultSink>,
+    /// Pure listener scope/filter policy.  The policy never changes the
+    /// immutable event; it only controls which configured sink receives it.
+    pub route: ListenerRoutePolicy,
 }
 
 impl fmt::Debug for ResultSinkSpec {
@@ -4348,6 +7112,7 @@ impl fmt::Debug for ResultSinkSpec {
             .debug_struct("ResultSinkSpec")
             .field("id", &self.id)
             .field("limits", &self.limits)
+            .field("route", &self.route)
             .finish_non_exhaustive()
     }
 }
@@ -4361,7 +7126,124 @@ impl ResultSinkSpec {
             id: id.into(),
             limits,
             sink,
+            route: ListenerRoutePolicy::default(),
         }
+    }
+
+    /// Replaces the pure listener routing policy.
+    #[must_use]
+    pub fn with_route(mut self, route: ListenerRoutePolicy) -> Self {
+        self.route = route;
+        self
+    }
+
+    /// Disables this listener while retaining it in the configured plan.
+    #[must_use]
+    pub fn disabled(self) -> Self {
+        let route = self.route.clone().disabled();
+        self.with_route(route)
+    }
+
+    /// Assigns stable listener ordering; equal orders retain input order.
+    #[must_use]
+    pub fn ordered(self, order: u64) -> Self {
+        let route = self.route.clone().ordered(order);
+        self.with_route(route)
+    }
+
+    /// Selects only unsuccessful root samples.
+    #[must_use]
+    pub fn errors_only(self) -> Self {
+        let route = self.route.clone().errors_only();
+        self.with_route(route)
+    }
+
+    /// Selects only successful root samples.
+    #[must_use]
+    pub fn successes_only(self) -> Self {
+        let route = self.route.clone().successes_only();
+        self.with_route(route)
+    }
+
+    /// Selects all non-ignored root samples.
+    #[must_use]
+    pub fn all_results(self) -> Self {
+        let route = self.route.clone().all_results();
+        self.with_route(route)
+    }
+
+    /// Restricts this sink to setup results.
+    #[must_use]
+    pub fn setup_only(self) -> Self {
+        let route = self.route.clone().phase(ListenerPhase::Setup);
+        self.with_route(route)
+    }
+
+    /// Restricts this sink to main results.
+    #[must_use]
+    pub fn main_only(self) -> Self {
+        let route = self.route.clone().phase(ListenerPhase::Main);
+        self.with_route(route)
+    }
+
+    /// Restricts this sink to teardown results.
+    #[must_use]
+    pub fn teardown_only(self) -> Self {
+        let route = self.route.clone().phase(ListenerPhase::Teardown);
+        self.with_route(route)
+    }
+
+    /// Applies the source ResultCollector flags and reports the unverified
+    /// both-enabled combination instead of guessing its truth table.
+    pub fn with_result_flags(
+        self,
+        error_only: bool,
+        success_only: bool,
+    ) -> Result<Self, ResultRouterError> {
+        let route = self
+            .route
+            .clone()
+            .with_result_flags(error_only, success_only)?;
+        Ok(self.with_route(route))
+    }
+
+    /// Alias using the JMeter ResultCollector property names.
+    pub fn result_collector_flags(
+        self,
+        error_logging: bool,
+        success_only: bool,
+    ) -> Result<Self, ResultRouterError> {
+        self.with_result_flags(error_logging, success_only)
+    }
+
+    /// Restricts this listener to an owning plan scope prefix.
+    pub fn scoped_to(self, path: impl Into<Vec<NodeId>>) -> Result<Self, ResultRouterError> {
+        let route = self.route.clone().scoped_to(path)?;
+        Ok(self.with_route(route))
+    }
+
+    /// Rejects the UI-only child-sample projection explicitly.
+    pub fn child_samples_only(self) -> Result<Self, ResultRouterError> {
+        self.route
+            .clone()
+            .child_samples_only()
+            .map(|route| self.with_route(route))
+    }
+
+    /// Rejects visualizer-only label regex filtering explicitly.
+    pub fn label_regex(self, pattern: impl AsRef<str>) -> Result<Self, ResultRouterError> {
+        self.route
+            .clone()
+            .label_regex(pattern)
+            .map(|route| self.with_route(route))
+    }
+
+    /// Rejects a non-source-defined generic thread predicate explicitly.
+    pub fn thread_predicate(self, predicate: impl AsRef<str>) -> Result<Self, ResultRouterError> {
+        self.route
+            .clone()
+            .thread_predicate(predicate)
+            .map(|route| self.with_route(route))
     }
 }
 
@@ -4389,12 +7271,21 @@ pub enum RouterPhase {
 /// The result of attempting to admit one event into every sink queue.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AdmissionOutcome {
-    /// The event was admitted to every configured sink queue.
+    /// The sample was explicitly marked ignored by the sampler result.  It
+    /// never enters a sink queue or advances run/sample accounting.
+    Ignored,
+    /// The event was admitted to every selected listener queue.  Explicit
+    /// listener filters may intentionally make `selected_sinks` smaller than
+    /// the configured sink count.
     Accepted {
         /// Sequence assigned exactly once to this event.
         sequence: RunSequence,
         /// Accounted bytes reserved in each queue.
         bytes: usize,
+        /// Number of enabled listener queues selected by this event.  A
+        /// zero count is an intentional filter result, not a silent drop;
+        /// the event still receives a run identity and is visible in stats.
+        selected_sinks: usize,
     },
     /// At least one sink could not reserve the event.  No sink queue was
     /// mutated, so an event is never partially admitted.
@@ -4450,6 +7341,17 @@ pub struct RouterStats {
     pub next_sequence: RunSequence,
     /// Per-sink queue accounting.
     pub sinks: Vec<SinkQueueStats>,
+    /// Number of non-ignored events assigned a run sequence.
+    pub admitted_events: usize,
+    /// Number of sink routes rejected by an explicit listener policy.
+    pub filtered_routes: usize,
+    /// Number of ignored events rejected before identity assignment.
+    pub ignored_events: usize,
+    /// Number of sink queue items successfully delivered.
+    pub delivered_items: usize,
+    /// Number of queued sink items terminally released after a diagnosed
+    /// sink failure or cancellation.
+    pub terminal_drops: usize,
 }
 
 /// Errors raised by router lifecycle and configuration operations.
@@ -4570,6 +7472,9 @@ struct QueuedEnvelope {
 struct SinkState {
     spec: ResultSinkSpec,
     started: bool,
+    flush_called: bool,
+    finish_called: bool,
+    cancel_called: bool,
     queue: VecDeque<QueuedEnvelope>,
     queued_bytes: usize,
     failed: Option<SinkError>,
@@ -4583,6 +7488,11 @@ struct RouterState {
     startup_active: bool,
     delivery_active: bool,
     drop_error: Option<ResultRouterError>,
+    admitted_events: usize,
+    filtered_routes: usize,
+    ignored_events: usize,
+    delivered_items: usize,
+    terminal_drops: usize,
 }
 
 struct RouterInner {
@@ -4625,9 +7535,23 @@ impl ResultRouter {
                     detail: format!("duplicate result sink identity {}", spec.id),
                 });
             }
+            spec.route.validate()?;
+            if spec.limits.max_items > MAX_TYPED_QUEUE_ITEMS {
+                return Err(ResultRouterError::InvalidConfiguration {
+                    detail: "result sink item limit exceeds runtime bound".to_owned(),
+                });
+            }
+            if spec.limits.max_finalization_steps > MAX_LEDGER_TRANSITIONS {
+                return Err(ResultRouterError::InvalidConfiguration {
+                    detail: "result sink finalization limit exceeds runtime bound".to_owned(),
+                });
+            }
             sinks.push(SinkState {
                 spec,
                 started: false,
+                flush_called: false,
+                finish_called: false,
+                cancel_called: false,
                 queue: VecDeque::new(),
                 queued_bytes: 0,
                 failed: None,
@@ -4638,6 +7562,10 @@ impl ResultRouter {
                 detail: "result router requires at least one sink".to_owned(),
             });
         }
+        // Compiler order is authoritative.  Explicit orders are sorted
+        // stably; specs without an order retain their original order after
+        // all explicitly ordered listeners.
+        sinks.sort_by_key(|sink| sink.spec.route.order().unwrap_or(u64::MAX));
         Ok(Self {
             inner: Arc::new(RouterInner {
                 run: run.into(),
@@ -4649,6 +7577,11 @@ impl ResultRouter {
                     startup_active: false,
                     delivery_active: false,
                     drop_error: None,
+                    admitted_events: 0,
+                    filtered_routes: 0,
+                    ignored_events: 0,
+                    delivered_items: 0,
+                    terminal_drops: 0,
                 }),
             }),
         })
@@ -4690,6 +7623,9 @@ impl ResultRouter {
                         });
                     }
                     let sink = &state.sinks[index];
+                    if !sink.spec.route.is_enabled() {
+                        continue;
+                    }
                     (sink.spec.id, Arc::clone(&sink.spec.sink))
                 };
                 match sink.start().await {
@@ -4697,6 +7633,7 @@ impl ResultRouter {
                         let mut state = lock(&router.inner.state);
                         if state.phase != RouterPhase::New || !state.startup_active {
                             let phase = state.phase;
+                            state.sinks[index].cancel_called = true;
                             state.startup_active = false;
                             drop(state);
                             let cancel =
@@ -4804,24 +7741,85 @@ impl ResultRouter {
                 )),
             };
         }
-        let bytes = estimate_event_bytes(&event)
-            .saturating_add(
-                metadata
-                    .plan_path
-                    .len()
-                    .saturating_mul(std::mem::size_of::<NodeId>()),
-            )
-            .saturating_add(std::mem::size_of::<ResultEnvelope>())
-            .max(1);
-        for sink in &state.sinks {
+        if event.result().is_ignored() {
+            state.ignored_events = match state.ignored_events.checked_add(1) {
+                Some(value) => value,
+                None => {
+                    return AdmissionOutcome::FailedWithoutSink {
+                        error: SinkError::resource_limit("result ignored counter exhausted"),
+                    };
+                }
+            };
+            return AdmissionOutcome::Ignored;
+        }
+        let mut selected = Vec::new();
+        let mut enabled_sinks = 0usize;
+        for (index, sink) in state.sinks.iter().enumerate() {
+            if !sink.spec.route.is_enabled() {
+                continue;
+            }
+            enabled_sinks = match enabled_sinks.checked_add(1) {
+                Some(value) => value,
+                None => {
+                    return AdmissionOutcome::FailedWithoutSink {
+                        error: SinkError::resource_limit("result listener counter exhausted"),
+                    };
+                }
+            };
+            let matches = match sink.spec.route.matches_metadata(&event, &metadata) {
+                Ok(matches) => matches,
+                Err(error) => {
+                    return AdmissionOutcome::FailedWithoutSink { error };
+                }
+            };
+            if !matches {
+                continue;
+            }
             if let Some(error) = sink.failed.clone() {
                 return AdmissionOutcome::Failed {
                     sink_id: sink.spec.id,
                     error,
                 };
             }
+            selected.push(index);
+        }
+        let bytes = match checked_event_bytes(&event, metadata.plan_path.len()) {
+            Some(bytes) => bytes,
+            None => {
+                return AdmissionOutcome::FailedWithoutSink {
+                    error: SinkError::resource_limit("result byte accounting overflow"),
+                };
+            }
+        };
+        let filtered_routes = enabled_sinks.saturating_sub(selected.len());
+        let admitted_events = match state.admitted_events.checked_add(1) {
+            Some(value) => value,
+            None => {
+                return AdmissionOutcome::FailedWithoutSink {
+                    error: SinkError::resource_limit("result admission counter exhausted"),
+                };
+            }
+        };
+        let filtered_total = match state.filtered_routes.checked_add(filtered_routes) {
+            Some(value) => value,
+            None => {
+                return AdmissionOutcome::FailedWithoutSink {
+                    error: SinkError::resource_limit("result filter counter exhausted"),
+                };
+            }
+        };
+        for &index in &selected {
+            let sink = &state.sinks[index];
+            let queued_bytes = match sink.queued_bytes.checked_add(bytes) {
+                Some(queued_bytes) => queued_bytes,
+                None => {
+                    return AdmissionOutcome::FailedWithoutSink {
+                        error: SinkError::resource_limit("result queue byte accounting overflow"),
+                    };
+                }
+            };
             if sink.queue.len() >= sink.spec.limits.max_items
-                || sink.queued_bytes.saturating_add(bytes) > sink.spec.limits.max_bytes
+                || queued_bytes > sink.spec.limits.max_bytes
             {
                 return AdmissionOutcome::Full {
                     sink_id: sink.spec.id,
@@ -4847,16 +7845,19 @@ impl ResultRouter {
                 }
             }
         } else {
-            (
-                metadata.sample,
-                state
-                    .next_sample
-                    .max(metadata.sample.get().saturating_add(1)),
-            )
+            let next = match metadata.sample.get().checked_add(1) {
+                Some(next) => next,
+                None => {
+                    return AdmissionOutcome::FailedWithoutSink {
+                        error: SinkError::resource_limit("sample identity exhausted"),
+                    };
+                }
+            };
+            (metadata.sample, state.next_sample.max(next))
         };
         let sequence = RunSequence::new(state.next_sequence);
         metadata.sample = sample;
-        let envelope = match ResultEnvelope::new(
+        let envelope = match ResultEnvelope::new_with_phase(
             sequence,
             metadata.source_node,
             metadata.plan_path,
@@ -4865,6 +7866,7 @@ impl ResultRouter {
             event.thread().clone(),
             metadata.sample,
             metadata.origin,
+            metadata.phase,
             event,
         ) {
             Ok(envelope) => Arc::new(envelope),
@@ -4877,14 +7879,29 @@ impl ResultRouter {
         state.next_sequence = next_sequence;
         state.next_sample = next_sample;
         let bytes = envelope.byte_size();
-        for sink in &mut state.sinks {
-            sink.queued_bytes = sink.queued_bytes.saturating_add(bytes);
+        state.admitted_events = admitted_events;
+        state.filtered_routes = filtered_total;
+        let selected_count = selected.len();
+        for index in selected {
+            let sink = &mut state.sinks[index];
+            sink.queued_bytes = match sink.queued_bytes.checked_add(bytes) {
+                Some(value) => value,
+                None => {
+                    return AdmissionOutcome::FailedWithoutSink {
+                        error: SinkError::resource_limit("result queue byte accounting overflow"),
+                    };
+                }
+            };
             sink.queue.push_back(QueuedEnvelope {
                 envelope: Arc::clone(&envelope),
                 bytes,
             });
         }
-        AdmissionOutcome::Accepted { sequence, bytes }
+        AdmissionOutcome::Accepted {
+            sequence,
+            bytes,
+            selected_sinks: selected_count,
+        }
     }
 
     /// Admits an already-built envelope.  This is useful to adapters which
@@ -4906,16 +7923,59 @@ impl ResultRouter {
                 error: SinkError::failed("result envelope sequence is not the next run sequence"),
             };
         }
+        if envelope.event().result().is_ignored() {
+            state.ignored_events = match state.ignored_events.checked_add(1) {
+                Some(value) => value,
+                None => {
+                    return AdmissionOutcome::FailedWithoutSink {
+                        error: SinkError::resource_limit("result ignored counter exhausted"),
+                    };
+                }
+            };
+            return AdmissionOutcome::Ignored;
+        }
         let bytes = envelope.byte_size();
-        for sink in &state.sinks {
+        let mut selected = Vec::new();
+        let mut enabled_sinks = 0usize;
+        for (index, sink) in state.sinks.iter().enumerate() {
+            if !sink.spec.route.is_enabled() {
+                continue;
+            }
+            enabled_sinks = match enabled_sinks.checked_add(1) {
+                Some(value) => value,
+                None => {
+                    return AdmissionOutcome::FailedWithoutSink {
+                        error: SinkError::resource_limit("result listener counter exhausted"),
+                    };
+                }
+            };
+            let matches = match sink.spec.route.matches_envelope(&envelope) {
+                Ok(matches) => matches,
+                Err(error) => return AdmissionOutcome::FailedWithoutSink { error },
+            };
+            if !matches {
+                continue;
+            }
             if let Some(error) = sink.failed.clone() {
                 return AdmissionOutcome::Failed {
                     sink_id: sink.spec.id,
                     error,
                 };
             }
+            selected.push(index);
+        }
+        for &index in &selected {
+            let sink = &state.sinks[index];
+            let queued_bytes = match sink.queued_bytes.checked_add(bytes) {
+                Some(queued_bytes) => queued_bytes,
+                None => {
+                    return AdmissionOutcome::FailedWithoutSink {
+                        error: SinkError::resource_limit("result queue byte accounting overflow"),
+                    };
+                }
+            };
             if sink.queue.len() >= sink.spec.limits.max_items
-                || sink.queued_bytes.saturating_add(bytes) > sink.spec.limits.max_bytes
+                || queued_bytes > sink.spec.limits.max_bytes
             {
                 return AdmissionOutcome::Full {
                     sink_id: sink.spec.id,
@@ -4923,7 +7983,7 @@ impl ResultRouter {
                 };
             }
         }
-        state.next_sequence = match state.next_sequence.checked_add(1) {
+        let next_sequence = match state.next_sequence.checked_add(1) {
             Some(next) => next,
             None => {
                 return AdmissionOutcome::FailedWithoutSink {
@@ -4931,12 +7991,51 @@ impl ResultRouter {
                 };
             }
         };
-        state.next_sample = state
-            .next_sample
-            .max(envelope.sample.get().saturating_add(1));
+        let sample_next = match envelope.sample.get().checked_add(1) {
+            Some(next) => next,
+            None => {
+                return AdmissionOutcome::FailedWithoutSink {
+                    error: SinkError::resource_limit("sample identity exhausted"),
+                };
+            }
+        };
+        let next_sample = state.next_sample.max(sample_next);
+        let filtered_routes = enabled_sinks.saturating_sub(selected.len());
+        let admitted_events = match state.admitted_events.checked_add(1) {
+            Some(value) => value,
+            None => {
+                return AdmissionOutcome::FailedWithoutSink {
+                    error: SinkError::resource_limit("result admission counter exhausted"),
+                };
+            }
+        };
+        let filtered_total = match state.filtered_routes.checked_add(filtered_routes) {
+            Some(value) => value,
+            None => {
+                return AdmissionOutcome::FailedWithoutSink {
+                    error: SinkError::resource_limit("result filter counter exhausted"),
+                };
+            }
+        };
+        state.next_sequence = next_sequence;
+        state.next_sample = next_sample;
+        state.admitted_events = admitted_events;
+        state.filtered_routes = filtered_total;
+        let selected_count = selected.len();
         let envelope = Arc::new(envelope);
-        for sink in &mut state.sinks {
-            sink.queued_bytes = sink.queued_bytes.saturating_add(bytes);
+        for index in selected {
+            let sink = &mut state.sinks[index];
+            sink.queued_bytes = match sink.queued_bytes.checked_add(bytes) {
+                Some(value) => value,
+                None => {
+                    // The same condition was preflighted above; retaining a
+                    // defensive error keeps accounting explicit if this code
+                    // is changed to admit concurrently in the future.
+                    return AdmissionOutcome::FailedWithoutSink {
+                        error: SinkError::resource_limit("result queue byte accounting overflow"),
+                    };
+                }
+            };
             sink.queue.push_back(QueuedEnvelope {
                 envelope: Arc::clone(&envelope),
                 bytes,
@@ -4945,6 +8044,7 @@ impl ResultRouter {
         AdmissionOutcome::Accepted {
             sequence: envelope.sequence(),
             bytes,
+            selected_sinks: selected_count,
         }
     }
 
@@ -5107,6 +8207,10 @@ impl ResultRouter {
             let guard = RouterFutureDropGuard::new(router.clone());
             let sink_count = {
                 let state = lock(&router.inner.state);
+                if state.phase == RouterPhase::Finished {
+                    guard.disarm();
+                    return Ok(());
+                }
                 if !matches!(
                     state.phase,
                     RouterPhase::AdmissionStopped
@@ -5132,17 +8236,20 @@ impl ResultRouter {
             };
             let mut failure = None;
             for index in 0..sink_count {
-                let (sink_id, sink, failed, started) = {
-                    let state = lock(&router.inner.state);
+                let (sink_id, sink, failed, started, flush_called) = {
+                    let mut state = lock(&router.inner.state);
                     let item = &state.sinks[index];
-                    (
-                        item.spec.id,
-                        Arc::clone(&item.spec.sink),
-                        item.failed.is_some(),
-                        item.started,
-                    )
+                    let should_flush = item.started && !item.flush_called && item.failed.is_none();
+                    let sink_id = item.spec.id;
+                    let sink = Arc::clone(&item.spec.sink);
+                    let failed = item.failed.is_some();
+                    let started = item.started;
+                    if should_flush {
+                        state.sinks[index].flush_called = true;
+                    }
+                    (sink_id, sink, failed, started, should_flush)
                 };
-                if failed || !started {
+                if failed || !started || !flush_called {
                     continue;
                 }
                 if let Err(source) = sink.flush().await {
@@ -5187,6 +8294,10 @@ impl ResultRouter {
         let router = self.clone();
         Box::pin(async move {
             let guard = RouterFutureDropGuard::new(router.clone());
+            if lock(&router.inner.state).phase == RouterPhase::Finished {
+                guard.disarm();
+                return Ok(());
+            }
             let mut failure = prior_sink_failures(&router);
             if let Err(error) = router.stop_admission() {
                 combine_router_error_slot(&mut failure, error);
@@ -5199,12 +8310,19 @@ impl ResultRouter {
             }
             let sink_count = lock(&router.inner.state).sinks.len();
             for index in 0..sink_count {
-                let (sink_id, sink, started) = {
-                    let state = lock(&router.inner.state);
+                let (sink_id, sink, started, finish_called) = {
+                    let mut state = lock(&router.inner.state);
                     let item = &state.sinks[index];
-                    (item.spec.id, Arc::clone(&item.spec.sink), item.started)
+                    let sink_id = item.spec.id;
+                    let sink = Arc::clone(&item.spec.sink);
+                    let started = item.started;
+                    let should_finish = started && !item.finish_called;
+                    if should_finish {
+                        state.sinks[index].finish_called = true;
+                    }
+                    (sink_id, sink, started, should_finish)
                 };
-                if !started {
+                if !started || !finish_called {
                     continue;
                 }
                 if let Err(source) = sink.finish().await {
@@ -5265,6 +8383,11 @@ impl ResultRouter {
                     failed: sink.failed.is_some(),
                 })
                 .collect(),
+            admitted_events: state.admitted_events,
+            filtered_routes: state.filtered_routes,
+            ignored_events: state.ignored_events,
+            delivered_items: state.delivered_items,
+            terminal_drops: state.terminal_drops,
         }
     }
 
@@ -5313,16 +8436,35 @@ fn combine_router_error_slot(slot: &mut Option<ResultRouterError>, error: Result
 async fn deliver_queued(router: &ResultRouter) -> Option<ResultRouterError> {
     let mut failure = None;
     let sink_count = lock(&router.inner.state).sinks.len();
-    for index in 0..sink_count {
-        loop {
+    // Select the lowest queued run sequence globally before each write.  A
+    // sink may have filtered a sequence that another sink retains, so this
+    // interleaves notifications by event and then by configured listener
+    // order instead of draining one listener's entire queue first.
+    loop {
+        let next_sequence = {
+            let state = lock(&router.inner.state);
+            state
+                .sinks
+                .iter()
+                .filter(|sink| sink.spec.route.is_enabled() && sink.failed.is_none())
+                .filter_map(|sink| sink.queue.front().map(|item| item.envelope.sequence()))
+                .min()
+        };
+        let Some(next_sequence) = next_sequence else {
+            break;
+        };
+        for index in 0..sink_count {
             let (sink_id, sink, envelope) = {
                 let state = lock(&router.inner.state);
                 let sink_state = &state.sinks[index];
                 let Some(item) = sink_state.queue.front() else {
-                    break;
+                    continue;
                 };
-                if sink_state.failed.is_some() {
-                    break;
+                if !sink_state.spec.route.is_enabled()
+                    || sink_state.failed.is_some()
+                    || item.envelope.sequence() != next_sequence
+                {
+                    continue;
                 }
                 (
                     sink_state.spec.id,
@@ -5338,16 +8480,49 @@ async fn deliver_queued(router: &ResultRouter) -> Option<ResultRouterError> {
                 };
                 let mut state = lock(&router.inner.state);
                 state.sinks[index].failed = Some(source);
+                let dropped_items = state.sinks[index].queue.len();
+                if let Some(total) = state.terminal_drops.checked_add(dropped_items) {
+                    state.terminal_drops = total;
+                } else {
+                    combine_router_error_slot(
+                        &mut failure,
+                        ResultRouterError::Sink {
+                            sink_id,
+                            operation: "write-accounting",
+                            source: SinkError::resource_limit(
+                                "result terminal-drop counter exhausted",
+                            ),
+                        },
+                    );
+                }
                 state.sinks[index].queue.clear();
                 state.sinks[index].queued_bytes = 0;
                 state.phase = RouterPhase::Failed;
                 combine_router_error_slot(&mut failure, error);
-                break;
+                continue;
             }
             let mut state = lock(&router.inner.state);
             if let Some(item) = state.sinks[index].queue.pop_front() {
-                state.sinks[index].queued_bytes =
-                    state.sinks[index].queued_bytes.saturating_sub(item.bytes);
+                state.sinks[index].queued_bytes = state.sinks[index]
+                    .queued_bytes
+                    .checked_sub(item.bytes)
+                    .map_or(0, |remaining| remaining);
+                if let Some(total) = state.delivered_items.checked_add(1) {
+                    state.delivered_items = total;
+                } else {
+                    state.phase = RouterPhase::Failed;
+                    combine_router_error_slot(
+                        &mut failure,
+                        ResultRouterError::Sink {
+                            sink_id: state.sinks[index].spec.id,
+                            operation: "write-accounting",
+                            source: SinkError::resource_limit(
+                                "result delivered-item counter exhausted",
+                            ),
+                        },
+                    );
+                    break;
+                }
             }
         }
     }
@@ -5359,9 +8534,15 @@ async fn finish_started_sinks(router: &ResultRouter) -> Option<ResultRouterError
     let mut failure = None;
     for index in 0..sink_count {
         let (sink_id, sink, started) = {
-            let state = lock(&router.inner.state);
+            let mut state = lock(&router.inner.state);
             let item = &state.sinks[index];
-            (item.spec.id, Arc::clone(&item.spec.sink), item.started)
+            let sink_id = item.spec.id;
+            let sink = Arc::clone(&item.spec.sink);
+            let started = item.started && !item.finish_called;
+            if started {
+                state.sinks[index].finish_called = true;
+            }
+            (sink_id, sink, started)
         };
         if !started {
             continue;
@@ -5399,7 +8580,7 @@ fn prior_sink_failures(router: &ResultRouter) -> Option<ResultRouterError> {
 }
 
 fn cancel_inner(inner: &Arc<RouterInner>) -> Result<(), ResultRouterError> {
-    let (sinks, pending_items, pending_bytes) = {
+    let (sinks, pending_items, pending_bytes, accounting_error) = {
         let mut state = lock(&inner.state);
         if state.phase == RouterPhase::Finished || state.phase == RouterPhase::Cancelled {
             return Ok(());
@@ -5424,6 +8605,20 @@ fn cancel_inner(inner: &Arc<RouterInner>) -> Result<(), ResultRouterError> {
             .map(|sink| sink.queued_bytes)
             .max()
             .unwrap_or(0);
+        let released_routes = state
+            .sinks
+            .iter()
+            .try_fold(0usize, |total, sink| total.checked_add(sink.queue.len()));
+        let accounting_error =
+            match released_routes.and_then(|released| state.terminal_drops.checked_add(released)) {
+                Some(total) => {
+                    state.terminal_drops = total;
+                    None
+                }
+                None => Some(ResultRouterError::InvalidConfiguration {
+                    detail: "result terminal-drop counter exhausted".to_owned(),
+                }),
+            };
         for sink in &mut state.sinks {
             sink.queue.clear();
             sink.queued_bytes = 0;
@@ -5431,16 +8626,22 @@ fn cancel_inner(inner: &Arc<RouterInner>) -> Result<(), ResultRouterError> {
         let sinks = state
             .sinks
             .iter()
-            .filter(|sink| sink.started)
+            .filter(|sink| sink.started && !sink.cancel_called)
             .map(|sink| (sink.spec.id, Arc::clone(&sink.spec.sink)))
             .collect::<Vec<_>>();
-        (sinks, pending_items, pending_bytes)
+        for sink in &mut state.sinks {
+            if sink.started && !sink.cancel_called {
+                sink.cancel_called = true;
+            }
+        }
+        (sinks, pending_items, pending_bytes, accounting_error)
     };
-    let mut failure =
+    let mut failure = accounting_error.or_else(|| {
         (pending_items > 0 || pending_bytes > 0).then_some(ResultRouterError::Cancelled {
             pending_items,
             pending_bytes,
-        });
+        })
+    });
     for (sink_id, sink) in sinks {
         if let Err(source) = sink.cancel() {
             combine_router_error_slot(
@@ -5517,6 +8718,7 @@ mod tests {
     struct FakeState {
         started: usize,
         writes: Vec<(RunSequence, String, ResultOrigin)>,
+        subresult_counts: Vec<usize>,
         flushed: usize,
         finished: usize,
         cancelled: usize,
@@ -5578,6 +8780,9 @@ mod tests {
                         envelope.event().result().label().to_owned(),
                         envelope.origin(),
                     ));
+                    state
+                        .subresult_counts
+                        .push(envelope.event().result().sub_results().len());
                     Ok(())
                 }
             }))
@@ -5621,6 +8826,48 @@ mod tests {
         result.set_successful(true);
         SampleEvent::new(
             result,
+            "run",
+            ThreadIdentity::with_group("thread-1", Some("group".to_owned()), Some(1)),
+            "host",
+            jmeter_rs_results::VariableSnapshot::new(),
+        )
+    }
+
+    fn ignored_event(label: &str) -> SampleEvent {
+        let mut result = SampleResult::new(label);
+        result.set_successful(true);
+        result.set_ignore(true);
+        SampleEvent::new(
+            result,
+            "run",
+            ThreadIdentity::with_group("thread-1", Some("group".to_owned()), Some(1)),
+            "host",
+            jmeter_rs_results::VariableSnapshot::new(),
+        )
+    }
+
+    fn failed_event(label: &str) -> SampleEvent {
+        let mut result = SampleResult::new(label);
+        result.set_successful(false);
+        SampleEvent::new(
+            result,
+            "run",
+            ThreadIdentity::with_group("thread-1", Some("group".to_owned()), Some(1)),
+            "host",
+            jmeter_rs_results::VariableSnapshot::new(),
+        )
+    }
+
+    fn event_with_failed_child(label: &str) -> SampleEvent {
+        let mut parent = SampleResult::new(label);
+        parent.set_successful(true);
+        let mut child = SampleResult::new("child");
+        child.set_successful(false);
+        parent
+            .try_add_sub_result_raw(child, ValidationLimits::default())
+            .expect("valid child result");
+        SampleEvent::new(
+            parent,
             "run",
             ThreadIdentity::with_group("thread-1", Some("group".to_owned()), Some(1)),
             "host",
@@ -5720,6 +8967,31 @@ mod tests {
             ]
         );
         assert_eq!(state.finished, 1);
+    }
+
+    #[test]
+    fn ignored_samples_are_filtered_before_sink_admission_and_accounting() {
+        let first = Arc::new(Mutex::new(FakeState::default()));
+        let router = router(Arc::clone(&first), None, SinkLimits::new(1, 100_000));
+        block_on(router.start()).expect("start");
+        assert!(matches!(
+            router.admit(
+                ignored_event("ignored"),
+                metadata(
+                    11,
+                    ResultOrigin::Sampler {
+                        sampler_id: NodeId::new(11),
+                        parent: None,
+                    },
+                ),
+            ),
+            AdmissionOutcome::Ignored
+        ));
+        let stats = router.stats();
+        assert_eq!(stats.next_sequence, RunSequence::new(1));
+        assert_eq!(stats.sinks[0].queued_items, 0);
+        block_on(router.finish()).expect("finish");
+        assert!(lock(&first).writes.is_empty());
     }
 
     #[test]
@@ -5968,11 +9240,910 @@ mod tests {
         assert_eq!(stats.sinks[0].queued_bytes, 0);
         assert_eq!(lock(&state).cancelled, 1);
     }
+
+    #[test]
+    fn result_collector_success_and_error_filters_select_root_samples_per_sink() {
+        let successes = Arc::new(Mutex::new(FakeState::default()));
+        let errors = Arc::new(Mutex::new(FakeState::default()));
+        let router = ResultRouter::new(
+            "run",
+            [
+                ResultSinkSpec::new(
+                    SinkId::new(1),
+                    SinkLimits::new(4, 100_000),
+                    Arc::new(FakeSink::new(Arc::clone(&successes))),
+                )
+                .successes_only(),
+                ResultSinkSpec::new(
+                    SinkId::new(2),
+                    SinkLimits::new(4, 100_000),
+                    Arc::new(FakeSink::new(Arc::clone(&errors))),
+                )
+                .errors_only(),
+            ],
+        )
+        .expect("router");
+        block_on(router.start()).expect("start");
+        let sampler = |id| ResultOrigin::Sampler {
+            sampler_id: NodeId::new(id),
+            parent: None,
+        };
+        assert!(matches!(
+            router.admit(event("ok"), metadata(11, sampler(11))),
+            AdmissionOutcome::Accepted {
+                selected_sinks: 1,
+                ..
+            }
+        ));
+        assert!(matches!(
+            router.admit(failed_event("bad"), metadata(12, sampler(12))),
+            AdmissionOutcome::Accepted {
+                selected_sinks: 1,
+                ..
+            }
+        ));
+        assert_eq!(router.stats().filtered_routes, 2);
+        block_on(router.finish()).expect("finish");
+        assert_eq!(lock(&successes).writes.len(), 1);
+        assert_eq!(lock(&successes).writes[0].1, "ok");
+        assert_eq!(lock(&errors).writes.len(), 1);
+        assert_eq!(lock(&errors).writes[0].1, "bad");
+    }
+
+    #[test]
+    fn enabled_listener_order_is_interleaved_per_event_sequence() {
+        let shared = Arc::new(Mutex::new(FakeState::default()));
+        let router = ResultRouter::new(
+            "run",
+            [
+                ResultSinkSpec::new(
+                    SinkId::new(1),
+                    SinkLimits::new(4, 100_000),
+                    Arc::new(FakeSink::new(Arc::clone(&shared))),
+                ),
+                ResultSinkSpec::new(
+                    SinkId::new(2),
+                    SinkLimits::new(4, 100_000),
+                    Arc::new(FakeSink::new(Arc::clone(&shared))),
+                ),
+            ],
+        )
+        .expect("router");
+        block_on(router.start()).expect("start");
+        assert!(matches!(
+            router.admit(
+                event("one"),
+                metadata(
+                    11,
+                    ResultOrigin::Sampler {
+                        sampler_id: NodeId::new(11),
+                        parent: None,
+                    },
+                ),
+            ),
+            AdmissionOutcome::Accepted {
+                selected_sinks: 2,
+                ..
+            }
+        ));
+        assert!(matches!(
+            router.admit(
+                event("two"),
+                metadata(
+                    12,
+                    ResultOrigin::Sampler {
+                        sampler_id: NodeId::new(12),
+                        parent: None,
+                    },
+                ),
+            ),
+            AdmissionOutcome::Accepted {
+                selected_sinks: 2,
+                ..
+            }
+        ));
+        block_on(router.finish()).expect("finish");
+        let shared = lock(&shared);
+        let labels = shared
+            .writes
+            .iter()
+            .map(|write| write.1.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(labels, vec!["one", "one", "two", "two"]);
+    }
+
+    #[test]
+    fn root_success_filter_does_not_flatten_or_reclassify_failed_subresults() {
+        let state = Arc::new(Mutex::new(FakeState::default()));
+        let router = ResultRouter::new(
+            "run",
+            [ResultSinkSpec::new(
+                SinkId::new(1),
+                SinkLimits::new(2, 100_000),
+                Arc::new(FakeSink::new(Arc::clone(&state))),
+            )
+            .successes_only()],
+        )
+        .expect("router");
+        block_on(router.start()).expect("start");
+        let outcome = router.admit(
+            event_with_failed_child("parent"),
+            metadata(
+                11,
+                ResultOrigin::Sampler {
+                    sampler_id: NodeId::new(11),
+                    parent: None,
+                },
+            ),
+        );
+        assert!(
+            matches!(
+                &outcome,
+                AdmissionOutcome::Accepted {
+                    selected_sinks: 1,
+                    ..
+                }
+            ),
+            "unexpected outcome: {outcome:?}"
+        );
+        block_on(router.finish()).expect("finish");
+        assert_eq!(lock(&state).writes.len(), 1);
+        assert_eq!(lock(&state).subresult_counts, vec![1]);
+        assert_eq!(router.stats().delivered_items, 1);
+    }
+
+    #[test]
+    fn listener_phase_scope_and_order_are_explicit_and_disabled_sinks_do_not_start() {
+        let setup = Arc::new(Mutex::new(FakeState::default()));
+        let teardown = Arc::new(Mutex::new(FakeState::default()));
+        let disabled = Arc::new(Mutex::new(FakeState::default()));
+        let router = ResultRouter::new(
+            "run",
+            [
+                ResultSinkSpec::new(
+                    SinkId::new(2),
+                    SinkLimits::new(2, 100_000),
+                    Arc::new(FakeSink::new(Arc::clone(&teardown))),
+                )
+                .ordered(20)
+                .teardown_only(),
+                ResultSinkSpec::new(
+                    SinkId::new(1),
+                    SinkLimits::new(2, 100_000),
+                    Arc::new(FakeSink::new(Arc::clone(&setup))),
+                )
+                .ordered(10)
+                .setup_only(),
+                ResultSinkSpec::new(
+                    SinkId::new(3),
+                    SinkLimits::new(2, 100_000),
+                    Arc::new(FakeSink::new(Arc::clone(&disabled))),
+                )
+                .ordered(30)
+                .disabled(),
+            ],
+        )
+        .expect("router");
+        assert_eq!(
+            router
+                .stats()
+                .sinks
+                .iter()
+                .map(|sink| sink.sink_id)
+                .collect::<Vec<_>>(),
+            vec![SinkId::new(1), SinkId::new(2), SinkId::new(3)]
+        );
+        block_on(router.start()).expect("start");
+        assert_eq!(lock(&setup).started, 1);
+        assert_eq!(lock(&teardown).started, 1);
+        assert_eq!(lock(&disabled).started, 0);
+        let sampler = ResultOrigin::Sampler {
+            sampler_id: NodeId::new(11),
+            parent: None,
+        };
+        assert!(matches!(
+            router.admit(
+                event("setup"),
+                metadata(11, sampler).with_phase(ListenerPhase::Setup),
+            ),
+            AdmissionOutcome::Accepted {
+                selected_sinks: 1,
+                ..
+            }
+        ));
+        assert!(matches!(
+            router.admit(
+                event("teardown"),
+                metadata(
+                    11,
+                    ResultOrigin::Sampler {
+                        sampler_id: NodeId::new(11),
+                        parent: None,
+                    },
+                )
+                .with_phase(ListenerPhase::Teardown),
+            ),
+            AdmissionOutcome::Accepted {
+                selected_sinks: 1,
+                ..
+            }
+        ));
+        block_on(router.finish()).expect("finish");
+        assert_eq!(lock(&setup).writes.len(), 1);
+        assert_eq!(lock(&teardown).writes.len(), 1);
+        assert!(lock(&disabled).writes.is_empty());
+    }
+
+    #[test]
+    fn unsupported_visualizer_filters_and_both_result_flags_are_explicit_errors() {
+        let state = Arc::new(Mutex::new(FakeState::default()));
+        let base = ResultSinkSpec::new(
+            SinkId::new(1),
+            SinkLimits::new(1, 100_000),
+            Arc::new(FakeSink::new(state)),
+        );
+        let both = base.clone().with_result_flags(true, true);
+        assert!(matches!(
+            both,
+            Err(ResultRouterError::InvalidConfiguration { detail })
+                if detail.contains("result.filter.unverified")
+        ));
+        assert!(matches!(
+            base.clone().label_regex(".*secret.*"),
+            Err(ResultRouterError::InvalidConfiguration { detail })
+                if detail == "result.listener.label-regex-unsupported"
+        ));
+        assert!(matches!(
+            base.clone().thread_predicate("thread-1"),
+            Err(ResultRouterError::InvalidConfiguration { detail })
+                if detail == "result.listener.thread-predicate-unsupported"
+        ));
+        assert!(matches!(
+            base.child_samples_only(),
+            Err(ResultRouterError::InvalidConfiguration { detail })
+                if detail == "result.listener.child-samples-only-unsupported"
+        ));
+    }
+
+    #[test]
+    fn terminal_finish_and_diagnostics_are_exact_once_and_redacted() {
+        let state = Arc::new(Mutex::new(FakeState::default()));
+        let router = router(Arc::clone(&state), None, SinkLimits::new(2, 100_000));
+        block_on(router.start()).expect("start");
+        assert!(matches!(
+            router.admit(
+                event("one"),
+                metadata(
+                    11,
+                    ResultOrigin::Sampler {
+                        sampler_id: NodeId::new(11),
+                        parent: None,
+                    },
+                ),
+            ),
+            AdmissionOutcome::Accepted { .. }
+        ));
+        block_on(router.finish()).expect("finish");
+        block_on(router.finish()).expect("idempotent finish");
+        let state = lock(&state);
+        assert_eq!(state.finished, 1);
+        assert_eq!(state.flushed, 1);
+        drop(state);
+
+        let error = SinkError::failed("token=topsecret password:other-secret");
+        assert_eq!(error.code(), "runtime.result-sink.failed");
+        let rendered = error.to_string();
+        assert!(!rendered.contains("topsecret"));
+        assert!(!rendered.contains("other-secret"));
+        assert!(rendered.contains("<redacted>"));
+    }
+
+    #[test]
+    fn oversized_legacy_queue_limits_are_rejected_instead_of_unbounded() {
+        let state = Arc::new(Mutex::new(FakeState::default()));
+        let result = ResultRouter::new(
+            "run",
+            [ResultSinkSpec::new(
+                SinkId::new(1),
+                SinkLimits::new(MAX_TYPED_QUEUE_ITEMS + 1, 100_000),
+                Arc::new(FakeSink::new(state)),
+            )],
+        );
+        assert!(matches!(
+            result,
+            Err(ResultRouterError::InvalidConfiguration { detail })
+                if detail == "result sink item limit exceeds runtime bound"
+        ));
+    }
+
+    #[test]
+    fn all_disabled_listeners_are_preserved_without_starting_a_sink() {
+        let state = Arc::new(Mutex::new(FakeState::default()));
+        let router = ResultRouter::new(
+            "run",
+            [ResultSinkSpec::new(
+                SinkId::new(1),
+                SinkLimits::new(1, 100_000),
+                Arc::new(FakeSink::new(Arc::clone(&state))),
+            )
+            .disabled()],
+        )
+        .expect("disabled listener plan");
+        block_on(router.start()).expect("start");
+        assert!(matches!(
+            router.admit(
+                event("disabled"),
+                metadata(
+                    11,
+                    ResultOrigin::Sampler {
+                        sampler_id: NodeId::new(11),
+                        parent: None,
+                    },
+                ),
+            ),
+            AdmissionOutcome::Accepted {
+                selected_sinks: 0,
+                ..
+            }
+        ));
+        block_on(router.finish()).expect("finish");
+        let state = lock(&state);
+        assert_eq!(state.started, 0);
+        assert!(state.writes.is_empty());
+    }
 }
 
 #[cfg(test)]
 mod revision3_tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
+    use std::task::{Context, Poll};
+    use std::time::Duration;
+
+    fn block_on<F: Future>(future: F) -> F::Output {
+        let waker = Waker::noop();
+        let mut context = Context::from_waker(waker);
+        let mut future = Box::pin(future);
+        loop {
+            match Pin::new(&mut future).poll(&mut context) {
+                Poll::Ready(value) => return value,
+                Poll::Pending => std::hint::spin_loop(),
+            }
+        }
+    }
+
+    #[derive(Clone)]
+    struct LivenessClock {
+        current: Arc<Mutex<Result<crate::MonotonicInstant, ResultClockError>>>,
+    }
+
+    impl LivenessClock {
+        fn at(duration: Duration) -> Self {
+            Self {
+                current: Arc::new(Mutex::new(Ok(crate::MonotonicInstant::from_duration(
+                    duration,
+                )))),
+            }
+        }
+
+        fn set(&self, duration: Duration) {
+            *lock(&self.current) = Ok(crate::MonotonicInstant::from_duration(duration));
+        }
+
+        fn fail(&self, error: ResultClockError) {
+            *lock(&self.current) = Err(error);
+        }
+    }
+
+    impl ResultMonotonicClock for LivenessClock {
+        fn now(&self) -> Result<crate::MonotonicInstant, ResultClockError> {
+            lock(&self.current).clone()
+        }
+    }
+
+    fn liveness_budget(
+        clock: &LivenessClock,
+        attempts: u32,
+        operation: Duration,
+        finalization: Duration,
+    ) -> ResultDeliveryBudget {
+        ResultDeliveryBudget::from_parts(
+            ResultOperationScope::sink_set(
+                TypedRunId::from_u128(1).expect("run"),
+                SinkPlanGeneration::new(1).expect("sink generation"),
+            ),
+            Arc::new(clock.clone()),
+            Arc::new(crate::CancellationToken::new()),
+            ResultOperationWindows::uniform(operation, finalization),
+            attempts,
+            None,
+        )
+        .expect("liveness budget")
+    }
+
+    #[test]
+    fn progressing_run_can_outlive_each_operation_window() {
+        let clock = LivenessClock::at(Duration::ZERO);
+        let budget = liveness_budget(&clock, 8, Duration::from_secs(5), Duration::from_secs(5));
+        let first = budget
+            .begin_operation(ResultOperationKind::Process)
+            .expect("first lease");
+        assert_eq!(
+            first.deadline(),
+            crate::MonotonicInstant::from_duration(Duration::from_secs(5))
+        );
+        clock.set(Duration::from_secs(4));
+        first.check().expect("first lease remains live");
+        let second = budget
+            .begin_operation(ResultOperationKind::Process)
+            .expect("second lease");
+        assert_eq!(
+            second.deadline(),
+            crate::MonotonicInstant::from_duration(Duration::from_secs(9))
+        );
+        clock.set(Duration::from_secs(8));
+        second.check().expect("run keeps progressing");
+    }
+
+    #[test]
+    fn operation_deadline_is_absolute_and_not_refreshed_by_poll_or_retry() {
+        let clock = LivenessClock::at(Duration::ZERO);
+        let budget = liveness_budget(&clock, 3, Duration::from_secs(5), Duration::from_secs(10));
+        let lease = budget
+            .begin_operation(ResultOperationKind::Process)
+            .expect("lease");
+        let deadline = lease.deadline();
+        clock.set(Duration::from_secs(4));
+        lease.consume_retry().expect("first attempt");
+        assert_eq!(lease.deadline(), deadline);
+        clock.set(Duration::from_secs(6));
+        assert!(matches!(lease.check(), Err(BudgetError::Expired)));
+    }
+
+    #[test]
+    fn attempts_are_shared_across_cloned_authority_and_operations() {
+        let clock = LivenessClock::at(Duration::ZERO);
+        let budget = liveness_budget(&clock, 2, Duration::from_secs(10), Duration::from_secs(10));
+        let clone = budget.clone();
+        let first = budget
+            .begin_operation(ResultOperationKind::Process)
+            .expect("first");
+        let second = clone
+            .begin_operation(ResultOperationKind::Flush)
+            .expect("second");
+        first.consume_retry().expect("attempt one");
+        second.consume_retry().expect("attempt two");
+        assert_eq!(budget.attempts_remaining(), 0);
+        assert!(matches!(
+            second.consume_retry(),
+            Err(BudgetError::RetryBudgetExhausted)
+        ));
+    }
+
+    #[test]
+    fn finalization_narrows_later_operation_leases_to_one_shared_cap() {
+        let clock = LivenessClock::at(Duration::ZERO);
+        let budget = liveness_budget(&clock, 8, Duration::from_secs(30), Duration::from_secs(7));
+        let process = budget
+            .begin_operation(ResultOperationKind::Process)
+            .expect("process");
+        let finalization = budget.begin_finalization().expect("finalization");
+        let flush = finalization
+            .operation(ResultOperationKind::Flush)
+            .expect("flush");
+        let finish = budget
+            .begin_operation(ResultOperationKind::Finish)
+            .expect("finish");
+        assert_eq!(finalization.deadline(), flush.deadline());
+        assert_eq!(flush.deadline(), finish.deadline());
+        assert!(process.deadline() > flush.deadline());
+        assert_eq!(budget.finalization_deadline(), Some(flush.deadline()));
+    }
+
+    #[test]
+    fn clock_failures_are_typed_and_never_become_a_large_deadline() {
+        let clock = LivenessClock::at(Duration::ZERO);
+        clock.fail(ResultClockError::Unavailable);
+        assert!(matches!(
+            ResultDeliveryBudget::from_parts(
+                ResultOperationScope::sink_set(
+                    TypedRunId::from_u128(1).expect("run"),
+                    SinkPlanGeneration::new(1).expect("sink generation"),
+                ),
+                Arc::new(clock),
+                Arc::new(crate::CancellationToken::new()),
+                ResultOperationWindows::uniform(Duration::from_secs(1), Duration::from_secs(1)),
+                1,
+                None,
+            ),
+            Err(BudgetError::Clock(ResultClockError::Unavailable))
+        ));
+
+        let clock = LivenessClock::at(Duration::from_secs(5));
+        let budget = liveness_budget(&clock, 1, Duration::from_secs(5), Duration::from_secs(5));
+        clock.set(Duration::from_secs(4));
+        assert!(matches!(
+            budget.begin_operation(ResultOperationKind::Process),
+            Err(BudgetError::Clock(ResultClockError::Reversed { .. }))
+        ));
+    }
+
+    #[derive(Default)]
+    struct WakeCounter(AtomicUsize);
+
+    impl std::task::Wake for WakeCounter {
+        fn wake(self: Arc<Self>) {
+            self.0.fetch_add(1, Ordering::AcqRel);
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.0.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    struct CapturedWait {
+        operation: ResultOperationId,
+        owner: crate::WaitOwnerClass,
+        deadline: crate::MonotonicInstant,
+    }
+
+    struct CapturingWaitRegistrar {
+        captured: Mutex<Option<CapturedWait>>,
+    }
+
+    struct RetirableWaitHandle;
+
+    impl ResultWaitRegistrationHandle for RetirableWaitHandle {
+        fn retire(&mut self) -> Result<(), ResultWaitError> {
+            Ok(())
+        }
+    }
+
+    impl ResultWaitRegistrar for CapturingWaitRegistrar {
+        fn register(
+            &self,
+            spec: ResultWaitSpec,
+        ) -> Result<Box<dyn ResultWaitRegistrationHandle>, ResultWaitError> {
+            *lock(&self.captured) = Some(CapturedWait {
+                operation: spec.operation,
+                owner: spec.owner,
+                deadline: spec.deadline,
+            });
+            Ok(Box::new(RetirableWaitHandle))
+        }
+    }
+
+    #[test]
+    fn lease_owns_provider_identity_and_exact_cancellation_wake() {
+        let clock = LivenessClock::at(Duration::ZERO);
+        let cancellation = Arc::new(crate::CancellationToken::new());
+        let run = TypedRunId::from_u128(7).expect("run");
+        let generation = SinkPlanGeneration::new(3).expect("generation");
+        let sink = QualifiedSinkId::from_parts(
+            run,
+            generation,
+            PlanNodeRef::from_u64(PlanDomain::from_canonical_plan(b"wait").expect("domain"), 4)
+                .expect("node"),
+        );
+        let budget = ResultDeliveryBudget::from_parts(
+            ResultOperationScope::sink_set(run, generation),
+            Arc::new(clock),
+            Arc::clone(&cancellation) as Arc<dyn CancellationSignal>,
+            ResultOperationWindows::uniform(Duration::from_secs(5), Duration::from_secs(5)),
+            1,
+            None,
+        )
+        .expect("budget");
+        let lease = budget
+            .begin_sink_operation(sink, ResultOperationKind::Process)
+            .expect("sink lease");
+        assert_eq!(lease.scope(), ResultOperationScope::Sink { run, sink });
+        let registrar = CapturingWaitRegistrar {
+            captured: Mutex::new(None),
+        };
+        let registration = lease
+            .register_wait(
+                &registrar,
+                crate::WaitOwnerClass::Provider,
+                &Waker::from(Arc::new(WakeCounter::default())),
+            )
+            .expect("wait");
+        let captured = lock(&registrar.captured)
+            .as_ref()
+            .map(|value| (value.operation, value.owner, value.deadline))
+            .expect("captured wait");
+        assert_eq!(captured.0, lease.id());
+        assert_eq!(captured.1, crate::WaitOwnerClass::Provider);
+        assert_eq!(captured.2, lease.deadline());
+        drop(registration);
+
+        let wake = Arc::new(WakeCounter::default());
+        lease.register_waker(&Waker::from(Arc::clone(&wake)));
+        cancellation.cancel_immediate();
+        assert!(wake.0.load(Ordering::Acquire) > 0);
+        assert!(matches!(lease.check(), Err(BudgetError::Cancelled)));
+    }
+
+    #[test]
+    fn operation_ids_are_shared_and_scope_rejects_foreign_sinks() {
+        let clock = LivenessClock::at(Duration::ZERO);
+        let run = TypedRunId::from_u128(9).expect("run");
+        let foreign_run = TypedRunId::from_u128(10).expect("foreign run");
+        let generation = SinkPlanGeneration::new(1).expect("generation");
+        let sink = QualifiedSinkId::from_parts(
+            run,
+            generation,
+            PlanNodeRef::from_u64(PlanDomain::from_canonical_plan(b"ids").expect("domain"), 1)
+                .expect("node"),
+        );
+        let other = QualifiedSinkId::from_parts(
+            run,
+            SinkPlanGeneration::new(2).expect("foreign generation"),
+            PlanNodeRef::from_u64(PlanDomain::from_canonical_plan(b"ids").expect("domain"), 2)
+                .expect("node"),
+        );
+        let budget = ResultDeliveryBudget::from_parts(
+            ResultOperationScope::sink_set(run, generation),
+            Arc::new(clock),
+            Arc::new(crate::CancellationToken::new()),
+            ResultOperationWindows::uniform(Duration::from_secs(5), Duration::from_secs(5)),
+            1,
+            None,
+        )
+        .expect("budget");
+        let first = budget
+            .begin_sink_operation(sink, ResultOperationKind::Process)
+            .expect("first");
+        let second = budget
+            .begin_sink_operation(sink, ResultOperationKind::Flush)
+            .expect("second");
+        assert_ne!(first.id(), second.id());
+        assert!(matches!(
+            budget.begin_sink_operation(other, ResultOperationKind::Process),
+            Err(BudgetError::ScopeMismatch)
+        ));
+
+        let malformed_scope = ResultOperationScope::Sink {
+            run: foreign_run,
+            sink,
+        };
+        assert!(matches!(
+            ResultDeliveryBudget::from_parts(
+                malformed_scope,
+                Arc::new(LivenessClock::at(Duration::ZERO)),
+                Arc::new(crate::CancellationToken::new()),
+                ResultOperationWindows::uniform(Duration::from_secs(5), Duration::from_secs(5)),
+                1,
+                None,
+            ),
+            Err(BudgetError::ScopeMismatch)
+        ));
+    }
+
+    struct OrderedTypedAdapter {
+        trace: Arc<Mutex<Vec<&'static str>>>,
+        fail_flush: bool,
+        fail_finish: bool,
+        fail_cancel: bool,
+    }
+
+    impl TypedSinkAdapter for OrderedTypedAdapter {
+        fn start<'a>(
+            &'a self,
+            _operation: &'a ResultOperationLease,
+            _wait_registrar: &'a dyn ResultWaitRegistrar,
+        ) -> TypedSinkFuture<'a, ()> {
+            lock(&self.trace).push("start");
+            Box::pin(future::ready(Ok(())))
+        }
+
+        fn process<'a>(
+            &'a self,
+            lease: &'a DeliveryLease,
+            _operation: &'a ResultOperationLease,
+            _wait_registrar: &'a dyn ResultWaitRegistrar,
+        ) -> TypedSinkFuture<'a, DurabilityAck> {
+            lock(&self.trace).push("process");
+            Box::pin(future::ready(
+                lease
+                    .acknowledge(lease.durability_boundary())
+                    .map_err(|error| TypedSinkError::permanent(error.to_string())),
+            ))
+        }
+
+        fn flush<'a>(
+            &'a self,
+            _operation: &'a ResultOperationLease,
+            _wait_registrar: &'a dyn ResultWaitRegistrar,
+        ) -> TypedSinkFuture<'a, ()> {
+            lock(&self.trace).push("flush");
+            if self.fail_flush {
+                Box::pin(future::ready(Err(TypedSinkError::permanent(
+                    "flush failed",
+                ))))
+            } else {
+                Box::pin(future::ready(Ok(())))
+            }
+        }
+
+        fn finish<'a>(
+            &'a self,
+            _operation: &'a ResultOperationLease,
+            _wait_registrar: &'a dyn ResultWaitRegistrar,
+        ) -> TypedSinkFuture<'a, ()> {
+            lock(&self.trace).push("finish");
+            if self.fail_finish {
+                Box::pin(future::ready(Err(TypedSinkError::permanent(
+                    "finish failed",
+                ))))
+            } else {
+                Box::pin(future::ready(Ok(())))
+            }
+        }
+
+        fn cancel(&self) -> Result<(), TypedSinkError> {
+            if self.fail_cancel {
+                Err(TypedSinkError::unknown_outcome("cancel failed"))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    fn typed_adapter(
+        fixture: &Fixture,
+        trace: Arc<Mutex<Vec<&'static str>>>,
+        fail_finish: bool,
+    ) -> TypedResultRouterAdapter {
+        typed_adapter_with_options(fixture, trace, false, fail_finish, false, 8).0
+    }
+
+    fn typed_adapter_with_options(
+        fixture: &Fixture,
+        trace: Arc<Mutex<Vec<&'static str>>>,
+        fail_flush: bool,
+        fail_finish: bool,
+        fail_cancel: bool,
+        attempts: u32,
+    ) -> (TypedResultRouterAdapter, Arc<crate::CancellationToken>) {
+        let sink_id = sink(
+            fixture,
+            3,
+            SinkLimits::with_finalization(4, 100_000, 16),
+            FullPolicy::FailRun,
+        )
+        .id;
+        let router = TypedResultRouter::new(
+            fixture.run,
+            fixture.generation,
+            RetryBudget::new(8),
+            [TypedSinkPlan::with_boundary(
+                sink_id,
+                SinkLimits::with_finalization(4, 100_000, 16),
+                FullPolicy::FailRun,
+                DurabilityBoundary::FormatWritten,
+            )],
+        )
+        .expect("router");
+        let clock = LivenessClock::at(Duration::ZERO);
+        let cancellation = Arc::new(crate::CancellationToken::new());
+        let budget = ResultDeliveryBudget::from_parts(
+            ResultOperationScope::sink_set(fixture.run, sink_id.sink_plan_generation()),
+            Arc::new(clock),
+            Arc::clone(&cancellation) as Arc<dyn CancellationSignal>,
+            ResultOperationWindows::uniform(Duration::from_secs(10), Duration::from_secs(10)),
+            attempts,
+            None,
+        )
+        .expect("liveness budget");
+        let domain = fixture.domain;
+        let adapter = TypedResultRouterAdapter::new_with_liveness(
+            router,
+            TypedRouterIdentity::new(
+                domain,
+                fixture.run,
+                fixture.generation,
+                fixture.worker,
+                fixture.worker_generation,
+            ),
+            [(
+                sink_id,
+                Arc::new(OrderedTypedAdapter {
+                    trace,
+                    fail_flush,
+                    fail_finish,
+                    fail_cancel,
+                }) as Arc<dyn TypedSinkAdapter>,
+            )],
+            budget,
+            Arc::new(crate::WaitRegistry::default()),
+        )
+        .expect("typed adapter");
+        (adapter, cancellation)
+    }
+
+    #[test]
+    fn typed_adapter_finishes_sinks_before_pure_router_finished() {
+        let fixture = fixture();
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let adapter = typed_adapter(&fixture, Arc::clone(&trace), false);
+        block_on(adapter.start()).expect("start");
+        adapter
+            .admit(envelope(&fixture, 1, "ordered"))
+            .expect("admit");
+        block_on(adapter.deliver()).expect("deliver");
+        block_on(adapter.finish()).expect("finish");
+        assert_eq!(&*lock(&trace), &["start", "process", "flush", "finish"]);
+        assert_eq!(adapter.phase(), TypedRouterPhase::Finished);
+    }
+
+    #[test]
+    fn typed_adapter_preserves_finish_error_and_never_publishes_finished() {
+        let fixture = fixture();
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let adapter = typed_adapter(&fixture, Arc::clone(&trace), true);
+        block_on(adapter.start()).expect("start");
+        adapter
+            .admit(envelope(&fixture, 1, "finish-error"))
+            .expect("admit");
+        let error = block_on(adapter.finish()).expect_err("finish must fail");
+        assert!(matches!(
+            error,
+            TypedRouterError::Sink(TypedSinkError::Permanent(_))
+        ));
+        assert_eq!(&*lock(&trace), &["start", "process", "flush", "finish"]);
+        assert_ne!(adapter.phase(), TypedRouterPhase::Finished);
+    }
+
+    #[test]
+    fn zero_retry_budget_still_permits_the_initial_delivery_attempt() {
+        let fixture = fixture();
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let (adapter, _) =
+            typed_adapter_with_options(&fixture, Arc::clone(&trace), false, false, false, 0);
+        block_on(adapter.start()).expect("start");
+        adapter
+            .admit(envelope(&fixture, 1, "initial-attempt"))
+            .expect("admit");
+        block_on(adapter.deliver()).expect("initial attempt is free");
+        assert_eq!(&*lock(&trace), &["start", "process"]);
+    }
+
+    #[test]
+    fn cancellation_only_stops_normal_work_and_cleanup_uses_finalization_lease() {
+        let fixture = fixture();
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let (adapter, cancellation) =
+            typed_adapter_with_options(&fixture, Arc::clone(&trace), false, false, false, 0);
+        block_on(adapter.start()).expect("start");
+        adapter
+            .admit(envelope(&fixture, 1, "cancelled-run"))
+            .expect("admit");
+        cancellation.cancel_immediate();
+        block_on(adapter.finish()).expect("cleanup remains bounded and usable");
+        assert_eq!(&*lock(&trace), &["start", "process", "flush", "finish"]);
+        assert_eq!(adapter.phase(), TypedRouterPhase::Finished);
+    }
+
+    #[test]
+    fn cleanup_errors_are_all_retained_and_cancel_category_is_typed() {
+        let fixture = fixture();
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let (adapter, _) =
+            typed_adapter_with_options(&fixture, Arc::clone(&trace), true, true, true, 0);
+        block_on(adapter.start()).expect("start");
+        adapter
+            .admit(envelope(&fixture, 1, "cleanup-errors"))
+            .expect("admit");
+        let error = block_on(adapter.finish()).expect_err("cleanup errors");
+        let rendered = error.to_string();
+        assert!(rendered.contains("flush failed"));
+        assert!(rendered.contains("finish failed"));
+        assert!(rendered.contains("cancel failed"));
+        assert!(rendered.contains("unknown-outcome"));
+        assert_ne!(adapter.phase(), TypedRouterPhase::Finished);
+        assert_eq!(&*lock(&trace), &["start", "process", "flush", "finish"]);
+    }
 
     fn event(label: &str) -> SampleEvent {
         let mut result = SampleResult::new(label);
@@ -6033,6 +10204,37 @@ mod revision3_tests {
             event(label),
         )
         .expect("typed envelope")
+    }
+
+    fn ignored_envelope(fixture: &Fixture, sequence: u64, label: &str) -> TypedResultEnvelope {
+        let user = TypedUserIdentity::new(1, fixture.root, 1, 0).expect("user");
+        let mut result = SampleResult::new(label);
+        result.set_successful(true);
+        result.set_ignore(true);
+        TypedResultEnvelope::new(
+            TypedRunSequence::new(sequence).expect("sequence"),
+            fixture.run,
+            fixture.generation,
+            fixture.worker,
+            fixture.worker_generation,
+            fixture.source,
+            vec![fixture.root, fixture.source],
+            user,
+            ThreadIdentity::with_group("thread-1", Some("group".to_owned()), Some(1)),
+            TypedSampleId::new(sequence).expect("sample"),
+            TypedResultOrigin::Sampler {
+                sampler: fixture.source,
+                parent: None,
+            },
+            SampleEvent::new(
+                result,
+                "run-text",
+                ThreadIdentity::with_group("thread-1", Some("group".to_owned()), Some(1)),
+                "host",
+                jmeter_rs_results::VariableSnapshot::new(),
+            ),
+        )
+        .expect("typed ignored envelope")
     }
 
     fn sink(fixture: &Fixture, node: u64, limits: SinkLimits, policy: FullPolicy) -> TypedSinkPlan {
@@ -6120,6 +10322,21 @@ mod revision3_tests {
         )
         .expect("transaction envelope");
         assert!(transaction.origin().is_transaction());
+    }
+
+    #[test]
+    fn typed_ignored_samples_do_not_enter_ledger_or_advance_sequence() {
+        let fixture = fixture();
+        let mut router = router(&fixture, SinkLimits::new(1, 100_000));
+        assert!(matches!(
+            router.admit(ignored_envelope(&fixture, 1, "ignored")),
+            Ok(TypedAdmissionOutcome::Ignored)
+        ));
+        assert_eq!(router.ledger().summary().selected, 0);
+        assert!(matches!(
+            router.admit(envelope(&fixture, 1, "accepted")),
+            Ok(TypedAdmissionOutcome::Accepted { .. })
+        ));
     }
 
     #[test]
@@ -6597,6 +10814,320 @@ mod revision3_tests {
         ));
     }
 
+    #[test]
+    fn stale_ack_is_rejected_after_retry_and_after_terminal_ack() {
+        let fixture = fixture();
+        let mut router = TypedResultRouter::new(
+            fixture.run,
+            fixture.generation,
+            RetryBudget::new(2),
+            [sink(
+                &fixture,
+                3,
+                SinkLimits::new(2, 100_000),
+                FullPolicy::Backpressure {
+                    deadline: RetryBudget::new(2),
+                },
+            )],
+        )
+        .expect("router");
+        router.start().expect("start");
+        router
+            .admit(envelope(&fixture, 1, "retry-ack"))
+            .expect("admit");
+        let lease = router.next_delivery().expect("delivery").expect("lease");
+        let key = lease.key();
+        let stale_ack = lease.acknowledge(lease.durability_boundary()).expect("ack");
+        router
+            .fail(
+                key,
+                FailureReason::Retryable(BoundedDiagnostic::new("temporary")),
+            )
+            .expect("retryable failure");
+        router.retry(key).expect("retry");
+        let retried = router
+            .next_delivery()
+            .expect("delivery")
+            .expect("retry lease");
+        assert!(matches!(
+            router.acknowledge(stale_ack),
+            Err(TypedRouterError::Ledger(
+                LedgerError::AcknowledgementMismatch
+            ))
+        ));
+        router
+            .acknowledge(
+                retried
+                    .acknowledge(retried.durability_boundary())
+                    .expect("retry ack"),
+            )
+            .expect("durable");
+        assert!(matches!(
+            router.acknowledge(
+                retried
+                    .acknowledge(retried.durability_boundary())
+                    .expect("duplicate ack")
+            ),
+            Err(TypedRouterError::Ledger(LedgerError::LeaseMissing))
+        ));
+        assert_eq!(router.ledger().summary().durable, 1);
+        assert!(router.ledger().validate_conservation().is_ok());
+    }
+
+    #[test]
+    fn retry_queue_full_does_not_spend_budget_or_change_ledger_state() {
+        let fixture = fixture();
+        let mut router = TypedResultRouter::new(
+            fixture.run,
+            fixture.generation,
+            RetryBudget::new(3),
+            [sink(
+                &fixture,
+                3,
+                SinkLimits::new(1, 100_000),
+                FullPolicy::FailRun,
+            )],
+        )
+        .expect("router");
+        router.start().expect("start");
+        router.admit(envelope(&fixture, 1, "first")).expect("first");
+        let first = router
+            .next_delivery()
+            .expect("delivery")
+            .expect("first lease");
+        router
+            .admit(envelope(&fixture, 2, "second"))
+            .expect("second");
+        router
+            .fail(
+                first.key(),
+                FailureReason::Retryable(BoundedDiagnostic::new("temporary")),
+            )
+            .expect("retryable failure");
+        let remaining = router.remaining_budget().remaining();
+        assert!(matches!(
+            router.retry(first.key()),
+            Err(TypedRouterError::Ledger(LedgerError::RetryQueueFull))
+        ));
+        assert_eq!(router.remaining_budget().remaining(), remaining);
+        assert!(matches!(
+            router.ledger().disposition(first.key()),
+            Some(LedgerDisposition::Failed(FailureReason::Retryable(_)))
+        ));
+        let second = router
+            .next_delivery()
+            .expect("delivery")
+            .expect("second lease");
+        router
+            .acknowledge(
+                second
+                    .acknowledge(second.durability_boundary())
+                    .expect("ack"),
+            )
+            .expect("second durable");
+        router.retry(first.key()).expect("retry after capacity");
+        let retried = router
+            .next_delivery()
+            .expect("delivery")
+            .expect("retry lease");
+        router
+            .acknowledge(
+                retried
+                    .acknowledge(retried.durability_boundary())
+                    .expect("ack"),
+            )
+            .expect("retry durable");
+        assert!(router.ledger().validate_conservation().is_ok());
+    }
+
+    #[test]
+    fn backpressure_retry_identity_collision_cannot_spend_budget() {
+        let fixture = fixture();
+        let mut router = TypedResultRouter::new(
+            fixture.run,
+            fixture.generation,
+            RetryBudget::new(2),
+            [sink(
+                &fixture,
+                3,
+                SinkLimits::new(1, 100_000),
+                FullPolicy::Backpressure {
+                    deadline: RetryBudget::new(2),
+                },
+            )],
+        )
+        .expect("router");
+        router.start().expect("start");
+        router.admit(envelope(&fixture, 1, "full")).expect("first");
+        let pending = envelope(&fixture, 2, "original");
+        assert!(matches!(
+            router.admit(pending.clone()),
+            Ok(TypedAdmissionOutcome::Full { .. })
+        ));
+        let alternate = envelope(&fixture, 2, "different-payload");
+        let remaining = router.remaining_budget().remaining();
+        assert!(matches!(
+            router.retry_admission(alternate),
+            Err(TypedRouterError::InvalidConfiguration(_))
+        ));
+        assert_eq!(router.remaining_budget().remaining(), remaining);
+        let lease = router.next_delivery().expect("delivery").expect("lease");
+        router
+            .acknowledge(lease.acknowledge(lease.durability_boundary()).expect("ack"))
+            .expect("durable");
+        let remaining = router.remaining_budget().remaining();
+        assert!(matches!(
+            router.admit(pending.clone()),
+            Ok(TypedAdmissionOutcome::Full { .. })
+        ));
+        assert_eq!(router.remaining_budget().remaining(), remaining);
+        assert!(matches!(
+            router.retry_admission(pending),
+            Ok(TypedAdmissionOutcome::Accepted { .. })
+        ));
+    }
+
+    #[test]
+    fn finish_closes_pending_backpressure_and_conserves_counts() {
+        let fixture = fixture();
+        let mut router = TypedResultRouter::new(
+            fixture.run,
+            fixture.generation,
+            RetryBudget::new(2),
+            [sink(
+                &fixture,
+                3,
+                SinkLimits::with_finalization(1, 100_000, 3),
+                FullPolicy::Backpressure {
+                    deadline: RetryBudget::new(2),
+                },
+            )],
+        )
+        .expect("router");
+        router.start().expect("start");
+        router
+            .admit(envelope(&fixture, 1, "accepted"))
+            .expect("first");
+        assert!(matches!(
+            router.admit(envelope(&fixture, 2, "pending")),
+            Ok(TypedAdmissionOutcome::Full { .. })
+        ));
+        let report = router.finish().expect("finish");
+        assert_eq!(report.selected, 2);
+        assert_eq!(report.not_admitted, 1);
+        assert_eq!(report.failed_after_admission, 1);
+        assert_eq!(report.summary.incomplete, 0);
+        report.validate_conservation().expect("conservation");
+        assert_eq!(router.phase(), TypedRouterPhase::Finished);
+    }
+
+    #[test]
+    fn finalization_bound_rejects_unaccountable_pending_work() {
+        let fixture = fixture();
+        let mut router = TypedResultRouter::new(
+            fixture.run,
+            fixture.generation,
+            RetryBudget::new(1),
+            [sink(
+                &fixture,
+                3,
+                SinkLimits::with_finalization(1, 100_000, 2),
+                FullPolicy::Backpressure {
+                    deadline: RetryBudget::new(1),
+                },
+            )],
+        )
+        .expect("router");
+        router.start().expect("start");
+        router
+            .admit(envelope(&fixture, 1, "accepted"))
+            .expect("first");
+        assert!(matches!(
+            router.admit(envelope(&fixture, 2, "pending")),
+            Ok(TypedAdmissionOutcome::Full { .. })
+        ));
+        assert!(matches!(
+            router.finish(),
+            Err(TypedRouterError::Ledger(LedgerError::FinalizationLimit))
+        ));
+        assert_eq!(router.phase(), TypedRouterPhase::AdmissionStopped);
+        assert_eq!(router.ledger().summary().incomplete, 1);
+        let lease = router.next_delivery().expect("delivery").expect("lease");
+        router
+            .acknowledge(lease.acknowledge(lease.durability_boundary()).expect("ack"))
+            .expect("durable");
+        let report = router.finish().expect("finish after draining");
+        report.validate_conservation().expect("conservation");
+    }
+
+    #[test]
+    fn cancellation_terminalizes_retryable_failures() {
+        let fixture = fixture();
+        let mut router = TypedResultRouter::new(
+            fixture.run,
+            fixture.generation,
+            RetryBudget::new(2),
+            [sink(
+                &fixture,
+                3,
+                SinkLimits::new(1, 100_000),
+                FullPolicy::Backpressure {
+                    deadline: RetryBudget::new(2),
+                },
+            )],
+        )
+        .expect("router");
+        router.start().expect("start");
+        router
+            .admit(envelope(&fixture, 1, "cancel-retry"))
+            .expect("admit");
+        let lease = router.next_delivery().expect("delivery").expect("lease");
+        router
+            .fail(
+                lease.key(),
+                FailureReason::Retryable(BoundedDiagnostic::new("temporary")),
+            )
+            .expect("retryable failure");
+        router.cancel().expect("cancel");
+        let summary = router
+            .ledger()
+            .validate_conservation()
+            .expect("conservation");
+        assert_eq!(summary.failed_after_admission, 1);
+        assert_eq!(summary.incomplete, 0);
+    }
+
+    #[test]
+    fn typed_router_rejects_queue_limits_that_exceed_ledger_capacity() {
+        let fixture = fixture();
+        let oversized = SinkLimits::new(MAX_TYPED_QUEUE_ITEMS + 1, usize::MAX);
+        assert!(matches!(
+            TypedResultRouter::new(
+                fixture.run,
+                fixture.generation,
+                RetryBudget::new(1),
+                [sink(&fixture, 3, oversized, FullPolicy::FailRun)],
+            ),
+            Err(TypedRouterError::InvalidConfiguration(_))
+        ));
+        let oversized_finalization =
+            SinkLimits::with_finalization(1, 100, MAX_LEDGER_TRANSITIONS + 1);
+        assert!(matches!(
+            TypedResultRouter::new(
+                fixture.run,
+                fixture.generation,
+                RetryBudget::new(1),
+                [sink(
+                    &fixture,
+                    3,
+                    oversized_finalization,
+                    FullPolicy::FailRun,
+                )],
+            ),
+            Err(TypedRouterError::InvalidConfiguration(_))
+        ));
+    }
+
     struct TestClock(std::cell::Cell<u64>);
 
     impl MonotonicClock for TestClock {
@@ -6605,11 +11136,11 @@ mod revision3_tests {
         }
     }
 
-    struct TestCancellation(std::cell::Cell<bool>);
+    struct TestCancellation(AtomicBool);
 
     impl CancellationSignal for TestCancellation {
         fn is_cancelled(&self) -> bool {
-            self.0.get()
+            self.0.load(Ordering::Acquire)
         }
 
         fn register_waker(&self, _waker: &Waker) {}
@@ -6618,7 +11149,7 @@ mod revision3_tests {
     #[test]
     fn finite_budget_uses_monotonic_phase_deadline_and_cancellation() {
         let clock = TestClock(std::cell::Cell::new(10));
-        let cancellation = TestCancellation(std::cell::Cell::new(false));
+        let cancellation = TestCancellation(AtomicBool::new(false));
         let mut budget =
             RunOperationBudget::new(&clock, &cancellation, 5, RetryBudget::new(1)).expect("budget");
         assert_eq!(budget.remaining_ticks(), 5);
@@ -6633,7 +11164,7 @@ mod revision3_tests {
         ));
         clock.0.set(13);
         assert!(matches!(budget.check(), Err(BudgetError::Expired)));
-        cancellation.0.set(true);
+        cancellation.0.store(true, Ordering::Release);
         assert!(matches!(budget.check(), Err(BudgetError::Cancelled)));
     }
 }

@@ -26,7 +26,7 @@ pub(crate) struct BoundedText<const LIMIT: usize>(String);
 impl<const LIMIT: usize> BoundedText<LIMIT> {
     pub(crate) fn new(value: impl AsRef<str>) -> Result<Self, SupervisionError> {
         let value = value.as_ref();
-        if value.is_empty() || value.len() > LIMIT || value.contains('\0') {
+        if value.len() > LIMIT || value.contains('\0') {
             return Err(SupervisionError::new(
                 ErrorCode::Configuration,
                 ErrorCategory::Setup,
@@ -49,7 +49,7 @@ pub(crate) struct ExecutableRef(BoundedText<MAX_EXECUTABLE_BYTES>);
 impl ExecutableRef {
     pub(crate) fn new(path: impl AsRef<str>) -> Result<Self, SupervisionError> {
         let text = BoundedText::new(path)?;
-        if !Path::new(text.as_str()).is_absolute() {
+        if text.as_str().is_empty() || !Path::new(text.as_str()).is_absolute() {
             return Err(SupervisionError::new(
                 ErrorCode::Configuration,
                 ErrorCategory::Setup,
@@ -141,6 +141,14 @@ impl BoundedEnvironment {
     ) -> Result<(), SupervisionError> {
         let key = BoundedText::new(key)?;
         let value = BoundedText::new(value)?;
+        if key.as_str().is_empty() {
+            return Err(SupervisionError::new(
+                ErrorCode::Configuration,
+                ErrorCategory::Setup,
+                false,
+                "environment keys cannot be empty",
+            ));
+        }
         if self.entries[..self.length]
             .iter()
             .flatten()
@@ -188,7 +196,7 @@ pub(crate) struct WorkingRootRef(BoundedText<MAX_WORKING_ROOT_BYTES>);
 impl WorkingRootRef {
     pub(crate) fn new(path: impl AsRef<str>) -> Result<Self, SupervisionError> {
         let text = BoundedText::new(path)?;
-        if !Path::new(text.as_str()).is_absolute() {
+        if text.as_str().is_empty() || !Path::new(text.as_str()).is_absolute() {
             return Err(SupervisionError::new(
                 ErrorCode::Configuration,
                 ErrorCategory::Setup,
@@ -325,6 +333,18 @@ impl LaunchSpec {
 
     pub(crate) fn validate(&self) -> Result<(), SupervisionError> {
         self.kind.validate_platform()?;
+        let expected = match self.kind {
+            crate::policy::PolicyKind::ExactChild => RequiredContainment::ExactChild,
+            crate::policy::PolicyKind::ProcessTree => RequiredContainment::ProcessTree,
+        };
+        if self.required_containment != expected {
+            return Err(SupervisionError::new(
+                ErrorCode::Configuration,
+                ErrorCategory::Setup,
+                false,
+                "launch purpose and containment policy disagree",
+            ));
+        }
         if self.setup_deadline.instant() <= Instant::now() {
             return Err(SupervisionError::new(
                 ErrorCode::Configuration,
@@ -353,5 +373,43 @@ impl<P: PurposeMarker> From<SpawnSpec<P>> for LaunchSpec {
             required_containment: spec.required_containment,
             kind: P::KIND,
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_argument_and_environment_value_preserve_boundaries() {
+        let mut arguments = BoundedArguments::default();
+        arguments.push("").expect("empty argv item is valid");
+        assert_eq!(arguments.iter().collect::<Vec<_>>(), vec![""]);
+
+        let mut environment = BoundedEnvironment::default();
+        environment
+            .insert("EMPTY", "")
+            .expect("empty environment value is valid");
+        assert_eq!(environment.iter().collect::<Vec<_>>(), vec![("EMPTY", "")]);
+        assert!(environment.insert("", "value").is_err());
+    }
+
+    #[test]
+    fn launch_spec_rechecks_containment_policy_after_type_erasure() {
+        let spec = LaunchSpec {
+            executable: ExecutableRef::new("/bin/true").expect("absolute executable"),
+            arguments: BoundedArguments::default(),
+            working_root: WorkingRootRef::new("/").expect("absolute root"),
+            environment: BoundedEnvironment::default(),
+            stdio: StdioContract::Null,
+            setup_deadline: MonotonicDeadline::after(Duration::from_secs(1)),
+            required_containment: RequiredContainment::ProcessTree,
+            kind: crate::policy::PolicyKind::ExactChild,
+        };
+        assert_eq!(
+            spec.validate().expect_err("mismatched policy").code(),
+            ErrorCode::Configuration
+        );
     }
 }

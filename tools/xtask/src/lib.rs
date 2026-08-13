@@ -6,6 +6,12 @@
 //! workspace policy; generated-file commands use closed, declared target
 //! catalogs and only rewrite their explicitly owned outputs.
 //!
+//! The command surface is the repository harness boundary for `TEST-001` and
+//! the cross-platform/performance policy boundary for `TEST-005`.  Commands
+//! that depend on the active profile admit dependent checks only after profile
+//! validation succeeds; planned standalone release operations remain explicit
+//! CI/tooling gates until they have their own typed validator.
+//!
 //! The small dependency set is intentional: `serde_json` 1.0.151 (MIT or
 //! Apache-2.0, MSRV 1.71, `std` only) parses the checked-in JSON documents,
 //! `toml` 1.1.4 (MIT or Apache-2.0, MSRV 1.85, `parse` + `serde`) parses Cargo
@@ -31,6 +37,9 @@ use std::path::{Path, PathBuf};
 pub use diagnostics::{Diagnostic, Diagnostics};
 pub use profile_references::Action as ProfileReferencesAction;
 
+const DEFAULT_PROFILE_ID: &str = "jmeter-5.6.3";
+const DEFAULT_PROFILE_FILE: &str = "jmeter-5.6.3.json";
+
 /// A repository check exposed by `cargo xtask`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Command {
@@ -54,10 +63,46 @@ pub enum Command {
     ProfileReferences,
 }
 
+impl Command {
+    /// The currently implemented command set, in canonical help/dispatch order.
+    ///
+    /// Keeping this catalog next to the enum gives callers a single exhaustive
+    /// source for command inventory tests.  A command must be added here when
+    /// its dispatch arm is added; planned standalone release operations remain
+    /// outside this catalog until they have a real validator and diagnostics.
+    pub const ALL: [Self; 9] = [
+        Self::ProfileCheck,
+        Self::FixtureCheck,
+        Self::WorkspaceCheck,
+        Self::PolicyCheck,
+        Self::ExternalAcceptance,
+        Self::HttpAcceptance,
+        Self::GuiAcceptanceCheck,
+        Self::PropertyInventory,
+        Self::ProfileReferences,
+    ];
+
+    /// Return the canonical command spelling used by `cargo xtask`.
+    #[must_use]
+    pub const fn canonical_name(self) -> &'static str {
+        match self {
+            Self::ProfileCheck => "profile-check",
+            Self::FixtureCheck => "fixture-check",
+            Self::WorkspaceCheck => "workspace-check",
+            Self::PolicyCheck => "policy-check",
+            Self::ExternalAcceptance => "external-acceptance",
+            Self::HttpAcceptance => "http-acceptance",
+            Self::GuiAcceptanceCheck => "gui-acceptance",
+            Self::PropertyInventory => "property-inventory",
+            Self::ProfileReferences => "profile-references",
+        }
+    }
+}
+
 pub use property_inventory::Action as PropertyInventoryAction;
 
 /// Options shared by repository checks.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Options {
     /// Repository root containing `Cargo.toml`, `compat`, and `docs`.
     pub root: PathBuf,
@@ -104,7 +149,7 @@ impl Options {
                 self.root
                     .join("compat")
                     .join("profiles")
-                    .join("jmeter-5.6.3.json")
+                    .join(DEFAULT_PROFILE_FILE)
             })
     }
 
@@ -139,73 +184,91 @@ impl Options {
                     .join("external-acceptance.json")
             })
     }
+
+    /// Resolve the HTTP fixture root for the active profile.
+    ///
+    /// HTTP acceptance validates the profile itself, but its existing checker
+    /// accepts the fixture root as an explicit argument.  Resolve that root
+    /// from the validated profile ID so a custom profile cannot accidentally
+    /// read the default JMeter fixture tree.  Invalid profiles fall back to
+    /// the default path only for the checker to report the profile error; no
+    /// dependent fixture validation is admitted for an invalid profile.
+    fn http_acceptance_fixture_path(&self) -> PathBuf {
+        let profile_path = self.profile_path();
+        let (profile_diagnostics, profile_index) = profile::check(&self.root, &profile_path);
+        if profile_diagnostics.is_empty()
+            && let Some(profile_index) = profile_index
+        {
+            return self.fixtures_path(&profile_index.profile_id);
+        }
+        self.fixtures_path(DEFAULT_PROFILE_ID)
+    }
+}
+
+fn run_profile_dependent<F>(options: &Options, check: F) -> Diagnostics
+where
+    F: FnOnce(&Options, &profile::ProfileIndex) -> Diagnostics,
+{
+    let profile_path = options.profile_path();
+    let (mut diagnostics, profile_index) = profile::check(&options.root, &profile_path);
+
+    // Do not consume a partially populated index.  Profile validation is the
+    // admission gate for every dependent catalog; using an index alongside
+    // profile errors can select untrusted paths or produce misleading
+    // downstream evidence.  The profile diagnostics already make the command
+    // fail, so this remains fail-closed without inventing a second error.
+    if diagnostics.is_empty()
+        && let Some(profile_index) = profile_index.as_ref()
+    {
+        diagnostics.extend(check(options, profile_index));
+    }
+    diagnostics.sort_deterministically();
+    diagnostics
 }
 
 /// Run one repository check and return deterministic diagnostics.
 pub fn run(command: Command, options: &Options) -> Diagnostics {
     match command {
         Command::ProfileCheck => profile::check(&options.root, &options.profile_path()).0,
-        Command::FixtureCheck => {
-            let profile_path = options.profile_path();
-            let (mut diagnostics, index) = profile::check(&options.root, &profile_path);
-            if let Some(index) = index {
-                diagnostics.extend(fixtures::check(
-                    &options.root,
-                    &options.fixtures_path(&index.profile_id),
-                    &index,
-                ));
-            }
-            diagnostics.sort_deterministically();
-            diagnostics
-        }
+        Command::FixtureCheck => run_profile_dependent(options, |options, profile| {
+            fixtures::check(
+                &options.root,
+                &options.fixtures_path(&profile.profile_id),
+                profile,
+            )
+        }),
         Command::WorkspaceCheck => workspace::check(&options.root),
-        Command::PolicyCheck => {
+        Command::PolicyCheck => run_profile_dependent(options, |options, profile| {
+            policy::check(
+                &options.root,
+                &options.fixtures_path(&profile.profile_id),
+                profile,
+            )
+        }),
+        Command::ExternalAcceptance => run_profile_dependent(options, |options, profile| {
             let profile_path = options.profile_path();
-            let (mut diagnostics, index) = profile::check(&options.root, &profile_path);
-            if let Some(index) = index {
-                diagnostics.extend(policy::check(
-                    &options.root,
-                    &options.fixtures_path(&index.profile_id),
-                    &index,
-                ));
-            }
-            diagnostics.sort_deterministically();
-            diagnostics
-        }
-        Command::ExternalAcceptance => {
-            let profile_path = options.profile_path();
-            let (mut diagnostics, index) = profile::check(&options.root, &profile_path);
-            if let Some(index) = index {
-                diagnostics.extend(external_acceptance::check(
-                    &options.root,
-                    &options.external_acceptance_manifest_path(&index.profile_id),
-                    &profile_path,
-                    &index,
-                ));
-            }
-            diagnostics.sort_deterministically();
-            diagnostics
-        }
+            external_acceptance::check(
+                &options.root,
+                &options.external_acceptance_manifest_path(&profile.profile_id),
+                &profile_path,
+                profile,
+            )
+        }),
         Command::HttpAcceptance => http_acceptance::check(
             &options.root,
             &options.profile_path(),
-            &options.fixtures_path("jmeter-5.6.3"),
+            &options.http_acceptance_fixture_path(),
             options.http_acceptance_check,
         ),
-        Command::GuiAcceptanceCheck => {
+        Command::GuiAcceptanceCheck => run_profile_dependent(options, |options, profile| {
             let profile_path = options.profile_path();
-            let (mut diagnostics, index) = profile::check(&options.root, &profile_path);
-            if let Some(index) = index {
-                diagnostics.extend(gui_acceptance::check(
-                    &options.root,
-                    &options.fixtures_path(&index.profile_id),
-                    &index,
-                    &profile_path,
-                ));
-            }
-            diagnostics.sort_deterministically();
-            diagnostics
-        }
+            gui_acceptance::check(
+                &options.root,
+                &options.fixtures_path(&profile.profile_id),
+                profile,
+                &profile_path,
+            )
+        }),
         Command::PropertyInventory => property_inventory::run(
             &options.root,
             options
@@ -229,5 +292,65 @@ fn resolve_path(root: &Path, path: &Path) -> PathBuf {
         path.to_path_buf()
     } else {
         root.join(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Command, Options, resolve_path};
+    use std::path::Path;
+
+    #[test]
+    fn command_catalog_has_one_canonical_name_per_dispatch_variant() {
+        let names = Command::ALL
+            .into_iter()
+            .map(Command::canonical_name)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            [
+                "profile-check",
+                "fixture-check",
+                "workspace-check",
+                "policy-check",
+                "external-acceptance",
+                "http-acceptance",
+                "gui-acceptance",
+                "property-inventory",
+                "profile-references",
+            ]
+        );
+    }
+
+    #[test]
+    fn options_are_value_types_for_cli_parser_tests() {
+        let options = Options::new("/repo");
+        assert_eq!(options, Options::new("/repo"));
+        assert_ne!(options, Options::new("/other"));
+    }
+
+    #[test]
+    fn relative_paths_resolve_against_root_but_absolute_paths_are_preserved() {
+        let root = Path::new("/repo");
+        assert_eq!(
+            resolve_path(root, Path::new("compat/profile.json")),
+            Path::new("/repo/compat/profile.json")
+        );
+        assert_eq!(
+            resolve_path(root, Path::new("/tmp/profile.json")),
+            Path::new("/tmp/profile.json")
+        );
+    }
+
+    #[test]
+    fn profile_dependent_gates_do_not_run_after_profile_diagnostics() {
+        let options = Options::new("/path/that/does/not/exist");
+        let mut called = false;
+        let diagnostics = super::run_profile_dependent(&options, |_, _| {
+            called = true;
+            super::Diagnostics::default()
+        });
+        assert!(!diagnostics.is_empty());
+        assert!(!called);
     }
 }

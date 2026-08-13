@@ -1433,20 +1433,20 @@ fn evaluate_expression_uses_lifecycle_identity_and_cleans_stateful_functions() {
         context
             .evaluate_expression("${__counter(true)}", &functions)
             .expect("second counter"),
-        "1"
+        "2"
     );
     context.set_iteration_id(Some(1));
     assert_eq!(
         context
             .evaluate_expression("${__counter(true)}", &functions)
             .expect("next iteration counter"),
-        "2"
+        "3"
     );
     assert_eq!(
         context
             .evaluate_expression("${__counter(true)}:${__counter(true)}", &functions)
             .expect("distinct counter occurrences"),
-        "2:1"
+        "4:1"
     );
     context
         .clear_expression_state(&functions)

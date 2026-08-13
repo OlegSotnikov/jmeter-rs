@@ -38,6 +38,14 @@ pub const DEFAULT_MAX_ASSERTION_REGEX_DEPTH: usize = 128;
 /// Maximum XPath expression bytes by default.
 pub const DEFAULT_MAX_ASSERTION_XPATH_BYTES: usize = 4 * 1024;
 
+const JMETER_ASSERTION_ERROR_NAME: &str = "Assertion failed! See log file.";
+const EQUALS_SECTION_DIFF_LEN: usize = 100;
+const EQUALS_DIFF_TRUNCATION: &str = "...";
+const EQUALS_DELTA_START: &str = "[[[";
+const EQUALS_DELTA_END: &str = "]]]";
+const EQUALS_RECEIVED_PREFIX: &str = "****** received  : ";
+const EQUALS_COMPARISON_PREFIX: &str = "****** comparison: ";
+
 /// Resource limits shared by native assertion adapters.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AssertionLimits {
@@ -192,34 +200,256 @@ fn bounded_error(
     result
 }
 
+fn bounded_jmeter_error(message: impl Into<String>, limits: AssertionLimits) -> AssertionResult {
+    bounded_error(JMETER_ASSERTION_ERROR_NAME, message, limits)
+}
+
+fn number_format_error(value: &str) -> String {
+    // This is the stable `NumberFormatException.toString()` shape emitted by
+    // JMeter when a numeric assertion property is parsed during evaluation.
+    // Keep the value bounded before storing the deferred parse diagnostic.
+    let value = bounded(value.to_owned(), DEFAULT_MAX_ASSERTION_DIAGNOSTIC_BYTES);
+    format!("java.lang.NumberFormatException: For input string: \"{value}\"")
+}
+
+fn truncate_utf16(units: &[u16], right: bool) -> Vec<u16> {
+    if units.len() <= EQUALS_SECTION_DIFF_LEN {
+        return units.to_vec();
+    }
+    let mut output = Vec::with_capacity(EQUALS_SECTION_DIFF_LEN + EQUALS_DIFF_TRUNCATION.len());
+    let ellipsis = EQUALS_DIFF_TRUNCATION.encode_utf16().collect::<Vec<_>>();
+    if right {
+        output.extend_from_slice(&units[..EQUALS_SECTION_DIFF_LEN]);
+        output.extend_from_slice(&ellipsis);
+    } else {
+        output.extend_from_slice(&ellipsis);
+        output.extend_from_slice(&units[units.len() - EQUALS_SECTION_DIFF_LEN..]);
+    }
+    output
+}
+
+fn utf16_to_string(units: &[u16]) -> String {
+    String::from_utf16_lossy(units)
+}
+
+/// Reproduces JMeter's equality diagnostic, whose diff algorithm operates on
+/// Java UTF-16 code units rather than Rust Unicode scalar values.
+fn equals_comparison_text(received: &str, comparison: &str) -> String {
+    let received = received.encode_utf16().collect::<Vec<_>>();
+    let comparison = comparison.encode_utf16().collect::<Vec<_>>();
+    let min_length = received.len().min(comparison.len());
+    let first_diff = (0..min_length)
+        .find(|index| received[*index] != comparison[*index])
+        .unwrap_or(min_length);
+
+    let starting_equal = if first_diff == 0 {
+        Vec::new()
+    } else {
+        truncate_utf16(&received[..first_diff], false)
+    };
+
+    // Java's indexes are signed here: an empty string has a last index of -1.
+    let mut last_received_diff = received.len() as isize - 1;
+    let mut last_comparison_diff = comparison.len() as isize - 1;
+    while last_received_diff > first_diff as isize
+        && last_comparison_diff > first_diff as isize
+        && received[last_received_diff as usize] == comparison[last_comparison_diff as usize]
+    {
+        last_received_diff -= 1;
+        last_comparison_diff -= 1;
+    }
+
+    let received_end = (last_received_diff + 1).max(0) as usize;
+    let comparison_end = (last_comparison_diff + 1).max(0) as usize;
+    let ending_equal = truncate_utf16(&received[received_end..], true);
+    let (mut received_delta, mut comparison_delta) = if ending_equal.is_empty() {
+        (
+            truncate_utf16(&received[first_diff..], true),
+            truncate_utf16(&comparison[first_diff..], true),
+        )
+    } else {
+        (
+            truncate_utf16(&received[first_diff..received_end], true),
+            truncate_utf16(&comparison[first_diff..comparison_end], true),
+        )
+    };
+    if received_delta.len() < comparison_delta.len() {
+        received_delta.extend(std::iter::repeat_n(
+            u16::from(b' '),
+            comparison_delta.len() - received_delta.len(),
+        ));
+    } else if comparison_delta.len() < received_delta.len() {
+        comparison_delta.extend(std::iter::repeat_n(
+            u16::from(b' '),
+            received_delta.len() - comparison_delta.len(),
+        ));
+    }
+
+    format!(
+        "\n\n{EQUALS_RECEIVED_PREFIX}{}{EQUALS_DELTA_START}{}{EQUALS_DELTA_END}{}\n\n{EQUALS_COMPARISON_PREFIX}{}{EQUALS_DELTA_START}{}{EQUALS_DELTA_END}{}\n\n",
+        utf16_to_string(&starting_equal),
+        utf16_to_string(&received_delta),
+        utf16_to_string(&ending_equal),
+        utf16_to_string(&starting_equal),
+        utf16_to_string(&comparison_delta),
+        utf16_to_string(&ending_equal),
+    )
+}
+
+fn bounded_failure_and_error(
+    name: &str,
+    message: impl Into<String>,
+    limits: AssertionLimits,
+) -> AssertionResult {
+    // XMLAssertion retains both wire flags for malformed documents. Keep the
+    // diagnostic in JMeter's failureMessage field.
+    let message = bounded(message, limits.max_diagnostic_bytes);
+    match AssertionResult::from_flags(name.to_owned(), true, true, Some(message), None) {
+        Ok(result) => result,
+        Err(_) => bounded_error(
+            name,
+            "assertion result flags could not be represented",
+            limits,
+        ),
+    }
+}
+
 fn bounded_unsupported(message: impl Into<String>) -> ComponentError {
     ComponentError::unsupported(message)
 }
 
-fn check_response_bytes(
+fn malformed_or_unmatched_class(source: &str) -> String {
+    format!(
+        "Bad test configuration org.apache.oro.text.MalformedCachePatternException: Invalid expression: {source} Unmatched [] in expression."
+    )
+}
+
+fn response_field_bytes(
     result: &SampleResult,
+    field: &ResponseField,
+) -> Result<Option<usize>, ComponentError> {
+    let bytes = match field {
+        ResponseField::ResponseData => result.response_data().map(|data| data.len()),
+        // JMeter's request-data target is SampleResult.samplerData. Keep the
+        // typed request payload as a fallback for native protocol adapters.
+        ResponseField::RequestData => result
+            .sampler_data()
+            .map(str::len)
+            .or_else(|| result.request_data().map(|data| data.len())),
+        ResponseField::ResponseCode => result.response_code().map(str::len),
+        ResponseField::ResponseMessage => result.response_message().map(str::len),
+        ResponseField::ResponseHeaders => result
+            .response_headers()
+            .map(|headers| headers.as_str().len()),
+        ResponseField::RequestHeaders => result
+            .request_headers()
+            .map(|headers| headers.as_str().len()),
+        ResponseField::Url => result.url().map(str::len),
+        ResponseField::SampleLabel => Some(result.label().len()),
+        ResponseField::Variable(_) => None,
+        ResponseField::Unknown(value) => {
+            return Err(bounded_unsupported(format!(
+                "response assertion field {value:?} is not supported"
+            )));
+        }
+        ResponseField::Document => {
+            return Err(bounded_unsupported(
+                "response assertion document field requires the pinned document adapter",
+            ));
+        }
+    };
+    Ok(bytes)
+}
+
+fn decode_utf16_bytes(bytes: &[u8], little_endian: bool) -> String {
+    let mut units = Vec::with_capacity(bytes.len().div_ceil(2));
+    for pair in bytes.chunks_exact(2) {
+        let unit = if little_endian {
+            u16::from_le_bytes([pair[0], pair[1]])
+        } else {
+            u16::from_be_bytes([pair[0], pair[1]])
+        };
+        units.push(unit);
+    }
+    if !bytes.chunks_exact(2).remainder().is_empty() {
+        // Java's Charset decoder replaces an incomplete trailing code unit.
+        units.push(0xfffd);
+    }
+    String::from_utf16_lossy(&units)
+}
+
+fn decode_windows_1252(bytes: &[u8]) -> String {
+    const EXTENDED: [char; 32] = [
+        '\u{20ac}', '\u{fffd}', '\u{201a}', '\u{192}', '\u{201e}', '\u{2026}', '\u{2020}',
+        '\u{2021}', '\u{2c6}', '\u{2030}', '\u{160}', '\u{2039}', '\u{152}', '\u{fffd}', '\u{17d}',
+        '\u{fffd}', '\u{fffd}', '\u{2018}', '\u{2019}', '\u{201c}', '\u{201d}', '\u{2022}',
+        '\u{2013}', '\u{2014}', '\u{2dc}', '\u{2122}', '\u{161}', '\u{203a}', '\u{153}',
+        '\u{fffd}', '\u{17e}', '\u{178}',
+    ];
+    bytes
+        .iter()
+        .map(|byte| match *byte {
+            0x00..=0x7f | 0xa0..=0xff => char::from(*byte),
+            value => EXTENDED[(value - 0x80) as usize],
+        })
+        .collect()
+}
+
+fn decode_response_bytes(result: &SampleResult, bytes: &[u8]) -> Result<String, ComponentError> {
+    let encoding = result
+        .data_encoding()
+        .map(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("UTF-8");
+    let normalized = encoding
+        .bytes()
+        .filter(|value| !matches!(value, b'-' | b'_' | b' '))
+        .map(|value| char::from(value.to_ascii_uppercase()))
+        .collect::<String>();
+    let value = match normalized.as_str() {
+        "UTF8" => String::from_utf8_lossy(bytes).into_owned(),
+        "USASCII" | "ASCII" => bytes
+            .iter()
+            .map(|value| {
+                if value.is_ascii() {
+                    char::from(*value)
+                } else {
+                    '\u{fffd}'
+                }
+            })
+            .collect(),
+        "ISO88591" | "LATIN1" | "L1" => bytes.iter().map(|value| char::from(*value)).collect(),
+        "WINDOWS1252" | "CP1252" => decode_windows_1252(bytes),
+        "UTF16" => {
+            let (bytes, little_endian) = match bytes {
+                [0xfe, 0xff, rest @ ..] => (rest, false),
+                [0xff, 0xfe, rest @ ..] => (rest, true),
+                _ => (bytes, false),
+            };
+            decode_utf16_bytes(bytes, little_endian)
+        }
+        "UTF16LE" => decode_utf16_bytes(bytes, true),
+        "UTF16BE" => decode_utf16_bytes(bytes, false),
+        _ => {
+            return Err(bounded_unsupported(format!(
+                "response assertion encoding {encoding:?} is unsupported"
+            )));
+        }
+    };
+    Ok(value)
+}
+
+fn check_response_field_bytes(
+    result: &SampleResult,
+    field: &ResponseField,
     limits: AssertionLimits,
 ) -> Result<(), ComponentError> {
-    let mut total = 0_usize;
-    for data in [result.response_data(), result.request_data()]
-        .into_iter()
-        .flatten()
+    if let Some(bytes) = response_field_bytes(result, field)?
+        && bytes > limits.max_response_bytes
     {
-        total = total.checked_add(data.len()).ok_or_else(|| {
-            ComponentError::resource_limit("assertion response byte count overflow")
-        })?;
-    }
-    for headers in [result.response_headers(), result.request_headers()]
-        .into_iter()
-        .flatten()
-    {
-        total = total.checked_add(headers.as_str().len()).ok_or_else(|| {
-            ComponentError::resource_limit("assertion header byte count overflow")
-        })?;
-    }
-    if total > limits.max_response_bytes {
         return Err(ComponentError::resource_limit(format!(
-            "assertion response bytes {total} exceed {}",
+            "assertion {} bytes {bytes} exceed {}",
+            field.display_name(),
             limits.max_response_bytes
         )));
     }
@@ -233,10 +463,13 @@ fn sample_text(
     let value = match field {
         ResponseField::ResponseData => result
             .response_data()
-            .map(|data| String::from_utf8_lossy(data.as_bytes()).into_owned()),
-        ResponseField::RequestData => result
-            .request_data()
-            .map(|data| String::from_utf8_lossy(data.as_bytes()).into_owned()),
+            .map(|data| decode_response_bytes(result, data.as_bytes()))
+            .transpose()?,
+        ResponseField::RequestData => result.sampler_data().map(str::to_owned).or_else(|| {
+            result
+                .request_data()
+                .map(|data| String::from_utf8_lossy(data.as_bytes()).into_owned())
+        }),
         ResponseField::ResponseCode => result.response_code().map(str::to_owned),
         ResponseField::ResponseMessage => result.response_message().map(str::to_owned),
         ResponseField::ResponseHeaders => result
@@ -265,9 +498,10 @@ fn sample_text(
 /// Field inspected by a response assertion.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ResponseField {
-    /// Sampler response body bytes decoded as UTF-8 with replacement.
+    /// Sampler response body bytes decoded using the result's data encoding.
     ResponseData,
-    /// Sampler request body bytes decoded as UTF-8 with replacement.
+    /// Sampler request body text, with typed request bytes used only as a
+    /// native fallback when sampler data is absent.
     RequestData,
     /// Sampler response code.
     ResponseCode,
@@ -337,7 +571,8 @@ impl ResponseField {
 
     fn display_name(&self) -> &'static str {
         match self {
-            Self::ResponseData | Self::Document => "text",
+            Self::ResponseData => "text",
+            Self::Document => "document",
             Self::RequestData => "request data",
             Self::ResponseCode => "code",
             Self::ResponseMessage => "message",
@@ -347,6 +582,13 @@ impl ResponseField {
             Self::SampleLabel => "sample label",
             Self::Variable(_) => "variable",
             Self::Unknown(_) => "unknown field",
+        }
+    }
+
+    fn failure_display_name(&self) -> String {
+        match self {
+            Self::Variable(name) => format!("variable({name})"),
+            _ => self.display_name().to_owned(),
         }
     }
 }
@@ -368,6 +610,11 @@ impl ResponsePatternMode {
     /// Decodes the low-level JMeter test-type value, excluding NOT and OR
     /// modifiers.
     pub fn from_wire_test_type(value: i32) -> Result<Self, ComponentError> {
+        if value & !0x3f != 0 {
+            return Err(ComponentError::failure(format!(
+                "unsupported response assertion test type {value}"
+            )));
+        }
         let mode = value & 0x1f;
         match mode & 0x1b {
             0x01 => Ok(Self::Matches),
@@ -560,11 +807,6 @@ impl ResponseAssertion {
     }
 
     fn validate_patterns(&self) -> Result<(), ComponentError> {
-        if self.patterns.is_empty() {
-            return Err(ComponentError::resource_limit(
-                "response assertion requires at least one pattern",
-            ));
-        }
         if self.patterns.len() > self.limits.max_patterns {
             return Err(ComponentError::resource_limit(format!(
                 "response assertion pattern count {} exceeds {}",
@@ -597,9 +839,20 @@ impl ResponseAssertion {
         }
     }
 
-    fn failure_message(&self, pattern: &str) -> String {
-        if let Some(message) = &self.custom_failure_message {
-            return message.clone();
+    fn default_failure_message(&self, pattern: &str, value: &str) -> String {
+        if self.or {
+            // JMeter's getFailText switches on the complete test type.  OR is
+            // a modifier bit, so the upstream diagnostic intentionally falls
+            // through to this generic wording.
+            let displayed_pattern = if self.mode == ResponsePatternMode::Equals {
+                equals_comparison_text(value, pattern)
+            } else {
+                pattern.to_owned()
+            };
+            return format!(
+                "Test failed: {} expected something using /{displayed_pattern}/",
+                self.field.failure_display_name()
+            );
         }
         let relation = match (self.mode, self.negate) {
             (ResponsePatternMode::Contains, false) | (ResponsePatternMode::Substring, false) => {
@@ -613,10 +866,25 @@ impl ResponseAssertion {
             (ResponsePatternMode::Matches, true) => "not to match",
             (ResponsePatternMode::Equals, true) => "not to equal",
         };
+        let displayed_pattern = if self.mode == ResponsePatternMode::Equals {
+            equals_comparison_text(value, pattern)
+        } else {
+            pattern.to_owned()
+        };
         format!(
-            "Test failed: {} expected to {relation} /{pattern}/",
-            self.field.display_name()
+            "Test failed: {} expected to {relation} /{displayed_pattern}/",
+            self.field.failure_display_name()
         )
+    }
+
+    fn failure_message(&self, pattern: &str, value: &str) -> String {
+        self.custom_failure_message
+            .as_deref()
+            .filter(|message| !message.is_empty())
+            .map_or_else(
+                || self.default_failure_message(pattern, value),
+                ToOwned::to_owned,
+            )
     }
 }
 
@@ -627,6 +895,11 @@ impl Assertion for ResponseAssertion {
     ) -> ComponentFuture<'a, AssertionResult> {
         Box::pin(async move {
             self.validate_patterns()?;
+            if self.assume_success
+                && let Some(result) = context.result_mut()
+            {
+                result.set_successful(true);
+            }
             let Some(result) = context.result() else {
                 return Ok(bounded_error(
                     &self.name,
@@ -634,39 +907,52 @@ impl Assertion for ResponseAssertion {
                     self.limits,
                 ));
             };
-            check_response_bytes(result, self.limits)?;
+            check_response_field_bytes(result, &self.field, self.limits)?;
             let value = match &self.field {
                 ResponseField::Variable(name) => context.execution().variable(name),
                 _ => sample_text(result, &self.field)?,
             };
-            if self.assume_success
-                && let Some(result) = context.result_mut()
-            {
-                result.set_successful(true);
-            }
             let Some(value) = value else {
-                return Ok(bounded_failure(
-                    &self.name,
-                    "Response was null",
-                    self.limits,
-                ));
+                return if self.negate {
+                    Ok(AssertionResult::passed(self.name.clone()))
+                } else {
+                    Ok(bounded_failure(
+                        &self.name,
+                        "Response was null",
+                        self.limits,
+                    ))
+                };
             };
-            if value.len() > self.limits.max_response_bytes {
+            // Non-variable fields were bounded from their original wire
+            // representation above. Rechecking the lossy UTF-8 rendering can
+            // reject a valid byte-bounded response when replacement characters
+            // expand it; only variable text needs this post-resolution bound.
+            if matches!(self.field, ResponseField::Variable(_))
+                && value.len() > self.limits.max_response_bytes
+            {
                 return Err(ComponentError::resource_limit(format!(
                     "response assertion field bytes {} exceed {}",
                     value.len(),
                     self.limits.max_response_bytes
                 )));
             }
-            if self.mode == ResponsePatternMode::Equals && value.is_empty() {
-                return Ok(bounded_failure(
-                    &self.name,
-                    "Response was null",
-                    self.limits,
-                ));
+            // JMeter treats an empty checked field as a null result. NOT
+            // assertions are explicitly successful for that case; positive
+            // assertions fail without attempting regex compilation.
+            if value.is_empty() {
+                return if self.negate {
+                    Ok(AssertionResult::passed(self.name.clone()))
+                } else {
+                    Ok(bounded_failure(
+                        &self.name,
+                        "Response was null",
+                        self.limits,
+                    ))
+                };
             }
             let mut matched = !self.or;
             let mut failed_pattern = None;
+            let mut failed_messages = Vec::new();
             for pattern in &self.patterns {
                 let raw = match self.check_pattern(&value, pattern) {
                     Ok(raw) => raw,
@@ -684,6 +970,7 @@ impl Assertion for ResponseAssertion {
                     if result {
                         break;
                     }
+                    failed_messages.push(self.default_failure_message(pattern, &value));
                 } else {
                     matched &= result;
                     if !result {
@@ -695,12 +982,27 @@ impl Assertion for ResponseAssertion {
             if matched {
                 Ok(AssertionResult::passed(self.name.clone()))
             } else {
-                let pattern = failed_pattern.unwrap_or_else(|| self.patterns[0].as_str());
-                Ok(bounded_failure(
-                    &self.name,
-                    self.failure_message(pattern),
-                    self.limits,
-                ))
+                let pattern = failed_pattern
+                    .or_else(|| self.patterns.first().map(String::as_str))
+                    .unwrap_or("");
+                let message = if self.or {
+                    if let Some(custom) = self
+                        .custom_failure_message
+                        .as_deref()
+                        .filter(|message| !message.is_empty())
+                    {
+                        custom.to_owned()
+                    } else if failed_messages.is_empty() {
+                        // Java's joining(delimiter, prefix, suffix) emits the
+                        // suffix for an empty OR collection.
+                        "\t".to_owned()
+                    } else {
+                        format!("\t{}\t", failed_messages.join("\t"))
+                    }
+                } else {
+                    self.failure_message(pattern, &value)
+                };
+                Ok(bounded_failure(&self.name, message, self.limits))
             }
         })
     }
@@ -1189,9 +1491,8 @@ impl<'a> RegexParser<'a> {
             }
         }
         if !closed {
-            return Err(PatternCheckError::Malformed(format!(
-                "invalid regular expression {:?}: unmatched '['",
-                self.source
+            return Err(PatternCheckError::Malformed(malformed_or_unmatched_class(
+                self.source,
             )));
         }
         self.bump_node()?;
@@ -1411,7 +1712,7 @@ impl DurationAssertion {
         let value = value.into();
         let allowed_millis = value
             .parse::<i64>()
-            .map_err(|_| format!("invalid duration threshold {value:?}"));
+            .map_err(|_| number_format_error(&value));
         Self {
             name: name.into(),
             allowed_millis,
@@ -1456,13 +1757,16 @@ impl Assertion for DurationAssertion {
         Box::pin(async move {
             let allowed = match &self.allowed_millis {
                 Ok(value) => *value,
-                Err(message) => return Ok(bounded_error(&self.name, message, self.limits)),
+                Err(message) => return Ok(bounded_jmeter_error(message, self.limits)),
             };
-            let elapsed = context
-                .result()
-                .and_then(SampleResult::elapsed)
-                .map(|value| value.as_millis())
-                .unwrap_or(0);
+            let Some(result) = context.result() else {
+                return Ok(bounded_error(
+                    &self.name,
+                    "duration assertion received no sample result",
+                    self.limits,
+                ));
+            };
+            let elapsed = result.elapsed().map(|value| value.as_millis()).unwrap_or(0);
             // JMeter treats non-positive configured values as the disabled
             // boundary.  The GUI asks for positive values, but malformed JMX
             // can still carry zero or negative values and must not panic.
@@ -1632,7 +1936,7 @@ impl SizeAssertion {
         let allowed_size = allowed_size.into();
         let parsed = allowed_size
             .parse::<i64>()
-            .map_err(|_| format!("invalid size threshold {allowed_size:?}"));
+            .map_err(|_| number_format_error(&allowed_size));
         Self {
             name: name.into(),
             field: SizeField::from_wire(field),
@@ -1689,29 +1993,51 @@ impl SizeAssertion {
 
     fn measured_size(
         &self,
-        context: &SampleContext<'_>,
         result: &SampleResult,
-    ) -> Result<u64, ComponentError> {
-        match &self.field {
-            SizeField::ResponseBody => {
-                Ok(result.response_data().map_or(0, |value| value.len() as u64))
+        limits: AssertionLimits,
+    ) -> Result<i128, ComponentError> {
+        let measured = match &self.field {
+            SizeField::ResponseBody => result
+                .effective_body_size()
+                .map_err(size_result_metadata_error)?
+                .map_or(0_i128, |value| i128::from(value.as_u64())),
+            SizeField::ResponseHeaders => result.headers_size().map_or_else(
+                || {
+                    result
+                        .response_headers()
+                        .map_or(Ok(0_i128), |value| checked_size(value.as_str().len()))
+                },
+                |value| Ok(i128::from(value.as_u64())),
+            )?,
+            SizeField::ResponseCode => result
+                .response_code()
+                .map_or(Ok(0_i128), |value| checked_size(java_utf16_len(value)))?,
+            SizeField::ResponseMessage => result
+                .response_message()
+                .map_or(Ok(0_i128), |value| checked_size(java_utf16_len(value)))?,
+            SizeField::Network => result
+                .effective_received_bytes()
+                .map_err(size_result_metadata_error)?
+                .map_or(0_i128, |value| i128::from(value.as_u64())),
+            SizeField::Variable(_) => {
+                return Err(ComponentError::failure(
+                    "size assertion variable must be parsed before measuring",
+                ));
             }
-            SizeField::ResponseHeaders => Ok(result
-                .response_headers()
-                .map_or(0, |value| value.as_str().len() as u64)),
-            SizeField::ResponseCode => Ok(result.response_code().map_or(0, java_utf16_len) as u64),
-            SizeField::ResponseMessage => {
-                Ok(result.response_message().map_or(0, java_utf16_len) as u64)
+            SizeField::Unknown(value) => {
+                return Err(bounded_unsupported(format!(
+                    "size assertion field {value:?} is not supported"
+                )));
             }
-            SizeField::Network => Ok(result.received_bytes().map_or(0, |value| value.as_u64())),
-            SizeField::Variable(name) => Ok(context
-                .execution()
-                .variable(name)
-                .map_or(0, |value| value.len() as u64)),
-            SizeField::Unknown(value) => Err(bounded_unsupported(format!(
-                "size assertion field {value:?} is not supported"
-            ))),
+        };
+        let maximum = checked_size(limits.max_response_bytes)?;
+        if measured > maximum {
+            return Err(ComponentError::resource_limit(format!(
+                "size assertion input bytes {measured} exceed {}",
+                limits.max_response_bytes
+            )));
         }
+        Ok(measured)
     }
 }
 
@@ -1723,7 +2049,7 @@ impl Assertion for SizeAssertion {
         Box::pin(async move {
             let allowed = match &self.allowed_size {
                 Ok(value) => *value,
-                Err(message) => return Ok(bounded_error(&self.name, message, self.limits)),
+                Err(message) => return Ok(bounded_jmeter_error(message, self.limits)),
             };
             let Some(result) = context.result() else {
                 return Ok(bounded_error(
@@ -1732,26 +2058,43 @@ impl Assertion for SizeAssertion {
                     self.limits,
                 ));
             };
-            check_response_bytes(result, self.limits)?;
-            let measured = self.measured_size(context, result)?;
-            if measured > self.limits.max_response_bytes as u64 {
-                return Err(ComponentError::resource_limit(format!(
-                    "size assertion input bytes {measured} exceed {}",
-                    self.limits.max_response_bytes
-                )));
-            }
-            let allowed_unsigned = u64::try_from(allowed).ok();
+            let measured = match &self.field {
+                SizeField::Variable(name) => {
+                    let Some(value) = context.execution().variable(name) else {
+                        return Ok(bounded_failure(
+                            &self.name,
+                            format!("Error parsing variable name: {name} value: null"),
+                            self.limits,
+                        ));
+                    };
+                    if value.len() > self.limits.max_response_bytes {
+                        return Err(ComponentError::resource_limit(format!(
+                            "size assertion variable bytes {} exceed {}",
+                            value.len(),
+                            self.limits.max_response_bytes
+                        )));
+                    }
+                    match value.parse::<i64>() {
+                        Ok(value) => i128::from(value),
+                        Err(_) => {
+                            return Ok(bounded_failure(
+                                &self.name,
+                                format!("Error parsing variable name: {name} value: {value}"),
+                                self.limits,
+                            ));
+                        }
+                    }
+                }
+                _ => self.measured_size(result, self.limits)?,
+            };
+            let allowed = i128::from(allowed);
             let matches = match self.comparison {
-                SizeComparison::Equal => allowed_unsigned == Some(measured),
-                SizeComparison::NotEqual => allowed_unsigned != Some(measured),
-                SizeComparison::Greater => allowed_unsigned.is_some_and(|value| measured > value),
-                SizeComparison::Less => allowed_unsigned.is_some_and(|value| measured < value),
-                SizeComparison::GreaterOrEqual => {
-                    allowed_unsigned.is_some_and(|value| measured >= value)
-                }
-                SizeComparison::LessOrEqual => {
-                    allowed_unsigned.is_some_and(|value| measured <= value)
-                }
+                SizeComparison::Equal => measured == allowed,
+                SizeComparison::NotEqual => measured != allowed,
+                SizeComparison::Greater => measured > allowed,
+                SizeComparison::Less => measured < allowed,
+                SizeComparison::GreaterOrEqual => measured >= allowed,
+                SizeComparison::LessOrEqual => measured <= allowed,
                 SizeComparison::Unknown(_) => false,
             };
             if matches {
@@ -1771,6 +2114,23 @@ impl Assertion for SizeAssertion {
 
 fn java_utf16_len(value: &str) -> usize {
     value.encode_utf16().count()
+}
+
+fn checked_size(value: usize) -> Result<i128, ComponentError> {
+    i128::try_from(value)
+        .map_err(|_| ComponentError::resource_limit("size assertion measurement overflows"))
+}
+
+fn size_result_metadata_error(error: jmeter_rs_results::ResultError) -> ComponentError {
+    let message = format!(
+        "size assertion result metadata error {}",
+        error.stable_code()
+    );
+    if error.is_limit() {
+        ComponentError::resource_limit(message)
+    } else {
+        ComponentError::failure(message)
+    }
 }
 
 /// Native implementation of JMeter's MD5Hex Assertion.
@@ -1831,11 +2191,26 @@ impl Assertion for Md5HexAssertion {
     ) -> ComponentFuture<'a, AssertionResult> {
         Box::pin(async move {
             let Some(result) = context.result() else {
-                return Ok(bounded_error(&self.name, "Response was null", self.limits));
+                return Ok(bounded_failure(
+                    &self.name,
+                    "Response was null",
+                    self.limits,
+                ));
             };
             let Some(data) = result.response_data() else {
-                return Ok(bounded_error(&self.name, "Response was null", self.limits));
+                return Ok(bounded_failure(
+                    &self.name,
+                    "Response was null",
+                    self.limits,
+                ));
             };
+            if data.is_empty() {
+                return Ok(bounded_failure(
+                    &self.name,
+                    "Response was null",
+                    self.limits,
+                ));
+            }
             if data.len() > self.limits.max_response_bytes {
                 return Err(ComponentError::resource_limit(format!(
                     "MD5 response bytes {} exceed {}",
@@ -1843,19 +2218,17 @@ impl Assertion for Md5HexAssertion {
                     self.limits.max_response_bytes
                 )));
             }
+            if self.expected.len() > self.limits.max_pattern_bytes {
+                return Err(ComponentError::resource_limit(format!(
+                    "MD5 expected digest bytes {} exceed {}",
+                    self.expected.len(),
+                    self.limits.max_pattern_bytes
+                )));
+            }
             if self.expected.is_empty() {
-                return Ok(bounded_error(
+                return Ok(bounded_failure(
                     &self.name,
                     "MD5Hex to test against is empty",
-                    self.limits,
-                ));
-            }
-            if self.expected.len() != 32
-                || !self.expected.bytes().all(|value| value.is_ascii_hexdigit())
-            {
-                return Ok(bounded_error(
-                    &self.name,
-                    "MD5Hex to test against must contain 32 hexadecimal digits",
                     self.limits,
                 ));
             }
@@ -2410,8 +2783,8 @@ fn decode_xml_entities(value: &[u8]) -> Result<String, XmlParseError> {
                 })?
             }
             _ => {
-                return Err(XmlParseError::Unsupported(format!(
-                    "XML entity &{entity}; requires a DTD declaration"
+                return Err(XmlParseError::Invalid(format!(
+                    "XML entity &{entity}; is undefined"
                 )));
             }
         };
@@ -2502,10 +2875,18 @@ impl Assertion for XmlAssertion {
                     self.limits.max_response_bytes
                 )));
             }
-            match XmlParser::new(data.as_bytes(), self.limits).parse() {
+            if data.is_empty() {
+                return Ok(bounded_failure(
+                    &self.name,
+                    "Response was null",
+                    self.limits,
+                ));
+            }
+            let decoded = decode_response_bytes(result, data.as_bytes())?;
+            match XmlParser::new(decoded.as_bytes(), self.limits).parse() {
                 Ok(_) => Ok(AssertionResult::passed(self.name.clone())),
                 Err(XmlParseError::Invalid(message)) => {
-                    Ok(bounded_failure(&self.name, message, self.limits))
+                    Ok(bounded_failure_and_error(&self.name, message, self.limits))
                 }
                 Err(XmlParseError::Unsupported(message)) => Err(bounded_unsupported(message)),
                 Err(XmlParseError::Limit(error)) => Err(error),
@@ -2555,7 +2936,8 @@ pub struct XPathAssertion {
 
 impl XPathAssertion {
     /// Creates an XPath assertion.  `/`, child/descendant paths, simple
-    /// attribute/text predicates, and `count(path)=N` are supported.
+    /// attribute/text predicates, `boolean(path)`, and `count(path)=N` are
+    /// supported.
     #[must_use]
     pub fn new(name: impl Into<String>, expression: impl Into<String>) -> Self {
         Self {
@@ -2661,7 +3043,21 @@ impl Assertion for XPathAssertion {
                     self.limits.max_response_bytes
                 )));
             }
-            let document = match XmlParser::new(data.as_bytes(), self.limits).parse() {
+            if data.is_empty() {
+                return Ok(bounded_failure(
+                    &self.name,
+                    "Response was null",
+                    self.limits,
+                ));
+            }
+            let raw = data.as_bytes();
+            let decoded = match raw {
+                [0xfe, 0xff, rest @ ..] => Some(decode_utf16_bytes(rest, false)),
+                [0xff, 0xfe, rest @ ..] => Some(decode_utf16_bytes(rest, true)),
+                _ => None,
+            };
+            let input = decoded.as_deref().map_or(raw, |value| value.as_bytes());
+            let document = match XmlParser::new(input, self.limits).parse() {
                 Ok(document) => document,
                 Err(XmlParseError::Invalid(message)) => {
                     return Ok(bounded_error(&self.name, message, self.limits));
@@ -2671,21 +3067,54 @@ impl Assertion for XPathAssertion {
                 }
                 Err(XmlParseError::Limit(error)) => return Err(error),
             };
-            let matched = match evaluate_xpath(&document, &self.expression, self.options.whitespace)
-            {
-                Ok(value) => value,
-                Err(XPathError::Invalid(message)) => {
-                    return Ok(bounded_error(&self.name, message, self.limits));
+            let match_kind =
+                match evaluate_xpath_kind(&document, &self.expression, self.options.whitespace) {
+                    Ok(value) => value,
+                    Err(XPathError::Invalid(message)) => {
+                        return Ok(bounded_error(&self.name, message, self.limits));
+                    }
+                    Err(XPathError::Unsupported(message)) => {
+                        return Err(bounded_unsupported(message));
+                    }
+                };
+            let (matched, message) = match match_kind {
+                XPathMatchKind::Nodes(value) => {
+                    let matched = if self.negate { !value } else { value };
+                    let message = if value {
+                        self.negate.then_some(
+                            "Specified XPath was found... Turn off negate if this is not desired"
+                                .to_owned(),
+                        )
+                    } else {
+                        Some(format!("No Nodes Matched {}", self.expression))
+                    };
+                    (matched, message)
                 }
-                Err(XPathError::Unsupported(message)) => return Err(bounded_unsupported(message)),
+                XPathMatchKind::Boolean(value) => {
+                    let matched = if self.negate { !value } else { value };
+                    let message = Some(format!(
+                        "{} for {}",
+                        if self.negate {
+                            "Nodes Matched"
+                        } else {
+                            "No Nodes Matched"
+                        },
+                        self.expression
+                    ));
+                    (matched, message)
+                }
             };
-            let matched = if self.negate { !matched } else { matched };
             if matched {
-                Ok(AssertionResult::passed(self.name.clone()))
+                let mut result = AssertionResult::passed(self.name.clone());
+                result.set_failure_message(Some(bounded(
+                    message.unwrap_or_default(),
+                    self.limits.max_diagnostic_bytes,
+                )));
+                Ok(result)
             } else {
                 Ok(bounded_failure(
                     &self.name,
-                    format!("XPath expression {:?} did not match", self.expression),
+                    message.unwrap_or_else(|| format!("No Nodes Matched {}", self.expression)),
                     self.limits,
                 ))
             }
@@ -2697,6 +3126,21 @@ impl Assertion for XPathAssertion {
 enum XPathError {
     Invalid(String),
     Unsupported(String),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum XPathMatchKind {
+    Nodes(bool),
+    Boolean(bool),
+}
+
+impl XPathMatchKind {
+    #[cfg(test)]
+    const fn matched(self) -> bool {
+        match self {
+            Self::Nodes(value) | Self::Boolean(value) => value,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -2717,17 +3161,26 @@ enum XPathPredicate {
     AttributeEquals(String, String),
 }
 
+#[cfg(test)]
 fn evaluate_xpath(
     document: &XmlDocument,
     expression: &str,
     ignore_whitespace: bool,
 ) -> Result<bool, XPathError> {
+    evaluate_xpath_kind(document, expression, ignore_whitespace).map(XPathMatchKind::matched)
+}
+
+fn evaluate_xpath_kind(
+    document: &XmlDocument,
+    expression: &str,
+    ignore_whitespace: bool,
+) -> Result<XPathMatchKind, XPathError> {
     let expression = expression.trim();
     if expression.is_empty() {
         return Err(XPathError::Invalid("XPath expression is empty".to_owned()));
     }
     if expression == "/" {
-        return Ok(true);
+        return Ok(XPathMatchKind::Nodes(true));
     }
     if let Some(rest) = expression.strip_prefix("count(") {
         let Some((path, expected)) = rest.rsplit_once('=') else {
@@ -2740,21 +3193,33 @@ fn evaluate_xpath(
                 "XPath count expression must have the form count(path)=N".to_owned(),
             ));
         };
-        let expected = expected.trim().parse::<usize>().map_err(|_| {
-            XPathError::Invalid(
-                "XPath count expected value is not a non-negative integer".to_owned(),
-            )
+        let expected = expected.trim().parse::<i128>().map_err(|_| {
+            XPathError::Invalid("XPath count expected value is not an integer".to_owned())
         })?;
         let path = parse_xpath_path(path.trim())?;
-        return Ok(select_xpath_nodes(document, &path, ignore_whitespace).len() == expected);
+        return Ok(XPathMatchKind::Boolean(
+            i128::try_from(select_xpath_nodes(document, &path, ignore_whitespace).len())
+                .is_ok_and(|count| count == expected),
+        ));
     }
     if expression.starts_with("boolean(") {
-        return Err(XPathError::Unsupported(
-            "only count(path)=N XPath boolean expressions are supported".to_owned(),
+        let Some(path) = expression
+            .strip_prefix("boolean(")
+            .and_then(|value| value.strip_suffix(')'))
+        else {
+            return Err(XPathError::Invalid(
+                "XPath boolean expression must have the form boolean(path)".to_owned(),
+            ));
+        };
+        let path = parse_xpath_path(path.trim())?;
+        return Ok(XPathMatchKind::Boolean(
+            !select_xpath_nodes(document, &path, ignore_whitespace).is_empty(),
         ));
     }
     let path = parse_xpath_path(expression)?;
-    Ok(!select_xpath_nodes(document, &path, ignore_whitespace).is_empty())
+    Ok(XPathMatchKind::Nodes(
+        !select_xpath_nodes(document, &path, ignore_whitespace).is_empty(),
+    ))
 }
 
 fn parse_xpath_path(expression: &str) -> Result<XPathPath, XPathError> {
@@ -3087,6 +3552,99 @@ mod tests {
         assert!(matches!(
             bounded.is_match("aaaa", false),
             Err(ComponentError::ResourceLimit(_))
+        ));
+    }
+
+    #[test]
+    fn response_diagnostics_use_jmeter_equals_diff_and_or_shape() {
+        assert_eq!(
+            equals_comparison_text("abc", "axc"),
+            "\n\n****** received  : a[[[b]]]c\n\n****** comparison: a[[[x]]]c\n\n"
+        );
+        let assertion = ResponseAssertion::single(
+            "equals",
+            ResponseField::ResponseData,
+            ResponsePatternMode::Equals,
+            "axc",
+        );
+        assert_eq!(
+            assertion.default_failure_message("axc", "abc"),
+            "Test failed: text expected to equal /\n\n****** received  : a[[[b]]]c\n\n****** comparison: a[[[x]]]c\n\n/"
+        );
+        let or = assertion.with_or(true);
+        assert!(
+            or.default_failure_message("axc", "abc")
+                .contains("expected something using /\n\n****** received")
+        );
+    }
+
+    #[test]
+    fn response_decoding_honors_explicit_charset_without_host_state() {
+        let mut result = SampleResult::new("encoding");
+        result.set_response_data_bytes(vec![0xe9]);
+        result.set_data_encoding_name("ISO-8859-1");
+        assert_eq!(
+            sample_text(&result, &ResponseField::ResponseData)
+                .unwrap_or_else(|error| panic!("encoding: {error}")),
+            Some("é".to_owned())
+        );
+
+        let mut utf16 = SampleResult::new("utf16");
+        utf16.set_response_data_bytes(vec![0xff, 0xfe, b'A', 0]);
+        utf16.set_data_encoding_name("UTF-16");
+        assert_eq!(
+            sample_text(&utf16, &ResponseField::ResponseData)
+                .unwrap_or_else(|error| panic!("encoding: {error}")),
+            Some("A".to_owned())
+        );
+    }
+
+    #[test]
+    fn malformed_oro_class_and_numeric_errors_keep_wire_shape() {
+        let error = match RegexProgram::compile("[", AssertionLimits::default()) {
+            Err(error) => error,
+            Ok(_) => panic!("unmatched class should be malformed"),
+        };
+        assert!(matches!(
+            error,
+            PatternCheckError::Malformed(message)
+                if message == "Bad test configuration org.apache.oro.text.MalformedCachePatternException: Invalid expression: [ Unmatched [] in expression."
+        ));
+        assert_eq!(
+            number_format_error("not-a-number"),
+            "java.lang.NumberFormatException: For input string: \"not-a-number\""
+        );
+        assert_eq!(
+            DurationAssertion::from_wire("duration", "not-a-duration").allowed_millis(),
+            None
+        );
+        assert_eq!(
+            SizeAssertion::from_wire("size", "SizeAssertion.response_data", 1, "not-a-size")
+                .allowed_size(),
+            None
+        );
+    }
+
+    #[test]
+    fn xpath_result_messages_distinguish_nodes_and_boolean_values() {
+        let document = XmlParser::new(br#"<root><item/></root>"#, AssertionLimits::default())
+            .parse()
+            .unwrap_or_else(|_| panic!("XML should parse"));
+        assert!(matches!(
+            evaluate_xpath_kind(&document, "/root/missing", false),
+            Ok(XPathMatchKind::Nodes(false))
+        ));
+        assert!(matches!(
+            evaluate_xpath_kind(&document, "count(//item)=1", false),
+            Ok(XPathMatchKind::Boolean(true))
+        ));
+        assert!(matches!(
+            evaluate_xpath_kind(&document, "boolean(//item)", false),
+            Ok(XPathMatchKind::Boolean(true))
+        ));
+        assert!(matches!(
+            evaluate_xpath_kind(&document, "count(//item)=-1", false),
+            Ok(XPathMatchKind::Boolean(false))
         ));
     }
 

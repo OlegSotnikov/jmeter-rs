@@ -5,6 +5,12 @@
 //! percentiles.  The report generator keeps a FIFO statistical window and
 //! interpolates between sorted values; counters and APDEX continue to cover
 //! the complete input stream.
+//!
+//! This module is deliberately limited to deterministic report data and
+//! algorithm state.  Source-file identity, generation manifests, and the
+//! atomic `current` publication token belong to the application boundary
+//! described by Decision 0003; this crate never opens, names, or publishes a
+//! filesystem artifact.
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -16,7 +22,7 @@ use crate::config::{
 };
 use crate::error::{ReportError, ReportLimit};
 use crate::graph::{
-    GraphAggregationOptions, GraphPoint, GraphSample, GraphTimestampPolicy,
+    GraphAggregationOptions, GraphPoint, GraphSample, GraphSampleCountMode, GraphTimestampPolicy,
     aggregate_graph_samples, aggregate_graph_samples_with_options,
     validate_graph_input_with_limits, write_graph_points_json,
 };
@@ -1216,6 +1222,15 @@ impl DashboardReport {
         max_points: usize,
     ) -> DashboardGraphSections {
         let mut sections = DashboardGraphSections::new();
+        if max_points == 0 {
+            let error = ReportError::InvalidConfig {
+                field: crate::ConfigField::MaxGraphPoints,
+            };
+            for definition in DASHBOARD_GRAPH_INVENTORY {
+                let _ = sections.mark_unsupported(definition.id, error);
+            }
+            return sections;
+        }
         if samples.is_empty() {
             return sections;
         }
@@ -1259,8 +1274,12 @@ impl DashboardReport {
         let samples = results
             .iter()
             .map(|result| {
-                GraphSample::try_from_result_with_timestamp(result, policy)?
-                    .ok_or(ReportError::Serialization)
+                GraphSample::try_from_result_with_count_mode(
+                    result,
+                    GraphSampleCountMode::Row,
+                    policy,
+                )?
+                .ok_or(ReportError::Serialization)
             })
             .collect::<Result<Vec<_>, _>>()?;
         self.materialize_graph_section(id, &samples, max_points)
@@ -1278,10 +1297,11 @@ impl DashboardReport {
         validate_input_sample_count(events.len(), self.config.limits().max_input_samples())?;
         let mut samples = Vec::with_capacity(events.len());
         for (event, metadata) in events {
-            let sample = GraphSample::try_from_result_with_metadata_and_timestamp(
+            let sample = GraphSample::try_from_result_with_metadata_and_timestamp_and_count_mode(
                 event.result(),
                 *metadata,
                 policy,
+                GraphSampleCountMode::Row,
             )?
             .ok_or(ReportError::Serialization)?;
             samples.push(sample);
@@ -1290,8 +1310,9 @@ impl DashboardReport {
         Ok(samples)
     }
 
-    /// Projects result snapshots into weighted graph rows and aggregates them
-    /// using the configured dashboard granularity.
+    /// Projects result snapshots into one graph row per serialized result and
+    /// aggregates them using the configured dashboard granularity. Statistical
+    /// listener weighting is selected explicitly by the listener adapter.
     pub fn graph_series_from_results(
         &self,
         results: &[SampleResult],
@@ -1300,8 +1321,8 @@ impl DashboardReport {
         self.graph_series_from_results_with_policy(results, max_points, GraphTimestampPolicy::End)
     }
 
-    /// Projects result snapshots with an explicit timestamp policy before
-    /// applying the dashboard's fixed-width aggregation.
+    /// Projects one dashboard row per result with an explicit timestamp policy
+    /// before applying the fixed-width aggregation.
     pub fn graph_series_from_results_with_policy(
         &self,
         results: &[SampleResult],
@@ -1311,8 +1332,12 @@ impl DashboardReport {
         validate_input_sample_count(results.len(), self.config.limits().max_input_samples())?;
         let mut samples = Vec::with_capacity(results.len());
         for result in results {
-            let sample = GraphSample::try_from_result_with_timestamp(result, policy)?
-                .ok_or(ReportError::Serialization)?;
+            let sample = GraphSample::try_from_result_with_count_mode(
+                result,
+                GraphSampleCountMode::Row,
+                policy,
+            )?
+            .ok_or(ReportError::Serialization)?;
             samples.push(sample);
         }
         self.graph_series(&samples, max_points)
@@ -1336,8 +1361,12 @@ impl DashboardReport {
         let samples = results
             .iter()
             .map(|result| {
-                GraphSample::try_from_result_with_timestamp(result, policy)?
-                    .ok_or(ReportError::Serialization)
+                GraphSample::try_from_result_with_count_mode(
+                    result,
+                    GraphSampleCountMode::Row,
+                    policy,
+                )?
+                .ok_or(ReportError::Serialization)
             })
             .collect::<Result<Vec<_>, _>>()?;
         self.graph_series_for_definition(definition, &samples, max_points)
@@ -2197,8 +2226,10 @@ fn push_dashboard_details_html(
 fn push_dashboard_error_html(output: &mut String, key: &crate::ErrorKey) {
     if key.code() == "Assertion failed" {
         if key.message().is_empty() {
-            output.push_str(key.code());
+            push_html_escaped(output, key.code());
         } else {
+            // Assertion messages use the same already-escaped ErrorKey
+            // representation as response messages.
             output.push_str(key.message());
         }
         return;
@@ -2206,6 +2237,10 @@ fn push_dashboard_error_html(output: &mut String, key: &crate::ErrorKey) {
     push_html_escaped(output, key.code());
     if !key.message().is_empty() {
         output.push('/');
+        // ErrorKey messages have already passed through JMeter's HTML4
+        // escapeJson-compatible encoding in `ErrorKey::from_result`.  Escape
+        // the response-code context above, but do not encode the message a
+        // second time or `&lt;` would become `&amp;lt;`.
         output.push_str(key.message());
     }
 }
@@ -2495,6 +2530,94 @@ mod tests {
         let html = report.to_html().unwrap_or_else(|_| panic!("valid HTML"));
         assert!(html.contains("a&lt;&quot;b"));
         assert_eq!(html, report.html().unwrap_or_else(|_| panic!("valid HTML")));
+    }
+
+    #[test]
+    fn dashboard_html_escapes_error_messages() {
+        let mut report = DashboardReport::new(config());
+        assert!(
+            report
+                .add_result(&sample(
+                    "error",
+                    10,
+                    false,
+                    "500",
+                    "<script>alert('x')</script>",
+                ))
+                .is_ok()
+        );
+        let html = report.to_html().unwrap_or_else(|_| panic!("valid HTML"));
+        assert!(html.contains("500/&lt;script&gt;alert(&apos;x&apos;)&lt;/script&gt;"));
+        assert!(!html.contains("500/<script>"));
+        assert!(!html.contains("500/&amp;lt;script&amp;gt;"));
+
+        let mut assertion = sample("assertion", 10, false, "200", "ignored");
+        assertion.set_failure_message(Some("<assertion> & 'failure'".to_owned()));
+        assert!(report.add_result(&assertion).is_ok());
+        let html = report.to_html().unwrap_or_else(|_| panic!("valid HTML"));
+        assert!(html.contains("&lt;assertion&gt; &amp; &apos;failure&apos;"));
+        assert!(!html.contains("&amp;lt;assertion&amp;gt;"));
+    }
+
+    #[test]
+    fn dashboard_graph_projection_is_row_based_for_statistical_results() {
+        let interval = crate::ReportInterval::from_millis(0, 2_000).unwrap();
+        let config = DashboardConfig::new(interval)
+            .unwrap()
+            .with_percentile_window(8)
+            .unwrap()
+            .with_overall_granularity_millis(2_000)
+            .unwrap();
+        let mut result = sample("batch", 600, false, "503", "overload");
+        result.set_timestamp(Some(jmeter_rs_results::WallTimestamp::from_millis(100)));
+        result.set_sample_count(Some(SampleCount::from_u64(2)));
+        result.set_error_count(Some(ErrorCount::from_u64(1)));
+        let report = DashboardReport::new(config);
+        let points = report
+            .graph_series_from_results(&[result], 4)
+            .unwrap_or_else(|_| panic!("valid dashboard graph"));
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0].sample_count(), 1);
+        assert_eq!(points[0].error_count(), 1);
+        assert_eq!(points[0].elapsed_count(), 1);
+        assert_eq!(points[0].elapsed_sum_millis(), Some(600.0));
+    }
+
+    #[test]
+    fn dashboard_empty_graph_sections_reject_zero_point_bound() {
+        let report = DashboardReport::new(config());
+        let sections = report.materialize_graph_sections(&[], 0);
+        assert!(sections.sections().all(|section| {
+            section.status() == DashboardGraphStatus::Unsupported
+                && section.error()
+                    == Some(ReportError::InvalidConfig {
+                        field: crate::ConfigField::MaxGraphPoints,
+                    })
+        }));
+    }
+
+    #[test]
+    fn dashboard_top_errors_are_deterministic_for_equal_counts() {
+        let mut report = DashboardReport::new(config());
+        assert!(
+            report
+                .add_result(&sample("first", 10, false, "503", "overload"))
+                .is_ok()
+        );
+        assert!(
+            report
+                .add_result(&sample("second", 10, false, "409", "conflict"))
+                .is_ok()
+        );
+        let errors = report.total().top_errors();
+        assert_eq!(errors.len(), 2);
+        assert_eq!(errors[0].key().code(), "409");
+        assert_eq!(errors[1].key().code(), "503");
+        let json = report.to_json().unwrap_or_else(|_| panic!("valid JSON"));
+        assert!(
+            json.find("\"response_code\":\"409\"").unwrap_or(usize::MAX)
+                < json.find("\"response_code\":\"503\"").unwrap_or(usize::MAX)
+        );
     }
 
     #[test]

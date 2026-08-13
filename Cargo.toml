@@ -8,6 +8,7 @@ members = [
     "crates/runtime",
     "crates/results",
     "crates/http",
+    "crates/http-native",
     "crates/report",
     "crates/remote",
     "crates/bridge-protocol",

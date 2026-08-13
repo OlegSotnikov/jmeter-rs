@@ -2,10 +2,11 @@
 //! An in-memory scripted transport for deterministic protocol tests.
 //!
 //! This module deliberately does not bind a socket or consult proxy,
-//! filesystem, environment, or clock state.  A response is an explicit
-//! sequence of data, delay, end, and reset steps.  Delays are values returned
-//! to the caller; they never sleep the host thread.  Requests must match the
-//! next scripted expectation exactly, including header order and body bytes.
+//! filesystem, environment, or clock state.  A request write and response are
+//! explicit sequences of data, delay, end, and reset steps.  Delays are values
+//! returned to the caller; they never sleep the host thread.  Requests must
+//! match the next scripted expectation exactly, including header order and
+//! body bytes.
 //! Exchange cancellation is explicit and logged.  Dropping an unfinished
 //! explicitly owned exchange attempts bounded cancellation;
 //! [`FakeTransport::assert_no_leaks`] reports any event-capacity failure that
@@ -433,6 +434,209 @@ pub struct TransportResponsePlan {
     pub headers: Vec<TransportHeader>,
     /// Explicit response stream.
     pub steps: Vec<TransportStep>,
+}
+
+/// One explicit request-write action.
+///
+/// A write data step is a byte count rather than a copy of request bytes.  The
+/// request itself remains the exact fixture and is already retained by the
+/// exchange.  This lets tests model short writes without duplicating or
+/// leaking secret request payloads into a second trace value.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TransportWriteStep {
+    /// A successful partial write of the specified number of request bytes.
+    Data(usize),
+    /// A logical delay before the next write action.
+    Delay(Duration),
+    /// The request write completed.
+    End,
+    /// A deterministic connection reset while writing the request.
+    Reset {
+        /// Optional protocol/platform code associated with the reset.
+        code: Option<u16>,
+    },
+}
+
+impl fmt::Debug for TransportWriteStep {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Data(bytes) => formatter
+                .debug_struct("Data")
+                .field("byte_len", bytes)
+                .finish(),
+            Self::Delay(delay) => formatter.debug_tuple("Delay").field(delay).finish(),
+            Self::End => formatter.write_str("End"),
+            Self::Reset { code } => formatter.debug_struct("Reset").field("code", code).finish(),
+        }
+    }
+}
+
+impl TransportWriteStep {
+    /// Returns the number of request bytes represented by this step.
+    #[must_use]
+    pub const fn data_len(self) -> usize {
+        match self {
+            Self::Data(bytes) => bytes,
+            Self::Delay(_) | Self::End | Self::Reset { .. } => 0,
+        }
+    }
+
+    /// Returns the bounded payload bytes represented by this step.
+    #[must_use]
+    pub const fn wire_bytes(self) -> usize {
+        self.data_len()
+    }
+}
+
+/// A bounded request-write script.
+///
+/// Unlike [`TransportResponsePlan`], the expected request is supplied later
+/// by [`FakeTransportBuilder::push_with_write`], so validation also checks
+/// that the successful write chunks add up to the exact request wire size.
+#[derive(Clone, PartialEq, Eq)]
+pub struct TransportWritePlan {
+    /// Explicit request-write actions.
+    pub steps: Vec<TransportWriteStep>,
+}
+
+impl fmt::Debug for TransportWritePlan {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TransportWritePlan")
+            .field("steps", &self.steps)
+            .finish()
+    }
+}
+
+impl TransportWritePlan {
+    /// Creates an empty write script with a terminal completion marker.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            steps: vec![TransportWriteStep::End],
+        }
+    }
+
+    /// Adds a successful partial write before the terminal marker.
+    #[must_use]
+    pub fn chunk(mut self, bytes: usize) -> Self {
+        insert_before_write_end(&mut self.steps, TransportWriteStep::Data(bytes));
+        self
+    }
+
+    /// Adds a logical delay before the terminal marker.
+    #[must_use]
+    pub fn delay(mut self, delay: Duration) -> Self {
+        insert_before_write_end(&mut self.steps, TransportWriteStep::Delay(delay));
+        self
+    }
+
+    /// Replaces the terminal marker with a deterministic reset.
+    #[must_use]
+    pub fn reset(mut self, code: Option<u16>) -> Self {
+        if matches!(self.steps.last(), Some(TransportWriteStep::End)) {
+            let _ = self.steps.pop();
+        }
+        self.steps.push(TransportWriteStep::Reset { code });
+        self
+    }
+
+    /// Returns aggregate request bytes represented by successful write steps.
+    pub fn wire_bytes(&self) -> Result<usize, TransportError> {
+        self.steps
+            .iter()
+            .map(|step| step.wire_bytes())
+            .try_fold(0_usize, usize::checked_add)
+            .ok_or(TransportError::InvalidSize)
+    }
+
+    /// Validates the write script against one exact request and finite limits.
+    pub fn validate(
+        &self,
+        request_bytes: usize,
+        limits: TransportLimits,
+    ) -> Result<(), TransportError> {
+        if self.steps.len() > limits.max_steps {
+            return Err(TransportError::CapacityExceeded {
+                kind: TransportCapacityKind::Steps,
+                actual: self.steps.len(),
+                limit: limits.max_steps,
+            });
+        }
+        let mut terminal = None;
+        let mut total_bytes = 0_usize;
+        let mut total_delay = Duration::ZERO;
+        for (position, step) in self.steps.iter().copied().enumerate() {
+            if terminal.is_some() {
+                return Err(match terminal {
+                    Some(true) => TransportError::UnexpectedAfterReset { position },
+                    Some(false) => TransportError::UnexpectedEnd { position },
+                    None => TransportError::Incomplete,
+                });
+            }
+            let event_bytes = step.wire_bytes();
+            if event_bytes > limits.max_event_bytes {
+                return Err(TransportError::EventTooLarge {
+                    actual: event_bytes,
+                    limit: limits.max_event_bytes,
+                });
+            }
+            match step {
+                TransportWriteStep::Data(bytes) => {
+                    if bytes == 0 {
+                        return Err(TransportError::InvalidSize);
+                    }
+                    total_bytes = total_bytes
+                        .checked_add(bytes)
+                        .ok_or(TransportError::InvalidSize)?;
+                }
+                TransportWriteStep::Delay(delay) => {
+                    if delay > limits.max_delay_per_step {
+                        return Err(TransportError::DelayTooLarge {
+                            actual: delay,
+                            limit: limits.max_delay_per_step,
+                        });
+                    }
+                    total_delay = total_delay.checked_add(delay).ok_or(
+                        TransportError::DelayAggregateTooLarge {
+                            actual: Duration::MAX,
+                            limit: limits.max_total_delay,
+                        },
+                    )?;
+                    if total_delay > limits.max_total_delay {
+                        return Err(TransportError::DelayAggregateTooLarge {
+                            actual: total_delay,
+                            limit: limits.max_total_delay,
+                        });
+                    }
+                }
+                TransportWriteStep::End => terminal = Some(false),
+                TransportWriteStep::Reset { .. } => terminal = Some(true),
+            }
+        }
+        if terminal.is_none() {
+            return Err(TransportError::MissingEnd);
+        }
+        if total_bytes > request_bytes {
+            return Err(TransportError::WriteLengthMismatch {
+                expected: request_bytes,
+                actual: total_bytes,
+            });
+        }
+        if matches!(terminal, Some(false)) && total_bytes != request_bytes {
+            return Err(TransportError::WriteLengthMismatch {
+                expected: request_bytes,
+                actual: total_bytes,
+            });
+        }
+        Ok(())
+    }
+}
+
+impl Default for TransportWritePlan {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// A redacted response-plan projection.
@@ -912,6 +1116,16 @@ pub enum TransportError {
     SequenceOverflow,
     /// A size calculation overflowed before a bound check.
     InvalidSize,
+    /// A successful write script did not account for the exact request size.
+    ///
+    /// This uses the transport-invalid-size stable code because it is a
+    /// fixture-construction error, not a provider/network failure.
+    WriteLengthMismatch {
+        /// Exact request wire bytes required by the fixture.
+        expected: usize,
+        /// Bytes represented by the scripted write chunks.
+        actual: usize,
+    },
     /// A response reset the exchange.
     Reset {
         /// Optional reset code.
@@ -973,7 +1187,7 @@ impl TransportError {
             Self::EventTooLarge { .. } => ErrorCode::TransportEventTooLarge,
             Self::SequenceOverflow => ErrorCode::TransportSequenceOverflow,
             Self::CapacityExceeded { .. } => ErrorCode::TransportCapacity,
-            Self::InvalidSize => ErrorCode::TransportInvalidSize,
+            Self::InvalidSize | Self::WriteLengthMismatch { .. } => ErrorCode::TransportInvalidSize,
             Self::Reset { .. } => ErrorCode::TransportReset,
             Self::Cancelled => ErrorCode::TransportCancelled,
             Self::UnexpectedAfterReset { .. } => ErrorCode::TransportUnexpectedAfterReset,
@@ -1063,6 +1277,10 @@ impl fmt::Debug for TransportError {
                 .field("limit", limit),
             Self::SequenceOverflow => debug.field("kind", &"SequenceOverflow"),
             Self::InvalidSize => debug.field("kind", &"InvalidSize"),
+            Self::WriteLengthMismatch { expected, actual } => debug
+                .field("kind", &"WriteLengthMismatch")
+                .field("expected", expected)
+                .field("actual", actual),
             Self::Reset { code } => debug.field("kind", &"Reset").field("code", code),
             Self::Cancelled => debug.field("kind", &"Cancelled"),
             Self::UnexpectedAfterReset { position } => debug
@@ -1140,6 +1358,11 @@ impl fmt::Display for TransportError {
                 self.code()
             ),
             Self::InvalidSize => write!(formatter, "{}: transport size overflow", self.code()),
+            Self::WriteLengthMismatch { expected, actual } => write!(
+                formatter,
+                "{}: scripted request write bytes {actual} do not match {expected}",
+                self.code()
+            ),
             Self::Reset { code } => write!(formatter, "{}: response reset ({code:?})", self.code()),
             Self::Cancelled => write!(formatter, "{}: response exchange cancelled", self.code()),
             Self::MissingEnd => write!(
@@ -1263,6 +1486,7 @@ impl StableError for TransportLeakError {
 #[derive(Clone, Debug)]
 struct ScriptEntry {
     expected: TransportRequest,
+    write: Option<TransportWritePlan>,
     response: TransportResponsePlan,
 }
 
@@ -1277,6 +1501,17 @@ pub enum TransportEvent {
         sequence: u64,
         /// Exact request snapshot.
         request: TransportRequest,
+    },
+    /// One request-write step was consumed.
+    RequestWrite {
+        /// Request sequence number.
+        sequence: u64,
+        /// Zero-based request-write step index.
+        step: usize,
+        /// Consumed write step.
+        value: TransportWriteStep,
+        /// Total request bytes written after this step.
+        written: usize,
     },
     /// One response step was consumed.
     Step {
@@ -1308,6 +1543,17 @@ pub enum TransportEventDiagnostic {
         /// Redacted request metadata.
         request: TransportRequestDiagnostic,
     },
+    /// A request-write step was consumed.
+    RequestWrite {
+        /// Request sequence number.
+        sequence: u64,
+        /// Request-write step index.
+        step: usize,
+        /// Redacted write-step metadata.
+        value: TransportWriteStepDiagnostic,
+        /// Total request bytes written after this step.
+        written: usize,
+    },
     /// A response step was consumed.
     Step {
         /// Request sequence number.
@@ -1326,6 +1572,28 @@ pub enum TransportEventDiagnostic {
     },
 }
 
+/// A redacted request-write event projection.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TransportWriteStepDiagnostic {
+    /// Data step represented by its byte count.
+    Data {
+        /// Number of request bytes written by this step.
+        byte_len: usize,
+    },
+    /// Logical delay.
+    Delay {
+        /// Logical duration.
+        duration: Duration,
+    },
+    /// End marker.
+    End,
+    /// Reset marker.
+    Reset {
+        /// Optional reset code.
+        code: Option<u16>,
+    },
+}
+
 impl TransportEvent {
     /// Returns an explicit redacted diagnostic projection.
     #[must_use]
@@ -1339,6 +1607,28 @@ impl TransportEvent {
                 position: *position,
                 sequence: *sequence,
                 request: request.redacted(),
+            },
+            Self::RequestWrite {
+                sequence,
+                step,
+                value,
+                written,
+            } => TransportEventDiagnostic::RequestWrite {
+                sequence: *sequence,
+                step: *step,
+                value: match value {
+                    TransportWriteStep::Data(bytes) => {
+                        TransportWriteStepDiagnostic::Data { byte_len: *bytes }
+                    }
+                    TransportWriteStep::Delay(delay) => {
+                        TransportWriteStepDiagnostic::Delay { duration: *delay }
+                    }
+                    TransportWriteStep::End => TransportWriteStepDiagnostic::End,
+                    TransportWriteStep::Reset { code } => {
+                        TransportWriteStepDiagnostic::Reset { code: *code }
+                    }
+                },
+                written: *written,
             },
             Self::Step {
                 sequence,
@@ -1371,6 +1661,7 @@ impl TransportEvent {
     pub fn wire_bytes(&self) -> Result<usize, TransportError> {
         match self {
             Self::RequestAccepted { request, .. } => request.wire_bytes(),
+            Self::RequestWrite { value, .. } => Ok(value.wire_bytes()),
             Self::Step { value, .. } => Ok(value.wire_bytes()),
             Self::ExchangeCancelled { .. } => Ok(std::mem::size_of::<u64>() * 2),
         }
@@ -1423,8 +1714,40 @@ impl FakeTransportBuilder {
 
     /// Adds one exact request/response pair.
     pub fn push(
+        self,
+        request: TransportRequest,
+        response: TransportResponsePlan,
+    ) -> Result<Self, TransportError> {
+        self.push_entry(request, None, response)
+    }
+
+    /// Adds one exact request/response pair with an explicit request-write
+    /// script.  The write chunks must add up to the exact request wire size
+    /// when the script ends normally.  A terminal reset may intentionally
+    /// leave the request partially written.
+    pub fn push_with_write(
+        self,
+        request: TransportRequest,
+        write: TransportWritePlan,
+        response: TransportResponsePlan,
+    ) -> Result<Self, TransportError> {
+        self.push_entry(request, Some(write), response)
+    }
+
+    /// Alias for [`Self::push_with_write`] emphasizing request matching.
+    pub fn expect_with_write(
+        self,
+        request: TransportRequest,
+        write: TransportWritePlan,
+        response: TransportResponsePlan,
+    ) -> Result<Self, TransportError> {
+        self.push_with_write(request, write, response)
+    }
+
+    fn push_entry(
         mut self,
         request: TransportRequest,
+        write: Option<TransportWritePlan>,
         response: TransportResponsePlan,
     ) -> Result<Self, TransportError> {
         if self.script.len() >= self.limits.max_script_entries {
@@ -1435,10 +1758,19 @@ impl FakeTransportBuilder {
             });
         }
         validate_request(&request, self.limits)?;
+        if let Some(write) = &write {
+            write.validate(request.wire_bytes()?, self.limits)?;
+        }
         response.validate(self.limits)?;
+        let write_bytes = match &write {
+            Some(plan) => plan.wire_bytes()?,
+            None => 0,
+        };
+        let response_bytes = response.wire_bytes()?;
         let entry_bytes = request
             .wire_bytes()?
-            .checked_add(response.wire_bytes()?)
+            .checked_add(write_bytes)
+            .and_then(|bytes| bytes.checked_add(response_bytes))
             .ok_or(TransportError::InvalidSize)?;
         let script_bytes = self
             .script_bytes
@@ -1453,6 +1785,7 @@ impl FakeTransportBuilder {
         self.script_bytes = script_bytes;
         self.script.push(ScriptEntry {
             expected: request,
+            write,
             response,
         });
         Ok(self)
@@ -1611,6 +1944,13 @@ impl FakeTransport {
             });
         }
         let response = entry.response.clone();
+        let write = entry.write.clone();
+        let write_finished = write.is_none();
+        let written_request_bytes = if write_finished {
+            request.wire_bytes()?
+        } else {
+            0
+        };
         let sequence = state.next_sequence;
         let next_sequence = sequence
             .checked_add(1)
@@ -1640,7 +1980,11 @@ impl FakeTransport {
             state: Arc::clone(&self.state),
             sequence,
             request,
+            write,
             response,
+            next_write_step: 0,
+            written_request_bytes,
+            write_finished,
             next_step: 0,
             finished: false,
             complete: false,
@@ -1663,7 +2007,11 @@ pub struct TransportExchange {
     state: Arc<Mutex<TransportState>>,
     sequence: u64,
     request: TransportRequest,
+    write: Option<TransportWritePlan>,
     response: TransportResponsePlan,
+    next_write_step: usize,
+    written_request_bytes: usize,
+    write_finished: bool,
     next_step: usize,
     finished: bool,
     complete: bool,
@@ -1684,6 +2032,10 @@ pub struct TransportExchangeDiagnostic {
     pub headers: Vec<TransportHeaderDiagnostic>,
     /// Exchange sequence number.
     pub sequence: u64,
+    /// Number of request bytes accepted by scripted partial writes.
+    pub written_request_bytes: usize,
+    /// Whether the request write reached its terminal marker.
+    pub write_finished: bool,
     /// Number of the next response step.
     pub next_step: usize,
     /// Collected body byte length.
@@ -1710,6 +2062,8 @@ impl TransportExchange {
                 .map(TransportHeader::redacted)
                 .collect(),
             sequence: self.sequence,
+            written_request_bytes: self.written_request_bytes,
+            write_finished: self.write_finished,
             next_step: self.next_step,
             body_bytes: self.body.len(),
             finished: self.finished,
@@ -1740,6 +2094,18 @@ impl TransportExchange {
     #[must_use]
     pub const fn sequence(&self) -> u64 {
         self.sequence
+    }
+
+    /// Returns the number of request bytes accepted by scripted writes.
+    #[must_use]
+    pub const fn written_request_bytes(&self) -> usize {
+        self.written_request_bytes
+    }
+
+    /// Returns whether the request write reached its terminal marker.
+    #[must_use]
+    pub const fn is_write_finished(&self) -> bool {
+        self.write_finished
     }
 
     /// Returns whether this exchange owns cancellation-on-drop behavior.
@@ -1811,6 +2177,43 @@ impl TransportExchange {
         self.cancel_inner()
     }
 
+    /// Consumes scripted request-write actions until completion, a logical
+    /// delay, or a deterministic reset.
+    ///
+    /// A successful return contains the exact request wire bytes accepted by
+    /// the script. This method never sleeps and can be called again after a
+    /// [`TransportError::DelayPending`] to resume at the same boundary.
+    pub fn write_request(&mut self) -> Result<usize, TransportError> {
+        if self.finished {
+            if let Some(error) = &self.reset_error {
+                return Err(error.clone());
+            }
+            if self.cancelled {
+                return Err(TransportError::Cancelled);
+            }
+            return if self.write_finished {
+                Ok(self.written_request_bytes)
+            } else {
+                Err(TransportError::Incomplete)
+            };
+        }
+        while !self.write_finished {
+            let Some(step) = self.next_write_step()? else {
+                break;
+            };
+            match step {
+                TransportWriteStep::Data(_) | TransportWriteStep::End => {}
+                TransportWriteStep::Delay(delay) => {
+                    return Err(TransportError::DelayPending { delay });
+                }
+                TransportWriteStep::Reset { code } => {
+                    return Err(TransportError::Reset { code });
+                }
+            }
+        }
+        Ok(self.written_request_bytes)
+    }
+
     fn cancel_inner(&mut self) -> Result<bool, TransportError> {
         let mut state = recover_lock(&self.state);
         let event = TransportEvent::ExchangeCancelled {
@@ -1845,6 +2248,9 @@ impl TransportExchange {
             } else {
                 Err(TransportError::Incomplete)
             };
+        }
+        if !self.write_finished {
+            self.write_request()?;
         }
         let Some(value) = self.response.steps.get(self.next_step).cloned() else {
             self.finished = true;
@@ -1887,6 +2293,57 @@ impl TransportExchange {
             }
             step => Ok(Some(step)),
         }
+    }
+
+    fn next_write_step(&mut self) -> Result<Option<TransportWriteStep>, TransportError> {
+        if self.write_finished {
+            return Ok(None);
+        }
+        let Some(write) = &self.write else {
+            self.write_finished = true;
+            return Ok(None);
+        };
+        let Some(value) = write.steps.get(self.next_write_step).copied() else {
+            self.finished = true;
+            let mut state = recover_lock(&self.state);
+            state.active_exchanges = state.active_exchanges.saturating_sub(1);
+            return Err(TransportError::MissingEnd);
+        };
+        let written = self
+            .written_request_bytes
+            .checked_add(value.data_len())
+            .ok_or(TransportError::InvalidSize)?;
+        let event = TransportEvent::RequestWrite {
+            sequence: self.sequence,
+            step: self.next_write_step,
+            value,
+            written,
+        };
+        let event_bytes = event.wire_bytes()?;
+        let mut state = recover_lock(&self.state);
+        ensure_event_capacity(&state, event_bytes)?;
+        let total_event_bytes = state
+            .event_bytes
+            .checked_add(event_bytes)
+            .ok_or(TransportError::InvalidSize)?;
+        state.event_bytes = total_event_bytes;
+        state.events.push(event);
+        self.next_write_step = self
+            .next_write_step
+            .checked_add(1)
+            .ok_or(TransportError::InvalidSize)?;
+        self.written_request_bytes = written;
+        match value {
+            TransportWriteStep::End => self.write_finished = true,
+            TransportWriteStep::Reset { code } => {
+                self.write_finished = true;
+                self.finished = true;
+                state.active_exchanges = state.active_exchanges.saturating_sub(1);
+                self.reset_error = Some(TransportError::Reset { code });
+            }
+            TransportWriteStep::Data(_) | TransportWriteStep::Delay(_) => {}
+        }
+        Ok(Some(value))
     }
 
     /// Collects data until end, returning a typed delay/reset instead of
@@ -1932,6 +2389,14 @@ fn insert_before_end(steps: &mut Vec<TransportStep>, step: TransportStep) {
     let position = steps
         .iter()
         .position(|candidate| matches!(candidate, TransportStep::End))
+        .unwrap_or(steps.len());
+    steps.insert(position, step);
+}
+
+fn insert_before_write_end(steps: &mut Vec<TransportWriteStep>, step: TransportWriteStep) {
+    let position = steps
+        .iter()
+        .position(|candidate| matches!(candidate, TransportWriteStep::End))
         .unwrap_or(steps.len());
     steps.insert(position, step);
 }
@@ -2597,7 +3062,9 @@ mod tests {
             .into_iter()
             .filter_map(|event| match event {
                 TransportEvent::ExchangeCancelled { step, .. } => Some(step),
-                TransportEvent::RequestAccepted { .. } | TransportEvent::Step { .. } => None,
+                TransportEvent::RequestAccepted { .. }
+                | TransportEvent::RequestWrite { .. }
+                | TransportEvent::Step { .. } => None,
             })
             .collect::<Vec<_>>();
         assert_eq!(cancellation_steps, vec![0, 1, 2]);
@@ -2715,6 +3182,190 @@ mod tests {
     }
 
     #[test]
+    fn request_write_script_preserves_partial_order_and_delay_boundary() {
+        let limits = TransportLimits::new(4, 64, 64, 16, 32);
+        let request = TransportRequest::new("POST", "/write")
+            .header("Content-Type", b"application/octet-stream".to_vec())
+            .body(b"payload".to_vec());
+        let request_bytes = request.wire_bytes().unwrap();
+        let write = TransportWritePlan::new()
+            .chunk(2)
+            .delay(Duration::from_millis(5))
+            .chunk(request_bytes - 2);
+        let transport = FakeTransportBuilder::new(limits)
+            .push_with_write(
+                request.clone(),
+                write,
+                TransportResponsePlan::new(200).body(b"ok".to_vec()),
+            )
+            .unwrap()
+            .build();
+        let mut exchange = transport.send(request).unwrap();
+
+        assert_eq!(
+            exchange.write_request(),
+            Err(TransportError::DelayPending {
+                delay: Duration::from_millis(5),
+            })
+        );
+        assert_eq!(exchange.written_request_bytes(), 2);
+        assert!(!exchange.is_write_finished());
+        assert_eq!(
+            exchange.write_request().unwrap(),
+            request_bytes,
+            "resuming a delayed write must consume the remaining chunks and end marker"
+        );
+        assert!(exchange.is_write_finished());
+        assert_eq!(
+            exchange.next_step().unwrap(),
+            Some(TransportStep::Data(b"ok".to_vec()))
+        );
+
+        let events = transport.events();
+        assert!(matches!(
+            events.get(1),
+            Some(TransportEvent::RequestWrite {
+                step: 0,
+                value: TransportWriteStep::Data(2),
+                written: 2,
+                ..
+            })
+        ));
+        assert!(matches!(
+            events.get(2),
+            Some(TransportEvent::RequestWrite {
+                step: 1,
+                value: TransportWriteStep::Delay(delay),
+                written: 2,
+                ..
+            }) if *delay == Duration::from_millis(5)
+        ));
+        assert!(matches!(
+            events.get(3),
+            Some(TransportEvent::RequestWrite {
+                step: 2,
+                value: TransportWriteStep::Data(bytes),
+                written,
+                ..
+            }) if *bytes == request_bytes - 2 && *written == request_bytes
+        ));
+        assert!(matches!(
+            events.get(4),
+            Some(TransportEvent::RequestWrite {
+                step: 3,
+                value: TransportWriteStep::End,
+                written,
+                ..
+            }) if *written == request_bytes
+        ));
+    }
+
+    #[test]
+    fn request_write_script_rejects_zero_or_mismatched_successful_chunks() {
+        let limits = TransportLimits::new(4, 64, 64, 16, 32);
+        let request = TransportRequest::new("GET", "/write");
+        let response = TransportResponsePlan::new(200);
+        let zero = FakeTransportBuilder::new(limits)
+            .push_with_write(
+                request.clone(),
+                TransportWritePlan::new().chunk(0),
+                response.clone(),
+            )
+            .unwrap_err();
+        assert_eq!(zero, TransportError::InvalidSize);
+
+        let too_short = FakeTransportBuilder::new(limits)
+            .push_with_write(
+                request.clone(),
+                TransportWritePlan::new().chunk(1),
+                response.clone(),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            too_short,
+            TransportError::WriteLengthMismatch { expected, actual }
+                if expected == request.wire_bytes().unwrap() && actual == 1
+        ));
+
+        let too_long = FakeTransportBuilder::new(limits)
+            .push_with_write(request, TransportWritePlan::new().chunk(64), response)
+            .unwrap_err();
+        assert!(matches!(
+            too_long,
+            TransportError::WriteLengthMismatch { actual: 64, .. }
+        ));
+    }
+
+    #[test]
+    fn request_write_reset_is_terminal_and_does_not_start_response() {
+        let limits = TransportLimits::new(4, 64, 64, 16, 32);
+        let request = TransportRequest::new("POST", "/write").body(b"payload".to_vec());
+        let transport = FakeTransportBuilder::new(limits)
+            .push_with_write(
+                request.clone(),
+                TransportWritePlan::new().chunk(1).reset(Some(9)),
+                TransportResponsePlan::new(200).body(b"must-not-arrive".to_vec()),
+            )
+            .unwrap()
+            .build();
+        let mut exchange = transport.send(request).unwrap();
+
+        assert_eq!(
+            exchange.write_request().unwrap_err(),
+            TransportError::Reset { code: Some(9) }
+        );
+        assert_eq!(exchange.written_request_bytes(), 1);
+        assert!(exchange.is_finished());
+        assert_eq!(
+            exchange.next_step().unwrap_err(),
+            TransportError::Reset { code: Some(9) }
+        );
+        assert_eq!(transport.active_exchange_count(), 0);
+        assert!(matches!(
+            transport.events().get(2),
+            Some(TransportEvent::RequestWrite {
+                value: TransportWriteStep::Reset { code: Some(9) },
+                written: 1,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn owned_write_delay_can_be_cancelled_without_sleeping_or_starting_response() {
+        let limits = TransportLimits::new(4, 64, 64, 16, 32);
+        let request = TransportRequest::new("POST", "/write").body(b"payload".to_vec());
+        let request_bytes = request.wire_bytes().unwrap();
+        let transport = FakeTransportBuilder::new(limits)
+            .push_with_write(
+                request.clone(),
+                TransportWritePlan::new()
+                    .chunk(request_bytes - 1)
+                    .delay(Duration::from_secs(30))
+                    .chunk(1),
+                TransportResponsePlan::new(200).body(b"must-not-arrive".to_vec()),
+            )
+            .unwrap()
+            .build();
+        let mut exchange = transport.send_owned(request).unwrap();
+        assert_eq!(
+            exchange.write_request().unwrap_err(),
+            TransportError::DelayPending {
+                delay: Duration::from_secs(30)
+            }
+        );
+        assert_eq!(exchange.written_request_bytes(), request_bytes - 1);
+        assert!(exchange.cancel().unwrap());
+        assert_eq!(exchange.finish().unwrap_err(), TransportError::Cancelled);
+        assert_eq!(transport.active_exchange_count(), 0);
+        assert!(transport.assert_no_leaks().is_ok());
+        assert!(matches!(
+            transport.events().last(),
+            Some(TransportEvent::ExchangeCancelled { step: 0, .. })
+        ));
+    }
+
+    #[test]
     fn transport_debug_projections_omit_request_and_response_bytes() {
         let limits = TransportLimits::new(4, 64, 64, 8, 16);
         let request = TransportRequest::new("POST", "/secret?token=secret-target")
@@ -2726,10 +3377,15 @@ mod tests {
             .build(limits)
             .unwrap();
         let transport = FakeTransportBuilder::new(limits)
-            .push(request.clone(), response)
+            .push_with_write(
+                request.clone(),
+                TransportWritePlan::new().chunk(request.wire_bytes().unwrap()),
+                response,
+            )
             .unwrap()
             .build();
         let mut exchange = transport.send(request.clone()).unwrap();
+        exchange.write_request().unwrap();
         let mismatch = TransportError::RequestMismatch {
             position: 0,
             expected: Box::new(request.clone()),

@@ -17,12 +17,12 @@
 //! * `${__name}` no-argument calls.
 //!
 //! Function arguments may contain nested references and are split on
-//! unescaped, top-level commas.  A backslash before `$`, `,`, or `\` escapes
-//! that character when the containing expression has a reference; otherwise
-//! it remains literal.  Undefined variables and functions are emitted
-//! verbatim, as required by the JMeter 5.6.3 behavior map.  Malformed
-//! references and resource-limit violations are explicit errors rather than
-//! silent fallbacks.
+//! unescaped commas, except while scanning a nested `${...}` reference.  A
+//! backslash before `$`, `,`, or `\` escapes that character when the
+//! containing expression has a reference; otherwise it remains literal.
+//! Undefined variables and functions are emitted verbatim, as required by the
+//! JMeter 5.6.3 behavior map.  Malformed references and resource-limit
+//! violations are explicit errors rather than silent fallbacks.
 
 use std::borrow::Borrow;
 use std::cell::RefCell;
@@ -31,12 +31,15 @@ use std::error::Error;
 use std::fmt;
 use std::hash::{BuildHasher, Hash};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 mod builtins;
 
 pub use builtins::{
-    BuiltinFunctions, BuiltinRegistry, EXTENDED_FUNCTION_NAMES, FunctionSupport,
-    KNOWN_FUNCTION_NAMES, MapPropertyCapability, MapVariableCapability, StaticTestPlanName,
+    BuiltinFunctions, BuiltinRegistry, EXTENDED_FUNCTION_NAMES, FunctionCapability,
+    FunctionInvocationRequirements, FunctionSupport, KNOWN_FUNCTION_NAMES, MapPropertyCapability,
+    MapVariableCapability, SharedBuiltinFunctions, SharedBuiltinRegistry, StaticTestPlanName,
 };
 
 /// Limits applied to one expansion operation.
@@ -167,6 +170,11 @@ pub enum FunctionError {
     /// Capacity failures are fail-closed: state is never evicted, reset, or
     /// silently reused to make room for a new occurrence.
     ResourceLimit(String),
+    /// A state capability or session authority is poisoned and cannot safely
+    /// continue.  Poison is deliberately distinct from an ordinary function
+    /// execution failure so callers cannot accidentally recover with a stale
+    /// or partially applied state value.
+    Poisoned(String),
 }
 
 impl FunctionError {
@@ -200,6 +208,12 @@ impl FunctionError {
         Self::ResourceLimit(message.into())
     }
 
+    /// Creates a typed poisoned-state failure.
+    #[must_use]
+    pub fn poisoned(message: impl Into<String>) -> Self {
+        Self::Poisoned(message.into())
+    }
+
     /// Returns a stable code for this function failure.
     #[must_use]
     pub const fn code(&self) -> &'static str {
@@ -209,6 +223,7 @@ impl FunctionError {
             Self::Unsupported(_) => "FUNC_UNSUPPORTED",
             Self::StopThread(_) => "FUNC_STOP_THREAD",
             Self::ResourceLimit(_) => "FUNC_RESOURCE_LIMIT",
+            Self::Poisoned(_) => "FUNC_POISONED",
         }
     }
 }
@@ -225,6 +240,7 @@ impl fmt::Display for FunctionError {
             Self::ResourceLimit(message) => {
                 write!(formatter, "function resource limit reached: {message}")
             }
+            Self::Poisoned(message) => write!(formatter, "function state is poisoned: {message}"),
         }
     }
 }
@@ -406,11 +422,60 @@ pub trait VariableSetter: Sync + Send {
     /// Stores a value under an exact, case-sensitive variable name.
     fn set_variable(&self, name: &str, value: &str) -> Result<(), FunctionError>;
 
+    /// Stores several values as one logical mutation.
+    ///
+    /// Implementors backed by a map should override this method to commit all
+    /// entries while holding their store lock. The default supplies a
+    /// recoverable transaction for setter-only capabilities by snapshotting
+    /// values and rolling back on the first failed write; a rollback failure
+    /// is returned explicitly rather than being ignored.
+    fn set_variables_atomic(&self, values: &[(&str, &str)]) -> Result<(), FunctionError> {
+        let mut previous = Vec::with_capacity(values.len());
+        for (name, _) in values {
+            if previous.iter().all(|(existing, _)| existing != name) {
+                previous.push(((*name).to_owned(), self.get_variable_checked(name)?));
+            }
+        }
+        for (name, value) in values {
+            if let Err(error) = self.set_variable(name, value) {
+                let mut rollback_error = None;
+                for (name, old_value) in previous.iter().rev() {
+                    let result = match old_value {
+                        Some(value) => self.set_variable(name, value),
+                        None => self.remove_variable(name),
+                    };
+                    if let Err(error) = result {
+                        rollback_error = Some(error);
+                        break;
+                    }
+                }
+                return match rollback_error {
+                    Some(rollback @ FunctionError::Poisoned(_)) => Err(rollback),
+                    Some(rollback) => Err(FunctionError::execution(format!(
+                        "variable mutation failed ({error}); rollback failed ({rollback})"
+                    ))),
+                    None => Err(error),
+                };
+            }
+        }
+        Ok(())
+    }
+
     /// Reads a value owned by the capability, when it also acts as the
     /// mutable variable store.  Setter-only capabilities may return `None`.
     #[must_use]
     fn get_variable(&self, _name: &str) -> Option<String> {
         None
+    }
+
+    /// Reads a variable while preserving a poisoned-lock diagnostic.
+    ///
+    /// This checked companion keeps the original optional getter available to
+    /// existing capability implementations while giving new implementations
+    /// a fail-closed read path.  A lock-backed capability should override this
+    /// method; returning `Ok(None)` means the variable is genuinely absent.
+    fn get_variable_checked(&self, name: &str) -> Result<Option<String>, FunctionError> {
+        Ok(self.get_variable(name))
     }
 
     /// Removes a variable from the mutable store.
@@ -437,6 +502,11 @@ pub trait PropertySetter: Sync + Send {
     #[must_use]
     fn get_property(&self, _name: &str) -> Option<String> {
         None
+    }
+
+    /// Reads a property while preserving a poisoned-lock diagnostic.
+    fn get_property_checked(&self, name: &str) -> Result<Option<String>, FunctionError> {
+        Ok(self.get_property(name))
     }
 }
 
@@ -706,6 +776,47 @@ pub trait FileCapability: Sync + Send {
     ) -> Result<(), FunctionError>;
 }
 
+/// Explicit run-owned hooks for stateful native function inputs.
+///
+/// Counters, random streams, and file cursors are not ambient globals and are
+/// not inferred from evaluator call order.  A runtime may install this hook
+/// to give those functions an identity-bound state authority.  Each returned
+/// value is journaled by an [`ExpressionSession`] by the caller that performs
+/// the evaluation.  The default rollback operation is deliberately
+/// unsupported: callers must not claim to have restored state that an
+/// adapter cannot restore exactly.
+pub trait NativeStateCapability: Sync + Send {
+    /// Advances or reads the counter associated with one exact occurrence.
+    fn next_counter(
+        &self,
+        occurrence: &FunctionOccurrence,
+        per_user: bool,
+        iteration: Option<IterationIdentity>,
+        thread_num: Option<u32>,
+    ) -> Result<i64, FunctionError>;
+
+    /// Draws one random value from the occurrence-bound stream.
+    fn next_random(&self, occurrence: &FunctionOccurrence) -> Result<u64, FunctionError>;
+
+    /// Advances one file cursor and returns its new position.
+    fn advance_file_cursor(
+        &self,
+        occurrence: &FunctionOccurrence,
+        path: &str,
+    ) -> Result<u64, FunctionError>;
+
+    /// Attempts to roll back one state token.
+    ///
+    /// Adapters that do not have a proven transactional protocol must keep the
+    /// default error.  An unsuccessful rollback is an uncertain outcome, not
+    /// a successful no-op.
+    fn rollback(&self, _token: &str) -> Result<(), FunctionError> {
+        Err(FunctionError::unsupported(
+            "native state rollback capability is unavailable",
+        ))
+    }
+}
+
 /// Supplies the previous sample/response body for response-extraction
 /// functions.  The matcher remains an injected capability because JMeter's
 /// regular-expression and XPath engines are versioned dependencies.
@@ -740,6 +851,7 @@ pub struct EvaluationCapabilities<'a> {
     property_setter: Option<&'a dyn PropertySetter>,
     test_plan_name: Option<&'a dyn TestPlanNameResolver>,
     random: Option<&'a dyn RandomSource>,
+    native_state: Option<&'a dyn NativeStateCapability>,
     clock: Option<&'a dyn ClockSource>,
     execution: Option<&'a dyn ExecutionContext>,
     host: Option<&'a dyn HostResolver>,
@@ -758,6 +870,7 @@ impl<'a> EvaluationCapabilities<'a> {
             property_setter: None,
             test_plan_name: None,
             random: None,
+            native_state: None,
             clock: None,
             execution: None,
             host: None,
@@ -793,6 +906,14 @@ impl<'a> EvaluationCapabilities<'a> {
     #[must_use]
     pub const fn with_random_source(mut self, source: &'a dyn RandomSource) -> Self {
         self.random = Some(source);
+        self
+    }
+
+    /// Adds occurrence-bound native state hooks for counters, random streams,
+    /// and file cursors.
+    #[must_use]
+    pub const fn with_native_state(mut self, state: &'a dyn NativeStateCapability) -> Self {
+        self.native_state = Some(state);
         self
     }
 
@@ -871,6 +992,12 @@ impl<'a> EvaluationCapabilities<'a> {
         self.random.is_some()
     }
 
+    /// Returns whether occurrence-bound native state was supplied.
+    #[must_use]
+    pub const fn has_native_state(self) -> bool {
+        self.native_state.is_some()
+    }
+
     /// Returns whether a clock was supplied for this evaluation.
     #[must_use]
     pub const fn has_clock(self) -> bool {
@@ -888,6 +1015,12 @@ impl<'a> EvaluationCapabilities<'a> {
     #[must_use]
     pub fn execution_context(self) -> Option<&'a dyn ExecutionContext> {
         self.execution
+    }
+
+    /// Returns occurrence-bound native state hooks, if supplied.
+    #[must_use]
+    pub fn native_state(self) -> Option<&'a dyn NativeStateCapability> {
+        self.native_state
     }
 
     /// Returns whether a host identity provider was supplied for this
@@ -939,7 +1072,14 @@ pub struct FunctionOccurrence {
 }
 
 impl FunctionOccurrence {
-    fn new(namespace: u64, path: Vec<u64>, function_name: &str) -> Self {
+    /// Creates an occurrence from its field namespace, structural path, and
+    /// exact function name.
+    ///
+    /// The evaluator uses source-byte offsets and argument indexes in `path`;
+    /// callers compiling another syntax representation may use any stable
+    /// bounded structural segments.  No hash is used for identity.
+    #[must_use]
+    pub fn new(namespace: u64, path: Vec<u64>, function_name: &str) -> Self {
         Self {
             namespace,
             path: path.into_boxed_slice(),
@@ -959,6 +1099,13 @@ impl FunctionOccurrence {
         &self.path
     }
 
+    /// Alias for [`Self::path`] emphasizing that segments are structural
+    /// source identity rather than a hash.
+    #[must_use]
+    pub fn structural_path(&self) -> &[u64] {
+        self.path()
+    }
+
     /// Returns the exact, case-sensitive upstream function name.
     #[must_use]
     pub fn function_name(&self) -> &str {
@@ -972,6 +1119,2369 @@ impl FunctionOccurrence {
     fn legacy_id(&self) -> u64 {
         occurrence_id(self.namespace, &self.path, &self.function_name)
     }
+
+    /// Creates a top-level occurrence at one source-byte offset.
+    #[must_use]
+    pub fn at_source_offset(namespace: u64, offset: usize, function_name: &str) -> Self {
+        let segment = u64::try_from(offset).unwrap_or(u64::MAX);
+        Self::new(namespace, vec![segment], function_name)
+    }
+}
+
+/// Stable identity of one compiled function-bearing field.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ExpressionFieldId(u64);
+
+impl ExpressionFieldId {
+    /// Creates an identity from a plan/compiler-assigned value.
+    #[must_use]
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    /// Returns the plan/compiler-assigned value.
+    #[must_use]
+    pub const fn value(self) -> u64 {
+        self.0
+    }
+}
+
+impl From<u64> for ExpressionFieldId {
+    fn from(value: u64) -> Self {
+        Self::new(value)
+    }
+}
+
+/// Cache policy for one compiled expression field.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExpressionCachePolicy {
+    /// Evaluate on every getter/read.
+    Disabled,
+    /// Cache one value while the field is in running-version mode.
+    Once,
+    /// Cache one value for each complete [`IterationIdentity`].
+    PerIteration,
+}
+
+impl ExpressionCachePolicy {
+    /// A spelling that makes the no-cache policy clear at call sites.
+    pub const NO_CACHE: Self = Self::Disabled;
+    /// A spelling matching the JMeter property vocabulary.
+    pub const CACHE_PER_ITERATION: Self = Self::PerIteration;
+    /// A spelling for the one-value running-version cache.
+    pub const CACHE_ONCE: Self = Self::Once;
+}
+
+/// Lifecycle state of a compiled expression field.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExpressionFieldState {
+    /// The raw source has not entered running-version mode.
+    RawBeforeRunningVersion,
+    /// Running-version state exists, but sampling has not started.
+    RunningBeforeSampling,
+    /// Sampling is active for the complete supplied iteration identity.
+    RunningDuringSampling {
+        /// Identity used for per-iteration cache keys.
+        iteration: IterationIdentity,
+    },
+    /// The owning component/run has finished and the field is no longer
+    /// readable.
+    Finished,
+}
+
+/// Compatibility alias for callers that name the lifecycle vocabulary
+/// `FieldLifecycleState`.
+pub type FieldLifecycleState = ExpressionFieldState;
+
+/// Bounds for compiling and caching one expression field.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExpressionFieldLimits {
+    /// Maximum source bytes retained by a field.
+    pub max_source_bytes: usize,
+    /// Maximum structural occurrences retained by a field.
+    pub max_occurrences: usize,
+    /// Maximum cache entries retained for per-iteration caching.
+    pub max_cached_iterations: usize,
+}
+
+impl ExpressionFieldLimits {
+    /// Creates explicit field bounds.
+    #[must_use]
+    pub const fn new(
+        max_source_bytes: usize,
+        max_occurrences: usize,
+        max_cached_iterations: usize,
+    ) -> Self {
+        Self {
+            max_source_bytes,
+            max_occurrences,
+            max_cached_iterations,
+        }
+    }
+}
+
+impl Default for ExpressionFieldLimits {
+    fn default() -> Self {
+        Self {
+            max_source_bytes: 64 * 1024,
+            max_occurrences: 4_096,
+            max_cached_iterations: 1_024,
+        }
+    }
+}
+
+/// A checked failure while compiling or advancing a field.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ExpressionFieldError {
+    /// The field source exceeded its configured bound.
+    SourceLimit {
+        /// Configured source-byte limit.
+        limit: usize,
+        /// Source/value bytes observed.
+        actual: usize,
+    },
+    /// The field contained malformed expression syntax.
+    InvalidSource(EvaluationError),
+    /// A lifecycle transition was not valid from the current state.
+    InvalidTransition {
+        /// State before the attempted transition.
+        from: ExpressionFieldState,
+        /// Requested state.
+        to: ExpressionFieldState,
+    },
+    /// A per-iteration read did not provide the active complete identity.
+    IterationRequired,
+    /// A supplied identity did not match the active sampling identity.
+    IterationMismatch {
+        /// Active identity.
+        expected: IterationIdentity,
+        /// Supplied identity.
+        actual: IterationIdentity,
+    },
+    /// The field cache reached its explicit bound.
+    CacheLimit {
+        /// Configured cache limit.
+        limit: usize,
+    },
+    /// The structural occurrence bound was reached.
+    OccurrenceLimit {
+        /// Configured occurrence limit.
+        limit: usize,
+    },
+    /// The field's internal state lock was poisoned.
+    Poisoned {
+        /// Logical lock identity.
+        lock: String,
+    },
+    /// The field was read after it finished.
+    Finished,
+    /// The field's evaluator returned a bounded session failure.
+    Session(SessionError),
+}
+
+impl fmt::Display for ExpressionFieldError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SourceLimit { limit, actual } => {
+                write!(
+                    formatter,
+                    "expression field source is {actual} bytes (limit {limit})"
+                )
+            }
+            Self::InvalidSource(error) => {
+                write!(formatter, "invalid expression field source: {error}")
+            }
+            Self::InvalidTransition { from, to } => {
+                write!(
+                    formatter,
+                    "invalid expression field transition {from:?} -> {to:?}"
+                )
+            }
+            Self::IterationRequired => {
+                formatter.write_str("expression field iteration identity is required")
+            }
+            Self::IterationMismatch { expected, actual } => {
+                write!(
+                    formatter,
+                    "expression field iteration mismatch: expected {expected:?}, got {actual:?}"
+                )
+            }
+            Self::CacheLimit { limit } => {
+                write!(formatter, "expression field cache limit {limit} reached")
+            }
+            Self::OccurrenceLimit { limit } => {
+                write!(
+                    formatter,
+                    "expression field occurrence limit {limit} reached"
+                )
+            }
+            Self::Poisoned { lock } => {
+                write!(formatter, "expression field state lock is poisoned: {lock}")
+            }
+            Self::Finished => formatter.write_str("expression field is finished"),
+            Self::Session(error) => write!(formatter, "expression session failed: {error}"),
+        }
+    }
+}
+
+impl Error for ExpressionFieldError {}
+
+/// A source-preserving, occurrence-bound compiled expression field.
+pub struct ExpressionField {
+    id: ExpressionFieldId,
+    namespace: u64,
+    source_property: Box<str>,
+    source: String,
+    occurrences: Box<[FunctionOccurrence]>,
+    cache_policy: ExpressionCachePolicy,
+    limits: ExpressionFieldLimits,
+    state: Mutex<ExpressionFieldStateData>,
+}
+
+struct ExpressionFieldStateData {
+    state: ExpressionFieldState,
+    once: Option<String>,
+    per_iteration: BTreeMap<IterationIdentity, String>,
+}
+
+impl fmt::Debug for ExpressionField {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ExpressionField")
+            .field("id", &self.id)
+            .field("namespace", &self.namespace)
+            .field("source_property", &self.source_property)
+            .field("source_bytes", &self.source.len())
+            .field("occurrences", &self.occurrences.len())
+            .field("cache_policy", &self.cache_policy)
+            .field("state", &self.state())
+            .finish()
+    }
+}
+
+impl ExpressionField {
+    /// Compiles a field using its field ID as the occurrence namespace.
+    pub fn new(
+        id: ExpressionFieldId,
+        source_property: impl Into<String>,
+        source: impl Into<String>,
+        cache_policy: ExpressionCachePolicy,
+    ) -> Result<Self, ExpressionFieldError> {
+        Self::compile_with_limits(
+            id,
+            id.value(),
+            source_property,
+            source,
+            cache_policy,
+            ExpressionFieldLimits::default(),
+        )
+    }
+
+    /// Compiles a field with an explicit namespace and default bounds.
+    pub fn compile(
+        id: ExpressionFieldId,
+        namespace: u64,
+        source_property: impl Into<String>,
+        source: impl Into<String>,
+        cache_policy: ExpressionCachePolicy,
+    ) -> Result<Self, ExpressionFieldError> {
+        Self::compile_with_limits(
+            id,
+            namespace,
+            source_property,
+            source,
+            cache_policy,
+            ExpressionFieldLimits::default(),
+        )
+    }
+
+    /// Compiles a field with an explicit function-occurrence namespace.
+    pub fn compile_with_limits(
+        id: ExpressionFieldId,
+        namespace: u64,
+        source_property: impl Into<String>,
+        source: impl Into<String>,
+        cache_policy: ExpressionCachePolicy,
+        limits: ExpressionFieldLimits,
+    ) -> Result<Self, ExpressionFieldError> {
+        let source = source.into();
+        if source.len() > limits.max_source_bytes {
+            return Err(ExpressionFieldError::SourceLimit {
+                limit: limits.max_source_bytes,
+                actual: source.len(),
+            });
+        }
+        let occurrences = collect_field_occurrences(&source, namespace, &limits)?;
+        Ok(Self {
+            id,
+            namespace,
+            source_property: source_property.into().into_boxed_str(),
+            source,
+            occurrences: occurrences.into_boxed_slice(),
+            cache_policy,
+            limits,
+            state: Mutex::new(ExpressionFieldStateData {
+                state: ExpressionFieldState::RawBeforeRunningVersion,
+                once: None,
+                per_iteration: BTreeMap::new(),
+            }),
+        })
+    }
+
+    /// Returns the field's stable compiler identity.
+    #[must_use]
+    pub const fn id(&self) -> ExpressionFieldId {
+        self.id
+    }
+
+    /// Alias for [`Self::id`].
+    #[must_use]
+    pub const fn identity(&self) -> ExpressionFieldId {
+        self.id()
+    }
+
+    /// Returns the namespace used by structural function occurrences.
+    #[must_use]
+    pub const fn namespace(&self) -> u64 {
+        self.namespace
+    }
+
+    /// Returns the exact source property identity.
+    #[must_use]
+    pub fn source_property(&self) -> &str {
+        &self.source_property
+    }
+
+    /// Returns the exact unmodified expression source.
+    #[must_use]
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    /// Returns all structural function occurrences in source order.
+    #[must_use]
+    pub fn occurrences(&self) -> &[FunctionOccurrence] {
+        &self.occurrences
+    }
+
+    /// Returns the field cache policy.
+    #[must_use]
+    pub const fn cache_policy(&self) -> ExpressionCachePolicy {
+        self.cache_policy
+    }
+
+    /// Returns the field resource bounds.
+    #[must_use]
+    pub const fn limits(&self) -> ExpressionFieldLimits {
+        self.limits
+    }
+
+    /// Returns the current lifecycle state, failing closed if its lock is
+    /// poisoned.
+    pub fn state(&self) -> Result<ExpressionFieldState, ExpressionFieldError> {
+        self.state
+            .lock()
+            .map(|state| state.state)
+            .map_err(|_| ExpressionFieldError::Poisoned {
+                lock: "expression-field-state".to_owned(),
+            })
+    }
+
+    /// Alias for [`Self::state`].
+    pub fn lifecycle(&self) -> Result<ExpressionFieldState, ExpressionFieldError> {
+        self.state()
+    }
+
+    /// Enters running-version mode before sampling starts.
+    pub fn start_running_version(&self) -> Result<(), ExpressionFieldError> {
+        self.transition(ExpressionFieldState::RunningBeforeSampling)
+    }
+
+    /// Alias for [`Self::start_running_version`].
+    pub fn begin_running(&self) -> Result<(), ExpressionFieldError> {
+        self.start_running_version()
+    }
+
+    /// Enters sampling mode for one complete iteration identity.
+    pub fn start_sampling(&self, iteration: IterationIdentity) -> Result<(), ExpressionFieldError> {
+        let mut state = self.lock_state()?;
+        match state.state {
+            ExpressionFieldState::RunningBeforeSampling
+            | ExpressionFieldState::RunningDuringSampling { .. } => {
+                state.state = ExpressionFieldState::RunningDuringSampling { iteration };
+                state.per_iteration.clear();
+                Ok(())
+            }
+            current => Err(ExpressionFieldError::InvalidTransition {
+                from: current,
+                to: ExpressionFieldState::RunningDuringSampling { iteration },
+            }),
+        }
+    }
+
+    /// Alias for [`Self::start_sampling`].
+    pub fn begin_sampling(&self, iteration: IterationIdentity) -> Result<(), ExpressionFieldError> {
+        self.start_sampling(iteration)
+    }
+
+    /// Marks the field finished.  A finished field rejects further reads.
+    pub fn finish(&self) -> Result<(), ExpressionFieldError> {
+        let mut state = self.lock_state()?;
+        match state.state {
+            ExpressionFieldState::RawBeforeRunningVersion => {
+                return Err(ExpressionFieldError::InvalidTransition {
+                    from: state.state,
+                    to: ExpressionFieldState::Finished,
+                });
+            }
+            ExpressionFieldState::Finished => return Ok(()),
+            _ => {}
+        }
+        state.state = ExpressionFieldState::Finished;
+        state.once = None;
+        state.per_iteration.clear();
+        Ok(())
+    }
+
+    /// Clears cached values while retaining lifecycle state.
+    pub fn clear_cache(&self) -> Result<(), ExpressionFieldError> {
+        let mut state = self.lock_state()?;
+        state.once = None;
+        state.per_iteration.clear();
+        Ok(())
+    }
+
+    /// Clones field metadata and the current lifecycle/cache state without
+    /// recovering a poisoned state lock.
+    pub fn try_clone(&self) -> Result<Self, ExpressionFieldError> {
+        let state = self.lock_state()?;
+        Ok(Self {
+            id: self.id,
+            namespace: self.namespace,
+            source_property: self.source_property.clone(),
+            source: self.source.clone(),
+            occurrences: self.occurrences.clone(),
+            cache_policy: self.cache_policy,
+            limits: self.limits,
+            state: Mutex::new(ExpressionFieldStateData {
+                state: state.state,
+                once: state.once.clone(),
+                per_iteration: state.per_iteration.clone(),
+            }),
+        })
+    }
+
+    /// Reads the field and evaluates only when its lifecycle/cache policy
+    /// requires it.  The callback receives the exact source text and is never
+    /// called for a raw or cached read.
+    pub fn read_with<F>(
+        &self,
+        iteration: Option<IterationIdentity>,
+        evaluate: F,
+    ) -> Result<String, ExpressionFieldError>
+    where
+        F: FnOnce(&str) -> Result<String, ExpressionFieldError>,
+    {
+        let mut state = self.lock_state()?;
+        match state.state {
+            ExpressionFieldState::RawBeforeRunningVersion => Ok(self.source.clone()),
+            ExpressionFieldState::Finished => Err(ExpressionFieldError::Finished),
+            ExpressionFieldState::RunningBeforeSampling => {
+                if self.cache_policy == ExpressionCachePolicy::Once
+                    && let Some(value) = state.once.clone()
+                {
+                    return Ok(value);
+                }
+                drop(state);
+                let value = evaluate(&self.source)?;
+                if value.len() > self.limits.max_source_bytes {
+                    return Err(ExpressionFieldError::SourceLimit {
+                        limit: self.limits.max_source_bytes,
+                        actual: value.len(),
+                    });
+                }
+                state = self.lock_state()?;
+                if self.cache_policy == ExpressionCachePolicy::Once {
+                    state.once = Some(value.clone());
+                }
+                Ok(value)
+            }
+            ExpressionFieldState::RunningDuringSampling { iteration: active } => {
+                if let Some(actual) = iteration {
+                    if actual != active {
+                        return Err(ExpressionFieldError::IterationMismatch {
+                            expected: active,
+                            actual,
+                        });
+                    }
+                } else if self.cache_policy == ExpressionCachePolicy::PerIteration {
+                    return Err(ExpressionFieldError::IterationRequired);
+                }
+                if self.cache_policy == ExpressionCachePolicy::Once
+                    && let Some(value) = state.once.clone()
+                {
+                    return Ok(value);
+                }
+                if self.cache_policy == ExpressionCachePolicy::PerIteration {
+                    if let Some(value) = state.per_iteration.get(&active).cloned() {
+                        return Ok(value);
+                    }
+                    drop(state);
+                    let value = evaluate(&self.source)?;
+                    if value.len() > self.limits.max_source_bytes {
+                        return Err(ExpressionFieldError::SourceLimit {
+                            limit: self.limits.max_source_bytes,
+                            actual: value.len(),
+                        });
+                    }
+                    state = self.lock_state()?;
+                    if state.per_iteration.len() >= self.limits.max_cached_iterations {
+                        return Err(ExpressionFieldError::CacheLimit {
+                            limit: self.limits.max_cached_iterations,
+                        });
+                    }
+                    state.per_iteration.insert(active, value.clone());
+                    Ok(value)
+                } else {
+                    drop(state);
+                    let value = evaluate(&self.source)?;
+                    if value.len() > self.limits.max_source_bytes {
+                        return Err(ExpressionFieldError::SourceLimit {
+                            limit: self.limits.max_source_bytes,
+                            actual: value.len(),
+                        });
+                    }
+                    state = self.lock_state()?;
+                    if self.cache_policy == ExpressionCachePolicy::Once {
+                        state.once = Some(value.clone());
+                    }
+                    Ok(value)
+                }
+            }
+        }
+    }
+
+    fn transition(&self, target: ExpressionFieldState) -> Result<(), ExpressionFieldError> {
+        let mut state = self.lock_state()?;
+        let valid = matches!(
+            (state.state, target),
+            (
+                ExpressionFieldState::RawBeforeRunningVersion,
+                ExpressionFieldState::RunningBeforeSampling
+            )
+        );
+        if !valid {
+            return Err(ExpressionFieldError::InvalidTransition {
+                from: state.state,
+                to: target,
+            });
+        }
+        state.state = target;
+        state.once = None;
+        state.per_iteration.clear();
+        Ok(())
+    }
+
+    fn lock_state(&self) -> Result<MutexGuard<'_, ExpressionFieldStateData>, ExpressionFieldError> {
+        self.state
+            .lock()
+            .map_err(|_| ExpressionFieldError::Poisoned {
+                lock: "expression-field-state".to_owned(),
+            })
+    }
+}
+
+/// Effect classification for expression capabilities.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum EffectClass {
+    /// No observable state is touched.
+    Pure,
+    /// The run can journal and publish the native state exactly.
+    JournaledNative,
+    /// An external adapter exposes prepare/commit/abort semantics.
+    TransactionalExternal,
+    /// The operation may escape the session and cannot be rolled back by the
+    /// pure expression crate.
+    IrreversibleExternal,
+}
+
+/// Compatibility alias for effect-class callers.
+pub type ExpressionEffectClass = EffectClass;
+
+impl EffectClass {
+    /// Returns whether this class is natively rollback-capable.
+    #[must_use]
+    pub const fn rollback_supported(self) -> bool {
+        matches!(
+            self,
+            Self::Pure | Self::JournaledNative | Self::TransactionalExternal
+        )
+    }
+}
+
+/// One native state transition recorded by an expression session.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum NativeStateEffect {
+    /// A counter value advanced for one occurrence.
+    Counter {
+        /// Exact function occurrence.
+        occurrence: FunctionOccurrence,
+        /// Value before the transition.
+        previous: i64,
+        /// Value after the transition.
+        value: i64,
+    },
+    /// A random stream returned one value.
+    Random {
+        /// Exact function occurrence.
+        occurrence: FunctionOccurrence,
+        /// Drawn value.
+        value: u64,
+    },
+    /// A file cursor advanced for one occurrence/path.
+    FileCursor {
+        /// Exact function occurrence.
+        occurrence: FunctionOccurrence,
+        /// Capability-defined path/cursor key.
+        key: String,
+        /// Position before the transition.
+        previous: u64,
+        /// Position after the transition.
+        value: u64,
+    },
+}
+
+/// One observable expression effect in source order.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ExpressionEffect {
+    /// A variable overlay write.
+    Variable {
+        /// Exact variable name.
+        name: String,
+        /// Value visible before this write.
+        previous: Option<String>,
+        /// New value.
+        value: String,
+    },
+    /// A run-scoped property overlay write.
+    Property {
+        /// Exact property name.
+        name: String,
+        /// Value visible before this write.
+        previous: Option<String>,
+        /// New value.
+        value: String,
+    },
+    /// A journaled native state transition.
+    Native(NativeStateEffect),
+    /// A transactional or irreversible external operation.
+    External {
+        /// Effect class declared by the adapter.
+        class: EffectClass,
+        /// Bounded capability operation identity.
+        operation: String,
+    },
+}
+
+/// A journal entry containing one effect and its class.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExpressionEffectRecord {
+    class: EffectClass,
+    effect: ExpressionEffect,
+}
+
+impl ExpressionEffectRecord {
+    /// Creates a journal entry.  Session APIs should normally be preferred so
+    /// bounds and class/effect consistency are checked together.
+    #[must_use]
+    pub fn new(class: EffectClass, effect: ExpressionEffect) -> Self {
+        Self { class, effect }
+    }
+
+    /// Returns the declared effect class.
+    #[must_use]
+    pub const fn class(&self) -> EffectClass {
+        self.class
+    }
+
+    /// Returns the effect payload.
+    #[must_use]
+    pub fn effect(&self) -> &ExpressionEffect {
+        &self.effect
+    }
+}
+
+/// Alias used by callers that model the journal as a list of entries.
+pub type EffectJournalEntry = ExpressionEffectRecord;
+
+/// A bounded, source-ordered effect journal.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EffectJournal {
+    entries: Vec<ExpressionEffectRecord>,
+    max_entries: usize,
+    max_bytes: usize,
+    bytes: usize,
+}
+
+impl EffectJournal {
+    /// Creates an empty journal with explicit entry and byte bounds.
+    #[must_use]
+    pub fn new(max_entries: usize, max_bytes: usize) -> Self {
+        Self {
+            entries: Vec::new(),
+            max_entries,
+            max_bytes,
+            bytes: 0,
+        }
+    }
+
+    /// Returns the configured journal bounds.
+    #[must_use]
+    pub const fn limits(&self) -> (usize, usize) {
+        (self.max_entries, self.max_bytes)
+    }
+
+    /// Returns the number of entries.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Returns whether no effects have been recorded.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Returns the retained byte count.
+    #[must_use]
+    pub const fn bytes(&self) -> usize {
+        self.bytes
+    }
+
+    /// Returns entries in exact evaluation order.
+    #[must_use]
+    pub fn entries(&self) -> &[ExpressionEffectRecord] {
+        &self.entries
+    }
+
+    /// Appends an entry if both journal bounds permit it.
+    pub fn push(&mut self, entry: ExpressionEffectRecord) -> Result<(), SessionError> {
+        if self.entries.len() >= self.max_entries {
+            return Err(SessionError::JournalLimit {
+                limit: self.max_entries,
+            });
+        }
+        let entry_bytes = effect_bytes(&entry);
+        let bytes = self
+            .bytes
+            .checked_add(entry_bytes)
+            .ok_or(SessionError::JournalBytesLimit {
+                limit: self.max_bytes,
+            })?;
+        if bytes > self.max_bytes {
+            return Err(SessionError::JournalBytesLimit {
+                limit: self.max_bytes,
+            });
+        }
+        self.entries.push(entry);
+        self.bytes = bytes;
+        Ok(())
+    }
+
+    /// Returns an owned, ordered snapshot of the entries.
+    #[must_use]
+    pub fn snapshot(&self) -> Box<[ExpressionEffectRecord]> {
+        self.entries.clone().into_boxed_slice()
+    }
+
+    /// Drops all entries after an abort-before-effects outcome.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.bytes = 0;
+    }
+}
+
+impl Default for EffectJournal {
+    fn default() -> Self {
+        let limits = ExpressionSessionLimits::default();
+        Self::new(limits.max_journal_entries, limits.max_journal_bytes)
+    }
+}
+
+/// Bounds for one expression session.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExpressionSessionLimits {
+    /// Maximum source/input bytes accepted by the session.
+    pub max_input_bytes: usize,
+    /// Maximum value/diagnostic bytes retained by the session.
+    pub max_output_bytes: usize,
+    /// Maximum nested capability call depth.
+    pub max_call_depth: usize,
+    /// Maximum function/capability calls.
+    pub max_calls: usize,
+    /// Maximum overlay/native mutations.
+    pub max_mutations: usize,
+    /// Maximum ordered journal entries.
+    pub max_journal_entries: usize,
+    /// Maximum aggregate journal bytes.
+    pub max_journal_bytes: usize,
+    /// Maximum diagnostic bytes.
+    pub max_diagnostic_bytes: usize,
+}
+
+impl ExpressionSessionLimits {
+    /// Creates explicit session limits.
+    #[must_use]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the session limit tuple is a stable, explicit resource policy"
+    )]
+    pub const fn new(
+        max_input_bytes: usize,
+        max_output_bytes: usize,
+        max_call_depth: usize,
+        max_calls: usize,
+        max_mutations: usize,
+        max_journal_entries: usize,
+        max_journal_bytes: usize,
+        max_diagnostic_bytes: usize,
+    ) -> Self {
+        Self {
+            max_input_bytes,
+            max_output_bytes,
+            max_call_depth,
+            max_calls,
+            max_mutations,
+            max_journal_entries,
+            max_journal_bytes,
+            max_diagnostic_bytes,
+        }
+    }
+}
+
+impl Default for ExpressionSessionLimits {
+    fn default() -> Self {
+        Self {
+            max_input_bytes: 64 * 1024,
+            max_output_bytes: 256 * 1024,
+            max_call_depth: 32,
+            max_calls: 1_024,
+            max_mutations: 1_024,
+            max_journal_entries: 4_096,
+            max_journal_bytes: 4 * 1024 * 1024,
+            max_diagnostic_bytes: 16 * 1024,
+        }
+    }
+}
+
+/// Identity binding an expression session to one run/user/component phase.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ExpressionSessionIdentity {
+    run_id: u64,
+    user_id: u64,
+    lifecycle_id: u64,
+    component_id: u64,
+    field_id: ExpressionFieldId,
+    phase: Box<str>,
+    iteration: Option<IterationIdentity>,
+}
+
+impl ExpressionSessionIdentity {
+    /// Creates an identity without an active iteration.
+    #[must_use]
+    pub fn new(
+        run_id: u64,
+        user_id: u64,
+        lifecycle_id: u64,
+        component_id: u64,
+        field_id: ExpressionFieldId,
+        phase: impl Into<String>,
+    ) -> Self {
+        Self {
+            run_id,
+            user_id,
+            lifecycle_id,
+            component_id,
+            field_id,
+            phase: phase.into().into_boxed_str(),
+            iteration: None,
+        }
+    }
+
+    /// Returns a convenient user/lifecycle identity for a field phase.
+    #[must_use]
+    pub fn for_user(
+        run_id: u64,
+        user_id: u64,
+        lifecycle_id: u64,
+        field_id: ExpressionFieldId,
+        phase: impl Into<String>,
+    ) -> Self {
+        Self::new(run_id, user_id, lifecycle_id, 0, field_id, phase)
+    }
+
+    /// Sets the complete active iteration identity.
+    #[must_use]
+    pub fn with_iteration(mut self, iteration: IterationIdentity) -> Self {
+        self.iteration = Some(iteration);
+        self
+    }
+
+    /// Returns the run identity.
+    #[must_use]
+    pub const fn run_id(&self) -> u64 {
+        self.run_id
+    }
+
+    /// Returns the virtual-user identity.
+    #[must_use]
+    pub const fn user_id(&self) -> u64 {
+        self.user_id
+    }
+
+    /// Returns the lifecycle identity.
+    #[must_use]
+    pub const fn lifecycle_id(&self) -> u64 {
+        self.lifecycle_id
+    }
+
+    /// Returns the component identity.
+    #[must_use]
+    pub const fn component_id(&self) -> u64 {
+        self.component_id
+    }
+
+    /// Returns the field identity.
+    #[must_use]
+    pub const fn field_id(&self) -> ExpressionFieldId {
+        self.field_id
+    }
+
+    /// Returns the expression phase label.
+    #[must_use]
+    pub fn phase(&self) -> &str {
+        &self.phase
+    }
+
+    /// Returns the optional complete iteration identity.
+    #[must_use]
+    pub const fn iteration(&self) -> Option<IterationIdentity> {
+        self.iteration
+    }
+}
+
+/// Typed reasons why an expression authority or session is poisoned.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ExpressionPoisonReason {
+    /// An external operation may have happened but its result is ambiguous.
+    ExternalEffectUncertain,
+    /// A mutex protecting expression state was poisoned.
+    LockPoisoned {
+        /// Logical lock identity.
+        lock: String,
+    },
+    /// A checked generation counter could not advance.
+    GenerationExhausted,
+    /// A capability did not provide a required rollback protocol.
+    UnsupportedRollback {
+        /// Effect class that could not be rolled back.
+        class: EffectClass,
+    },
+    /// An internal invariant was lost.
+    InvariantViolation(String),
+}
+
+/// Compatibility alias for typed authority poison state.
+pub type PoisonReason = ExpressionPoisonReason;
+
+/// A bounded, typed authority poison marker.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExpressionPoison {
+    reason: ExpressionPoisonReason,
+    detail: String,
+}
+
+impl ExpressionPoison {
+    /// Creates an external-uncertainty poison marker.
+    #[must_use]
+    pub fn external_effect(detail: impl Into<String>) -> Self {
+        Self {
+            reason: ExpressionPoisonReason::ExternalEffectUncertain,
+            detail: bounded_diagnostic(detail.into(), 4 * 1024),
+        }
+    }
+
+    /// Creates a lock-poison marker.
+    #[must_use]
+    pub fn lock_poisoned(lock: impl Into<String>) -> Self {
+        let lock = bounded_diagnostic(lock.into(), 256);
+        Self {
+            reason: ExpressionPoisonReason::LockPoisoned { lock: lock.clone() },
+            detail: lock,
+        }
+    }
+
+    /// Creates a generation-exhaustion marker.
+    #[must_use]
+    pub fn generation_exhausted() -> Self {
+        Self {
+            reason: ExpressionPoisonReason::GenerationExhausted,
+            detail: "expression generation exhausted".to_owned(),
+        }
+    }
+
+    /// Returns the poison reason.
+    #[must_use]
+    pub fn reason(&self) -> &ExpressionPoisonReason {
+        &self.reason
+    }
+
+    /// Returns bounded diagnostic detail.
+    #[must_use]
+    pub fn detail(&self) -> &str {
+        &self.detail
+    }
+}
+
+/// A checked failure from an expression session or authority.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SessionError {
+    /// Input exceeded the session's configured bound.
+    InputLimit {
+        /// Configured input limit.
+        limit: usize,
+        /// Observed input bytes.
+        actual: usize,
+    },
+    /// Output/value exceeded the session's configured bound.
+    OutputLimit {
+        /// Configured output limit.
+        limit: usize,
+        /// Observed output bytes.
+        actual: usize,
+    },
+    /// Nested call depth exceeded its bound.
+    CallDepthLimit {
+        /// Configured call-depth limit.
+        limit: usize,
+    },
+    /// Call count exceeded its bound.
+    CallLimit {
+        /// Configured call-count limit.
+        limit: usize,
+    },
+    /// Mutation count exceeded its bound.
+    MutationLimit {
+        /// Configured mutation limit.
+        limit: usize,
+    },
+    /// Journal entry count exceeded its bound.
+    JournalLimit {
+        /// Configured journal-entry limit.
+        limit: usize,
+    },
+    /// Journal bytes exceeded its bound.
+    JournalBytesLimit {
+        /// Configured journal-byte limit.
+        limit: usize,
+    },
+    /// Diagnostic bytes exceeded its bound.
+    DiagnosticLimit {
+        /// Configured diagnostic limit.
+        limit: usize,
+    },
+    /// A session used an old generation.
+    StaleGeneration {
+        /// Generation captured by this session.
+        expected: u64,
+        /// Generation supplied at publication.
+        actual: u64,
+    },
+    /// A session was already closed.
+    Closed,
+    /// The authority/session is poisoned.
+    Poisoned(ExpressionPoison),
+    /// A lock was poisoned; its inner value was not recovered.
+    LockPoisoned {
+        /// Logical lock identity.
+        lock: String,
+    },
+    /// A requested effect classification is inconsistent or unsupported.
+    UnsupportedEffect {
+        /// Rejected class.
+        class: EffectClass,
+    },
+    /// An outcome cannot be produced in the current session state.
+    InvalidOutcome(String),
+}
+
+/// Compatibility alias for session failures.
+pub type ExpressionSessionError = SessionError;
+
+/// Explicit generation token alias used by invocation-bound callers.
+pub type ExpressionGeneration = u64;
+
+/// Alias for the generation captured by a session.
+pub type InvocationGeneration = u64;
+
+impl fmt::Display for SessionError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InputLimit { limit, actual } => {
+                write!(formatter, "session input {actual} exceeds {limit}")
+            }
+            Self::OutputLimit { limit, actual } => {
+                write!(formatter, "session output {actual} exceeds {limit}")
+            }
+            Self::CallDepthLimit { limit } => {
+                write!(formatter, "session call depth exceeds {limit}")
+            }
+            Self::CallLimit { limit } => write!(formatter, "session call count exceeds {limit}"),
+            Self::MutationLimit { limit } => {
+                write!(formatter, "session mutation count exceeds {limit}")
+            }
+            Self::JournalLimit { limit } => {
+                write!(formatter, "session journal entry limit {limit} reached")
+            }
+            Self::JournalBytesLimit { limit } => {
+                write!(formatter, "session journal byte limit {limit} reached")
+            }
+            Self::DiagnosticLimit { limit } => {
+                write!(formatter, "session diagnostic limit {limit} reached")
+            }
+            Self::StaleGeneration { expected, actual } => write!(
+                formatter,
+                "stale expression generation: expected {expected}, got {actual}"
+            ),
+            Self::Closed => formatter.write_str("expression session is closed"),
+            Self::Poisoned(poison) => write!(
+                formatter,
+                "expression authority is poisoned: {}",
+                poison.detail()
+            ),
+            Self::LockPoisoned { lock } => write!(formatter, "expression lock is poisoned: {lock}"),
+            Self::UnsupportedEffect { class } => {
+                write!(formatter, "unsupported expression effect class: {class:?}")
+            }
+            Self::InvalidOutcome(message) => {
+                write!(formatter, "invalid expression session outcome: {message}")
+            }
+        }
+    }
+}
+
+impl Error for SessionError {}
+
+/// One ordered variable overlay entry.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OverlayWrite {
+    name: String,
+    previous: Option<String>,
+    value: String,
+}
+
+impl OverlayWrite {
+    /// Returns the exact key.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the value visible before this write.
+    #[must_use]
+    pub fn previous(&self) -> Option<&str> {
+        self.previous.as_deref()
+    }
+
+    /// Returns the written value.
+    #[must_use]
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+}
+
+/// A result of evaluating one bounded expression session.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ExpressionSessionOutcome {
+    /// All effects and the final value are committed.
+    Commit {
+        /// Final expression value.
+        value: String,
+        /// Ordered committed effects.
+        effects: Box<[ExpressionEffectRecord]>,
+    },
+    /// A pinned, observable prefix committed with a diagnostic.
+    CommitWithDiagnostic {
+        /// Observable partial/final value.
+        value: String,
+        /// Bounded diagnostic.
+        diagnostic: String,
+        /// Ordered committed effects.
+        effects: Box<[ExpressionEffectRecord]>,
+    },
+    /// No effect was published because failure happened before effects.
+    AbortBeforeEffects {
+        /// Typed failure explaining the abort.
+        error: SessionError,
+    },
+    /// An external effect may have escaped; the authority is poisoned.
+    UncertainAfterExternalEffect {
+        /// Typed external failure.
+        error: SessionError,
+        /// Exact poison marker.
+        poison: ExpressionPoison,
+    },
+}
+
+/// Short alias for [`ExpressionSessionOutcome`].
+pub type SessionOutcome = ExpressionSessionOutcome;
+
+/// Mutable, bounded, source-ordered expression evaluation session.
+pub struct ExpressionSession {
+    identity: ExpressionSessionIdentity,
+    generation: u64,
+    base_variables: BTreeMap<String, String>,
+    base_properties: BTreeMap<String, String>,
+    variables: Vec<OverlayWrite>,
+    properties: Vec<OverlayWrite>,
+    occurrences: Vec<FunctionOccurrence>,
+    journal: EffectJournal,
+    limits: ExpressionSessionLimits,
+    calls: usize,
+    mutations: usize,
+    depth: usize,
+    state: SessionLifecycle,
+    authority: Option<Arc<ExpressionRuntimeState>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum SessionLifecycle {
+    Open,
+    Committed,
+    Aborted,
+    Poisoned(ExpressionPoison),
+}
+
+impl fmt::Debug for ExpressionSession {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ExpressionSession")
+            .field("identity", &self.identity)
+            .field("generation", &self.generation)
+            .field("base_variable_count", &self.base_variables.len())
+            .field("base_property_count", &self.base_properties.len())
+            .field("variable_overlay_count", &self.variables.len())
+            .field("property_overlay_count", &self.properties.len())
+            .field("occurrence_count", &self.occurrences.len())
+            .field("journal_entries", &self.journal.len())
+            .field("calls", &self.calls)
+            .field("mutations", &self.mutations)
+            .field("depth", &self.depth)
+            .field("state", &self.state)
+            .finish()
+    }
+}
+
+impl ExpressionSession {
+    /// Creates a standalone session with generation zero.
+    pub fn new(
+        identity: ExpressionSessionIdentity,
+        base_variables: BTreeMap<String, String>,
+        base_properties: BTreeMap<String, String>,
+        limits: ExpressionSessionLimits,
+    ) -> Result<Self, SessionError> {
+        Self::with_generation(identity, 0, base_variables, base_properties, limits)
+    }
+
+    /// Creates a standalone session bound to an explicit generation.
+    pub fn with_generation(
+        identity: ExpressionSessionIdentity,
+        generation: u64,
+        base_variables: BTreeMap<String, String>,
+        base_properties: BTreeMap<String, String>,
+        limits: ExpressionSessionLimits,
+    ) -> Result<Self, SessionError> {
+        validate_base_maps(&base_variables, &base_properties, &limits)?;
+        Ok(Self {
+            identity,
+            generation,
+            base_variables,
+            base_properties,
+            variables: Vec::new(),
+            properties: Vec::new(),
+            occurrences: Vec::new(),
+            journal: EffectJournal::new(limits.max_journal_entries, limits.max_journal_bytes),
+            limits,
+            calls: 0,
+            mutations: 0,
+            depth: 0,
+            state: SessionLifecycle::Open,
+            authority: None,
+        })
+    }
+
+    /// Returns the session identity.
+    #[must_use]
+    pub fn identity(&self) -> &ExpressionSessionIdentity {
+        &self.identity
+    }
+
+    /// Returns the expected authority generation.
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Returns session bounds.
+    #[must_use]
+    pub const fn limits(&self) -> ExpressionSessionLimits {
+        self.limits
+    }
+
+    /// Resolves a variable from the latest overlay write or immutable base.
+    #[must_use]
+    pub fn resolve_variable(&self, name: &str) -> Option<&str> {
+        self.variables
+            .iter()
+            .rev()
+            .find(|entry| entry.name == name)
+            .map(OverlayWrite::value)
+            .or_else(|| self.base_variables.get(name).map(String::as_str))
+    }
+
+    /// Resolves a property from the latest overlay write or immutable base.
+    #[must_use]
+    pub fn resolve_property(&self, name: &str) -> Option<&str> {
+        self.properties
+            .iter()
+            .rev()
+            .find(|entry| entry.name == name)
+            .map(OverlayWrite::value)
+            .or_else(|| self.base_properties.get(name).map(String::as_str))
+    }
+
+    /// Returns the immutable base variable map.
+    #[must_use]
+    pub fn base_variables(&self) -> &BTreeMap<String, String> {
+        &self.base_variables
+    }
+
+    /// Returns the immutable base property map.
+    #[must_use]
+    pub fn base_properties(&self) -> &BTreeMap<String, String> {
+        &self.base_properties
+    }
+
+    /// Returns ordered variable writes, including duplicates.
+    #[must_use]
+    pub fn variable_overlay(&self) -> &[OverlayWrite] {
+        &self.variables
+    }
+
+    /// Returns ordered property writes, including duplicates.
+    #[must_use]
+    pub fn property_overlay(&self) -> &[OverlayWrite] {
+        &self.properties
+    }
+
+    /// Returns exact function occurrences observed by this session in source
+    /// evaluation order.
+    #[must_use]
+    pub fn occurrences(&self) -> &[FunctionOccurrence] {
+        &self.occurrences
+    }
+
+    /// Records one exact structural occurrence, rejecting a call-count
+    /// overflow rather than refreshing or reusing an identity.
+    pub fn record_occurrence(
+        &mut self,
+        occurrence: FunctionOccurrence,
+    ) -> Result<(), SessionError> {
+        self.ensure_open()?;
+        if self.occurrences.len() >= self.limits.max_calls {
+            return Err(SessionError::CallLimit {
+                limit: self.limits.max_calls,
+            });
+        }
+        self.occurrences.push(occurrence);
+        Ok(())
+    }
+
+    /// Returns the final variable projection (last overlay write wins).
+    #[must_use]
+    pub fn final_variables(&self) -> BTreeMap<String, String> {
+        let mut values = self.base_variables.clone();
+        for entry in &self.variables {
+            values.insert(entry.name.clone(), entry.value.clone());
+        }
+        values
+    }
+
+    /// Returns the final property projection (last overlay write wins).
+    #[must_use]
+    pub fn final_properties(&self) -> BTreeMap<String, String> {
+        let mut values = self.base_properties.clone();
+        for entry in &self.properties {
+            values.insert(entry.name.clone(), entry.value.clone());
+        }
+        values
+    }
+
+    /// Returns the ordered effect journal.
+    #[must_use]
+    pub fn journal(&self) -> &EffectJournal {
+        &self.journal
+    }
+
+    /// Appends one explicitly classified effect to the ordered journal.
+    ///
+    /// Variable/property overlay writes should use [`Self::set_variable`] or
+    /// [`Self::set_property`] so subsequent reads see the write immediately.
+    pub fn record_effect(
+        &mut self,
+        class: EffectClass,
+        effect: ExpressionEffect,
+    ) -> Result<(), SessionError> {
+        self.ensure_open()?;
+        if !effect_class_matches(class, &effect) {
+            return Err(SessionError::InvalidOutcome(
+                "effect class does not match effect payload".to_owned(),
+            ));
+        }
+        self.ensure_mutation("effect", "record")?;
+        self.journal
+            .push(ExpressionEffectRecord::new(class, effect))
+    }
+
+    /// Records one bounded input/capability call.
+    pub fn record_call(&mut self, input_bytes: usize) -> Result<(), SessionError> {
+        self.ensure_open()?;
+        if input_bytes > self.limits.max_input_bytes {
+            return Err(SessionError::InputLimit {
+                limit: self.limits.max_input_bytes,
+                actual: input_bytes,
+            });
+        }
+        self.calls = self.calls.checked_add(1).ok_or(SessionError::CallLimit {
+            limit: self.limits.max_calls,
+        })?;
+        if self.calls > self.limits.max_calls {
+            return Err(SessionError::CallLimit {
+                limit: self.limits.max_calls,
+            });
+        }
+        Ok(())
+    }
+
+    /// Checks input bytes without consuming a call-count slot.
+    pub fn check_input_bytes(&self, bytes: usize) -> Result<(), SessionError> {
+        if bytes > self.limits.max_input_bytes {
+            Err(SessionError::InputLimit {
+                limit: self.limits.max_input_bytes,
+                actual: bytes,
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Checks output bytes against the session bound.
+    pub fn check_output_bytes(&self, bytes: usize) -> Result<(), SessionError> {
+        self.check_output(bytes)
+    }
+
+    /// Returns the number of recorded calls.
+    #[must_use]
+    pub const fn call_count(&self) -> usize {
+        self.calls
+    }
+
+    /// Returns the number of recorded mutations.
+    #[must_use]
+    pub const fn mutation_count(&self) -> usize {
+        self.mutations
+    }
+
+    /// Enters one nested capability call depth.
+    pub fn enter_call(&mut self) -> Result<(), SessionError> {
+        self.ensure_open()?;
+        let depth = self
+            .depth
+            .checked_add(1)
+            .ok_or(SessionError::CallDepthLimit {
+                limit: self.limits.max_call_depth,
+            })?;
+        if depth > self.limits.max_call_depth {
+            return Err(SessionError::CallDepthLimit {
+                limit: self.limits.max_call_depth,
+            });
+        }
+        self.depth = depth;
+        Ok(())
+    }
+
+    /// Leaves one nested capability call depth.
+    pub fn leave_call(&mut self) -> Result<(), SessionError> {
+        self.ensure_open()?;
+        self.depth = self
+            .depth
+            .checked_sub(1)
+            .ok_or_else(|| SessionError::InvalidOutcome("call depth underflow".to_owned()))?;
+        Ok(())
+    }
+
+    /// Writes a variable to the ordered overlay and journals it.
+    pub fn set_variable(&mut self, name: &str, value: &str) -> Result<(), SessionError> {
+        self.ensure_mutation(name, value)?;
+        let previous = self.resolve_variable(name).map(str::to_owned);
+        let entry = ExpressionEffectRecord::new(
+            EffectClass::JournaledNative,
+            ExpressionEffect::Variable {
+                name: name.to_owned(),
+                previous: previous.clone(),
+                value: value.to_owned(),
+            },
+        );
+        self.journal.push(entry)?;
+        self.variables.push(OverlayWrite {
+            name: name.to_owned(),
+            previous,
+            value: value.to_owned(),
+        });
+        Ok(())
+    }
+
+    /// Writes several variables as one bounded session mutation.
+    ///
+    /// The writes remain source ordered and later entries see earlier values,
+    /// but a failed bound check restores the session's pre-call overlay,
+    /// journal, and mutation count.  This rollback is limited to the
+    /// session-local proposal; it never claims to undo an already-published
+    /// external/native capability effect.
+    pub fn set_variables_atomic(&mut self, values: &[(&str, &str)]) -> Result<(), SessionError> {
+        self.ensure_open()?;
+        let variables_len = self.variables.len();
+        let journal = self.journal.clone();
+        let mutations = self.mutations;
+        for (name, value) in values {
+            if let Err(error) = self.set_variable(name, value) {
+                self.variables.truncate(variables_len);
+                self.journal = journal;
+                self.mutations = mutations;
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    /// Writes a property to the ordered overlay and journals it.
+    pub fn set_property(&mut self, name: &str, value: &str) -> Result<(), SessionError> {
+        self.ensure_mutation(name, value)?;
+        let previous = self.resolve_property(name).map(str::to_owned);
+        let entry = ExpressionEffectRecord::new(
+            EffectClass::JournaledNative,
+            ExpressionEffect::Property {
+                name: name.to_owned(),
+                previous: previous.clone(),
+                value: value.to_owned(),
+            },
+        );
+        self.journal.push(entry)?;
+        self.properties.push(OverlayWrite {
+            name: name.to_owned(),
+            previous,
+            value: value.to_owned(),
+        });
+        Ok(())
+    }
+
+    /// Journals a counter transition.
+    pub fn journal_counter(
+        &mut self,
+        occurrence: FunctionOccurrence,
+        previous: i64,
+        value: i64,
+    ) -> Result<(), SessionError> {
+        self.record_native(NativeStateEffect::Counter {
+            occurrence,
+            previous,
+            value,
+        })
+    }
+
+    /// Journals a random draw without pretending the draw is reversible.
+    pub fn journal_random(
+        &mut self,
+        occurrence: FunctionOccurrence,
+        value: u64,
+    ) -> Result<(), SessionError> {
+        self.record_native(NativeStateEffect::Random { occurrence, value })
+    }
+
+    /// Journals a file-cursor transition.
+    pub fn journal_file_cursor(
+        &mut self,
+        occurrence: FunctionOccurrence,
+        key: &str,
+        previous: u64,
+        value: u64,
+    ) -> Result<(), SessionError> {
+        self.ensure_mutation(key, "cursor")?;
+        self.journal.push(ExpressionEffectRecord::new(
+            EffectClass::JournaledNative,
+            ExpressionEffect::Native(NativeStateEffect::FileCursor {
+                occurrence,
+                key: key.to_owned(),
+                previous,
+                value,
+            }),
+        ))
+    }
+
+    /// Journals an explicitly classified external operation.
+    pub fn journal_external(
+        &mut self,
+        class: EffectClass,
+        operation: &str,
+    ) -> Result<(), SessionError> {
+        self.ensure_open()?;
+        if matches!(class, EffectClass::Pure | EffectClass::JournaledNative) {
+            return Err(SessionError::UnsupportedEffect { class });
+        }
+        self.ensure_mutation(operation, "external")?;
+        self.journal.push(ExpressionEffectRecord::new(
+            class,
+            ExpressionEffect::External {
+                class,
+                operation: operation.to_owned(),
+            },
+        ))
+    }
+
+    /// Checks the generation supplied by an authority before publication.
+    pub fn check_generation(&self, actual: u64) -> Result<(), SessionError> {
+        if self.generation == actual {
+            Ok(())
+        } else {
+            Err(SessionError::StaleGeneration {
+                expected: self.generation,
+                actual,
+            })
+        }
+    }
+
+    /// Commits a final expression value and ordered effects.
+    pub fn commit(
+        &mut self,
+        value: impl Into<String>,
+    ) -> Result<ExpressionSessionOutcome, SessionError> {
+        self.commit_at(self.generation, value)
+    }
+
+    /// Commits after checking an explicit current generation.
+    pub fn commit_at(
+        &mut self,
+        actual_generation: u64,
+        value: impl Into<String>,
+    ) -> Result<ExpressionSessionOutcome, SessionError> {
+        self.ensure_open()?;
+        self.check_authority_generation(actual_generation)?;
+        let value = value.into();
+        self.check_output(value.len())?;
+        self.state = SessionLifecycle::Committed;
+        Ok(ExpressionSessionOutcome::Commit {
+            value,
+            effects: self.journal.snapshot(),
+        })
+    }
+
+    /// Commits a pinned observable value together with a bounded diagnostic.
+    pub fn commit_with_diagnostic(
+        &mut self,
+        value: impl Into<String>,
+        diagnostic: impl Into<String>,
+    ) -> Result<ExpressionSessionOutcome, SessionError> {
+        self.ensure_open()?;
+        self.check_authority_generation(self.generation)?;
+        let value = value.into();
+        let diagnostic = diagnostic.into();
+        self.check_output(value.len())?;
+        if diagnostic.len() > self.limits.max_diagnostic_bytes {
+            return Err(SessionError::DiagnosticLimit {
+                limit: self.limits.max_diagnostic_bytes,
+            });
+        }
+        self.state = SessionLifecycle::Committed;
+        Ok(ExpressionSessionOutcome::CommitWithDiagnostic {
+            value,
+            diagnostic,
+            effects: self.journal.snapshot(),
+        })
+    }
+
+    /// Aborts before effects are published.  This outcome is valid only while
+    /// the session has no journaled effect; after an effect, callers must use
+    /// a commit, diagnostic commit, or uncertain/poisoned outcome.  The
+    /// returned outcome never exposes a guessed or partial journal.
+    pub fn abort_before_effects(
+        &mut self,
+        error: SessionError,
+    ) -> Result<ExpressionSessionOutcome, SessionError> {
+        self.ensure_open()?;
+        if !self.journal.is_empty() || !self.variables.is_empty() || !self.properties.is_empty() {
+            return Err(SessionError::InvalidOutcome(
+                "abort-before-effects requires an empty effect journal".to_owned(),
+            ));
+        }
+        self.variables.clear();
+        self.properties.clear();
+        self.journal.clear();
+        self.state = SessionLifecycle::Aborted;
+        Ok(ExpressionSessionOutcome::AbortBeforeEffects { error })
+    }
+
+    /// Records an uncertain external effect, poisons this session and its run
+    /// authority, and returns a typed non-rollback outcome.
+    pub fn uncertain_after_external_effect(
+        &mut self,
+        error: SessionError,
+    ) -> Result<ExpressionSessionOutcome, SessionError> {
+        self.ensure_open()?;
+        let poison = ExpressionPoison::external_effect(error.to_string());
+        if let Some(authority) = &self.authority {
+            poison_authority(authority, poison.clone())?;
+        }
+        self.state = SessionLifecycle::Poisoned(poison.clone());
+        Ok(ExpressionSessionOutcome::UncertainAfterExternalEffect { error, poison })
+    }
+
+    /// Returns whether this session is closed or poisoned.
+    #[must_use]
+    pub fn is_closed(&self) -> bool {
+        !matches!(self.state, SessionLifecycle::Open)
+    }
+
+    /// Wraps this session in an explicit shared capability handle.
+    #[must_use]
+    pub fn into_handle(self) -> ExpressionSessionHandle {
+        ExpressionSessionHandle::new(self)
+    }
+
+    fn record_native(&mut self, effect: NativeStateEffect) -> Result<(), SessionError> {
+        self.ensure_mutation("native", "state")?;
+        self.journal.push(ExpressionEffectRecord::new(
+            EffectClass::JournaledNative,
+            ExpressionEffect::Native(effect),
+        ))
+    }
+
+    fn ensure_open(&self) -> Result<(), SessionError> {
+        match &self.state {
+            SessionLifecycle::Open => {}
+            SessionLifecycle::Committed | SessionLifecycle::Aborted => {
+                return Err(SessionError::Closed);
+            }
+            SessionLifecycle::Poisoned(poison) => {
+                return Err(SessionError::Poisoned(poison.clone()));
+            }
+        }
+        if let Some(authority) = &self.authority {
+            ensure_authority_healthy(authority)?;
+        }
+        Ok(())
+    }
+
+    fn ensure_mutation(&mut self, name: &str, value: &str) -> Result<(), SessionError> {
+        self.ensure_open()?;
+        let bytes = name
+            .len()
+            .checked_add(value.len())
+            .ok_or(SessionError::OutputLimit {
+                limit: self.limits.max_output_bytes,
+                actual: usize::MAX,
+            })?;
+        if bytes > self.limits.max_output_bytes {
+            return Err(SessionError::OutputLimit {
+                limit: self.limits.max_output_bytes,
+                actual: bytes,
+            });
+        }
+        self.mutations = self
+            .mutations
+            .checked_add(1)
+            .ok_or(SessionError::MutationLimit {
+                limit: self.limits.max_mutations,
+            })?;
+        if self.mutations > self.limits.max_mutations {
+            return Err(SessionError::MutationLimit {
+                limit: self.limits.max_mutations,
+            });
+        }
+        Ok(())
+    }
+
+    fn check_output(&self, bytes: usize) -> Result<(), SessionError> {
+        if bytes > self.limits.max_output_bytes {
+            Err(SessionError::OutputLimit {
+                limit: self.limits.max_output_bytes,
+                actual: bytes,
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    fn check_authority_generation(&self, actual: u64) -> Result<(), SessionError> {
+        if let Some(authority) = &self.authority {
+            ensure_authority_healthy(authority)?;
+            let current = authority.generation.load(Ordering::Acquire);
+            if current != actual || self.generation != current {
+                return Err(SessionError::StaleGeneration {
+                    expected: self.generation,
+                    actual: current,
+                });
+            }
+        } else {
+            self.check_generation(actual)?;
+        }
+        Ok(())
+    }
+}
+
+impl VariableResolver for ExpressionSession {
+    fn resolve_variable(&self, name: &str) -> Option<&str> {
+        self.resolve_variable(name)
+    }
+}
+
+impl PropertyResolver for ExpressionSession {
+    fn resolve_property(&self, name: &str) -> Option<&str> {
+        self.resolve_property(name)
+    }
+}
+
+/// A lock-backed capability handle for an [`ExpressionSession`].
+pub struct ExpressionSessionHandle {
+    session: Arc<Mutex<ExpressionSession>>,
+}
+
+impl Clone for ExpressionSessionHandle {
+    fn clone(&self) -> Self {
+        Self {
+            session: Arc::clone(&self.session),
+        }
+    }
+}
+
+impl fmt::Debug for ExpressionSessionHandle {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("ExpressionSessionHandle(..)")
+    }
+}
+
+impl ExpressionSessionHandle {
+    /// Creates a shared session capability handle.
+    #[must_use]
+    pub fn new(session: ExpressionSession) -> Self {
+        Self {
+            session: Arc::new(Mutex::new(session)),
+        }
+    }
+
+    /// Locks the session and fails with a typed error if it is poisoned.
+    pub fn lock(&self) -> Result<MutexGuard<'_, ExpressionSession>, SessionError> {
+        self.session.lock().map_err(|_| SessionError::LockPoisoned {
+            lock: "expression-session".to_owned(),
+        })
+    }
+
+    /// Runs a bounded operation under the session lock.
+    pub fn with_session<T>(
+        &self,
+        operation: impl FnOnce(&mut ExpressionSession) -> Result<T, SessionError>,
+    ) -> Result<T, SessionError> {
+        let mut session = self.lock()?;
+        operation(&mut session)
+    }
+
+    /// Returns a deterministic final variable projection.
+    pub fn final_variables(&self) -> Result<BTreeMap<String, String>, SessionError> {
+        Ok(self.lock()?.final_variables())
+    }
+
+    /// Returns a deterministic final property projection.
+    pub fn final_properties(&self) -> Result<BTreeMap<String, String>, SessionError> {
+        Ok(self.lock()?.final_properties())
+    }
+
+    /// Returns whether the underlying session is closed.
+    pub fn is_closed(&self) -> Result<bool, SessionError> {
+        Ok(self.lock()?.is_closed())
+    }
+}
+
+impl VariableSetter for ExpressionSessionHandle {
+    fn set_variable(&self, name: &str, value: &str) -> Result<(), FunctionError> {
+        self.with_session(|session| session.set_variable(name, value))
+            .map_err(session_error_to_function_error)
+    }
+
+    fn set_variables_atomic(&self, values: &[(&str, &str)]) -> Result<(), FunctionError> {
+        self.with_session(|session| session.set_variables_atomic(values))
+            .map_err(session_error_to_function_error)
+    }
+
+    fn get_variable(&self, name: &str) -> Option<String> {
+        // This legacy trait method cannot represent a typed lock failure.  All
+        // expression evaluation uses `get_variable_checked`; retain `None`
+        // here solely for source compatibility with older callers.
+        match self.session.lock() {
+            Ok(session) => session.resolve_variable(name).map(str::to_owned),
+            Err(_) => None,
+        }
+    }
+
+    fn get_variable_checked(&self, name: &str) -> Result<Option<String>, FunctionError> {
+        self.lock()
+            .map(|session| session.resolve_variable(name).map(str::to_owned))
+            .map_err(session_error_to_function_error)
+    }
+
+    fn remove_variable(&self, _name: &str) -> Result<(), FunctionError> {
+        Err(FunctionError::unsupported(
+            "expression session variable removal is not represented by this foundation",
+        ))
+    }
+}
+
+impl PropertySetter for ExpressionSessionHandle {
+    fn set_property(&self, name: &str, value: &str) -> Result<Option<String>, FunctionError> {
+        self.with_session(|session| {
+            let previous = session.resolve_property(name).map(str::to_owned);
+            session.set_property(name, value)?;
+            Ok(previous)
+        })
+        .map_err(session_error_to_function_error)
+    }
+
+    fn get_property(&self, name: &str) -> Option<String> {
+        // This legacy trait method cannot represent a typed lock failure.  All
+        // expression evaluation uses `get_property_checked`; retain `None`
+        // here solely for source compatibility with older callers.
+        match self.session.lock() {
+            Ok(session) => session.resolve_property(name).map(str::to_owned),
+            Err(_) => None,
+        }
+    }
+
+    fn get_property_checked(&self, name: &str) -> Result<Option<String>, FunctionError> {
+        self.lock()
+            .map(|session| session.resolve_property(name).map(str::to_owned))
+            .map_err(session_error_to_function_error)
+    }
+}
+
+/// One shared run-owned expression authority.
+pub struct ExpressionRuntime {
+    inner: Arc<ExpressionRuntimeState>,
+}
+
+struct ExpressionRuntimeState {
+    registry: SharedBuiltinFunctions,
+    generation: AtomicU64,
+    poison: Mutex<Option<ExpressionPoison>>,
+}
+
+impl Clone for ExpressionRuntime {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+}
+
+impl fmt::Debug for ExpressionRuntime {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ExpressionRuntime")
+            .field("generation", &self.current_generation())
+            .field("poisoned", &self.is_poisoned().unwrap_or(true))
+            .finish()
+    }
+}
+
+impl ExpressionRuntime {
+    /// Creates a fresh run authority and a fresh native function registry.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::with_registry(BuiltinFunctions::new_shared())
+    }
+
+    /// Creates a run authority around an explicitly selected shared registry.
+    #[must_use]
+    pub fn with_registry(registry: SharedBuiltinFunctions) -> Self {
+        Self {
+            inner: Arc::new(ExpressionRuntimeState {
+                registry,
+                generation: AtomicU64::new(0),
+                poison: Mutex::new(None),
+            }),
+        }
+    }
+
+    /// Returns a clone of the run-shared authority handle.
+    #[must_use]
+    pub fn shared(&self) -> Arc<Self> {
+        Arc::new(self.clone())
+    }
+
+    /// Returns the one shared native function registry.
+    #[must_use]
+    pub fn registry(&self) -> &SharedBuiltinFunctions {
+        &self.inner.registry
+    }
+
+    /// Returns the current checked invocation generation.
+    #[must_use]
+    pub fn current_generation(&self) -> u64 {
+        self.inner.generation.load(Ordering::Acquire)
+    }
+
+    /// Advances the generation, poisoning the run if it would overflow.
+    pub fn advance_generation(&self) -> Result<u64, SessionError> {
+        ensure_authority_healthy(&self.inner)?;
+        loop {
+            let current = self.inner.generation.load(Ordering::Acquire);
+            let next = current.checked_add(1).ok_or_else(|| {
+                let poison = ExpressionPoison::generation_exhausted();
+                let _ = poison_authority(&self.inner, poison.clone());
+                SessionError::Poisoned(poison)
+            })?;
+            match self.inner.generation.compare_exchange(
+                current,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return Ok(next),
+                Err(_) => continue,
+            }
+        }
+    }
+
+    /// Begins a bounded session at the authority's current generation.
+    pub fn begin_session(
+        &self,
+        identity: ExpressionSessionIdentity,
+        base_variables: BTreeMap<String, String>,
+        base_properties: BTreeMap<String, String>,
+        limits: ExpressionSessionLimits,
+    ) -> Result<ExpressionSession, SessionError> {
+        ensure_authority_healthy(&self.inner)?;
+        let generation = self.current_generation();
+        let mut session = ExpressionSession::with_generation(
+            identity,
+            generation,
+            base_variables,
+            base_properties,
+            limits,
+        )?;
+        session.authority = Some(Arc::clone(&self.inner));
+        Ok(session)
+    }
+
+    /// Poisons this exact run authority.
+    pub fn poison(&self, poison: ExpressionPoison) -> Result<(), SessionError> {
+        poison_authority(&self.inner, poison)
+    }
+
+    /// Returns the current poison marker, if any.
+    pub fn poison_state(&self) -> Result<Option<ExpressionPoison>, SessionError> {
+        self.inner
+            .poison
+            .lock()
+            .map(|poison| poison.clone())
+            .map_err(|_| SessionError::LockPoisoned {
+                lock: "expression-runtime-poison".to_owned(),
+            })
+    }
+
+    /// Returns whether this run is poisoned, failing closed on a poisoned
+    /// poison-state lock.
+    pub fn is_poisoned(&self) -> Result<bool, SessionError> {
+        Ok(self.poison_state()?.is_some())
+    }
+}
+
+impl Default for ExpressionRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn ensure_authority_healthy(authority: &ExpressionRuntimeState) -> Result<(), SessionError> {
+    let poison = authority
+        .poison
+        .lock()
+        .map_err(|_| SessionError::LockPoisoned {
+            lock: "expression-runtime-poison".to_owned(),
+        })?
+        .clone();
+    poison.map_or(Ok(()), |poison| Err(SessionError::Poisoned(poison)))
+}
+
+fn poison_authority(
+    authority: &ExpressionRuntimeState,
+    poison: ExpressionPoison,
+) -> Result<(), SessionError> {
+    let mut state = authority
+        .poison
+        .lock()
+        .map_err(|_| SessionError::LockPoisoned {
+            lock: "expression-runtime-poison".to_owned(),
+        })?;
+    if state.is_none() {
+        *state = Some(poison);
+    }
+    Ok(())
+}
+
+fn session_error_to_function_error(error: SessionError) -> FunctionError {
+    match error {
+        SessionError::Poisoned(poison) => FunctionError::poisoned(poison.detail()),
+        SessionError::LockPoisoned { lock } => FunctionError::poisoned(lock),
+        SessionError::InputLimit { limit, actual } => {
+            FunctionError::resource_limit(format!("session input {actual} exceeds {limit}"))
+        }
+        SessionError::OutputLimit { limit, actual } => {
+            FunctionError::resource_limit(format!("session output {actual} exceeds {limit}"))
+        }
+        SessionError::CallDepthLimit { limit }
+        | SessionError::CallLimit { limit }
+        | SessionError::MutationLimit { limit }
+        | SessionError::JournalLimit { limit }
+        | SessionError::JournalBytesLimit { limit }
+        | SessionError::DiagnosticLimit { limit } => {
+            FunctionError::resource_limit(format!("session limit {limit} reached"))
+        }
+        SessionError::StaleGeneration { expected, actual } => FunctionError::execution(format!(
+            "stale expression generation: expected {expected}, got {actual}"
+        )),
+        SessionError::Closed => FunctionError::execution("expression session is closed"),
+        SessionError::UnsupportedEffect { class } => {
+            FunctionError::unsupported(format!("effect class {class:?} is unavailable"))
+        }
+        SessionError::InvalidOutcome(message) => FunctionError::execution(message),
+    }
+}
+
+fn bounded_diagnostic(mut value: String, limit: usize) -> String {
+    if value.len() <= limit {
+        return value;
+    }
+    let mut end = limit;
+    while !value.is_char_boundary(end) {
+        end = end.saturating_sub(1);
+    }
+    value.truncate(end);
+    value
+}
+
+fn validate_base_maps(
+    variables: &BTreeMap<String, String>,
+    properties: &BTreeMap<String, String>,
+    limits: &ExpressionSessionLimits,
+) -> Result<(), SessionError> {
+    let total =
+        variables
+            .iter()
+            .chain(properties.iter())
+            .try_fold(0usize, |total, (name, value)| {
+                total
+                    .checked_add(name.len())
+                    .and_then(|total| total.checked_add(value.len()))
+                    .ok_or(SessionError::OutputLimit {
+                        limit: limits.max_output_bytes,
+                        actual: usize::MAX,
+                    })
+            })?;
+    if total > limits.max_output_bytes {
+        return Err(SessionError::OutputLimit {
+            limit: limits.max_output_bytes,
+            actual: total,
+        });
+    }
+    Ok(())
+}
+
+fn effect_bytes(record: &ExpressionEffectRecord) -> usize {
+    let class_bytes = std::mem::size_of_val(&record.class);
+    let effect_bytes = match &record.effect {
+        ExpressionEffect::Variable {
+            name,
+            previous,
+            value,
+        }
+        | ExpressionEffect::Property {
+            name,
+            previous,
+            value,
+        } => name
+            .len()
+            .saturating_add(previous.as_ref().map_or(0, String::len))
+            .saturating_add(value.len()),
+        ExpressionEffect::Native(NativeStateEffect::Counter { occurrence, .. })
+        | ExpressionEffect::Native(NativeStateEffect::Random { occurrence, .. }) => {
+            occurrence.function_name().len().saturating_add(
+                occurrence
+                    .path()
+                    .len()
+                    .saturating_mul(std::mem::size_of::<u64>()),
+            )
+        }
+        ExpressionEffect::Native(NativeStateEffect::FileCursor {
+            occurrence, key, ..
+        }) => occurrence
+            .function_name()
+            .len()
+            .saturating_add(key.len())
+            .saturating_add(
+                occurrence
+                    .path()
+                    .len()
+                    .saturating_mul(std::mem::size_of::<u64>()),
+            ),
+        ExpressionEffect::External { operation, .. } => operation.len(),
+    };
+    class_bytes.saturating_add(effect_bytes)
+}
+
+fn effect_class_matches(class: EffectClass, effect: &ExpressionEffect) -> bool {
+    match effect {
+        ExpressionEffect::Variable { .. }
+        | ExpressionEffect::Property { .. }
+        | ExpressionEffect::Native(_) => class == EffectClass::JournaledNative,
+        ExpressionEffect::External {
+            class: effect_class,
+            ..
+        } => {
+            class == *effect_class
+                && matches!(
+                    class,
+                    EffectClass::TransactionalExternal | EffectClass::IrreversibleExternal
+                )
+        }
+    }
+}
+
+fn collect_field_occurrences(
+    source: &str,
+    namespace: u64,
+    limits: &ExpressionFieldLimits,
+) -> Result<Vec<FunctionOccurrence>, ExpressionFieldError> {
+    let mut occurrences = Vec::new();
+    collect_field_occurrences_in(source, namespace, &[], limits, &mut occurrences)?;
+    Ok(occurrences)
+}
+
+fn collect_field_occurrences_in(
+    source: &str,
+    namespace: u64,
+    prefix: &[u64],
+    limits: &ExpressionFieldLimits,
+    occurrences: &mut Vec<FunctionOccurrence>,
+) -> Result<(), ExpressionFieldError> {
+    let mut index = 0usize;
+    while index < source.len() {
+        let Some(character) = source[index..].chars().next() else {
+            break;
+        };
+        if character == '\\' {
+            let slash_end = index + character.len_utf8();
+            if let Some(next) = source[slash_end..].chars().next() {
+                index = slash_end + next.len_utf8();
+                continue;
+            }
+            index = slash_end;
+            continue;
+        }
+        if character == '$' {
+            let dollar_end = index + character.len_utf8();
+            if source[dollar_end..].starts_with('{') {
+                let end = find_reference_end(source, index, false)
+                    .map_err(ExpressionFieldError::InvalidSource)?;
+                let reference = &source[index..end];
+                let body = &reference[2..reference.len() - 1];
+                let parsed = parse_reference_body(body, index + 2)
+                    .map_err(ExpressionFieldError::InvalidSource)?;
+                let function_name = parsed
+                    .function
+                    .as_ref()
+                    .map(|function| function.name.as_str())
+                    .or_else(|| {
+                        parsed
+                            .bare_name
+                            .starts_with("__")
+                            .then_some(parsed.bare_name.as_str())
+                    });
+                if let Some(function_name) = function_name {
+                    let mut path = prefix.to_vec();
+                    let segment = u64::try_from(index).map_err(|_| {
+                        ExpressionFieldError::InvalidSource(
+                            EvaluationError::OccurrencePathLimitExceeded {
+                                limit: MAX_FUNCTION_OCCURRENCE_PATH_SEGMENTS,
+                                offset: index,
+                            },
+                        )
+                    })?;
+                    append_occurrence_segment(&mut path, segment, index)
+                        .map_err(ExpressionFieldError::InvalidSource)?;
+                    if occurrences.len() >= limits.max_occurrences {
+                        return Err(ExpressionFieldError::OccurrenceLimit {
+                            limit: limits.max_occurrences,
+                        });
+                    }
+                    occurrences.push(FunctionOccurrence::new(
+                        namespace,
+                        path.clone(),
+                        function_name,
+                    ));
+                    if let Some(function) = parsed.function {
+                        for (argument_index, argument) in function.arguments.into_iter().enumerate()
+                        {
+                            let mut argument_prefix = path.clone();
+                            let argument_segment = u64::try_from(argument_index).map_err(|_| {
+                                ExpressionFieldError::InvalidSource(
+                                    EvaluationError::OccurrencePathLimitExceeded {
+                                        limit: MAX_FUNCTION_OCCURRENCE_PATH_SEGMENTS,
+                                        offset: index,
+                                    },
+                                )
+                            })?;
+                            append_occurrence_segment(
+                                &mut argument_prefix,
+                                argument_segment,
+                                index,
+                            )
+                            .map_err(ExpressionFieldError::InvalidSource)?;
+                            collect_field_occurrences_in(
+                                &argument,
+                                namespace,
+                                &argument_prefix,
+                                limits,
+                                occurrences,
+                            )?;
+                        }
+                    }
+                }
+                index = end;
+                continue;
+            }
+        }
+        index += character.len_utf8();
+    }
+    Ok(())
 }
 
 /// A private hook used by indirection functions to re-enter the evaluator.
@@ -1056,6 +3566,16 @@ impl<'a> FunctionContext<'a> {
             .or_else(|| self.variable(name).map(str::to_owned))
     }
 
+    /// Resolves a variable and preserves a capability's poisoned-lock error.
+    pub fn variable_value_checked(&self, name: &str) -> Result<Option<String>, FunctionError> {
+        match self.capabilities.variable_setter {
+            Some(setter) => setter
+                .get_variable_checked(name)
+                .map(|value| value.or_else(|| self.variable(name).map(str::to_owned))),
+            None => Ok(self.variable(name).map(str::to_owned)),
+        }
+    }
+
     /// Resolves a property for a function implementation.
     #[must_use]
     pub fn property(&self, name: &str) -> Option<&str> {
@@ -1072,6 +3592,16 @@ impl<'a> FunctionContext<'a> {
             .or_else(|| self.property(name).map(str::to_owned))
     }
 
+    /// Resolves a property and preserves a capability's poisoned-lock error.
+    pub fn property_value_checked(&self, name: &str) -> Result<Option<String>, FunctionError> {
+        match self.capabilities.property_setter {
+            Some(setter) => setter
+                .get_property_checked(name)
+                .map(|value| value.or_else(|| self.property(name).map(str::to_owned))),
+            None => Ok(self.property(name).map(str::to_owned)),
+        }
+    }
+
     /// Stores a variable through the explicitly supplied mutable capability.
     pub fn set_variable(&self, name: &str, value: &str) -> Result<(), FunctionError> {
         self.capabilities
@@ -1082,10 +3612,27 @@ impl<'a> FunctionContext<'a> {
             .set_variable(name, value)
     }
 
+    /// Stores several variables through the explicitly supplied mutable
+    /// capability as one logical mutation.
+    pub fn set_variables_atomic(&self, values: &[(&str, &str)]) -> Result<(), FunctionError> {
+        self.capabilities
+            .variable_setter
+            .ok_or_else(|| {
+                FunctionError::unsupported("variable mutation capability is unavailable")
+            })?
+            .set_variables_atomic(values)
+    }
+
     /// Returns whether variable mutation was explicitly supplied.
     #[must_use]
     pub fn has_variable_setter(&self) -> bool {
         self.capabilities.variable_setter.is_some()
+    }
+
+    /// Returns whether property mutation was explicitly supplied.
+    #[must_use]
+    pub fn has_property_setter(&self) -> bool {
+        self.capabilities.property_setter.is_some()
     }
 
     /// Removes a variable through the explicitly supplied mutable capability.
@@ -1126,6 +3673,12 @@ impl<'a> FunctionContext<'a> {
     #[must_use]
     pub fn random_source(&self) -> Option<&dyn RandomSource> {
         self.capabilities.random
+    }
+
+    /// Returns occurrence-bound native state hooks, if supplied.
+    #[must_use]
+    pub fn native_state(&self) -> Option<&dyn NativeStateCapability> {
+        self.capabilities.native_state
     }
 
     /// Returns the injected clock, if one is available.
@@ -1641,14 +4194,19 @@ impl<'a> Evaluator<'a> {
             let name = parsed.variable_name;
             // JMeter's parser permits the no-parentheses form for functions;
             // an unknown no-argument `__name` is represented as a simple
-            // variable by the upstream parser.  A static variable with the
-            // same name as a built-in takes precedence over that no-argument
-            // function form.
-            let variable = self.resolve_variable(name.as_str());
-            if name.starts_with("__")
+            // variable by the upstream parser.  Unlike variable names, the
+            // parser does not trim the no-parentheses lookup key, so `${__V
+            // }` is not the same function reference as `${__V}`.  A static
+            // variable with the same exact name as a built-in takes
+            // precedence over that no-argument function form.
+            let variable = self.resolve_variable(name.as_str())?;
+            if parsed.bare_name.starts_with("__")
                 && !parsed.had_parentheses
                 && variable.is_none()
-                && !matches!(self.functions.is_defined(name.as_str()), Some(false))
+                && !matches!(
+                    self.functions.is_defined(parsed.bare_name.as_str()),
+                    Some(false)
+                )
             {
                 let mut occurrence_path = occurrence_prefix.to_vec();
                 append_occurrence_segment(
@@ -1664,7 +4222,7 @@ impl<'a> Evaluator<'a> {
                 let occurrence = FunctionOccurrence::new(
                     self.function_instance_namespace,
                     occurrence_path.clone(),
-                    name.as_str(),
+                    parsed.bare_name.as_str(),
                 );
                 let nested_evaluator = NestedExpansion {
                     evaluator: self,
@@ -1682,12 +4240,15 @@ impl<'a> Evaluator<'a> {
                 );
                 match self
                     .functions
-                    .resolve_function(name.as_str(), &[], &context)
+                    .resolve_function(parsed.bare_name.as_str(), &[], &context)
                 {
                     Ok(Some(value)) => return Ok(value),
                     Ok(None) => {}
                     Err(source) => {
-                        return Err(EvaluationError::Function { name, source });
+                        return Err(EvaluationError::Function {
+                            name: parsed.bare_name,
+                            source,
+                        });
                     }
                 }
             }
@@ -1700,11 +4261,19 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    fn resolve_variable(&self, name: &str) -> Option<String> {
-        self.capabilities
-            .variable_setter
-            .and_then(|setter| setter.get_variable(name))
-            .or_else(|| self.variables.resolve_variable(name).map(str::to_owned))
+    fn resolve_variable(&self, name: &str) -> Result<Option<String>, EvaluationError> {
+        match self.capabilities.variable_setter {
+            Some(setter) => setter
+                .get_variable_checked(name)
+                .map(|value| {
+                    value.or_else(|| self.variables.resolve_variable(name).map(str::to_owned))
+                })
+                .map_err(|source| EvaluationError::Function {
+                    name: name.to_owned(),
+                    source,
+                }),
+            None => Ok(self.variables.resolve_variable(name).map(str::to_owned)),
+        }
     }
 }
 
@@ -1883,6 +4452,7 @@ fn unescape_name(value: &str) -> String {
 fn reference_is_function(input: &str, start: usize) -> bool {
     let mut index = start + 2;
     let name_start = index;
+    let mut previous = ' ';
     while index < input.len() {
         let Some(character) = input[index..].chars().next() else {
             break;
@@ -1890,19 +4460,20 @@ fn reference_is_function(input: &str, start: usize) -> bool {
         if character == '\\' {
             let slash_end = index + character.len_utf8();
             if let Some(next) = input[slash_end..].chars().next() {
+                previous = ' ';
                 index = slash_end + next.len_utf8();
                 continue;
             }
             break;
         }
-        if character == '(' {
+        if character == '(' && previous != ' ' {
             let unescaped = unescape_name(&input[name_start..index]);
-            let name = trim_name(&unescaped);
-            return name.starts_with("__");
+            return trim_name(&unescaped).starts_with("__");
         }
         if character == '}' || character == '$' {
             return false;
         }
+        previous = character;
         index += character.len_utf8();
     }
     false
@@ -1966,6 +4537,7 @@ fn find_reference_end(
 
 struct ParsedReference {
     variable_name: String,
+    bare_name: String,
     function: Option<ParsedFunction>,
     had_parentheses: bool,
 }
@@ -1977,9 +4549,11 @@ struct ParsedFunction {
 
 fn parse_reference_body(body: &str, offset: usize) -> Result<ParsedReference, EvaluationError> {
     let Some(open) = find_top_level_open_paren(body) else {
-        let name = trim_name(unescape_name(body).as_str()).to_owned();
+        let bare_name = unescape_name(body);
+        let name = trim_name(&bare_name).to_owned();
         return Ok(ParsedReference {
             variable_name: name,
+            bare_name,
             function: None,
             had_parentheses: false,
         });
@@ -1989,6 +4563,7 @@ fn parse_reference_body(body: &str, offset: usize) -> Result<ParsedReference, Ev
     if !function_name.starts_with("__") {
         return Ok(ParsedReference {
             variable_name: trim_name(unescape_name(body).as_str()).to_owned(),
+            bare_name: String::new(),
             function: None,
             had_parentheses: true,
         });
@@ -2004,6 +4579,7 @@ fn parse_reference_body(body: &str, offset: usize) -> Result<ParsedReference, Ev
     let arguments = split_arguments(&body[open + 1..close]);
     Ok(ParsedReference {
         variable_name: String::new(),
+        bare_name: String::new(),
         function: Some(ParsedFunction {
             name: function_name,
             arguments,
@@ -2014,11 +4590,17 @@ fn parse_reference_body(body: &str, offset: usize) -> Result<ParsedReference, Ev
 
 fn find_top_level_open_paren(body: &str) -> Option<usize> {
     let mut index = 0;
+    let mut previous = ' ';
     while index < body.len() {
         let character = body[index..].chars().next()?;
         if character == '\\' {
             let slash_end = index + character.len_utf8();
             if let Some(next) = body[slash_end..].chars().next() {
+                // FunctionParser resets its `previous` marker after an
+                // escape.  In particular, `${__name (arg)}` is not a
+                // function call, while `${__name\t(arg)}` is (the parser's
+                // historical check is specifically against ASCII space).
+                previous = ' ';
                 index = slash_end + next.len_utf8();
                 continue;
             }
@@ -2027,9 +4609,10 @@ fn find_top_level_open_paren(body: &str) -> Option<usize> {
         if character == '$' && body[index + character.len_utf8()..].starts_with('{') {
             return None;
         }
-        if character == '(' {
+        if character == '(' && previous != ' ' {
             return Some(index);
         }
+        previous = character;
         index += character.len_utf8();
     }
     None
@@ -2083,7 +4666,6 @@ fn split_arguments(arguments: &str) -> Vec<String> {
     let mut start = 0;
     let mut index = 0;
     let mut nested_references = 0usize;
-    let mut parenthesis_depth = 0usize;
     while index < arguments.len() {
         let Some(character) = arguments[index..].chars().next() else {
             break;
@@ -2109,14 +4691,15 @@ fn split_arguments(arguments: &str) -> Vec<String> {
             index += character.len_utf8();
             continue;
         }
-        match character {
-            '(' => parenthesis_depth = parenthesis_depth.saturating_add(1),
-            ')' if parenthesis_depth > 0 => parenthesis_depth -= 1,
-            ',' if parenthesis_depth == 0 => {
-                result.push(arguments[start..index].to_owned());
-                start = index + character.len_utf8();
-            }
-            _ => {}
+        // JMeter only treats commas inside a nested `${...}` reference as
+        // protected.  Ordinary parentheses are just function-argument text:
+        // `${__javaScript(Math.max(2,5))}` is parsed as two arguments unless
+        // the comma is escaped.  Parentheses still participate in locating a
+        // function's closing `)` in `find_function_close`, but they must not
+        // change comma splitting here.
+        if character == ',' {
+            result.push(arguments[start..index].to_owned());
+            start = index + character.len_utf8();
         }
         index += character.len_utf8();
     }
@@ -2127,6 +4710,7 @@ fn split_arguments(arguments: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
@@ -2246,6 +4830,27 @@ mod tests {
     }
 
     #[test]
+    fn an_ascii_space_before_function_parenthesis_keeps_the_reference_undefined() {
+        let variables: HashMap<String, String> = HashMap::new();
+        let properties: HashMap<String, String> = HashMap::new();
+        let eval = evaluator(&variables, &properties);
+
+        // FunctionParser's recognition rule is `previous != ' '`.  The
+        // function name itself is trimmed once a call is recognized, but an
+        // ASCII space before `(` prevents recognition altogether.
+        assert_eq!(
+            eval.evaluate("${__echo (value)}"),
+            Ok("${__echo (value)}".to_owned())
+        );
+        assert_eq!(
+            eval.evaluate("${__echo (value}"),
+            Ok("${__echo (value}".to_owned())
+        );
+        assert_eq!(eval.evaluate("${__echo\t(value)}"), Ok("value".to_owned()));
+        assert_eq!(eval.evaluate("${__echo }"), Ok("${__echo }".to_owned()));
+    }
+
+    #[test]
     fn function_close_uses_java_space_char_but_names_use_java_trim() {
         let variables = HashMap::new();
         let properties: HashMap<String, String> = HashMap::new();
@@ -2293,11 +4898,34 @@ mod tests {
         let properties: HashMap<String, String> = HashMap::new();
         let eval = evaluator(&variables, &properties);
         assert_eq!(
-            eval.evaluate("${__join(${__echo(a,b)},${NAME},c(d,e))}"),
+            eval.evaluate(r"${__join(${__echo(a,b)},${NAME},c(d\,e))}"),
             Ok("a|Ada|c(d,e)".to_owned())
         );
         assert_eq!(eval.evaluate("${__join(,x,)}"), Ok("|x|".to_owned()));
         assert_eq!(eval.evaluate("${__join()}"), Ok(String::new()));
+    }
+
+    #[test]
+    fn commas_inside_nested_references_are_protected_but_parentheses_are_not() {
+        let variables: HashMap<String, String> = HashMap::new();
+        let properties: HashMap<String, String> = HashMap::new();
+        let eval = evaluator(&variables, &properties);
+
+        // A nested function/reference is parsed as one argument, while the
+        // comma in ordinary function text is a delimiter.  JMeter therefore
+        // requires the comma in Math.max to be escaped.
+        assert_eq!(
+            eval.evaluate(r"${__join(Math.max(2,5),tail)}"),
+            Ok("Math.max(2|5)|tail".to_owned())
+        );
+        assert_eq!(
+            eval.evaluate(r"${__join(Math.max(2\,5),tail)}"),
+            Ok("Math.max(2,5)|tail".to_owned())
+        );
+        assert_eq!(
+            eval.evaluate(r"${__join(${__join(a,b)},tail)}"),
+            Ok("a|b|tail".to_owned())
+        );
     }
 
     #[test]
@@ -2456,6 +5084,11 @@ mod tests {
             Some(ErrorCode::FunctionError)
         );
         assert_eq!(FunctionError::stop_thread("eof").code(), "FUNC_STOP_THREAD");
+        assert_eq!(FunctionError::poisoned("lock").code(), "FUNC_POISONED");
+        assert!(matches!(
+            FunctionError::poisoned("lock"),
+            FunctionError::Poisoned(message) if message == "lock"
+        ));
     }
 
     #[test]
@@ -2497,6 +5130,314 @@ mod tests {
                 assert!(worker.join().is_ok());
             }
         });
+    }
+
+    #[test]
+    #[allow(clippy::expect_used)]
+    fn field_lifecycle_and_cache_policy_are_explicit() {
+        let field = ExpressionField::new(
+            ExpressionFieldId::new(7),
+            "Arguments.value",
+            "${__echo(value)}",
+            ExpressionCachePolicy::PerIteration,
+        )
+        .expect("field source is valid");
+        assert_eq!(
+            field.state(),
+            Ok(ExpressionFieldState::RawBeforeRunningVersion)
+        );
+        assert_eq!(field.occurrences().len(), 1);
+        let escaped = ExpressionField::new(
+            ExpressionFieldId::new(8),
+            "Arguments.escaped",
+            r"\${__echo(raw)} ${__echo(evaluated)}",
+            ExpressionCachePolicy::Disabled,
+        )
+        .expect("escaped field source is valid");
+        assert_eq!(escaped.occurrences().len(), 1);
+        let calls = std::cell::Cell::new(0usize);
+        assert_eq!(
+            field.read_with(Some(IterationIdentity::new(0)), |_| {
+                calls.set(calls.get() + 1);
+                Ok("raw".to_owned())
+            }),
+            Ok("${__echo(value)}".to_owned())
+        );
+        field.start_running_version().expect("raw -> running");
+        assert_eq!(
+            field.read_with(None, |_| {
+                calls.set(calls.get() + 1);
+                Ok("before-sampling".to_owned())
+            }),
+            Ok("before-sampling".to_owned())
+        );
+        field
+            .start_sampling(IterationIdentity::for_user(1, 2, 0))
+            .expect("running -> sampling");
+        assert_eq!(
+            field.read_with(Some(IterationIdentity::for_user(1, 2, 0)), |_| {
+                calls.set(calls.get() + 1);
+                Ok("cached".to_owned())
+            }),
+            Ok("cached".to_owned())
+        );
+        assert_eq!(
+            field.read_with(Some(IterationIdentity::for_user(1, 2, 0)), |_| {
+                calls.set(calls.get() + 1);
+                Ok("changed".to_owned())
+            }),
+            Ok("cached".to_owned())
+        );
+        assert_eq!(calls.get(), 2);
+        assert!(matches!(
+            field.read_with(Some(IterationIdentity::new(0)), |_| Ok("bad".to_owned())),
+            Err(ExpressionFieldError::IterationMismatch { .. })
+        ));
+        field.finish().expect("sampling -> finished");
+        assert_eq!(
+            field.read_with(None, |_| Ok("not-read".to_owned())),
+            Err(ExpressionFieldError::Finished)
+        );
+    }
+
+    #[test]
+    #[allow(clippy::expect_used)]
+    fn session_overlay_is_ordered_and_duplicate_projection_is_last_wins() {
+        let identity =
+            ExpressionSessionIdentity::for_user(1, 2, 3, ExpressionFieldId::new(4), "preprocessor");
+        let mut session = ExpressionSession::new(
+            identity,
+            BTreeMap::from([(String::from("A"), String::from("base"))]),
+            BTreeMap::new(),
+            ExpressionSessionLimits::default(),
+        )
+        .expect("session is within bounds");
+        assert_eq!(session.resolve_variable("A"), Some("base"));
+        session.set_variable("A", "first").expect("first write");
+        assert_eq!(session.resolve_variable("A"), Some("first"));
+        session
+            .set_variable("A", "second")
+            .expect("duplicate write");
+        assert_eq!(session.resolve_variable("A"), Some("second"));
+        assert_eq!(session.variable_overlay().len(), 2);
+        assert_eq!(
+            session.final_variables().get("A").map(String::as_str),
+            Some("second")
+        );
+        assert_eq!(session.journal().len(), 2);
+        assert!(matches!(
+            session.journal().entries()[0].effect(),
+            ExpressionEffect::Variable {
+                previous: Some(previous),
+                ..
+            } if previous == "base"
+        ));
+        assert!(matches!(
+            session.journal().entries()[1].effect(),
+            ExpressionEffect::Variable {
+                previous: Some(previous),
+                ..
+            } if previous == "first"
+        ));
+    }
+
+    #[test]
+    #[allow(clippy::expect_used)]
+    fn session_journal_is_bounded_and_occurrences_are_not_refreshed() {
+        let identity =
+            ExpressionSessionIdentity::new(1, 2, 3, 4, ExpressionFieldId::new(5), "sampler");
+        let limits = ExpressionSessionLimits::new(64, 64, 4, 8, 8, 1, 1_024, 64);
+        let mut session =
+            ExpressionSession::new(identity, BTreeMap::new(), BTreeMap::new(), limits)
+                .expect("session is within bounds");
+        let occurrence = FunctionOccurrence::new(11, vec![7, 2], "__counter");
+        session
+            .record_occurrence(occurrence.clone())
+            .expect("first occurrence");
+        session
+            .record_occurrence(occurrence.clone())
+            .expect("duplicate occurrence remains an ordered observation");
+        assert_eq!(
+            session.occurrences(),
+            &[occurrence.clone(), occurrence.clone()]
+        );
+        session
+            .journal_random(occurrence.clone(), 42)
+            .expect("first journal entry");
+        assert!(matches!(
+            session.record_effect(
+                EffectClass::Pure,
+                ExpressionEffect::External {
+                    class: EffectClass::TransactionalExternal,
+                    operation: "mismatch".to_owned(),
+                },
+            ),
+            Err(SessionError::InvalidOutcome(message))
+                if message == "effect class does not match effect payload"
+        ));
+        assert!(matches!(
+            session.journal_random(occurrence, 43),
+            Err(SessionError::JournalLimit { limit: 1 })
+        ));
+        assert_eq!(session.journal().len(), 1);
+    }
+
+    #[test]
+    #[allow(clippy::expect_used)]
+    fn session_limits_outcomes_generation_and_authority_poison_are_typed() {
+        let limits = ExpressionSessionLimits::new(64, 64, 2, 2, 1, 1, 256, 8);
+        let identity =
+            ExpressionSessionIdentity::new(1, 1, 1, 1, ExpressionFieldId::new(1), "phase");
+        let mut bounded =
+            ExpressionSession::new(identity.clone(), BTreeMap::new(), BTreeMap::new(), limits)
+                .expect("bounded session");
+        bounded.set_variable("A", "1").expect("first mutation");
+        assert!(matches!(
+            bounded.set_variable("B", "2"),
+            Err(SessionError::MutationLimit { limit: 1 })
+        ));
+        let committed = bounded.commit("value").expect("commit");
+        assert!(matches!(committed, ExpressionSessionOutcome::Commit { .. }));
+
+        let mut diagnostic = ExpressionSession::new(
+            identity.clone(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            ExpressionSessionLimits::default(),
+        )
+        .expect("diagnostic session");
+        let diagnostic_outcome = diagnostic
+            .commit_with_diagnostic("partial", "warn")
+            .expect("diagnostic commit");
+        assert!(matches!(
+            diagnostic_outcome,
+            ExpressionSessionOutcome::CommitWithDiagnostic { .. }
+        ));
+
+        let mut aborted = ExpressionSession::new(
+            identity.clone(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            ExpressionSessionLimits::default(),
+        )
+        .expect("abort session");
+        aborted.set_variable("A", "1").expect("journal prefix");
+        assert!(matches!(
+            aborted.abort_before_effects(SessionError::InvalidOutcome("known failure".to_owned())),
+            Err(SessionError::InvalidOutcome(message))
+                if message == "abort-before-effects requires an empty effect journal"
+        ));
+        let mut clean_abort = ExpressionSession::new(
+            identity.clone(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+            ExpressionSessionLimits::default(),
+        )
+        .expect("clean abort session");
+        assert!(matches!(
+            clean_abort
+                .abort_before_effects(SessionError::InvalidOutcome("known failure".to_owned())),
+            Ok(ExpressionSessionOutcome::AbortBeforeEffects { .. })
+        ));
+
+        let runtime = ExpressionRuntime::new();
+        let mut stale = runtime
+            .begin_session(
+                identity.clone(),
+                BTreeMap::new(),
+                BTreeMap::new(),
+                ExpressionSessionLimits::default(),
+            )
+            .expect("runtime session");
+        runtime.advance_generation().expect("generation advance");
+        assert!(matches!(
+            stale.commit("stale"),
+            Err(SessionError::StaleGeneration { .. })
+        ));
+
+        let mut uncertain = runtime
+            .begin_session(
+                identity,
+                BTreeMap::new(),
+                BTreeMap::new(),
+                ExpressionSessionLimits::default(),
+            )
+            .expect("second runtime session");
+        let outcome = uncertain
+            .uncertain_after_external_effect(SessionError::InvalidOutcome(
+                "worker ambiguous".to_owned(),
+            ))
+            .expect("uncertain outcome");
+        assert!(matches!(
+            outcome,
+            ExpressionSessionOutcome::UncertainAfterExternalEffect { .. }
+        ));
+        assert!(runtime.is_poisoned().expect("poison state read"));
+        assert!(matches!(
+            runtime.begin_session(
+                ExpressionSessionIdentity::new(1, 1, 1, 1, ExpressionFieldId::new(1), "phase"),
+                BTreeMap::new(),
+                BTreeMap::new(),
+                ExpressionSessionLimits::default(),
+            ),
+            Err(SessionError::Poisoned(_))
+        ));
+    }
+
+    #[test]
+    fn shared_registry_handle_and_fresh_registry_are_distinct() {
+        struct Execution {
+            iteration: u64,
+        }
+        impl ExecutionContext for Execution {
+            fn thread_num(&self) -> Option<u32> {
+                Some(1)
+            }
+            fn lifecycle_id(&self) -> Option<u64> {
+                Some(1)
+            }
+            fn iteration_id(&self) -> Option<u64> {
+                Some(self.iteration)
+            }
+        }
+        let execution = Execution { iteration: 0 };
+        let capabilities = EvaluationCapabilities::new().with_execution_context(&execution);
+        let variables = BTreeMap::<String, String>::new();
+        let properties = BTreeMap::<String, String>::new();
+        let shared = SharedBuiltinFunctions::new();
+        let shared_clone = shared.clone();
+        assert_eq!(shared.strong_count(), 2);
+        let first = Evaluator::with_capabilities(&variables, &properties, &shared, capabilities);
+        assert_eq!(first.evaluate("${__counter(false)}"), Ok("1".to_owned()));
+        let next_execution = Execution {
+            // A new iteration is required because JMeter's global counter
+            // caches one value per occurrence and complete iteration.
+            iteration: 1,
+        };
+        let second =
+            Evaluator::with_capabilities(&variables, &properties, &shared_clone, capabilities);
+        assert_eq!(second.evaluate("${__counter(false)}"), Ok("1".to_owned()));
+        let second_iteration_capabilities =
+            EvaluationCapabilities::new().with_execution_context(&next_execution);
+        let second_iteration = Evaluator::with_capabilities(
+            &variables,
+            &properties,
+            &shared_clone,
+            second_iteration_capabilities,
+        );
+        assert_eq!(
+            second_iteration.evaluate("${__counter(false)}"),
+            Ok("2".to_owned())
+        );
+        let fresh = BuiltinFunctions::new();
+        let fresh_clone = fresh.fresh_clone();
+        let third = Evaluator::with_capabilities(
+            &variables,
+            &properties,
+            &fresh_clone,
+            second_iteration_capabilities,
+        );
+        assert_eq!(third.evaluate("${__counter(false)}"), Ok("1".to_owned()));
     }
 
     fn next_random(seed: &mut u64) -> u64 {

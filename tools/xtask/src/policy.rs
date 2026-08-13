@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Deterministic policy checks for the TEST-003 and TEST-005 boundaries.
+//! Deterministic policy checks for the TEST-001, TEST-003, and TEST-005 boundaries.
 //!
 //! This module intentionally validates the checked-in declarations directly.
 //! It does not invoke the Python performance planner, Cargo, a fuzzing
@@ -15,6 +15,7 @@ use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use toml::Value as TomlValue;
 
 const MAX_DECLARATION_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_JSON_DEPTH: usize = 64;
@@ -41,6 +42,19 @@ const STANDALONE_FORBIDDEN_EMBEDDED_EXTENSIONS: [&str; 11] = [
     "jar", "class", "java", "jmod", "war", "ear", "zip", "exe", "dll", "so", "dylib",
 ];
 const STANDALONE_NOTICE_FILES: [&str; 2] = ["LICENSE", "NOTICE"];
+const STANDALONE_RUNTIME_DEPENDENCIES: [StandaloneDependencySpec; 7] = [
+    StandaloneDependencySpec::path("jmeter-rs-http", "0.1.0", "../../crates/http"),
+    StandaloneDependencySpec::path("jmeter-rs-http-native", "0.1.0", "../../crates/http-native"),
+    StandaloneDependencySpec::path("jmeter-rs-jmx", "0.1.0", "../../crates/jmx"),
+    StandaloneDependencySpec::path("jmeter-rs-model", "0.1.0", "../../crates/model"),
+    StandaloneDependencySpec::path("jmeter-rs-report", "0.1.0", "../../crates/report"),
+    StandaloneDependencySpec::path("jmeter-rs-results", "0.1.0", "../../crates/results"),
+    StandaloneDependencySpec::path("jmeter-rs-runtime", "0.1.0", "../../crates/runtime"),
+];
+const STANDALONE_DEV_DEPENDENCIES: [StandaloneDependencySpec; 2] = [
+    StandaloneDependencySpec::path("jmeter-rs-expr", "0.1.0", "../../crates/expr"),
+    StandaloneDependencySpec::registry("rcgen", "=0.14.9"),
+];
 const FUZZ_FORBIDDEN_IO_MARKERS: [&str; 16] = [
     "std::fs::",
     "use std::fs",
@@ -59,6 +73,37 @@ const FUZZ_FORBIDDEN_IO_MARKERS: [&str; 16] = [
     "read_to_string(",
     "read_to_end(",
 ];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StandaloneDependencySource {
+    Path(&'static str),
+    CratesIo,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct StandaloneDependencySpec {
+    package: &'static str,
+    version: &'static str,
+    source: StandaloneDependencySource,
+}
+
+impl StandaloneDependencySpec {
+    const fn path(package: &'static str, version: &'static str, path: &'static str) -> Self {
+        Self {
+            package,
+            version,
+            source: StandaloneDependencySource::Path(path),
+        }
+    }
+
+    const fn registry(package: &'static str, version: &'static str) -> Self {
+        Self {
+            package,
+            version,
+            source: StandaloneDependencySource::CratesIo,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct FuzzTargetSpec {
@@ -244,6 +289,495 @@ fn is_root_generated_artifact(path: &Path) -> bool {
                 .iter()
                 .any(|expected| extension.eq_ignore_ascii_case(expected))
         })
+}
+
+/// Enforce Decision 0009's default standalone product boundary.
+///
+/// This is intentionally a source/manifest check rather than a build probe:
+/// it must remain deterministic, offline, and safe to run from an ordinary
+/// repository checkout.  The application manifest is a closed allowlist of
+/// native runtime path dependencies plus explicitly pinned test-only registry
+/// dependencies, and its source tree cannot carry a JVM or compatibility-pack
+/// artifact.  Binary-linkage and target-specific static evidence remain
+/// release-build responsibilities; this check rejects the repository
+/// declarations that could make those claims false by construction.
+fn check_standalone_release_policy(root: &Path, diagnostics: &mut Diagnostics) {
+    check_standalone_manifest(root, diagnostics);
+    check_standalone_source(root, diagnostics);
+    check_standalone_notice_files(root, diagnostics);
+}
+
+fn check_standalone_manifest(root: &Path, diagnostics: &mut Diagnostics) {
+    let path = root.join(STANDALONE_MANIFEST_PATH);
+    let display = display_path(root, &path);
+    let Some(text) = read_text(root, &path, diagnostics) else {
+        return;
+    };
+    let manifest = match text.parse::<toml::Table>() {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            diagnostics.push(Diagnostic::new(
+                "POLICY-STANDALONE-MANIFEST",
+                display,
+                format!("invalid Cargo manifest: {error}"),
+            ));
+            return;
+        }
+    };
+
+    let Some(package) = manifest.get("package").and_then(TomlValue::as_table) else {
+        diagnostics.push(Diagnostic::new(
+            "POLICY-STANDALONE-MANIFEST",
+            format!("{display}.package"),
+            "standalone application manifest must declare a [package] table",
+        ));
+        return;
+    };
+    if package.get("name").and_then(TomlValue::as_str) != Some("jmeter-rs") {
+        diagnostics.push(Diagnostic::new(
+            "POLICY-STANDALONE-MANIFEST",
+            format!("{display}.package.name"),
+            "standalone application package name must be \"jmeter-rs\"",
+        ));
+    }
+    if package.get("build").is_some() {
+        diagnostics.push(Diagnostic::new(
+            "POLICY-STANDALONE-MANIFEST",
+            format!("{display}.package.build"),
+            "standalone application must not use a build script or generate sidecar artifacts",
+        ));
+    }
+
+    check_standalone_binary_targets(&manifest, &display, diagnostics);
+    check_standalone_dependency_sections(&manifest, &display, diagnostics);
+    check_standalone_feature_references(&manifest, &display, diagnostics);
+}
+
+fn check_standalone_binary_targets(
+    manifest: &toml::Table,
+    display: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    let Some(binaries) = manifest.get("bin").and_then(TomlValue::as_array) else {
+        diagnostics.push(Diagnostic::new(
+            "POLICY-STANDALONE-MANIFEST",
+            format!("{display}.[[bin]]"),
+            "standalone application must declare exactly one binary target",
+        ));
+        return;
+    };
+    let mut expected_targets = 0_usize;
+    for (index, binary) in binaries.iter().enumerate() {
+        let context = format!("{display}.[[bin]][{index}]");
+        let Some(binary) = binary.as_table() else {
+            diagnostics.push(Diagnostic::new(
+                "POLICY-STANDALONE-MANIFEST",
+                context,
+                "binary target declaration must be a TOML table",
+            ));
+            continue;
+        };
+        let name = binary.get("name").and_then(TomlValue::as_str);
+        let path = binary.get("path").and_then(TomlValue::as_str);
+        if name == Some("jmeter-rs") && path == Some("src/main.rs") {
+            expected_targets += 1;
+        } else {
+            diagnostics.push(Diagnostic::new(
+                "POLICY-STANDALONE-MANIFEST",
+                context,
+                "the standalone package may expose only the jmeter-rs binary at src/main.rs",
+            ));
+        }
+    }
+    if binaries.len() != 1 || expected_targets != 1 {
+        diagnostics.push(Diagnostic::new(
+            "POLICY-STANDALONE-MANIFEST",
+            format!("{display}.[[bin]]"),
+            "standalone application must declare exactly one jmeter-rs binary target",
+        ));
+    }
+}
+
+fn check_standalone_dependency_sections(
+    manifest: &toml::Table,
+    display: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    check_standalone_dependency_section(
+        manifest,
+        "dependencies",
+        &STANDALONE_RUNTIME_DEPENDENCIES,
+        display,
+        diagnostics,
+    );
+    check_standalone_dependency_section(
+        manifest,
+        "dev-dependencies",
+        &STANDALONE_DEV_DEPENDENCIES,
+        display,
+        diagnostics,
+    );
+    check_standalone_dependency_section(manifest, "build-dependencies", &[], display, diagnostics);
+
+    if let Some(targets) = manifest.get("target") {
+        let context = format!("{display}.target");
+        let Some(targets) = targets.as_table() else {
+            diagnostics.push(Diagnostic::new(
+                "POLICY-STANDALONE-MANIFEST",
+                context,
+                "target-specific dependency configuration must be a TOML table",
+            ));
+            return;
+        };
+        for (target_name, target_value) in targets {
+            let target_context = format!("{display}.target.{target_name}");
+            let Some(target) = target_value.as_table() else {
+                diagnostics.push(Diagnostic::new(
+                    "POLICY-STANDALONE-MANIFEST",
+                    target_context,
+                    "target-specific dependency configuration must be a TOML table",
+                ));
+                continue;
+            };
+            check_standalone_dependency_section(
+                target,
+                "dependencies",
+                &STANDALONE_RUNTIME_DEPENDENCIES,
+                &target_context,
+                diagnostics,
+            );
+            check_standalone_dependency_section(
+                target,
+                "dev-dependencies",
+                &STANDALONE_DEV_DEPENDENCIES,
+                &target_context,
+                diagnostics,
+            );
+            check_standalone_dependency_section(
+                target,
+                "build-dependencies",
+                &[],
+                &target_context,
+                diagnostics,
+            );
+        }
+    }
+}
+
+fn check_standalone_dependency_section(
+    parent: &toml::Table,
+    section_name: &str,
+    allowed: &[StandaloneDependencySpec],
+    display: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    let Some(section) = parent.get(section_name) else {
+        return;
+    };
+    let context = format!("{display}.{section_name}");
+    let Some(section) = section.as_table() else {
+        diagnostics.push(Diagnostic::new(
+            "POLICY-STANDALONE-MANIFEST",
+            context,
+            "dependency section must be a TOML table",
+        ));
+        return;
+    };
+    for (declared_name, dependency) in section {
+        check_standalone_dependency(
+            declared_name,
+            dependency,
+            allowed,
+            &format!("{display}.{section_name}.{declared_name}"),
+            diagnostics,
+        );
+    }
+}
+
+fn check_standalone_dependency(
+    declared_name: &str,
+    dependency: &TomlValue,
+    allowed: &[StandaloneDependencySpec],
+    context: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    let dependency_table = dependency.as_table();
+    let package_name = dependency_table
+        .and_then(|table| table.get("package"))
+        .and_then(TomlValue::as_str)
+        .unwrap_or(declared_name);
+    if let Some(forbidden) = forbidden_standalone_package(package_name) {
+        diagnostics.push(Diagnostic::new(
+            "POLICY-STANDALONE-DEPENDENCY",
+            context,
+            format!("compatibility-pack package {forbidden:?} is not allowed in the standalone application"),
+        ));
+    }
+
+    let expected = allowed
+        .iter()
+        .find(|spec| spec.package == package_name)
+        .copied();
+    let Some(expected) = expected else {
+        diagnostics.push(Diagnostic::new(
+            "POLICY-STANDALONE-DEPENDENCY",
+            context,
+            format!(
+                "dependency {package_name:?} is outside the closed native standalone allowlist"
+            ),
+        ));
+        return;
+    };
+
+    let Some(dependency_table) = dependency_table else {
+        diagnostics.push(Diagnostic::new(
+            "POLICY-STANDALONE-DEPENDENCY",
+            context,
+            "standalone dependencies must use an explicit native path declaration",
+        ));
+        return;
+    };
+    check_standalone_dependency_source(
+        &expected,
+        dependency_table,
+        package_name,
+        context,
+        diagnostics,
+    );
+    if dependency_table.get("version").and_then(TomlValue::as_str) != Some(expected.version) {
+        diagnostics.push(Diagnostic::new(
+            "POLICY-STANDALONE-DEPENDENCY",
+            context,
+            format!(
+                "dependency {package_name:?} must use exact version requirement {:?}",
+                expected.version
+            ),
+        ));
+    }
+    if dependency_table
+        .get("default-features")
+        .is_some_and(|value| value != &TomlValue::Boolean(false))
+    {
+        diagnostics.push(Diagnostic::new(
+            "POLICY-STANDALONE-DEPENDENCY",
+            context,
+            "standalone dependencies must not enable Cargo default features",
+        ));
+    }
+    if dependency_table
+        .get("optional")
+        .and_then(TomlValue::as_bool)
+        == Some(true)
+    {
+        diagnostics.push(Diagnostic::new(
+            "POLICY-STANDALONE-DEPENDENCY",
+            context,
+            "standalone dependencies must not be optional compatibility switches",
+        ));
+    }
+    if let Some(features) = dependency_table.get("features") {
+        if let Some(features) = features.as_array() {
+            for (index, feature) in features.iter().enumerate() {
+                let feature_context = format!("{context}.features[{index}]");
+                if let Some(feature) = feature.as_str()
+                    && let Some(forbidden) = forbidden_standalone_package(feature)
+                {
+                    diagnostics.push(Diagnostic::new(
+                        "POLICY-STANDALONE-DEPENDENCY",
+                        feature_context,
+                        format!("feature reference contains forbidden package {forbidden:?}"),
+                    ));
+                }
+            }
+        } else {
+            diagnostics.push(Diagnostic::new(
+                "POLICY-STANDALONE-MANIFEST",
+                format!("{context}.features"),
+                "dependency features must be declared as an array",
+            ));
+        }
+    }
+}
+
+fn check_standalone_dependency_source(
+    expected: &StandaloneDependencySpec,
+    dependency: &toml::Table,
+    package_name: &str,
+    context: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    match expected.source {
+        StandaloneDependencySource::Path(path) => {
+            if dependency.get("path").and_then(TomlValue::as_str) != Some(path) {
+                diagnostics.push(Diagnostic::new(
+                    "POLICY-STANDALONE-DEPENDENCY",
+                    context,
+                    format!("native dependency {package_name:?} must use path {path:?}"),
+                ));
+            }
+            if dependency.get("git").is_some() || dependency.get("registry").is_some() {
+                diagnostics.push(Diagnostic::new(
+                    "POLICY-STANDALONE-DEPENDENCY",
+                    context,
+                    format!(
+                        "native dependency {package_name:?} must use the exact local path source"
+                    ),
+                ));
+            }
+        }
+        StandaloneDependencySource::CratesIo => {
+            if dependency.get("path").is_some() || dependency.get("git").is_some() {
+                diagnostics.push(Diagnostic::new(
+                    "POLICY-STANDALONE-DEPENDENCY",
+                    context,
+                    format!(
+                        "dev dependency {package_name:?} must use the crates.io registry source"
+                    ),
+                ));
+            }
+            if dependency
+                .get("default-features")
+                .and_then(TomlValue::as_bool)
+                != Some(false)
+            {
+                diagnostics.push(Diagnostic::new(
+                    "POLICY-STANDALONE-DEPENDENCY",
+                    context,
+                    format!(
+                        "dev dependency {package_name:?} must explicitly disable Cargo default features"
+                    ),
+                ));
+            }
+            if dependency.get("registry").is_some() {
+                diagnostics.push(Diagnostic::new(
+                    "POLICY-STANDALONE-DEPENDENCY",
+                    context,
+                    format!(
+                        "dev dependency {package_name:?} must use the crates.io default registry"
+                    ),
+                ));
+            }
+        }
+    }
+}
+
+fn check_standalone_feature_references(
+    manifest: &toml::Table,
+    display: &str,
+    diagnostics: &mut Diagnostics,
+) {
+    let Some(features) = manifest.get("features") else {
+        return;
+    };
+    let Some(features) = features.as_table() else {
+        diagnostics.push(Diagnostic::new(
+            "POLICY-STANDALONE-MANIFEST",
+            format!("{display}.features"),
+            "Cargo features must be declared as a TOML table",
+        ));
+        return;
+    };
+    for (feature_name, values) in features {
+        let Some(values) = values.as_array() else {
+            diagnostics.push(Diagnostic::new(
+                "POLICY-STANDALONE-MANIFEST",
+                format!("{display}.features.{feature_name}"),
+                "Cargo feature values must be arrays",
+            ));
+            continue;
+        };
+        for (index, value) in values.iter().enumerate() {
+            let Some(value) = value.as_str() else {
+                continue;
+            };
+            if let Some(forbidden) = forbidden_standalone_package(value) {
+                diagnostics.push(Diagnostic::new(
+                    "POLICY-STANDALONE-DEPENDENCY",
+                    format!("{display}.features.{feature_name}[{index}]"),
+                    format!("feature reference contains forbidden package {forbidden:?}"),
+                ));
+            }
+        }
+    }
+}
+
+fn forbidden_standalone_package(value: &str) -> Option<&'static str> {
+    let normalized = value.replace('_', "-").to_ascii_lowercase();
+    STANDALONE_FORBIDDEN_RUNTIME_PACKAGES
+        .iter()
+        .copied()
+        .find(|forbidden| normalized == *forbidden || normalized.contains(forbidden))
+}
+
+fn check_standalone_source(root: &Path, diagnostics: &mut Diagnostics) {
+    let source_root = root.join(STANDALONE_SOURCE_PATH);
+    let source_display = display_path(root, &source_root);
+    let metadata = match fs::symlink_metadata(&source_root) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            diagnostics.push(Diagnostic::new(
+                "POLICY-STANDALONE-SOURCE",
+                source_display,
+                format!("cannot inspect standalone source tree: {error}"),
+            ));
+            return;
+        }
+    };
+    if metadata.file_type().is_symlink() {
+        diagnostics.push(Diagnostic::new(
+            "POLICY-STANDALONE-SOURCE",
+            source_display,
+            "standalone source tree must not be a symlink",
+        ));
+        return;
+    }
+    if !metadata.is_dir() {
+        diagnostics.push(Diagnostic::new(
+            "POLICY-STANDALONE-SOURCE",
+            source_display,
+            "standalone source tree must be a directory",
+        ));
+        return;
+    }
+
+    let mut files = Vec::new();
+    collect_files(root, &source_root, 0, &mut files, diagnostics);
+    for path in files {
+        if let Some(extension) = forbidden_standalone_embedded_extension(&path) {
+            diagnostics.push(Diagnostic::new(
+                "POLICY-STANDALONE-ARTIFACT",
+                display_path(root, &path),
+                format!("standalone source must not embed a compatibility-pack artifact with extension {extension:?}"),
+            ));
+        }
+    }
+}
+
+fn forbidden_standalone_embedded_extension(path: &Path) -> Option<&'static str> {
+    path.extension()
+        .and_then(OsStr::to_str)
+        .and_then(|extension| {
+            STANDALONE_FORBIDDEN_EMBEDDED_EXTENSIONS
+                .iter()
+                .copied()
+                .find(|expected| extension.eq_ignore_ascii_case(expected))
+        })
+}
+
+fn check_standalone_notice_files(root: &Path, diagnostics: &mut Diagnostics) {
+    for relative in STANDALONE_NOTICE_FILES {
+        let path = root.join(relative);
+        let Some(text) = read_text(root, &path, diagnostics) else {
+            continue;
+        };
+        if text.trim().is_empty() {
+            diagnostics.push(Diagnostic::new(
+                "POLICY-STANDALONE-NOTICE",
+                display_path(root, &path),
+                "standalone release notice files must not be empty",
+            ));
+        }
+    }
 }
 
 fn check_fuzz(root: &Path, profile: &ProfileIndex, diagnostics: &mut Diagnostics) {
@@ -2069,12 +2603,15 @@ fn safe_relative_path(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        CONFIG_SCHEMA_VERSION, FUZZ_TARGETS, RESULT_SCHEMA_VERSION, check_root_generated_artifacts,
-        declared_fuzz_input_bound, forbidden_corpus_artifact, is_root_generated_artifact,
-        is_sha256, safe_relative_path, valid_environment_name, valid_id,
+        CONFIG_SCHEMA_VERSION, FUZZ_TARGETS, RESULT_SCHEMA_VERSION, STANDALONE_MANIFEST_PATH,
+        STANDALONE_SOURCE_PATH, check_root_generated_artifacts, check_standalone_release_policy,
+        declared_fuzz_input_bound, forbidden_corpus_artifact,
+        forbidden_standalone_embedded_extension, is_root_generated_artifact, is_sha256,
+        safe_relative_path, valid_environment_name, valid_id,
     };
     use crate::diagnostics::Diagnostics;
     use std::fs;
+    use std::path::Path;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn temporary_root() -> std::path::PathBuf {
@@ -2089,6 +2626,270 @@ mod tests {
         }
         fs::create_dir_all(&root).expect("create deterministic policy test root");
         root
+    }
+
+    fn write_standalone_fixture(root: &Path) {
+        let app_root = root.join("apps/jmeter-rs");
+        fs::create_dir_all(app_root.join("src")).expect("create standalone source fixture");
+        fs::write(
+            app_root.join("Cargo.toml"),
+            r#"[package]
+name = "jmeter-rs"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "jmeter-rs"
+path = "src/main.rs"
+
+[dependencies]
+jmeter-rs-http = { version = "0.1.0", path = "../../crates/http" }
+jmeter-rs-http-native = { version = "0.1.0", path = "../../crates/http-native" }
+jmeter-rs-jmx = { version = "0.1.0", path = "../../crates/jmx" }
+jmeter-rs-model = { version = "0.1.0", path = "../../crates/model" }
+jmeter-rs-report = { version = "0.1.0", path = "../../crates/report" }
+jmeter-rs-results = { version = "0.1.0", path = "../../crates/results" }
+jmeter-rs-runtime = { version = "0.1.0", path = "../../crates/runtime" }
+
+[dev-dependencies]
+jmeter-rs-expr = { version = "0.1.0", path = "../../crates/expr" }
+rcgen = { version = "=0.14.9", default-features = false, features = ["crypto", "ring"] }
+"#,
+        )
+        .expect("write standalone manifest fixture");
+        fs::write(app_root.join("src/lib.rs"), b"").expect("write standalone library fixture");
+        fs::write(app_root.join("src/main.rs"), b"").expect("write standalone binary fixture");
+        fs::write(root.join("LICENSE"), b"Apache License, Version 2.0\n")
+            .expect("write standalone license fixture");
+        fs::write(root.join("NOTICE"), b"jmeter-rs notice\n")
+            .expect("write standalone notice fixture");
+    }
+
+    #[test]
+    fn standalone_policy_accepts_native_default_manifest() {
+        let root = temporary_root();
+        write_standalone_fixture(&root);
+
+        let mut diagnostics = Diagnostics::default();
+        check_standalone_release_policy(&root, &mut diagnostics);
+
+        assert!(
+            diagnostics.is_empty(),
+            "unexpected standalone diagnostics: {:?}",
+            diagnostics.iter().collect::<Vec<_>>()
+        );
+        fs::remove_dir_all(root).expect("remove standalone policy test root");
+    }
+
+    #[test]
+    fn standalone_policy_requires_exact_native_http_path_version_and_source() {
+        let cases = [
+            (
+                "jmeter-rs-http = { version = \"0.1.0\", path = \"../../crates/http\" }",
+                "jmeter-rs-http = { version = \"0.1.0\", path = \"../../crates/http-native\" }",
+                "must use path \"../../crates/http\"",
+            ),
+            (
+                "jmeter-rs-http-native = { version = \"0.1.0\", path = \"../../crates/http-native\" }",
+                "jmeter-rs-http-native = { version = \"0.1.1\", path = \"../../crates/http-native\" }",
+                "exact version requirement \"0.1.0\"",
+            ),
+            (
+                "jmeter-rs-http = { version = \"0.1.0\", path = \"../../crates/http\" }",
+                "jmeter-rs-http = { version = \"=0.1.0\" }",
+                "must use path \"../../crates/http\"",
+            ),
+        ];
+
+        for (index, (original, replacement, expected_message)) in cases.iter().enumerate() {
+            let root = temporary_root();
+            write_standalone_fixture(&root);
+            let manifest_path = root.join(STANDALONE_MANIFEST_PATH);
+            let manifest =
+                fs::read_to_string(&manifest_path).expect("read standalone fixture manifest");
+            assert!(manifest.contains(original), "fixture missing {original:?}");
+            fs::write(&manifest_path, manifest.replace(original, replacement))
+                .expect("write native HTTP declaration fixture");
+
+            let mut diagnostics = Diagnostics::default();
+            check_standalone_release_policy(&root, &mut diagnostics);
+            assert!(
+                diagnostics.iter().any(|entry| {
+                    entry.code == "POLICY-STANDALONE-DEPENDENCY"
+                        && entry.message.contains(expected_message)
+                }),
+                "case {index} did not reject the native HTTP declaration: {:?}",
+                diagnostics.iter().collect::<Vec<_>>()
+            );
+            fs::remove_dir_all(root).expect("remove native HTTP declaration test root");
+        }
+
+        let root = temporary_root();
+        write_standalone_fixture(&root);
+        let manifest_path = root.join(STANDALONE_MANIFEST_PATH);
+        let manifest =
+            fs::read_to_string(&manifest_path).expect("read standalone fixture manifest");
+        let runtime_declaration =
+            "jmeter-rs-http = { version = \"0.1.0\", path = \"../../crates/http\" }\n";
+        assert!(manifest.contains(runtime_declaration));
+        let manifest = manifest.replace(runtime_declaration, "").replace(
+            "[dev-dependencies]\n",
+            "[dev-dependencies]\n\
+jmeter-rs-http = { version = \"0.1.0\", path = \"../../crates/http\" }\n",
+        );
+        fs::write(&manifest_path, manifest).expect("write misplaced native HTTP fixture");
+
+        let mut diagnostics = Diagnostics::default();
+        check_standalone_release_policy(&root, &mut diagnostics);
+        assert!(diagnostics.iter().any(|entry| {
+            entry.code == "POLICY-STANDALONE-DEPENDENCY"
+                && entry.path.contains("dev-dependencies.jmeter-rs-http")
+                && entry
+                    .message
+                    .contains("outside the closed native standalone allowlist")
+        }));
+        fs::remove_dir_all(root).expect("remove misplaced native HTTP test root");
+    }
+
+    #[test]
+    fn standalone_policy_accepts_rcgen_only_as_exact_dev_registry_dependency() {
+        let root = temporary_root();
+        write_standalone_fixture(&root);
+        let manifest_path = root.join(STANDALONE_MANIFEST_PATH);
+        let manifest =
+            fs::read_to_string(&manifest_path).expect("read standalone fixture manifest");
+        let rcgen_declaration = "rcgen = { version = \"=0.14.9\", default-features = false, features = [\"crypto\", \"ring\"] }";
+        assert!(manifest.contains(rcgen_declaration));
+        let manifest = manifest
+            .replace(
+                rcgen_declaration,
+                "rcgen = { version = \"=0.14.8\", default-features = false, features = [\"crypto\", \"ring\"] }",
+            );
+        fs::write(&manifest_path, manifest).expect("write wrong rcgen version fixture");
+
+        let mut diagnostics = Diagnostics::default();
+        check_standalone_release_policy(&root, &mut diagnostics);
+        assert!(diagnostics.iter().any(|entry| {
+            entry.code == "POLICY-STANDALONE-DEPENDENCY"
+                && entry.path.contains("dev-dependencies.rcgen")
+                && entry
+                    .message
+                    .contains("exact version requirement \"=0.14.9\"")
+        }));
+        fs::remove_dir_all(root).expect("remove wrong rcgen version test root");
+
+        let root = temporary_root();
+        write_standalone_fixture(&root);
+        let manifest_path = root.join(STANDALONE_MANIFEST_PATH);
+        let manifest =
+            fs::read_to_string(&manifest_path).expect("read standalone fixture manifest");
+        let manifest = manifest
+            .replace(
+                rcgen_declaration,
+                "rcgen = { version = \"=0.14.9\", path = \"../../crates/http\" }",
+            )
+            .replace(
+                "[dependencies]\n",
+                "[dependencies]\nrcgen = { version = \"=0.14.9\", path = \"../../crates/http\" }\n",
+            )
+            .replace(
+                "rcgen = { version = \"=0.14.9\", path = \"../../crates/http\" }\n\n[dev-dependencies]",
+                "[dev-dependencies]",
+            );
+        fs::write(&manifest_path, manifest).expect("write runtime rcgen fixture");
+
+        let mut diagnostics = Diagnostics::default();
+        check_standalone_release_policy(&root, &mut diagnostics);
+        assert!(diagnostics.iter().any(|entry| {
+            entry.code == "POLICY-STANDALONE-DEPENDENCY"
+                && entry.path.contains("dependencies.rcgen")
+                && entry
+                    .message
+                    .contains("outside the closed native standalone allowlist")
+        }));
+        assert!(diagnostics.iter().any(|entry| {
+            entry.code == "POLICY-STANDALONE-DEPENDENCY"
+                && entry.path.contains("dev-dependencies.rcgen")
+                && entry
+                    .message
+                    .contains("must use the crates.io registry source")
+        }));
+        fs::remove_dir_all(root).expect("remove runtime rcgen test root");
+    }
+
+    #[test]
+    fn standalone_policy_rejects_compatibility_dependency_and_embedded_archive() {
+        let root = temporary_root();
+        write_standalone_fixture(&root);
+        let manifest_path = root.join(STANDALONE_MANIFEST_PATH);
+        let manifest =
+            fs::read_to_string(&manifest_path).expect("read standalone fixture manifest");
+        let manifest = manifest.replace(
+            "jmeter-rs-runtime = { version = \"0.1.0\", path = \"../../crates/runtime\" }",
+            "jmeter-rs-runtime = { version = \"0.1.0\", path = \"../../crates/runtime\" }\n\
+jmeter-rs-java-bridge = { version = \"0.1.0\", path = \"../../crates/java-bridge\" }\n\
+jmeter-rs-plugin-host = { version = \"0.1.0\", path = \"../../crates/plugin-host\" }\n\
+jmeter-rs-process-supervision = { version = \"0.1.0\", path = \"../../crates/process-supervision\" }",
+        );
+        fs::write(&manifest_path, manifest).expect("write forbidden dependency fixture");
+        fs::write(
+            root.join(STANDALONE_SOURCE_PATH).join("worker.JAR"),
+            b"archive",
+        )
+        .expect("write embedded archive fixture");
+
+        let mut diagnostics = Diagnostics::default();
+        check_standalone_release_policy(&root, &mut diagnostics);
+
+        for forbidden in [
+            "jmeter-rs-java-bridge",
+            "jmeter-rs-plugin-host",
+            "jmeter-rs-process-supervision",
+        ] {
+            assert!(diagnostics.iter().any(|entry| {
+                entry.code == "POLICY-STANDALONE-DEPENDENCY" && entry.message.contains(forbidden)
+            }));
+        }
+        assert!(diagnostics.iter().any(|entry| {
+            entry.code == "POLICY-STANDALONE-ARTIFACT" && entry.path.ends_with("worker.JAR")
+        }));
+        assert_eq!(
+            forbidden_standalone_embedded_extension(Path::new("plan.jmx")),
+            None
+        );
+        fs::remove_dir_all(root).expect("remove standalone policy test root");
+    }
+
+    #[test]
+    fn standalone_policy_rejects_default_features_and_empty_notice() {
+        let root = temporary_root();
+        write_standalone_fixture(&root);
+        let manifest_path = root.join(STANDALONE_MANIFEST_PATH);
+        let manifest =
+            fs::read_to_string(&manifest_path).expect("read standalone fixture manifest");
+        let manifest = manifest.replace(
+            "jmeter-rs-jmx = { version = \"0.1.0\", path = \"../../crates/jmx\" }",
+            "jmeter-rs-jmx = { version = \"0.1.0\", path = \"../../crates/jmx\", default-features = true }",
+        );
+        fs::write(&manifest_path, manifest).expect("write default-feature fixture");
+        fs::write(root.join("NOTICE"), b"").expect("write empty notice fixture");
+
+        let mut diagnostics = Diagnostics::default();
+        check_standalone_release_policy(&root, &mut diagnostics);
+
+        assert!(diagnostics.iter().any(|entry| {
+            entry.code == "POLICY-STANDALONE-DEPENDENCY"
+                && entry.message.contains("default features")
+        }));
+        assert!(
+            diagnostics.iter().any(|entry| {
+                entry.code == "POLICY-STANDALONE-NOTICE" && entry.path == "NOTICE"
+            })
+        );
+        fs::remove_dir_all(root).expect("remove standalone policy test root");
     }
 
     #[test]

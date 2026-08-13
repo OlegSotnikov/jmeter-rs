@@ -815,7 +815,8 @@ impl SaveFieldId {
             | Self::TimestampStart
             | Self::UseNanoTime
             | Self::SubresultsDisableRenaming
-            | Self::Autoflush => SaveValueKind::Boolean,
+            | Self::Autoflush
+            | Self::XmlPi => SaveValueKind::Boolean,
             Self::NanoThreadSleep => SaveValueKind::Long,
             Self::SampleVariables => SaveValueKind::StringList,
             Self::Delimiter => SaveValueKind::String,
@@ -824,7 +825,6 @@ impl SaveFieldId {
             | Self::Assertions
             | Self::AssertionResults
             | Self::DefaultEncoding
-            | Self::XmlPi
             | Self::BasePrefix
             | Self::LineEnding => SaveValueKind::String,
         }
@@ -909,7 +909,10 @@ impl SaveFieldId {
             }
             Self::AssertionResults => matches_ignore_ascii_case(value, &["none", "first", "all"]),
             Self::DefaultEncoding => !value.is_empty(),
-            Self::XmlPi | Self::BasePrefix | Self::LineEnding => true,
+            Self::BasePrefix => true,
+            Self::LineEnding => {
+                matches_ignore_ascii_case(value, &["lf", "\\n", "crlf", "\\r\\n", "cr", "\\r"])
+            }
             _ => true,
         };
         if valid {
@@ -1491,12 +1494,12 @@ impl SaveConfigPrecedence {
         }
         let mut sources = Vec::with_capacity(PRECEDENCE_SOURCE_COUNT);
         for source in ordered_sources {
-            if sources.len() >= PRECEDENCE_SOURCE_COUNT || sources.contains(&source) {
+            if sources.contains(&source) || sources.len() >= PRECEDENCE_SOURCE_COUNT {
                 return Err(SaveConfigError::InvalidConfiguration {
-                    kind: if sources.len() >= PRECEDENCE_SOURCE_COUNT {
-                        SaveConfigConfigurationKind::TooManySources
-                    } else {
+                    kind: if sources.contains(&source) {
                         SaveConfigConfigurationKind::DuplicateSource
+                    } else {
+                        SaveConfigConfigurationKind::TooManySources
                     },
                 });
             }
@@ -2242,6 +2245,12 @@ impl SaveConfigResolver {
                 }
                 _ => {}
             }
+        } else if !matches!(value, JavaValue::Raw(_)) {
+            return Err(SaveConfigError::InvalidValue {
+                field: field.clone(),
+                expected: SaveValueKind::Raw,
+                actual: value.kind(),
+            });
         }
         Ok(())
     }
@@ -2312,10 +2321,14 @@ impl SaveConfigResolver {
             }
         }
 
-        let active = source_states
+        let mut active = source_states
             .values()
             .filter_map(|state| state.active.as_ref())
             .collect::<Vec<_>>();
+        // Candidate diagnostics follow the original operation sequence. The
+        // source-state map is keyed by category for precedence lookup, not by
+        // arrival order.
+        active.sort_by_key(|state| state.order);
         let missing_precedence = active
             .iter()
             .any(|state| self.precedence.rank(state.source.kind()).is_none());
@@ -2337,7 +2350,18 @@ impl SaveConfigResolver {
                 let absent = source_states
                     .values()
                     .filter_map(|state| state.absent.as_ref())
-                    .max_by_key(|state| state.order)
+                    .min_by(|left, right| {
+                        let left_rank = self.precedence.rank(left.source.kind());
+                        let right_rank = self.precedence.rank(right.source.kind());
+                        match (left_rank, right_rank) {
+                            (Some(left_rank), Some(right_rank)) => left_rank
+                                .cmp(&right_rank)
+                                .then_with(|| right.order.cmp(&left.order)),
+                            (Some(_), None) => std::cmp::Ordering::Less,
+                            (None, Some(_)) => std::cmp::Ordering::Greater,
+                            (None, None) => right.order.cmp(&left.order),
+                        }
+                    })
                     .ok_or_else(|| SaveConfigError::MissingField {
                         field: field.clone(),
                     })?;
@@ -2863,6 +2887,7 @@ mod tests {
                     SaveFieldId::Assertions | SaveFieldId::AssertionResults => "all".to_owned(),
                     SaveFieldId::Delimiter => ",".to_owned(),
                     SaveFieldId::DefaultEncoding => "UTF-8".to_owned(),
+                    SaveFieldId::LineEnding => "lf".to_owned(),
                     _ => format!("value-{index}"),
                 };
                 JavaValue::string(value).expect("bounded test value")
@@ -3039,6 +3064,37 @@ mod tests {
                 .and_then(WireRepresentation::value),
             None
         );
+    }
+
+    #[test]
+    fn absent_provenance_uses_precedence_before_arrival_order() {
+        let mut resolver =
+            SaveConfigResolver::new(precedence(), SaveWireFormat::Properties, limits())
+                .expect("resolver");
+        resolver
+            .push(
+                field(),
+                source(SaveConfigSourceKind::PlanSaveConfig),
+                SaveConfigOperation::absent(),
+            )
+            .expect("plan absent");
+        resolver
+            .push(
+                field(),
+                source(SaveConfigSourceKind::RunProperties),
+                SaveConfigOperation::absent(),
+            )
+            .expect("property absent");
+        let result = resolver.resolve().expect("resolution");
+        let provenance = result
+            .field(&field())
+            .and_then(SaveFieldResolution::provenance)
+            .expect("absent provenance");
+        assert_eq!(
+            provenance.source().kind(),
+            SaveConfigSourceKind::RunProperties
+        );
+        assert_eq!(provenance.operation_order(), 1);
     }
 
     #[test]
@@ -3280,6 +3336,112 @@ mod tests {
     }
 
     #[test]
+    fn unknown_public_values_must_remain_raw_but_are_retained() {
+        let unknown = SaveField::unknown("jmeter.save.saveservice.future_switch").expect("name");
+        let mut resolver =
+            SaveConfigResolver::new(precedence(), SaveWireFormat::Properties, limits())
+                .expect("resolver");
+        let error = resolver
+            .push(
+                unknown.clone(),
+                source(SaveConfigSourceKind::RunProperties),
+                SaveConfigOperation::apply(JavaValue::boolean(true)),
+            )
+            .expect_err("unknown typed value");
+        assert!(matches!(
+            error,
+            SaveConfigError::InvalidValue {
+                expected: SaveValueKind::Raw,
+                actual: SaveValueKind::Boolean,
+                ..
+            }
+        ));
+
+        resolver
+            .push_raw(
+                unknown.clone(),
+                source(SaveConfigSourceKind::RunProperties),
+                SaveOperationKind::Apply,
+                "true",
+            )
+            .expect("unknown raw value");
+        let resolution = resolver.resolve().expect("resolution");
+        let field = resolution.field(&unknown).expect("unknown field");
+        assert!(field.is_unresolved());
+        assert!(matches!(
+            field
+                .operations()
+                .first()
+                .and_then(|operation| operation.operation().value()),
+            Some(JavaValue::Raw(value)) if value == "true"
+        ));
+    }
+
+    #[test]
+    fn xml_pi_and_line_ending_use_closed_property_value_contracts() {
+        assert_eq!(SaveFieldId::XmlPi.value_kind(), SaveValueKind::Boolean);
+        let mut resolver =
+            SaveConfigResolver::new(precedence(), SaveWireFormat::Properties, limits())
+                .expect("resolver");
+        resolver
+            .push_raw(
+                SaveField::known(SaveFieldId::XmlPi),
+                source(SaveConfigSourceKind::RunProperties),
+                SaveOperationKind::Apply,
+                "true",
+            )
+            .expect("xml PI switch");
+        resolver
+            .push_raw(
+                SaveField::known(SaveFieldId::LineEnding),
+                source(SaveConfigSourceKind::RunProperties),
+                SaveOperationKind::Apply,
+                "CRLF",
+            )
+            .expect("line ending");
+        let xml_pi = resolver
+            .resolve()
+            .expect("resolution")
+            .field(&SaveField::known(SaveFieldId::XmlPi))
+            .and_then(SaveFieldResolution::java_value)
+            .cloned();
+        assert_eq!(xml_pi, Some(JavaValue::Boolean(true)));
+
+        let error = resolver
+            .push_raw(
+                SaveField::known(SaveFieldId::XmlPi),
+                source(SaveConfigSourceKind::RunProperties),
+                SaveOperationKind::Apply,
+                "yes",
+            )
+            .expect_err("malformed XML PI switch");
+        assert!(matches!(
+            error,
+            SaveConfigError::InvalidValue {
+                expected: SaveValueKind::Boolean,
+                actual: SaveValueKind::Raw,
+                ..
+            }
+        ));
+        let error = resolver
+            .push_raw(
+                SaveField::known(SaveFieldId::LineEnding),
+                source(SaveConfigSourceKind::RunProperties),
+                SaveOperationKind::Apply,
+                "native",
+            )
+            .expect_err("malformed line ending");
+        assert!(matches!(
+            error,
+            SaveConfigError::InvalidValue {
+                expected: SaveValueKind::String,
+                actual: SaveValueKind::Raw,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn known_property_and_wire_names_are_not_normalized() {
         assert_eq!(
             SaveFieldId::ResponseDataOnError.property_name(),
@@ -3306,6 +3468,10 @@ mod tests {
         );
         assert!(
             SaveField::from_property_name("jmeter.save.saveservice.future")
+                .is_ok_and(|field| field.known_id().is_none())
+        );
+        assert!(
+            SaveField::from_property_name("JMeter.save.saveservice.failure_message")
                 .is_ok_and(|field| field.known_id().is_none())
         );
         assert!(
@@ -3367,6 +3533,14 @@ mod tests {
                 kind: SaveConfigConfigurationKind::DuplicateSource
             })
         ));
+        let mut full_then_duplicate = SaveConfigSourceKind::all().to_vec();
+        full_then_duplicate.push(SaveConfigSourceKind::CliMode);
+        assert!(matches!(
+            SaveConfigPrecedence::new("profile", full_then_duplicate),
+            Err(SaveConfigError::InvalidConfiguration {
+                kind: SaveConfigConfigurationKind::DuplicateSource
+            })
+        ));
         assert!(matches!(
             SaveConfigPrecedence::new("profile", core::iter::empty()),
             Err(SaveConfigError::InvalidConfiguration {
@@ -3417,6 +3591,46 @@ mod tests {
                 0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61,
                 0xf2, 0x00, 0x15, 0xad,
             ]
+        );
+    }
+
+    #[test]
+    fn canonical_identity_collapses_approved_property_aliases() {
+        let canonical_field = SaveField::known(SaveFieldId::AssertionFailureMessage);
+        let alias_field = SaveField::from_property_name("jmeter.save.saveservice.failure_message")
+            .expect("approved alias");
+        let mut canonical =
+            SaveConfigResolver::new(precedence(), SaveWireFormat::Properties, limits())
+                .expect("resolver");
+        canonical
+            .push_raw(
+                canonical_field,
+                source(SaveConfigSourceKind::RunProperties),
+                SaveOperationKind::Apply,
+                "true",
+            )
+            .expect("canonical property");
+        let mut alias = SaveConfigResolver::new(precedence(), SaveWireFormat::Properties, limits())
+            .expect("resolver");
+        alias
+            .push_raw(
+                alias_field,
+                source(SaveConfigSourceKind::RunProperties),
+                SaveOperationKind::Apply,
+                "true",
+            )
+            .expect("alias property");
+        assert_eq!(
+            canonical
+                .resolve()
+                .expect("canonical resolution")
+                .canonical_digest()
+                .expect("canonical digest"),
+            alias
+                .resolve()
+                .expect("alias resolution")
+                .canonical_digest()
+                .expect("alias digest")
         );
     }
 }

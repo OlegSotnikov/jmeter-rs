@@ -13,6 +13,18 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Bounds applied while decoding component properties.
+///
+/// The model retains unknown values losslessly, but a factory must not hand
+/// unbounded source data to a native component.  These limits are deliberately
+/// smaller than the whole-plan limits and match the bounded processor and
+/// extractor fixtures in the active compatibility profile.
+const MAX_FACTORY_PROPERTY_COUNT: usize = 256;
+const MAX_FACTORY_PROPERTY_BYTES: usize = 4096;
+const MAX_FACTORY_COLLECTION_ENTRIES: usize = 64;
+const MAX_FACTORY_PROPERTY_DEPTH: usize = 16;
+const MAX_FACTORY_PENDING_VALUES: usize = 16_384;
+
 use jmeter_rs_model::{ElementTree, NodeId, PropertyValue, TestElement};
 
 use crate::scope::{
@@ -81,6 +93,17 @@ impl fmt::Debug for FactoryComponent {
 pub trait ScopeComponentFactory: Send + Sync {
     /// Decodes one source component without performing I/O.
     fn create(&self, component: &ScopeComponent) -> Result<FactoryComponent, ScopeFactoryError>;
+
+    /// Returns the exact class identity this hook was authored for, when the
+    /// hook is not intentionally shared by several exact aliases.
+    ///
+    /// Registry lookup is always exact. This optional declaration adds a
+    /// second invariant for factories that must never be reused for another
+    /// source class; shared adapter hooks may retain the default `None` and
+    /// perform their own source-specific validation in [`Self::create`].
+    fn test_class(&self) -> Option<&str> {
+        None
+    }
 }
 
 /// Bounded class-to-factory registry for future native and adapter domains.
@@ -231,6 +254,13 @@ struct BuiltinTimerFactory {
 
 impl ScopeComponentFactory for BuiltinTimerFactory {
     fn create(&self, component: &ScopeComponent) -> Result<FactoryComponent, ScopeFactoryError> {
+        if let Err(detail) = validate_factory_properties(component) {
+            return Err(factory_decode_error(
+                component,
+                ComponentCategory::Timer,
+                detail,
+            ));
+        }
         if self.binding == TimerBinding::ExternalScript {
             return Err(timer_decode_error(
                 component,
@@ -250,6 +280,13 @@ struct BuiltinAssertionFactory;
 
 impl ScopeComponentFactory for BuiltinAssertionFactory {
     fn create(&self, component: &ScopeComponent) -> Result<FactoryComponent, ScopeFactoryError> {
+        if let Err(detail) = validate_factory_properties(component) {
+            return Err(factory_decode_error(
+                component,
+                ComponentCategory::Assertion,
+                detail,
+            ));
+        }
         let assertion =
             decode_builtin_assertion(component).map_err(|detail| ScopeFactoryError::Decode {
                 node_id: component.node_id,
@@ -272,13 +309,198 @@ fn timer_decode_error(component: &ScopeComponent, detail: impl Into<String>) -> 
     }
 }
 
-fn property_alias<'a>(component: &'a ScopeComponent, names: &[&str]) -> Option<&'a PropertyValue> {
-    for name in names {
-        if let Some(value) = component.element.property(name) {
-            return Some(value);
+fn factory_decode_error(
+    component: &ScopeComponent,
+    category: ComponentCategory,
+    detail: impl Into<String>,
+) -> ScopeFactoryError {
+    let detail = detail.into();
+    ScopeFactoryError::Decode {
+        node_id: component.node_id,
+        path: component.path.clone(),
+        test_class: component.binding.test_class.clone(),
+        category,
+        detail: bounded(&detail),
+    }
+}
+
+/// Check source properties before a factory receives them.
+///
+/// The model validates whole plans, but factories are also a public seam and
+/// may be called with a manually constructed component.  The iterative walk
+/// keeps this seam bounded without consuming the Rust call stack on hostile
+/// nested values.
+fn validate_factory_properties(component: &ScopeComponent) -> Result<(), String> {
+    let properties = &component.element.properties;
+    if properties.len() > MAX_FACTORY_PROPERTY_COUNT {
+        return Err(format!(
+            "component has {} properties; maximum is {MAX_FACTORY_PROPERTY_COUNT}",
+            properties.len()
+        ));
+    }
+
+    let mut tasks = Vec::with_capacity(properties.len());
+    let mut visited_values = 0usize;
+    for entry in properties.as_slice().iter().rev() {
+        if entry.name.len() > MAX_FACTORY_PROPERTY_BYTES {
+            return Err(format!(
+                "property name exceeds {MAX_FACTORY_PROPERTY_BYTES} bytes"
+            ));
+        }
+        tasks.push((&entry.value, 0usize));
+    }
+    while let Some((value, depth)) = tasks.pop() {
+        visited_values = visited_values
+            .checked_add(1)
+            .ok_or_else(|| "factory property value count overflowed".to_owned())?;
+        if visited_values > MAX_FACTORY_PENDING_VALUES {
+            return Err(format!(
+                "factory property value count exceeds {MAX_FACTORY_PENDING_VALUES} values"
+            ));
+        }
+        if depth > MAX_FACTORY_PROPERTY_DEPTH {
+            return Err(format!(
+                "property nesting exceeds {MAX_FACTORY_PROPERTY_DEPTH} levels"
+            ));
+        }
+        match value {
+            PropertyValue::String(value) => {
+                if value.len() > MAX_FACTORY_PROPERTY_BYTES {
+                    return Err(format!(
+                        "string property exceeds {MAX_FACTORY_PROPERTY_BYTES} bytes"
+                    ));
+                }
+            }
+            PropertyValue::Collection(values) => {
+                if values.len() > MAX_FACTORY_COLLECTION_ENTRIES {
+                    return Err(format!(
+                        "collection has {} entries; maximum is {MAX_FACTORY_COLLECTION_ENTRIES}",
+                        values.len()
+                    ));
+                }
+                if pending_values_exceed(tasks.len(), values.len()) {
+                    return Err(format!(
+                        "nested property expansion exceeds {MAX_FACTORY_PENDING_VALUES} values"
+                    ));
+                }
+                tasks.extend(values.iter().rev().map(|value| (value, depth + 1)));
+            }
+            PropertyValue::NamedCollection(entries) | PropertyValue::Map(entries) => {
+                if entries.len() > MAX_FACTORY_COLLECTION_ENTRIES {
+                    return Err(format!(
+                        "collection has {} entries; maximum is {MAX_FACTORY_COLLECTION_ENTRIES}",
+                        entries.len()
+                    ));
+                }
+                if pending_values_exceed(tasks.len(), entries.len()) {
+                    return Err(format!(
+                        "nested property expansion exceeds {MAX_FACTORY_PENDING_VALUES} values"
+                    ));
+                }
+                for entry in entries.iter().rev() {
+                    if entry.name.len() > MAX_FACTORY_PROPERTY_BYTES {
+                        return Err(format!(
+                            "collection entry name exceeds {MAX_FACTORY_PROPERTY_BYTES} bytes"
+                        ));
+                    }
+                    tasks.push((&entry.value, depth + 1));
+                }
+            }
+            PropertyValue::Element(element) => {
+                if element.name.len() > MAX_FACTORY_PROPERTY_BYTES
+                    || element
+                        .class_name
+                        .as_ref()
+                        .is_some_and(|name| name.len() > MAX_FACTORY_PROPERTY_BYTES)
+                {
+                    return Err(format!(
+                        "nested property metadata exceeds {MAX_FACTORY_PROPERTY_BYTES} bytes"
+                    ));
+                }
+                if element.properties.len() > MAX_FACTORY_PROPERTY_COUNT {
+                    return Err(format!(
+                        "nested property has {} children; maximum is {MAX_FACTORY_PROPERTY_COUNT}",
+                        element.properties.len()
+                    ));
+                }
+                if pending_values_exceed(tasks.len(), element.properties.len()) {
+                    return Err(format!(
+                        "nested property expansion exceeds {MAX_FACTORY_PENDING_VALUES} values"
+                    ));
+                }
+                for entry in element.properties.as_slice().iter().rev() {
+                    if entry.name.len() > MAX_FACTORY_PROPERTY_BYTES {
+                        return Err(format!(
+                            "nested property name exceeds {MAX_FACTORY_PROPERTY_BYTES} bytes"
+                        ));
+                    }
+                    tasks.push((&entry.value, depth + 1));
+                }
+                if element.opaque_extensions.len() > MAX_FACTORY_COLLECTION_ENTRIES {
+                    return Err(format!(
+                        "nested property has too many opaque extensions (maximum is {MAX_FACTORY_COLLECTION_ENTRIES})"
+                    ));
+                }
+                for extension in &element.opaque_extensions {
+                    if extension.type_name.len() > MAX_FACTORY_PROPERTY_BYTES
+                        || extension.raw.len() > MAX_FACTORY_PROPERTY_BYTES
+                    {
+                        return Err(format!(
+                            "nested opaque extension exceeds {MAX_FACTORY_PROPERTY_BYTES} bytes"
+                        ));
+                    }
+                }
+            }
+            PropertyValue::Object(object) => {
+                if object.raw.len() > MAX_FACTORY_PROPERTY_BYTES
+                    || object
+                        .class_name
+                        .as_ref()
+                        .is_some_and(|name| name.len() > MAX_FACTORY_PROPERTY_BYTES)
+                {
+                    return Err(format!(
+                        "object property exceeds {MAX_FACTORY_PROPERTY_BYTES} bytes"
+                    ));
+                }
+                if object.attributes.len() > MAX_FACTORY_COLLECTION_ENTRIES {
+                    return Err(format!(
+                        "object property has too many attributes (maximum is {MAX_FACTORY_COLLECTION_ENTRIES})"
+                    ));
+                }
+                for attribute in &object.attributes {
+                    if attribute.name.len() > MAX_FACTORY_PROPERTY_BYTES
+                        || attribute.value.len() > MAX_FACTORY_PROPERTY_BYTES
+                    {
+                        return Err(format!(
+                            "object property attribute exceeds {MAX_FACTORY_PROPERTY_BYTES} bytes"
+                        ));
+                    }
+                }
+            }
+            PropertyValue::Opaque(value) => {
+                if value.type_name.len() > MAX_FACTORY_PROPERTY_BYTES
+                    || value.raw.len() > MAX_FACTORY_PROPERTY_BYTES
+                {
+                    return Err(format!(
+                        "opaque property exceeds {MAX_FACTORY_PROPERTY_BYTES} bytes"
+                    ));
+                }
+            }
+            PropertyValue::Null
+            | PropertyValue::Boolean(_)
+            | PropertyValue::Integer(_)
+            | PropertyValue::Long(_)
+            | PropertyValue::Float(_)
+            | PropertyValue::Double(_) => {}
         }
     }
-    None
+    Ok(())
+}
+
+fn pending_values_exceed(current: usize, additional: usize) -> bool {
+    current
+        .checked_add(additional)
+        .is_none_or(|total| total > MAX_FACTORY_PENDING_VALUES)
 }
 
 fn scalar_number(value: &PropertyValue, name: &str) -> Result<f64, String> {
@@ -456,23 +678,15 @@ fn decode_builtin_timer(
             )))
         }
         TimerBinding::ConstantThroughput => {
-            reject_unknown_timer_properties(
-                component,
-                &[
-                    "throughput",
-                    "ConstantThroughputTimer.throughput",
-                    "calcMode",
-                ],
-            )?;
-            let throughput = property_alias(
-                component,
-                &["throughput", "ConstantThroughputTimer.throughput"],
-            )
-            .map(|value| {
-                scalar_number(value, "throughput")
-                    .map_err(|detail| timer_decode_error(component, detail))
-            })
-            .unwrap_or(Ok(1.0))?;
+            reject_unknown_timer_properties(component, &["throughput", "calcMode"])?;
+            let throughput = component
+                .element
+                .property("throughput")
+                .map(|value| {
+                    scalar_number(value, "throughput")
+                        .map_err(|detail| timer_decode_error(component, detail))
+                })
+                .unwrap_or(Ok(1.0))?;
             let mode = component
                 .element
                 .property("calcMode")
@@ -620,6 +834,14 @@ struct ScopeTask {
     replacement_chain: Vec<NodeId>,
     owner_category: Option<ComponentCategory>,
     run_level: bool,
+    /// Whether this branch is being visited through a resolved replacement.
+    ///
+    /// Test Fragments and WorkBench nodes are source-only in a normal JMeter
+    /// traversal. A Module/Include replacement may explicitly target one of
+    /// those nodes, in which case its children become executable through the
+    /// replacement edge. Keeping this bit on the walk frame prevents a source
+    /// fragment from executing once on its own and once through the module.
+    replacement_expansion: bool,
 }
 
 impl ScopeTask {
@@ -636,6 +858,7 @@ impl ScopeTask {
         replacement_chain: Vec<NodeId>,
         owner_category: Option<ComponentCategory>,
         run_level: bool,
+        replacement_expansion: bool,
     ) -> Self {
         Self {
             parent_id,
@@ -646,6 +869,7 @@ impl ScopeTask {
             replacement_chain,
             owner_category,
             run_level,
+            replacement_expansion,
         }
     }
 }
@@ -678,6 +902,7 @@ pub(crate) fn compile_scope(
         Vec::new(),
         None,
         true,
+        false,
     )];
 
     while let Some(task) = tasks.pop() {
@@ -690,6 +915,7 @@ pub(crate) fn compile_scope(
             replacement_chain,
             owner_category,
             run_level,
+            replacement_expansion,
         } = task;
 
         // A branch's scope is its enabled non-sampler lexical siblings.  It
@@ -730,11 +956,26 @@ pub(crate) fn compile_scope(
                         detail: "result collector must be a leaf".to_owned(),
                     });
                 }
-                if run_level {
-                    run_collectors.push(collector);
-                } else {
+                // Result collectors are run-owned regardless of where they
+                // are placed. Non-root placement still contributes a
+                // source-scope listener predicate to each affected sampler;
+                // root placement is represented only by the run collector.
+                run_collectors.push(collector.clone());
+                if run_collectors.len() > compiler.limits().max_components {
+                    return Err(ScopeCompileError::ComponentLimit {
+                        count: run_collectors.len(),
+                        limit: compiler.limits().max_components,
+                    });
+                }
+                if !run_level {
                     branch_components.push(collector);
                 }
+            } else if is_non_executable_lifecycle(child.value(), &binding) && !replacement_expansion
+            {
+                // TestFragment and WorkBench are source containers. Their
+                // subtrees are reached only through an explicit replacement
+                // edge; never execute or silently classify their contents in
+                // their preservation-only source position.
             } else if is_scope_category(binding.category) {
                 branch_components.push(ScopeComponent::new(
                     *child_id,
@@ -747,6 +988,12 @@ pub(crate) fn compile_scope(
 
         let mut effective_scope = inherited;
         effective_scope.extend(branch_components.iter().cloned());
+        if effective_scope.len() > compiler.limits().max_components {
+            return Err(ScopeCompileError::ComponentLimit {
+                count: effective_scope.len(),
+                limit: compiler.limits().max_components,
+            });
+        }
 
         // Reverse-push preserves the model's lexical child order when the
         // explicit DFS stack pops the next task.
@@ -775,6 +1022,7 @@ pub(crate) fn compile_scope(
                         replacement_chain.clone(),
                         &mut packages,
                         &mut disabled,
+                        &mut run_collectors,
                     )?;
                 }
                 ComponentCategory::Replaceable => {
@@ -811,9 +1059,15 @@ pub(crate) fn compile_scope(
                         next_chain,
                         Some(ComponentCategory::Replaceable),
                         false,
+                        true,
                     ));
                 }
                 ComponentCategory::Controller | ComponentCategory::Lifecycle => {
+                    if is_non_executable_lifecycle(child.value(), &child_binding)
+                        && !replacement_expansion
+                    {
+                        continue;
+                    }
                     let mut next_controller_path = controller_path.clone();
                     if child_binding.category == ComponentCategory::Controller {
                         next_controller_path.push(child_id);
@@ -828,6 +1082,7 @@ pub(crate) fn compile_scope(
                         replacement_chain.clone(),
                         Some(child_binding.category),
                         child_run_level,
+                        replacement_expansion,
                     ));
                 }
                 ComponentCategory::Configuration
@@ -849,11 +1104,27 @@ pub(crate) fn compile_scope(
                             replacement_chain.clone(),
                             Some(child_binding.category),
                             false,
+                            replacement_expansion,
                         ));
                     }
                 }
             }
         }
+    }
+
+    let mut run_collector_bytes = 0usize;
+    for collector in &run_collectors {
+        run_collector_bytes = checked_sum(
+            &collector.path,
+            "run collector metadata bytes",
+            [run_collector_bytes, component_metadata_bytes(collector)?],
+        )?;
+    }
+    if run_collector_bytes > compiler.limits().max_bytes {
+        return Err(ScopeCompileError::ByteLimit {
+            bytes: run_collector_bytes,
+            limit: compiler.limits().max_bytes,
+        });
     }
 
     Ok(CompiledScopePlan {
@@ -991,23 +1262,12 @@ fn decode(
     expected: ComponentCategory,
     factories: &ComponentFactoryRegistry,
 ) -> Result<FactoryComponent, ScopeCompileError> {
+    if let Err(detail) = validate_factory_properties(component) {
+        return Err(ScopeCompileError::Factory {
+            source: factory_decode_error(component, expected, detail),
+        });
+    }
     let Some(factory) = factories.get(&component.binding.test_class) else {
-        if expected == ComponentCategory::Assertion
-            && is_builtin_assertion_class(&component.binding.test_class)
-        {
-            let assertion = decode_builtin_assertion(component).map_err(|detail| {
-                ScopeCompileError::Factory {
-                    source: ScopeFactoryError::Decode {
-                        node_id: component.node_id,
-                        path: component.path.clone(),
-                        test_class: component.binding.test_class.clone(),
-                        category: expected,
-                        detail: bounded(&detail),
-                    },
-                }
-            })?;
-            return Ok(FactoryComponent::Assertion(assertion));
-        }
         return Err(ScopeCompileError::Factory {
             source: ScopeFactoryError::MissingFactory {
                 node_id: component.node_id,
@@ -1017,6 +1277,18 @@ fn decode(
             },
         });
     };
+    if let Some(identity) = factory.test_class()
+        && identity != component.binding.test_class
+    {
+        return Err(ScopeCompileError::Factory {
+            source: ScopeFactoryError::IdentityMismatch {
+                node_id: component.node_id,
+                path: component.path.clone(),
+                expected: component.binding.test_class.clone(),
+                actual: bounded(identity),
+            },
+        });
+    }
     let product = factory
         .create(component)
         .map_err(|source| ScopeCompileError::Factory { source })?;
@@ -1159,12 +1431,6 @@ fn decode_builtin_assertion(component: &ScopeComponent) -> Result<Arc<dyn Assert
             )))
         }
     }
-}
-
-fn is_builtin_assertion_class(test_class: &str) -> bool {
-    JMETER_ASSERTION_BINDINGS
-        .iter()
-        .any(|(alias, _)| *alias == test_class)
 }
 
 fn reject_unknown_assertion_properties(
@@ -1340,6 +1606,7 @@ fn compile_sampler(
     _replacement_chain: Vec<NodeId>,
     packages: &mut BTreeMap<NodeId, ScopePlan>,
     disabled: &mut BTreeSet<NodeId>,
+    run_collectors: &mut Vec<ScopeComponent>,
 ) -> Result<(), ScopeCompileError> {
     let node = tree
         .get(sampler_id)
@@ -1348,9 +1615,10 @@ fn compile_sampler(
     let sampler_component =
         ScopeComponent::new(sampler_id, &sampler_path, node.value(), &sampler_binding);
 
-    // A sampler's child hashTree is the documented attachment point for
-    // postprocessors, assertions, and scoped listeners. Other categories here
-    // are topology/category errors and must not be skipped.
+    // A sampler's child hashTree is the innermost lexical scope. JMeter's
+    // TestCompiler inspects every direct child there, not just the common
+    // postprocessor/assertion/listener classes; configuration, preprocessor,
+    // and timer siblings are therefore applicable too.
     let mut attached = Vec::new();
     for child_id in node.children() {
         let child = tree
@@ -1368,12 +1636,7 @@ fn compile_sampler(
             continue;
         }
         let child_binding = binding(compiler, *child_id, &child_path, child.value())?;
-        if !matches!(
-            child_binding.category,
-            ComponentCategory::Postprocessor
-                | ComponentCategory::Assertion
-                | ComponentCategory::Listener
-        ) {
+        if !is_scope_category(child_binding.category) {
             return Err(ScopeCompileError::CategoryMisuse {
                 node_id: *child_id,
                 category: child_binding.category,
@@ -1388,6 +1651,18 @@ fn compile_sampler(
             &child_binding,
         );
         reject_unsupported_collector(&child_component)?;
+        if is_result_collector(child.value(), &child_binding) {
+            // Collectors have run lifetime even when their source placement is
+            // the sampler's attached hashTree. The component remains in the
+            // package so the source-scope predicate is preserved as well.
+            run_collectors.push(child_component.clone());
+            if run_collectors.len() > compiler.limits().max_components {
+                return Err(ScopeCompileError::ComponentLimit {
+                    count: run_collectors.len(),
+                    limit: compiler.limits().max_components,
+                });
+            }
+        }
         if !child.children().is_empty() {
             return Err(ScopeCompileError::Topology {
                 node_id: Some(*child_id),
@@ -1399,29 +1674,38 @@ fn compile_sampler(
     }
     scope.extend(attached);
 
-    let package_components = scope
-        .len()
-        .saturating_add(controller_path.len())
-        .saturating_add(1);
+    let package_components = checked_sum(
+        &sampler_path,
+        "scope component count",
+        [scope.len(), controller_path.len(), 1],
+    )?;
     if package_components > compiler.limits().max_components {
         return Err(ScopeCompileError::ComponentLimit {
             count: package_components,
             limit: compiler.limits().max_components,
         });
     }
-    let package_bytes = scope.iter().fold(
-        sampler_binding
-            .test_class
-            .len()
-            .saturating_add(sampler_binding.capability_id.len())
-            .saturating_add(node.value().name().len()),
-        |total, component| {
-            total
-                .saturating_add(component.binding.test_class.len())
-                .saturating_add(component.binding.capability_id.len())
-                .saturating_add(component.element.name().len())
-        },
-    );
+    let mut package_bytes = checked_sum(
+        &sampler_path,
+        "scope metadata bytes",
+        [
+            sampler_binding.test_class.len(),
+            sampler_binding.capability_id.len(),
+            node.value().name().len(),
+        ],
+    )?;
+    for component in &scope {
+        package_bytes = checked_sum(
+            &sampler_path,
+            "scope metadata bytes",
+            [
+                package_bytes,
+                component.binding.test_class.len(),
+                component.binding.capability_id.len(),
+                component.element.name().len(),
+            ],
+        )?;
+    }
     if package_bytes > compiler.limits().max_bytes {
         return Err(ScopeCompileError::ByteLimit {
             bytes: package_bytes,
@@ -1430,7 +1714,12 @@ fn compile_sampler(
     }
     if packages.len() >= compiler.limits().max_packages {
         return Err(ScopeCompileError::PackageLimit {
-            count: packages.len().saturating_add(1),
+            count: packages.len().checked_add(1).ok_or_else(|| {
+                ScopeCompileError::ArithmeticOverflow {
+                    path: sampler_path.clone(),
+                    detail: "package count".to_owned(),
+                }
+            })?,
             limit: compiler.limits().max_packages,
         });
     }
@@ -1453,34 +1742,34 @@ fn compile_sampler(
         assertion_components: Vec::new(),
         listener_components: Vec::new(),
     };
-    for component in scope {
-        match component.binding.category {
-            ComponentCategory::Configuration => {
-                package.configurations.push(component.binding.clone());
-                package.configuration_components.push(component);
-            }
-            ComponentCategory::Preprocessor => {
-                package.preprocessors.push(component.binding.clone());
-                package.preprocessor_components.push(component);
-            }
-            ComponentCategory::Timer => {
-                package.timers.push(component.binding.clone());
-                package.timer_components.push(component);
-            }
-            ComponentCategory::Postprocessor => {
-                package.postprocessors.push(component.binding.clone());
-                package.postprocessor_components.push(component);
-            }
-            ComponentCategory::Assertion => {
-                package.assertions.push(component.binding.clone());
-                package.assertion_components.push(component);
-            }
-            ComponentCategory::Listener => {
-                package.listeners.push(component.binding.clone());
-                package.listener_components.push(component);
-            }
-            _ => {}
-        }
+    // The pinned TestCompiler walks the sampler path from the sampler toward
+    // the root for configurations, timers, and listeners. That means the
+    // nearest lexical scope wins, while siblings within one scope retain
+    // source order. Processors and assertions are prepended during that walk
+    // and therefore remain outermost-to-innermost.
+    for component in ordered_scope_components(&scope, ComponentCategory::Configuration, true) {
+        package.configurations.push(component.binding.clone());
+        package.configuration_components.push(component);
+    }
+    for component in ordered_scope_components(&scope, ComponentCategory::Preprocessor, false) {
+        package.preprocessors.push(component.binding.clone());
+        package.preprocessor_components.push(component);
+    }
+    for component in ordered_scope_components(&scope, ComponentCategory::Timer, true) {
+        package.timers.push(component.binding.clone());
+        package.timer_components.push(component);
+    }
+    for component in ordered_scope_components(&scope, ComponentCategory::Postprocessor, false) {
+        package.postprocessors.push(component.binding.clone());
+        package.postprocessor_components.push(component);
+    }
+    for component in ordered_scope_components(&scope, ComponentCategory::Assertion, false) {
+        package.assertions.push(component.binding.clone());
+        package.assertion_components.push(component);
+    }
+    for component in ordered_scope_components(&scope, ComponentCategory::Listener, true) {
+        package.listeners.push(component.binding.clone());
+        package.listener_components.push(component);
     }
     if packages.insert(sampler_id, package).is_some() {
         return Err(ScopeCompileError::DuplicateSampler {
@@ -1489,6 +1778,39 @@ fn compile_sampler(
         });
     }
     Ok(())
+}
+
+/// Selects one category while preserving source sibling order. JMeter's
+/// compiler uses nearest-first accumulation only for configuration, timer,
+/// and listener categories; the other phases use the lexical outer-to-inner
+/// order already represented by `scope`.
+fn ordered_scope_components(
+    scope: &[ScopeComponent],
+    category: ComponentCategory,
+    nearest_first: bool,
+) -> Vec<ScopeComponent> {
+    if !nearest_first {
+        return scope
+            .iter()
+            .filter(|component| component.binding.category == category)
+            .cloned()
+            .collect();
+    }
+    let mut groups = BTreeMap::<usize, Vec<ScopeComponent>>::new();
+    for component in scope
+        .iter()
+        .filter(|component| component.binding.category == category)
+    {
+        groups
+            .entry(component.path.len())
+            .or_default()
+            .push(component.clone());
+    }
+    groups
+        .into_iter()
+        .rev()
+        .flat_map(|(_, components)| components)
+        .collect()
 }
 
 fn validate_tree(tree: &ElementTree, limits: ScopeLimits) -> Result<(), ScopeCompileError> {
@@ -1517,7 +1839,14 @@ fn validate_tree(tree: &ElementTree, limits: ScopeLimits) -> Result<(), ScopeCom
             .get(id)
             .ok_or_else(|| ScopeCompileError::Tree(format!("missing node {id}")))?;
         for child in node.children().iter().rev() {
-            pending.push((*child, depth.saturating_add(1)));
+            let child_depth =
+                depth
+                    .checked_add(1)
+                    .ok_or_else(|| ScopeCompileError::ArithmeticOverflow {
+                        path: vec![*child],
+                        detail: "source depth".to_owned(),
+                    })?;
+            pending.push((*child, child_depth));
         }
     }
     Ok(())
@@ -1550,6 +1879,16 @@ fn binding(
             detail: "hashTree wrapper reached the semantic runtime boundary".to_owned(),
         });
     }
+    if !element.opaque_extensions.is_empty() {
+        return Err(ScopeCompileError::Unsupported(UnsupportedComponent {
+            node_id,
+            test_class: bounded(class),
+            category: guess_category(class),
+            capability_id: Some("runtime.plan.opaque-element-extension".to_owned()),
+            external: false,
+            path: path.to_vec(),
+        }));
+    }
     let Some(binding) = compiler.registry().get(class).cloned() else {
         return Err(ScopeCompileError::Unsupported(UnsupportedComponent {
             node_id,
@@ -1560,13 +1899,13 @@ fn binding(
             path: path.to_vec(),
         }));
     };
-    if binding.external {
+    if !binding.is_native() {
         return Err(ScopeCompileError::Unsupported(UnsupportedComponent {
             node_id,
             test_class: bounded(class),
             category: binding.category,
             capability_id: Some(binding.capability_id.clone()),
-            external: true,
+            external: binding.is_external(),
             path: path.to_vec(),
         }));
     }
@@ -1590,10 +1929,12 @@ fn validate_owner(
                 | ComponentCategory::Assertion
                 | ComponentCategory::Listener
         ),
-        // A configuration branch is accepted as a model-level scope
-        // ancestor.  This is the only non-executable owner that may contain
-        // another scope element; attached postprocessors/assertions/listeners
-        // must remain leaves.
+        // The semantic tree also permits a configuration node to act as a
+        // lexical scope owner.  This is the normalized representation used by
+        // the standalone scope API (and by older callers that build trees
+        // directly), while elementProp values remain embedded in the source
+        // element.  The inherited configuration is carried exactly once as
+        // the child branch is walked.
         ComponentCategory::Configuration => matches!(
             category,
             ComponentCategory::Configuration
@@ -1633,7 +1974,12 @@ fn mark_disabled(
 ) -> Result<(), ScopeCompileError> {
     let mut pending = vec![(id, path.to_vec())];
     while let Some((current, current_path)) = pending.pop() {
-        let depth = current_path.len().saturating_sub(1);
+        let depth = current_path.len().checked_sub(1).ok_or_else(|| {
+            ScopeCompileError::ArithmeticOverflow {
+                path: current_path.clone(),
+                detail: "disabled branch depth".to_owned(),
+            }
+        })?;
         if depth > max_depth {
             return Err(ScopeCompileError::DepthLimit {
                 depth,
@@ -1682,6 +2028,33 @@ fn path_with(parent: &[NodeId], id: NodeId) -> Vec<NodeId> {
     path
 }
 
+fn checked_sum<const N: usize>(
+    path: &[NodeId],
+    detail: &'static str,
+    values: [usize; N],
+) -> Result<usize, ScopeCompileError> {
+    values.into_iter().try_fold(0usize, |total, value| {
+        total
+            .checked_add(value)
+            .ok_or_else(|| ScopeCompileError::ArithmeticOverflow {
+                path: path.to_vec(),
+                detail: detail.to_owned(),
+            })
+    })
+}
+
+fn component_metadata_bytes(component: &ScopeComponent) -> Result<usize, ScopeCompileError> {
+    checked_sum(
+        &component.path,
+        "scope metadata bytes",
+        [
+            component.binding.test_class.len(),
+            component.binding.capability_id.len(),
+            component.element.name().len(),
+        ],
+    )
+}
+
 fn bounded(value: &str) -> String {
     if value.len() <= 4_096 {
         value.to_owned()
@@ -1707,7 +2080,22 @@ fn is_scope_category(category: ComponentCategory) -> bool {
 }
 
 fn is_result_collector(element: &TestElement, binding: &ComponentBinding) -> bool {
-    binding.category == ComponentCategory::Listener && element.test_class() == "ResultCollector"
+    binding.category == ComponentCategory::Listener
+        && matches!(
+            element.test_class(),
+            "ResultCollector" | "org.apache.jmeter.reporters.ResultCollector"
+        )
+}
+
+fn is_non_executable_lifecycle(element: &TestElement, binding: &ComponentBinding) -> bool {
+    binding.category == ComponentCategory::Lifecycle
+        && matches!(
+            element.test_class(),
+            "TestFragmentController"
+                | "org.apache.jmeter.control.TestFragmentController"
+                | "WorkBench"
+                | "org.apache.jmeter.testelement.WorkBench"
+        )
 }
 
 fn reject_unsupported_collector(component: &ScopeComponent) -> Result<(), ScopeCompileError> {
@@ -1752,7 +2140,7 @@ mod tests {
         ComponentFactoryRegistry, ComponentRegistry, FactoryComponent, ScopeCompiler, ScopeLimits,
         UnsupportedSampler,
     };
-    use jmeter_rs_model::{ElementTree, PropertyValue, TestElement};
+    use jmeter_rs_model::{ElementTree, OpaqueValue, PropertyValue, TestElement};
     use std::sync::Arc;
 
     fn component_tree() -> (ElementTree, NodeId) {
@@ -1765,11 +2153,8 @@ mod tests {
             .expect("group");
         tree.insert_child(group, TestElement::named("Arguments", "Gui", "config"))
             .expect("config");
-        tree.insert_child(
-            group,
-            TestElement::named("UserParametersPreProcessor", "Gui", "pre"),
-        )
-        .expect("preprocessor");
+        tree.insert_child(group, TestElement::named("ScopePreprocessor", "Gui", "pre"))
+            .expect("preprocessor");
         tree.insert_child(group, TestElement::named("ConstantTimer", "Gui", "timer"))
             .expect("timer");
         let sampler = tree
@@ -1792,7 +2177,15 @@ mod tests {
     #[test]
     fn sibling_scope_and_attached_phases_are_lexical_and_ordered() {
         let (tree, collector) = component_tree();
-        let plan = ScopeCompiler::builtins().compile(&tree).expect("scope");
+        let mut registry = ComponentRegistry::builtins();
+        registry.register_native(
+            "ScopePreprocessor",
+            ComponentCategory::Preprocessor,
+            "runtime.test.preprocessor",
+        );
+        let plan = ScopeCompiler::new(registry, ScopeLimits::default())
+            .compile(&tree)
+            .expect("scope");
         let sampler = plan.iter().next().expect("sampler package").1;
         assert_eq!(sampler.configurations.len(), 1);
         assert_eq!(sampler.preprocessors.len(), 1);
@@ -1803,6 +2196,243 @@ mod tests {
         assert_eq!(plan.run_collectors()[0].node_id, collector);
         assert_eq!(sampler.configuration_nodes()[0].element.name(), "config");
         assert_eq!(sampler.sampler_node().path.last(), sampler_id(sampler));
+    }
+
+    #[test]
+    fn nested_scope_order_matches_pinned_test_compiler_accumulation() {
+        let mut tree = ElementTree::new();
+        let plan = tree
+            .insert_root(TestElement::named("TestPlan", "Gui", "plan"))
+            .expect("plan");
+        let group = tree
+            .insert_child(plan, TestElement::named("ThreadGroup", "Gui", "group"))
+            .expect("group");
+        let _outer_config_a = tree
+            .insert_child(
+                group,
+                TestElement::named("Arguments", "Gui", "outer config a"),
+            )
+            .expect("outer config a");
+        let _outer_config_b = tree
+            .insert_child(
+                group,
+                TestElement::named("Arguments", "Gui", "outer config b"),
+            )
+            .expect("outer config b");
+        let _outer_pre = tree
+            .insert_child(
+                group,
+                TestElement::named("ScopePreprocessor", "Gui", "outer pre"),
+            )
+            .expect("outer pre");
+        let _outer_timer_a = tree
+            .insert_child(
+                group,
+                TestElement::named("ConstantTimer", "Gui", "outer timer a"),
+            )
+            .expect("outer timer a");
+        let _outer_timer_b = tree
+            .insert_child(
+                group,
+                TestElement::named("ConstantTimer", "Gui", "outer timer b"),
+            )
+            .expect("outer timer b");
+        let outer_listener_a = tree
+            .insert_child(
+                group,
+                TestElement::named("ResultCollector", "SimpleDataWriter", "outer listener a"),
+            )
+            .expect("outer listener a");
+        let outer_listener_b = tree
+            .insert_child(
+                group,
+                TestElement::named("ResultCollector", "SimpleDataWriter", "outer listener b"),
+            )
+            .expect("outer listener b");
+        let controller = tree
+            .insert_child(
+                group,
+                TestElement::named("GenericController", "Gui", "controller"),
+            )
+            .expect("controller");
+        let _inner_config = tree
+            .insert_child(
+                controller,
+                TestElement::named("Arguments", "Gui", "inner config"),
+            )
+            .expect("inner config");
+        let inner_pre = tree
+            .insert_child(
+                controller,
+                TestElement::named("ScopePreprocessor", "Gui", "inner pre"),
+            )
+            .expect("inner pre");
+        let _inner_timer = tree
+            .insert_child(
+                controller,
+                TestElement::named("ConstantTimer", "Gui", "inner timer"),
+            )
+            .expect("inner timer");
+        let inner_listener = tree
+            .insert_child(
+                controller,
+                TestElement::named("ResultCollector", "SimpleDataWriter", "inner listener"),
+            )
+            .expect("inner listener");
+        let inner_post = tree
+            .insert_child(
+                controller,
+                TestElement::named("ScopePostprocessor", "Gui", "inner post"),
+            )
+            .expect("inner post");
+        let inner_assertion = tree
+            .insert_child(
+                controller,
+                TestElement::named("ScopeAssertion", "Gui", "inner assertion"),
+            )
+            .expect("inner assertion");
+        let sampler = tree
+            .insert_child(
+                controller,
+                TestElement::named("DebugSampler", "Gui", "sample"),
+            )
+            .expect("sampler");
+        let attached_config = tree
+            .insert_child(
+                sampler,
+                TestElement::named("Arguments", "Gui", "attached config"),
+            )
+            .expect("attached config");
+        let _attached_pre = tree
+            .insert_child(
+                sampler,
+                TestElement::named("ScopePreprocessor", "Gui", "attached pre"),
+            )
+            .expect("attached pre");
+        let attached_timer = tree
+            .insert_child(
+                sampler,
+                TestElement::named("ConstantTimer", "Gui", "attached timer"),
+            )
+            .expect("attached timer");
+        let attached_post = tree
+            .insert_child(
+                sampler,
+                TestElement::named("ScopePostprocessor", "Gui", "attached post"),
+            )
+            .expect("attached post");
+        let attached_assertion = tree
+            .insert_child(
+                sampler,
+                TestElement::named("ScopeAssertion", "Gui", "attached assertion"),
+            )
+            .expect("attached assertion");
+        let attached_listener = tree
+            .insert_child(
+                sampler,
+                TestElement::named("ResultCollector", "SimpleDataWriter", "attached listener"),
+            )
+            .expect("attached listener");
+
+        let mut registry = ComponentRegistry::builtins();
+        registry.register_native(
+            "ScopePostprocessor",
+            ComponentCategory::Postprocessor,
+            "runtime.test.postprocessor",
+        );
+        registry.register_native(
+            "ScopeAssertion",
+            ComponentCategory::Assertion,
+            "runtime.test.assertion",
+        );
+        registry.register_native(
+            "ScopePreprocessor",
+            ComponentCategory::Preprocessor,
+            "runtime.test.preprocessor",
+        );
+        let scope = ScopeCompiler::new(registry, ScopeLimits::default())
+            .compile(&tree)
+            .expect("scope");
+        let package = scope.get(sampler).expect("sampler package");
+
+        let names = |components: &[ScopeComponent]| {
+            components
+                .iter()
+                .map(|component| component.element.name().to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            names(package.configuration_nodes()),
+            [
+                "attached config",
+                "inner config",
+                "outer config a",
+                "outer config b"
+            ]
+        );
+        assert_eq!(
+            names(package.preprocessor_nodes()),
+            ["outer pre", "inner pre", "attached pre"]
+        );
+        assert_eq!(
+            names(package.timer_nodes()),
+            [
+                "attached timer",
+                "inner timer",
+                "outer timer a",
+                "outer timer b"
+            ]
+        );
+        assert_eq!(
+            names(package.postprocessor_nodes()),
+            ["inner post", "attached post"]
+        );
+        assert_eq!(
+            names(package.assertion_nodes()),
+            ["inner assertion", "attached assertion"]
+        );
+        assert_eq!(
+            names(package.listener_nodes()),
+            [
+                "attached listener",
+                "inner listener",
+                "outer listener a",
+                "outer listener b"
+            ]
+        );
+        assert_eq!(scope.run_collectors().len(), 4);
+        assert!(
+            scope
+                .run_collectors()
+                .iter()
+                .any(|component| component.node_id == outer_listener_a)
+        );
+        assert!(
+            scope
+                .run_collectors()
+                .iter()
+                .any(|component| component.node_id == outer_listener_b)
+        );
+        assert!(
+            scope
+                .run_collectors()
+                .iter()
+                .any(|component| component.node_id == inner_listener)
+        );
+        assert!(
+            scope
+                .run_collectors()
+                .iter()
+                .any(|component| component.node_id == attached_listener)
+        );
+        assert_eq!(package.configuration_nodes()[0].node_id, attached_config);
+        assert_eq!(package.preprocessor_nodes()[1].node_id, inner_pre);
+        assert_eq!(package.timer_nodes()[0].node_id, attached_timer);
+        assert_eq!(package.postprocessor_nodes()[0].node_id, inner_post);
+        assert_eq!(package.postprocessor_nodes()[1].node_id, attached_post);
+        assert_eq!(package.assertion_nodes()[0].node_id, inner_assertion);
+        assert_eq!(package.assertion_nodes()[1].node_id, attached_assertion);
+        assert_eq!(package.listener_nodes()[0].node_id, attached_listener);
     }
 
     fn sampler_id(scope: &ScopePlan) -> Option<&NodeId> {
@@ -1888,6 +2518,189 @@ mod tests {
     }
 
     #[test]
+    fn disabled_ancestor_suppresses_unknown_enabled_descendants() {
+        let mut tree = ElementTree::new();
+        let plan = tree
+            .insert_root(TestElement::named("TestPlan", "Gui", "plan"))
+            .expect("plan");
+        let controller = tree
+            .insert_child(
+                plan,
+                TestElement::named("GenericController", "Gui", "disabled controller"),
+            )
+            .expect("controller");
+        let unknown = tree
+            .insert_child(
+                controller,
+                TestElement::named("com.example.PluginSampler", "PluginGui", "unknown"),
+            )
+            .expect("unknown descendant");
+        tree.get_mut(controller)
+            .expect("controller node")
+            .value_mut()
+            .set_enabled(false);
+
+        let compiled = ScopeCompiler::builtins()
+            .compile(&tree)
+            .expect("disabled ancestor is a source-preserving branch");
+        assert!(compiled.is_empty());
+        assert!(compiled.disabled_ids().contains(&controller));
+        assert!(compiled.disabled_ids().contains(&unknown));
+    }
+
+    #[test]
+    fn enabled_opaque_element_is_preserved_but_not_made_transparently_executable() {
+        let mut tree = ElementTree::new();
+        let sampler = tree
+            .insert_root(TestElement::named("DebugSampler", "Gui", "opaque sampler"))
+            .expect("sampler");
+        tree.get_mut(sampler)
+            .expect("sampler node")
+            .value_mut()
+            .push_opaque_extension(OpaqueValue::new("plugin.extension", b"<raw/>".to_vec()));
+
+        let error = ScopeCompiler::builtins()
+            .compile(&tree)
+            .expect_err("opaque executable element must fail closed");
+        assert!(matches!(
+            error,
+            ScopeCompileError::Unsupported(UnsupportedComponent {
+                node_id,
+                capability_id: Some(capability_id),
+                ..
+            }) if node_id == sampler && capability_id == "runtime.plan.opaque-element-extension"
+        ));
+        let source = tree.get(sampler).expect("source sampler").value();
+        assert_eq!(source.opaque_extensions.len(), 1);
+        assert_eq!(source.opaque_extensions[0].raw, b"<raw/>".to_vec());
+    }
+
+    #[test]
+    fn duplicate_sampler_identity_from_a_replacement_edge_is_rejected() {
+        let mut tree = ElementTree::new();
+        let plan = tree
+            .insert_root(TestElement::named("TestPlan", "Gui", "plan"))
+            .expect("plan");
+        let sampler = tree
+            .insert_child(plan, TestElement::named("DebugSampler", "Gui", "sample"))
+            .expect("sampler");
+        let module = tree
+            .insert_child(
+                plan,
+                TestElement::named("ModuleController", "Gui", "module"),
+            )
+            .expect("module");
+        tree.get_mut(module)
+            .expect("module node")
+            .value_mut()
+            .set_temporary_property(
+                "runtime.replacement-node",
+                PropertyValue::long(sampler.as_u64() as i64),
+            );
+
+        let error = ScopeCompiler::builtins()
+            .compile(&tree)
+            .expect_err("same source sampler reached twice");
+        assert!(matches!(
+            error,
+            ScopeCompileError::DuplicateSampler { sampler_id, .. } if sampler_id == sampler
+        ));
+    }
+
+    #[test]
+    fn deep_controller_tree_uses_bounded_explicit_walk_state() {
+        let mut tree = ElementTree::new();
+        let plan = tree
+            .insert_root(TestElement::named("TestPlan", "Gui", "plan"))
+            .expect("plan");
+        let mut parent = plan;
+        for depth in 0..512 {
+            parent = tree
+                .insert_child(
+                    parent,
+                    TestElement::named("GenericController", "Gui", format!("controller-{depth}")),
+                )
+                .expect("controller");
+        }
+        let sampler = tree
+            .insert_child(parent, TestElement::named("DebugSampler", "Gui", "sample"))
+            .expect("sampler");
+
+        let limits = ScopeLimits::new(4_096, 1_000_000, 1_024);
+        let compiled = ScopeCompiler::new(ComponentRegistry::builtins(), limits)
+            .compile(&tree)
+            .expect("deep controller tree");
+        assert_eq!(compiled.len(), 1);
+        assert_eq!(
+            compiled.get(sampler).expect("deep package").sampler_id,
+            sampler
+        );
+    }
+
+    #[test]
+    fn test_fragment_is_preservation_only_until_module_replacement_expands_it() {
+        let mut tree = ElementTree::new();
+        let plan = tree
+            .insert_root(TestElement::named("TestPlan", "Gui", "plan"))
+            .expect("plan");
+        let fragment = tree
+            .insert_child(
+                plan,
+                TestElement::named("TestFragmentController", "Gui", "fragment"),
+            )
+            .expect("fragment");
+        let fragment_sampler = tree
+            .insert_child(
+                fragment,
+                TestElement::named("DebugSampler", "Gui", "fragment sample"),
+            )
+            .expect("fragment sampler");
+        let module = tree
+            .insert_child(
+                plan,
+                TestElement::named("ModuleController", "Gui", "module"),
+            )
+            .expect("module");
+        tree.get_mut(module)
+            .expect("module node")
+            .value_mut()
+            .set_temporary_property(
+                "runtime.replacement-node",
+                PropertyValue::long(fragment.as_u64() as i64),
+            );
+        let plan = ScopeCompiler::builtins().compile(&tree).expect("scope");
+        assert_eq!(plan.len(), 1);
+        assert_eq!(
+            plan.get(fragment_sampler)
+                .expect("expanded sampler")
+                .sampler_id,
+            fragment_sampler
+        );
+        assert_eq!(plan.replacements().get(&module), Some(&fragment));
+    }
+
+    #[test]
+    fn fragment_with_unknown_executable_content_is_not_scanned_in_source_position() {
+        let mut tree = ElementTree::new();
+        let fragment = tree
+            .insert_root(TestElement::named(
+                "TestFragmentController",
+                "Gui",
+                "fragment",
+            ))
+            .expect("fragment");
+        tree.insert_child(
+            fragment,
+            TestElement::named("UnknownPluginSampler", "Gui", "opaque sample"),
+        )
+        .expect("unknown fragment child");
+        let plan = ScopeCompiler::builtins()
+            .compile(&tree)
+            .expect("source-only fragment");
+        assert!(plan.is_empty());
+    }
+
+    #[test]
     fn unsupported_result_collector_visualizer_is_typed_at_any_enabled_scope() {
         let mut tree = ElementTree::new();
         let plan = tree
@@ -1911,6 +2724,51 @@ mod tests {
                 path,
                 ..
             }) if path.len() == 3
+        ));
+    }
+
+    #[test]
+    fn fully_qualified_result_collector_keeps_run_sink_scope_identity() {
+        let mut tree = ElementTree::new();
+        let plan = tree
+            .insert_root(TestElement::named("TestPlan", "Gui", "plan"))
+            .expect("plan");
+        let collector = tree
+            .insert_child(
+                plan,
+                TestElement::named(
+                    "org.apache.jmeter.reporters.ResultCollector",
+                    "SimpleDataWriter",
+                    "qualified listener",
+                ),
+            )
+            .expect("qualified listener");
+        tree.insert_child(plan, TestElement::named("DebugSampler", "Gui", "sample"))
+            .expect("sampler");
+
+        let compiled = ScopeCompiler::builtins()
+            .compile(&tree)
+            .expect("qualified collector");
+        assert_eq!(compiled.run_collectors().len(), 1);
+        assert_eq!(compiled.run_collectors()[0].node_id, collector);
+    }
+
+    #[test]
+    fn run_owned_collectors_are_subject_to_metadata_limits() {
+        let mut tree = ElementTree::new();
+        let plan = tree
+            .insert_root(TestElement::named("TestPlan", "Gui", "plan"))
+            .expect("plan");
+        tree.insert_child(
+            plan,
+            TestElement::named("ResultCollector", "SimpleDataWriter", "collector"),
+        )
+        .expect("collector");
+        let compiler =
+            ScopeCompiler::new(ComponentRegistry::builtins(), ScopeLimits::new(32, 1, 16));
+        assert!(matches!(
+            compiler.compile(&tree),
+            Err(ScopeCompileError::ByteLimit { .. })
         ));
     }
 
@@ -1973,6 +2831,23 @@ mod tests {
         }
     }
 
+    struct IdentityBoundSamplerHook;
+
+    impl ScopeComponentFactory for IdentityBoundSamplerHook {
+        fn create(
+            &self,
+            _component: &ScopeComponent,
+        ) -> Result<FactoryComponent, ScopeFactoryError> {
+            Ok(FactoryComponent::Sampler(Arc::new(
+                UnsupportedSampler::new("identity test hook"),
+            )))
+        }
+
+        fn test_class(&self) -> Option<&str> {
+            Some("HTTPSamplerProxy")
+        }
+    }
+
     #[test]
     fn factory_registry_is_bounded_and_decodes_without_class_matching() {
         let mut registry = ComponentFactoryRegistry::with_capacity(1);
@@ -1990,6 +2865,87 @@ mod tests {
             .compile_with_factories(&tree, &registry)
             .expect("factory package");
         assert_eq!(packages.len(), 1);
+    }
+
+    #[test]
+    fn registered_http_sampler_factory_is_selected_by_exact_class() {
+        let mut tree = ElementTree::new();
+        tree.insert_root(TestElement::named(
+            "HTTPSamplerProxy",
+            "HttpTestSampleGui",
+            "http sample",
+        ))
+        .expect("http sampler");
+        let mut factories = ComponentFactoryRegistry::default();
+        factories
+            .register("HTTPSamplerProxy", Arc::new(SamplerHook))
+            .expect("http sampler factory");
+        let packages = ScopeCompiler::builtins()
+            .compile_with_factories(&tree, &factories)
+            .expect("registered native sampler factory");
+        assert_eq!(packages.len(), 1);
+        let (sampler_id, package) = packages.iter().next().expect("http package");
+        assert_eq!(package.sampler_id(), sampler_id);
+        assert_eq!(
+            tree.get(sampler_id)
+                .expect("compiled sampler source")
+                .value()
+                .test_class(),
+            "HTTPSamplerProxy"
+        );
+    }
+
+    #[test]
+    fn factory_identity_mismatch_is_rejected_before_component_creation() {
+        let mut tree = ElementTree::new();
+        let sampler = tree
+            .insert_root(TestElement::named("DebugSampler", "Gui", "sample"))
+            .expect("sampler");
+        let mut factories = ComponentFactoryRegistry::default();
+        factories
+            .register("DebugSampler", Arc::new(IdentityBoundSamplerHook))
+            .expect("identity-bound factory");
+        let error = ScopeCompiler::builtins()
+            .compile_with_factories(&tree, &factories)
+            .expect_err("mismatched factory identity");
+        assert!(matches!(
+            error,
+            ScopeCompileError::Factory {
+                source: ScopeFactoryError::IdentityMismatch {
+                    node_id,
+                    expected,
+                    actual,
+                    ..
+                }
+            } if node_id == sampler
+                && expected == "DebugSampler"
+                && actual == "HTTPSamplerProxy"
+        ));
+    }
+
+    #[test]
+    fn factory_decoded_packages_do_not_share_components_across_users() {
+        let mut tree = ElementTree::new();
+        let sampler = tree
+            .insert_root(TestElement::named("DebugSampler", "Gui", "sample"))
+            .expect("sampler");
+        let mut factories = ComponentFactoryRegistry::default();
+        factories
+            .register("DebugSampler", Arc::new(SamplerHook))
+            .expect("sampler factory");
+        let packages = ScopeCompiler::builtins()
+            .compile_with_factories(&tree, &factories)
+            .expect("factory package");
+        let error = packages
+            .clone_for_user()
+            .expect_err("per-user factories must be explicit");
+        assert!(matches!(
+            error,
+            crate::PackageCompileError::MissingFactory {
+                sampler_id,
+                component: "sampler"
+            } if sampler_id == sampler
+        ));
     }
 
     fn timer_tree(test_class: &str, properties: &[(&str, PropertyValue)]) -> ElementTree {
@@ -2017,6 +2973,14 @@ mod tests {
 
     fn timer_factories() -> ComponentFactoryRegistry {
         let mut factories = ComponentFactoryRegistry::with_builtin_timers();
+        factories
+            .register("DebugSampler", Arc::new(SamplerHook))
+            .expect("sampler factory");
+        factories
+    }
+
+    fn assertion_factories() -> ComponentFactoryRegistry {
+        let mut factories = ComponentFactoryRegistry::with_builtin_assertions();
         factories
             .register("DebugSampler", Arc::new(SamplerHook))
             .expect("sampler factory");
@@ -2142,6 +3106,112 @@ mod tests {
                     ..
                 }
             } if test_class == "ConstantTimer"
+        ));
+    }
+
+    #[test]
+    fn constant_throughput_rejects_non_wire_property_alias() {
+        let tree = timer_tree(
+            "ConstantThroughputTimer",
+            &[(
+                "ConstantThroughputTimer.throughput",
+                PropertyValue::double(60.0),
+            )],
+        );
+        let error = ScopeCompiler::builtins()
+            .compile_with_factories(&tree, &timer_factories())
+            .expect_err("non-wire timer property alias");
+        assert!(matches!(
+            error,
+            ScopeCompileError::Factory {
+                source: ScopeFactoryError::Decode {
+                    category: ComponentCategory::Timer,
+                    ..
+                }
+            }
+        ));
+    }
+
+    #[test]
+    fn factory_property_value_bound_is_enforced_before_decode() {
+        let oversized = "x".repeat(MAX_FACTORY_PROPERTY_BYTES + 1);
+        let tree = timer_tree(
+            "ConstantTimer",
+            &[("ConstantTimer.delay", PropertyValue::string(oversized))],
+        );
+        let error = ScopeCompiler::builtins()
+            .compile_with_factories(&tree, &timer_factories())
+            .expect_err("oversized timer property");
+        assert!(matches!(
+            error,
+            ScopeCompileError::Factory {
+                source: ScopeFactoryError::Decode {
+                    category: ComponentCategory::Timer,
+                    detail,
+                    ..
+                }
+            } if detail.contains("4096")
+        ));
+    }
+
+    #[test]
+    fn factory_property_walk_bounds_total_nested_values() {
+        let mut tree = timer_tree("ConstantTimer", &[]);
+        let timer = tree
+            .get_mut(NodeId::new(3))
+            .expect("timer node")
+            .value_mut();
+        for index in 0..MAX_FACTORY_PROPERTY_COUNT {
+            timer.set_property(
+                format!("nested.{index}"),
+                PropertyValue::collection(
+                    (0..MAX_FACTORY_COLLECTION_ENTRIES)
+                        .map(|_| PropertyValue::Null)
+                        .collect(),
+                ),
+            );
+        }
+        let error = ScopeCompiler::builtins()
+            .compile_with_factories(&tree, &timer_factories())
+            .expect_err("nested property value walk must be bounded");
+        assert!(matches!(
+            error,
+            ScopeCompileError::Factory {
+                source: ScopeFactoryError::Decode {
+                    category: ComponentCategory::Timer,
+                    detail,
+                    ..
+                }
+            } if detail.contains("16384")
+        ));
+    }
+
+    #[test]
+    fn recognized_native_candidate_is_typed_unavailable_until_implemented() {
+        let mut tree = ElementTree::new();
+        let plan = tree
+            .insert_root(TestElement::named("TestPlan", "Gui", "plan"))
+            .expect("plan");
+        let group = tree
+            .insert_child(plan, TestElement::named("ThreadGroup", "Gui", "group"))
+            .expect("group");
+        tree.insert_child(
+            group,
+            TestElement::named("UserParameters", "Gui", "parameters"),
+        )
+        .expect("user parameters");
+        tree.insert_child(group, TestElement::named("DebugSampler", "Gui", "sample"))
+            .expect("sample");
+        let error = ScopeCompiler::builtins()
+            .compile(&tree)
+            .expect_err("native candidate has no implemented factory");
+        assert!(matches!(
+            error,
+            ScopeCompileError::Unsupported(UnsupportedComponent {
+                capability_id: Some(capability_id),
+                external: false,
+                ..
+            }) if capability_id == "runtime.UserParameters"
         ));
     }
 
@@ -2365,15 +3435,34 @@ mod tests {
     #[test]
     fn built_in_assertion_factories_decode_wire_properties_in_order() {
         let (tree, sampler, _) = assertion_tree();
-        let mut factories = ComponentFactoryRegistry::default();
-        factories
-            .register("DebugSampler", Arc::new(SamplerHook))
-            .expect("sampler hook");
+        let factories = assertion_factories();
         let packages = ScopeCompiler::builtins()
             .compile_with_factories(&tree, &factories)
             .expect("native assertions decode");
         let package = packages.get(sampler).expect("compiled package");
         assert_eq!(package.assertions().len(), 3);
+    }
+
+    #[test]
+    fn recognized_native_assertion_without_a_registered_factory_is_missing_capability() {
+        let (tree, _sampler, _) = assertion_tree();
+        let mut factories = ComponentFactoryRegistry::default();
+        factories
+            .register("DebugSampler", Arc::new(SamplerHook))
+            .expect("sampler hook");
+        let error = ScopeCompiler::builtins()
+            .compile_with_factories(&tree, &factories)
+            .expect_err("assertion factory must be explicit");
+        assert!(matches!(
+            error,
+            ScopeCompileError::Factory {
+                source: ScopeFactoryError::MissingFactory {
+                    category: ComponentCategory::Assertion,
+                    test_class,
+                    ..
+                }
+            } if test_class == "ResponseAssertion"
+        ));
     }
 
     #[test]
@@ -2398,10 +3487,7 @@ mod tests {
             .value_mut()
             .set_property("Asserion.test_strings", PropertyValue::string("opaque"));
 
-        let mut factories = ComponentFactoryRegistry::default();
-        factories
-            .register("DebugSampler", Arc::new(SamplerHook))
-            .expect("sampler hook");
+        let factories = assertion_factories();
         let plan = ScopeCompiler::builtins()
             .compile(&tree)
             .expect("disabled assertion is retained");
@@ -2427,10 +3513,7 @@ mod tests {
             .expect("response node")
             .value_mut()
             .set_property("Assertion.test_type", PropertyValue::integer(0));
-        let mut factories = ComponentFactoryRegistry::default();
-        factories
-            .register("DebugSampler", Arc::new(SamplerHook))
-            .expect("sampler hook");
+        let factories = assertion_factories();
         let error = ScopeCompiler::builtins()
             .compile_with_factories(&tree, &factories)
             .expect_err("invalid test type");
@@ -2460,10 +3543,7 @@ mod tests {
                 "DurationAssertion.plugin_extension",
                 PropertyValue::string("x"),
             );
-        let mut factories = ComponentFactoryRegistry::default();
-        factories
-            .register("DebugSampler", Arc::new(SamplerHook))
-            .expect("sampler hook");
+        let factories = assertion_factories();
         let error = ScopeCompiler::builtins()
             .compile_with_factories(&tree, &factories)
             .expect_err("unknown property");
@@ -2517,17 +3597,24 @@ mod tests {
             tree.insert_child(sampler, TestElement::named(class, "AssertionGui", class))
                 .expect("assertion");
         }
-        let mut factories = ComponentFactoryRegistry::default();
-        factories
-            .register("DebugSampler", Arc::new(SamplerHook))
-            .expect("sampler hook");
-        let packages = ScopeCompiler::builtins()
-            .compile_with_factories(&tree, &factories)
-            .expect("typed unsupported markers");
-        assert_eq!(
-            packages.get(sampler).expect("package").assertions().len(),
-            3
-        );
+        let error = ScopeCompiler::builtins()
+            .compile(&tree)
+            .expect_err("provider-backed assertions must remain external");
+        assert!(matches!(
+            error,
+            ScopeCompileError::Unsupported(UnsupportedComponent {
+                capability_id: Some(capability_id),
+                external: true,
+                ..
+            }) if capability_id == "assertion.json"
+        ));
+
+        for id in [NodeId::new(2), NodeId::new(3), NodeId::new(4)] {
+            tree.get_mut(id)
+                .expect("provider assertion")
+                .value_mut()
+                .set_enabled(false);
+        }
 
         let unknown = tree
             .insert_child(

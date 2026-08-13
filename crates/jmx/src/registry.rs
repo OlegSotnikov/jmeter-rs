@@ -11,6 +11,22 @@ use std::fmt;
 const SAVESERVICE_5_6_3: &str = include_str!("../data/saveservice-5.6.3.properties");
 const UPGRADE_5_6_3: &str = include_str!("../data/upgrade-5.6.3.properties");
 
+// Registry tables are generated, read-only data, but the public constructors
+// also accept caller-provided profile tables.  Keep those inputs bounded just
+// like JMX syntax input.  These limits are deliberately much larger than the
+// pinned 5.6.3 tables while still making malformed/plugin-supplied tables
+// unable to grow maps or the cycle graph without a fixed budget.
+const MAX_REGISTRY_SOURCE_BYTES: usize = 1024 * 1024;
+const MAX_REGISTRY_LINES: usize = 16 * 1024;
+const MAX_REGISTRY_ENTRIES: usize = 4 * 1024;
+const MAX_REGISTRY_IDENTIFIER_BYTES: usize = 16 * 1024;
+
+const SAVESERVICE_5_6_3_GENERATED_BYTES: usize = 25_646;
+const UPGRADE_5_6_3_GENERATED_BYTES: usize = 7_757;
+
+const SAVESERVICE_5_6_3_SOURCE_URL: &str = "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/bin/saveservice.properties";
+const UPGRADE_5_6_3_SOURCE_URL: &str = "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/bin/upgrade.properties";
+
 /// The pinned upstream registry provenance.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct RegistryVersion {
@@ -97,6 +113,19 @@ pub enum RegistryError {
         /// Stable textual key identifying the conflicting rule.
         key: String,
     },
+    /// A caller-provided table exceeded a fixed parser or identifier bound.
+    LimitExceeded {
+        /// The bound that was exceeded.
+        kind: &'static str,
+    },
+    /// An embedded table no longer carries the generated pinned-source
+    /// identity expected by this crate.
+    SourceIdentityMismatch {
+        /// The embedded table whose generated identity was not recognized.
+        table: &'static str,
+    },
+    /// The two halves of a [`JmxRegistry`] use different provenance.
+    VersionMismatch,
     /// A profile has no pinned table in this crate.
     UnsupportedProfile {
         /// Requested profile identifier.
@@ -122,6 +151,9 @@ impl RegistryError {
             Self::ConflictingAlias { .. } => "jmx.registry.conflicting-alias",
             Self::ConflictingPrimary { .. } => "jmx.registry.conflicting-primary",
             Self::ConflictingUpgrade { .. } => "jmx.registry.conflicting-upgrade",
+            Self::LimitExceeded { .. } => "jmx.registry.limit",
+            Self::SourceIdentityMismatch { .. } => "jmx.registry.source-identity",
+            Self::VersionMismatch => "jmx.registry.version-mismatch",
             Self::UnsupportedProfile { .. } => "jmx.registry.unsupported-profile",
         }
     }
@@ -140,6 +172,15 @@ impl fmt::Display for RegistryError {
             Self::ConflictingUpgrade { .. } => {
                 formatter.write_str("registry contains conflicting upgrade targets")
             }
+            Self::LimitExceeded { .. } => {
+                formatter.write_str("registry input exceeds a fixed bound")
+            }
+            Self::SourceIdentityMismatch { .. } => {
+                formatter.write_str("embedded registry source identity is not pinned")
+            }
+            Self::VersionMismatch => {
+                formatter.write_str("registry tables use different provenance")
+            }
             Self::UnsupportedProfile { .. } => {
                 formatter.write_str("requested registry profile is unsupported")
             }
@@ -148,6 +189,207 @@ impl fmt::Display for RegistryError {
 }
 
 impl std::error::Error for RegistryError {}
+
+fn ensure_source_bounds(source: &str) -> std::result::Result<(), RegistryError> {
+    if source.len() > MAX_REGISTRY_SOURCE_BYTES {
+        return Err(RegistryError::LimitExceeded {
+            kind: "source-bytes",
+        });
+    }
+    let mut lines = 0_usize;
+    for _line in source.lines() {
+        lines = lines.saturating_add(1);
+        if lines > MAX_REGISTRY_LINES {
+            return Err(RegistryError::LimitExceeded { kind: "lines" });
+        }
+    }
+    Ok(())
+}
+
+fn ensure_identifier(value: &str) -> std::result::Result<(), RegistryError> {
+    if value.len() > MAX_REGISTRY_IDENTIFIER_BYTES {
+        Err(RegistryError::LimitExceeded {
+            kind: "identifier-bytes",
+        })
+    } else {
+        Ok(())
+    }
+}
+
+fn ensure_entry_budget(entries: &mut usize) -> std::result::Result<(), RegistryError> {
+    if *entries >= MAX_REGISTRY_ENTRIES {
+        return Err(RegistryError::LimitExceeded { kind: "entries" });
+    }
+    *entries = entries.saturating_add(1);
+    Ok(())
+}
+
+fn sha256_digest(input: &[u8]) -> [u8; 32] {
+    const K: [u32; 64] = [
+        0x428a_2f98,
+        0x7137_4491,
+        0xb5c0_fbcf,
+        0xe9b5_dba5,
+        0x3956_c25b,
+        0x59f1_11f1,
+        0x923f_82a4,
+        0xab1c_5ed5,
+        0xd807_aa98,
+        0x1283_5b01,
+        0x2431_85be,
+        0x550c_7dc3,
+        0x72be_5d74,
+        0x80de_b1fe,
+        0x9bdc_06a7,
+        0xc19b_f174,
+        0xe49b_69c1,
+        0xefbe_4786,
+        0x0fc1_9dc6,
+        0x240c_a1cc,
+        0x2de9_2c6f,
+        0x4a74_84aa,
+        0x5cb0_a9dc,
+        0x76f9_88da,
+        0x983e_5152,
+        0xa831_c66d,
+        0xb003_27c8,
+        0xbf59_7fc7,
+        0xc6e0_0bf3,
+        0xd5a7_9147,
+        0x06ca_6351,
+        0x1429_2967,
+        0x27b7_0a85,
+        0x2e1b_2138,
+        0x4d2c_6dfc,
+        0x5338_0d13,
+        0x650a_7354,
+        0x766a_0abb,
+        0x81c2_c92e,
+        0x9272_2c85,
+        0xa2bf_e8a1,
+        0xa81a_664b,
+        0xc24b_8b70,
+        0xc76c_51a3,
+        0xd192_e819,
+        0xd699_0624,
+        0xf40e_3585,
+        0x106a_a070,
+        0x19a4_c116,
+        0x1e37_6c08,
+        0x2748_774c,
+        0x34b0_bcb5,
+        0x391c_0cb3,
+        0x4ed8_aa4a,
+        0x5b9c_ca4f,
+        0x682e_6ff3,
+        0x748f_82ee,
+        0x78a5_636f,
+        0x84c8_7814,
+        0x8cc7_0208,
+        0x90be_fffa,
+        0xa450_6ceb,
+        0xbef9_a3f7,
+        0xc671_78f2,
+    ];
+    let mut state: [u32; 8] = [
+        0x6a09_e667,
+        0xbb67_ae85,
+        0x3c6e_f372,
+        0xa54f_f53a,
+        0x510e_527f,
+        0x9b05_688c,
+        0x1f83_d9ab,
+        0x5be0_cd19,
+    ];
+    let bit_len = (input.len() as u64).saturating_mul(8);
+    let padded_len = input.len().saturating_add(9).div_ceil(64) * 64;
+    let mut padded = vec![0_u8; padded_len];
+    padded[..input.len()].copy_from_slice(input);
+    padded[input.len()] = 0x80;
+    padded[padded_len - 8..].copy_from_slice(&bit_len.to_be_bytes());
+    for chunk in padded.chunks_exact(64) {
+        let mut words = [0_u32; 64];
+        for (index, bytes) in chunk.chunks_exact(4).take(16).enumerate() {
+            words[index] = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        }
+        for index in 16..64 {
+            let s0 = words[index - 15].rotate_right(7)
+                ^ words[index - 15].rotate_right(18)
+                ^ (words[index - 15] >> 3);
+            let s1 = words[index - 2].rotate_right(17)
+                ^ words[index - 2].rotate_right(19)
+                ^ (words[index - 2] >> 10);
+            words[index] = words[index - 16]
+                .wrapping_add(s0)
+                .wrapping_add(words[index - 7])
+                .wrapping_add(s1);
+        }
+        let mut working = state;
+        for index in 0..64 {
+            let s1 = working[4].rotate_right(6)
+                ^ working[4].rotate_right(11)
+                ^ working[4].rotate_right(25);
+            let choice = (working[4] & working[5]) ^ ((!working[4]) & working[6]);
+            let temp1 = working[7]
+                .wrapping_add(s1)
+                .wrapping_add(choice)
+                .wrapping_add(K[index])
+                .wrapping_add(words[index]);
+            let s0 = working[0].rotate_right(2)
+                ^ working[0].rotate_right(13)
+                ^ working[0].rotate_right(22);
+            let majority =
+                (working[0] & working[1]) ^ (working[0] & working[2]) ^ (working[1] & working[2]);
+            let temp2 = s0.wrapping_add(majority);
+            working[7] = working[6];
+            working[6] = working[5];
+            working[5] = working[4];
+            working[4] = working[3].wrapping_add(temp1);
+            working[3] = working[2];
+            working[2] = working[1];
+            working[1] = working[0];
+            working[0] = temp1.wrapping_add(temp2);
+        }
+        for index in 0..8 {
+            state[index] = state[index].wrapping_add(working[index]);
+        }
+    }
+    let mut digest = [0_u8; 32];
+    for (index, word) in state.into_iter().enumerate() {
+        digest[index * 4..index * 4 + 4].copy_from_slice(&word.to_be_bytes());
+    }
+    digest
+}
+
+fn sha256_matches(input: &[u8], expected: &str) -> bool {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let expected = expected.as_bytes();
+    if expected.len() != 64 {
+        return false;
+    }
+    for (index, byte) in sha256_digest(input).into_iter().enumerate() {
+        if expected[index * 2] != HEX[usize::from(byte >> 4)]
+            || expected[index * 2 + 1] != HEX[usize::from(byte & 0x0F)]
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn generated_source_matches(
+    source: &str,
+    source_url: &str,
+    expected_bytes: usize,
+    expected_sha256: &str,
+) -> bool {
+    source.len() == expected_bytes
+        && source.starts_with(
+            "# Generated from Apache JMeter rel/v5.6.3 (34a2785748e9e0b14702595e8682c387869deda3).\n",
+        )
+        && source.contains(source_url)
+        && sha256_matches(source.as_bytes(), expected_sha256)
+}
 
 /// A versioned SaveService alias table.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -165,6 +407,7 @@ impl AliasRegistry {
     /// Loads a registry for a profile identifier currently supported by this
     /// crate. Only `jmeter-5.6.3` is pinned in the initial profile.
     pub fn for_profile(profile_id: &str) -> std::result::Result<Self, RegistryError> {
+        ensure_identifier(profile_id)?;
         if profile_id == RegistryVersion::JMETER_5_6_3.profile_id() {
             Self::jmeter_5_6_3()
         } else {
@@ -176,7 +419,25 @@ impl AliasRegistry {
 
     /// Loads the pinned JMeter 5.6.3 table embedded in this crate.
     pub fn jmeter_5_6_3() -> std::result::Result<Self, RegistryError> {
-        Self::from_properties(SAVESERVICE_5_6_3, RegistryVersion::JMETER_5_6_3)
+        if !generated_source_matches(
+            SAVESERVICE_5_6_3,
+            SAVESERVICE_5_6_3_SOURCE_URL,
+            SAVESERVICE_5_6_3_GENERATED_BYTES,
+            RegistryVersion::JMETER_5_6_3_SAVESERVICE_SHA256,
+        ) {
+            return Err(RegistryError::SourceIdentityMismatch {
+                table: "saveservice.properties",
+            });
+        }
+        let registry = Self::from_properties(SAVESERVICE_5_6_3, RegistryVersion::JMETER_5_6_3)?;
+        if registry.alias_count() != RegistryVersion::JMETER_5_6_3_ALIAS_COUNT
+            || registry.primary_alias_count() != RegistryVersion::JMETER_5_6_3_PRIMARY_ALIAS_COUNT
+        {
+            return Err(RegistryError::SourceIdentityMismatch {
+                table: "saveservice.properties",
+            });
+        }
+        Ok(registry)
     }
 
     /// Parses a SaveService-style table for a caller-selected version.
@@ -187,8 +448,10 @@ impl AliasRegistry {
         source: &str,
         version: RegistryVersion,
     ) -> std::result::Result<Self, RegistryError> {
+        ensure_source_bounds(source)?;
         let mut aliases = BTreeMap::new();
         let mut primary_aliases = BTreeMap::new();
+        let mut entries = 0_usize;
         for (line_index, raw_line) in source.lines().enumerate() {
             let line = raw_line.trim();
             if line.is_empty() || line.starts_with('#') || line.starts_with('!') {
@@ -216,6 +479,7 @@ impl AliasRegistry {
                     line: line_index + 1,
                 });
             }
+            ensure_identifier(value)?;
             for (position, alias_part) in key.split(',').enumerate() {
                 let alias = alias_part.trim();
                 if alias.is_empty() {
@@ -223,6 +487,8 @@ impl AliasRegistry {
                         line: line_index + 1,
                     });
                 }
+                ensure_identifier(alias)?;
+                ensure_entry_budget(&mut entries)?;
                 if let Some(existing) = aliases.get(alias)
                     && existing != value
                 {
@@ -324,10 +590,24 @@ impl AliasRegistry {
     /// Selects the canonical alias for a wire tag and test class.
     #[must_use]
     pub fn canonical_alias(&self, wire_tag: &str, test_class: &str) -> String {
-        self.resolve(test_class)
-            .primary_alias
-            .or_else(|| self.resolve(wire_tag).primary_alias)
-            .unwrap_or_else(|| wire_tag.to_owned())
+        let test_resolution = self.resolve(test_class);
+        if let Some(primary_alias) = test_resolution.primary_alias {
+            return primary_alias;
+        }
+
+        // A known wire tag is not enough to classify an unknown test class.
+        // In particular, a plugin element must not become a built-in element
+        // merely because its lexical tag happens to use a built-in alias.
+        // Preserve the original wire spelling unless both inputs resolve to
+        // the same upstream class.
+        let wire_resolution = self.resolve(wire_tag);
+        if wire_resolution.class_name == test_resolution.class_name
+            && let Some(primary_alias) = wire_resolution.primary_alias
+        {
+            primary_alias
+        } else {
+            wire_tag.to_owned()
+        }
     }
 }
 
@@ -445,6 +725,7 @@ impl UpgradeRegistry {
     /// Loads a registry for a profile identifier currently supported by this
     /// crate. Only `jmeter-5.6.3` is pinned in the initial profile.
     pub fn for_profile(profile_id: &str) -> std::result::Result<Self, RegistryError> {
+        ensure_identifier(profile_id)?;
         if profile_id == RegistryVersion::JMETER_5_6_3.profile_id() {
             Self::jmeter_5_6_3()
         } else {
@@ -456,7 +737,23 @@ impl UpgradeRegistry {
 
     /// Loads the pinned JMeter 5.6.3 upgrade table.
     pub fn jmeter_5_6_3() -> std::result::Result<Self, RegistryError> {
-        Self::from_properties(UPGRADE_5_6_3, RegistryVersion::JMETER_5_6_3)
+        if !generated_source_matches(
+            UPGRADE_5_6_3,
+            UPGRADE_5_6_3_SOURCE_URL,
+            UPGRADE_5_6_3_GENERATED_BYTES,
+            RegistryVersion::JMETER_5_6_3_UPGRADE_SHA256,
+        ) {
+            return Err(RegistryError::SourceIdentityMismatch {
+                table: "upgrade.properties",
+            });
+        }
+        let registry = Self::from_properties(UPGRADE_5_6_3, RegistryVersion::JMETER_5_6_3)?;
+        if registry.rule_count() != RegistryVersion::JMETER_5_6_3_UPGRADE_RULE_COUNT {
+            return Err(RegistryError::SourceIdentityMismatch {
+                table: "upgrade.properties",
+            });
+        }
+        Ok(registry)
     }
 
     /// Parses a caller-provided upgrade table without executing classes.
@@ -464,6 +761,7 @@ impl UpgradeRegistry {
         source: &str,
         version: RegistryVersion,
     ) -> std::result::Result<Self, RegistryError> {
+        ensure_source_bounds(source)?;
         let mut registry = Self {
             version,
             class_rules: BTreeMap::new(),
@@ -473,6 +771,7 @@ impl UpgradeRegistry {
             rules: Vec::new(),
             load_error: None,
         };
+        let mut entries = 0_usize;
         for (line_index, raw_line) in source.lines().enumerate() {
             let line = raw_line.trim();
             if line.is_empty() || line.starts_with('#') || line.starts_with('!') {
@@ -490,13 +789,20 @@ impl UpgradeRegistry {
                     line: line_index + 1,
                 });
             }
+            ensure_identifier(left)?;
+            ensure_identifier(right)?;
             if let Some((class_name, old_gui)) = left.split_once('|') {
-                if class_name.trim().is_empty() || old_gui.trim().is_empty() || right.is_empty() {
+                let class_name = class_name.trim();
+                let old_gui = old_gui.trim();
+                if class_name.is_empty() || old_gui.is_empty() || right.is_empty() {
                     return Err(RegistryError::MalformedLine {
                         line: line_index + 1,
                     });
                 }
-                let key = (class_name.trim().to_owned(), old_gui.trim().to_owned());
+                ensure_identifier(class_name)?;
+                ensure_identifier(old_gui)?;
+                ensure_entry_budget(&mut entries)?;
+                let key = (class_name.to_owned(), old_gui.to_owned());
                 if let Some(existing) = registry.class_and_gui_rules.get(&key)
                     && existing != right
                 {
@@ -506,7 +812,8 @@ impl UpgradeRegistry {
                 }
                 registry
                     .class_and_gui_rules
-                    .insert(key.clone(), right.to_owned());
+                    .entry(key.clone())
+                    .or_insert_with(|| right.to_owned());
                 registry.rules.push(UpgradeRule::ClassAndGui {
                     old_class: key.0,
                     old_gui: key.1,
@@ -520,6 +827,8 @@ impl UpgradeRegistry {
                         line: line_index + 1,
                     });
                 }
+                ensure_identifier(left)?;
+                ensure_entry_budget(&mut entries)?;
                 if let Some(existing) = registry.class_rules.get(left)
                     && existing != right
                 {
@@ -536,11 +845,16 @@ impl UpgradeRegistry {
                 });
                 continue;
             };
+            let prefix = prefix.trim();
+            let old_value = old_value.trim();
             if prefix.is_empty() || old_value.is_empty() {
                 return Err(RegistryError::MalformedLine {
                     line: line_index + 1,
                 });
             }
+            ensure_identifier(prefix)?;
+            ensure_identifier(old_value)?;
+            ensure_entry_budget(&mut entries)?;
 
             // Property rules use an exact class prefix. Value rules have the
             // property appended to the class with a dot; split at the last
@@ -570,6 +884,13 @@ impl UpgradeRegistry {
             } else if let Some(dot) = prefix.rfind('.') {
                 let class_name = &prefix[..dot];
                 let property = &prefix[dot + 1..];
+                if class_name.is_empty() || property.is_empty() {
+                    return Err(RegistryError::MalformedLine {
+                        line: line_index + 1,
+                    });
+                }
+                ensure_identifier(class_name)?;
+                ensure_identifier(property)?;
                 let key = (
                     class_name.to_owned(),
                     property.to_owned(),
@@ -742,6 +1063,7 @@ pub struct JmxRegistry {
 impl JmxRegistry {
     /// Loads both registries for a supported profile identifier.
     pub fn for_profile(profile_id: &str) -> std::result::Result<Self, RegistryError> {
+        ensure_identifier(profile_id)?;
         if profile_id == RegistryVersion::JMETER_5_6_3.profile_id() {
             Self::jmeter_5_6_3()
         } else {
@@ -767,7 +1089,11 @@ impl JmxRegistry {
     /// Validates both embedded or caller-provided tables.
     pub fn validate(&self) -> std::result::Result<(), RegistryError> {
         self.aliases.validate()?;
-        self.upgrades.validate()
+        self.upgrades.validate()?;
+        if self.aliases.version() != self.upgrades.version() {
+            return Err(RegistryError::VersionMismatch);
+        }
+        Ok(())
     }
 
     /// Returns pinned provenance metadata.
@@ -972,6 +1298,19 @@ mod tests {
     }
 
     #[test]
+    fn canonical_alias_does_not_reinterpret_an_unknown_test_class() {
+        let registry = AliasRegistry::jmeter_5_6_3().expect("embedded table is valid");
+        assert_eq!(
+            registry.canonical_alias("TestPlan", "com.example.Plugin"),
+            "TestPlan"
+        );
+        assert_eq!(
+            registry.canonical_alias("com.example.Plugin", "com.example.Plugin"),
+            "com.example.Plugin"
+        );
+    }
+
+    #[test]
     fn pinned_upgrade_table_is_data_only_and_versioned() {
         let registry = UpgradeRegistry::jmeter_5_6_3().expect("embedded table is valid");
         assert_eq!(registry.version().jmeter_version, "5.6.3");
@@ -1031,6 +1370,72 @@ mod tests {
         let upgraded = registry.upgrade_element("C0", "Gui");
         assert_eq!(upgraded.test_class, "C17");
         assert!(upgraded.changed);
+    }
+
+    #[test]
+    fn duplicate_upgrade_rules_are_idempotent_but_keep_source_order() {
+        let source = "A=B\nA=B\nC=D\n";
+        let registry = UpgradeRegistry::from_properties(source, RegistryVersion::JMETER_5_6_3)
+            .expect("identical duplicate rules are safe");
+        assert_eq!(registry.rule_count(), 3);
+        assert_eq!(registry.upgrade_element("A", "Gui").test_class, "B");
+        assert!(matches!(registry.rules()[0], UpgradeRule::Class { .. }));
+        assert!(matches!(registry.rules()[1], UpgradeRule::Class { .. }));
+    }
+
+    #[test]
+    fn duplicate_alias_rules_are_idempotent() {
+        let registry = AliasRegistry::from_properties(
+            "Alias,Alias=example.Class\nAlias=example.Class\n",
+            RegistryVersion::JMETER_5_6_3,
+        )
+        .expect("identical duplicate aliases are safe");
+        assert_eq!(registry.alias_count(), 1);
+        assert_eq!(registry.primary_alias_count(), 1);
+        assert_eq!(registry.class_for_alias("Alias"), Some("example.Class"));
+    }
+
+    #[test]
+    fn pair_and_plain_upgrade_cycles_are_rejected() {
+        let error = UpgradeRegistry::from_properties(
+            "Old|Gui=New\nNew=Old\n",
+            RegistryVersion::JMETER_5_6_3,
+        )
+        .expect_err("pair/plain class cycle must fail closed");
+        assert_eq!(error.code(), "jmx.registry.conflicting-upgrade");
+    }
+
+    #[test]
+    fn combined_registry_rejects_mixed_provenance() {
+        let other_version = RegistryVersion {
+            save_service_version: "5.0",
+            jmeter_version: "other",
+            source_commit: "other",
+            source_path: "other",
+        };
+        let registry = JmxRegistry {
+            aliases: AliasRegistry::from_properties("Alias=example.Class\n", other_version)
+                .expect("alias table is valid"),
+            upgrades: UpgradeRegistry::from_properties("", RegistryVersion::JMETER_5_6_3)
+                .expect("upgrade table is valid"),
+        };
+        assert_eq!(
+            registry.validate().expect_err("versions must agree").code(),
+            "jmx.registry.version-mismatch"
+        );
+    }
+
+    #[test]
+    fn caller_supplied_registry_tables_are_bounded() {
+        let oversized = "!".repeat(MAX_REGISTRY_SOURCE_BYTES + 1);
+        let error = AliasRegistry::from_properties(&oversized, RegistryVersion::JMETER_5_6_3)
+            .expect_err("oversized source must fail closed");
+        assert_eq!(error.code(), "jmx.registry.limit");
+
+        let repeated = std::iter::repeat_n("A=B\n", MAX_REGISTRY_ENTRIES + 1).collect::<String>();
+        let error = UpgradeRegistry::from_properties(&repeated, RegistryVersion::JMETER_5_6_3)
+            .expect_err("too many rules must fail closed");
+        assert_eq!(error.code(), "jmx.registry.limit");
     }
 
     #[test]

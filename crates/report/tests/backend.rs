@@ -379,9 +379,18 @@ fn influx_backend_uses_decimal_percentile_suffix_and_context_order() {
             ..BackendContextSnapshot::default()
         },
     );
-    snapshot
-        .contexts
-        .insert("all".to_owned(), BackendContextSnapshot::default());
+    snapshot.contexts.insert(
+        "all".to_owned(),
+        BackendContextSnapshot {
+            // JMeter's cumulative writer skips a zero total; keep this
+            // synthetic row source-observable while testing ordering.
+            all: BackendStatusSnapshot {
+                count: 1,
+                ..BackendStatusSnapshot::default()
+            },
+            ..BackendContextSnapshot::default()
+        },
+    );
     let points = influx_points(&config, &snapshot, 1_704_067_200_000).expect("points");
     assert_eq!(points[0].tags[1].value, "all");
     let body = encode_influx_line_protocol(&points, 2_048, 16_384).expect("body");
@@ -396,21 +405,80 @@ fn influx_backend_uses_decimal_percentile_suffix_and_context_order() {
 }
 
 #[test]
-fn backend_error_descriptor_defaults_to_weighted_sample_count() {
+fn backend_error_descriptor_preserves_explicit_weighted_sample_counts() {
     let mut config = InfluxConfig::new("http://127.0.0.1:8086/write?db=jmeter", "fixture")
         .expect("config")
         .with_summary_only(false)
         .with_sampler_filter(
-            SamplerFilter::exact([
-                "backend/failure-default",
-                "backend/failure-explicit",
-                "backend/failure-zero",
-                "backend/failure-partial",
-            ])
-            .expect("filter"),
+            SamplerFilter::exact(["backend/failure-weighted", "backend/failure-explicit"])
+                .expect("filter"),
         );
     config.runtime.queue =
-        jmeter_rs_report::BackendQueueConfig::new(3, 4_096, 3, 4_096).expect("queue");
+        jmeter_rs_report::BackendQueueConfig::new(2, 4_096, 2, 4_096).expect("queue");
+    let state = Arc::new(Mutex::new(SenderState::default()));
+    let mut listener = BackendListener::new(
+        BackendEndpoint::Influx(config),
+        Box::new(FakeSender {
+            state: Arc::clone(&state),
+        }),
+        Box::new(FakeClock {
+            now: 1_704_067_200_000,
+        }),
+        Box::new(FakeScheduler::default()),
+    )
+    .expect("listener");
+    listener.start().expect("start");
+    listener
+        .enqueue(weighted_failed_event(
+            "backend/failure-weighted",
+            600,
+            2,
+            Some(2),
+        ))
+        .expect("weighted error count");
+    listener
+        .enqueue(weighted_failed_event(
+            "backend/failure-explicit",
+            600,
+            2,
+            Some(2),
+        ))
+        .expect("explicit error count");
+    listener.flush().expect("flush");
+
+    let state = state
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let BackendPayload::Influx(request) = &state.payloads[0] else {
+        panic!("expected Influx payload");
+    };
+    let body = String::from_utf8(request.body.clone()).expect("UTF-8 line protocol");
+    assert!(body.lines().any(|line| {
+        line.contains("transaction=all,statut=all") && line.contains("countError=4u")
+    }));
+    assert!(body.lines().any(|line| {
+        line.contains("transaction=backend/failure-weighted")
+            && line.contains("responseCode=500")
+            && line.contains("count=2u")
+    }));
+    assert!(body.lines().any(|line| {
+        line.contains("transaction=backend/failure-explicit")
+            && line.contains("responseCode=500")
+            && line.contains("count=2u")
+    }));
+}
+
+#[test]
+fn backend_failed_ordinary_weighted_row_is_treated_as_all_errors() {
+    // An ordinary failed SampleResult omits ec on the wire. Its derived
+    // error_count() is one, but JMeter's backend projection treats the result
+    // as wholly failed even when a statistical sample count is present.
+    let mut config = InfluxConfig::new("http://127.0.0.1:8086/write?db=jmeter", "fixture")
+        .expect("config")
+        .with_summary_only(false)
+        .with_sampler_filter(SamplerFilter::exact(["backend/failure-default"]).expect("filter"));
+    config.runtime.queue =
+        jmeter_rs_report::BackendQueueConfig::new(1, 4_096, 1, 4_096).expect("queue");
     let state = Arc::new(Mutex::new(SenderState::default()));
     let mut listener = BackendListener::new(
         BackendEndpoint::Influx(config),
@@ -431,24 +499,8 @@ fn backend_error_descriptor_defaults_to_weighted_sample_count() {
             2,
             None,
         ))
-        .expect("default error count");
-    listener
-        .enqueue(weighted_failed_event(
-            "backend/failure-explicit",
-            600,
-            2,
-            Some(2),
-        ))
-        .expect("explicit error count");
-    listener
-        .enqueue(weighted_failed_event(
-            "backend/failure-zero",
-            600,
-            2,
-            Some(0),
-        ))
-        .expect("zero error count follows failed result");
-    listener.flush().expect("flush");
+        .expect("ordinary failed event");
+    listener.flush().expect("ordinary failed event flush");
 
     let state = state
         .lock()
@@ -458,23 +510,12 @@ fn backend_error_descriptor_defaults_to_weighted_sample_count() {
     };
     let body = String::from_utf8(request.body.clone()).expect("UTF-8 line protocol");
     assert!(body.lines().any(|line| {
+        line.contains("transaction=all,statut=all") && line.contains("countError=2u")
+    }));
+    assert!(body.lines().any(|line| {
         line.contains("transaction=backend/failure-default")
             && line.contains("responseCode=500")
             && line.contains("count=2u")
-    }));
-    assert!(body.lines().any(|line| {
-        line.contains("transaction=backend/failure-explicit")
-            && line.contains("responseCode=500")
-            && line.contains("count=2u")
-    }));
-    assert!(body.lines().any(|line| {
-        line.contains("transaction=backend/failure-zero")
-            && line.contains("responseCode=500")
-            && line.contains("count=2u")
-    }));
-    assert!(body.lines().any(|line| {
-        line.contains("transaction=backend/failure-zero,statut=all")
-            && line.contains("countError=2u")
     }));
 }
 

@@ -7,13 +7,15 @@
 //! creates one [`ControllerRunner`] per virtual user. A runner owns all mutable
 //! traversal state, so a user cannot share loop counters with another user.
 //!
-//! The legacy [`ControllerNode`] surface remains a compact Simple/Loop seam.
-//! The complete built-in controller vocabulary is provided by the sibling
-//! [`crate::LogicNode`] state machine, which preserves explicit ordering and
-//! reports unsupported JVM/plugin conditions instead of silently approximating
-//! them.
+//! [`ControllerNode`] is the dependency-free traversal seam: it handles
+//! ordered/looping structure, disabled ancestry, Once Only/Interleave, and
+//! explicitly seeded random contracts.  The complete expression- and
+//! context-driven controller vocabulary is provided by the sibling
+//! [`crate::LogicNode`] state machine.  This module does not guess those
+//! semantics; callers must use that typed machine or receive an explicit
+//! unsupported-controller error.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -25,8 +27,50 @@ type NodeIndex = usize;
 
 const DEFAULT_MAX_NODES: usize = 16_384;
 const DEFAULT_MAX_DEPTH: usize = 128;
+const MAX_ALLOWED_NODES: usize = 1_048_576;
 const MAX_ALLOWED_DEPTH: usize = 4_096;
 const MAX_CONTROLLER_KIND_BYTES: usize = 4_096;
+
+/// A deterministic SplitMix64 increment.  Random controller state is kept in
+/// the runner and is never sourced from a process-global or ambient RNG.
+const SPLITMIX64_INCREMENT: u64 = 0x9E37_79B9_7F4A_7C15;
+
+/// Returns an unbiased index for one deterministic random value.  The caller
+/// must retry with a fresh value when the value is in the rejected prefix.
+fn uniform_index(value: u64, bound: usize) -> Option<usize> {
+    let bound = u64::try_from(bound).ok()?;
+    if bound == 0 {
+        return None;
+    }
+    let remainder = u64::MAX % bound;
+    let threshold = (remainder + 1) % bound;
+    if value < threshold {
+        return None;
+    }
+    usize::try_from(value % bound).ok()
+}
+
+/// Advances a SplitMix64 stream.  The wrapping operations are the specified
+/// PRNG algorithm, rather than resource-limit arithmetic.
+fn next_seeded_value(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(SPLITMIX64_INCREMENT);
+    let mut value = *state;
+    value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    value ^ (value >> 31)
+}
+
+fn restore_random_state(
+    states: &mut BTreeMap<ElementId, u64>,
+    id: ElementId,
+    previous: Option<u64>,
+) {
+    if let Some(previous) = previous {
+        states.insert(id, previous);
+    } else {
+        states.remove(&id);
+    }
+}
 
 fn bounded_kind(value: impl Into<String>) -> String {
     let value = value.into();
@@ -301,6 +345,51 @@ pub enum ControllerNode {
         /// Children in execution order.
         children: Vec<Self>,
     },
+    /// A disabled source element.  Compilation retains the source identity for
+    /// validation while the executable projection removes the complete
+    /// descendant subtree, including unsupported descendants.
+    Disabled {
+        /// The identity of the disabled controller.
+        id: ElementId,
+        /// Source descendants retained only for bounded validation.
+        children: Vec<Self>,
+    },
+    /// A controller that admits its children only on the first root
+    /// iteration of one virtual user.
+    OnceOnly {
+        /// The identity of this controller.
+        id: ElementId,
+        /// Children in execution order.
+        children: Vec<Self>,
+    },
+    /// A controller that selects one child in round-robin order on each
+    /// entry.  The cursor is retained across root iterations for one user.
+    Interleave {
+        /// The identity of this controller.
+        id: ElementId,
+        /// Children in execution order.
+        children: Vec<Self>,
+    },
+    /// A controller that selects one child using an explicit deterministic
+    /// seed on each entry.
+    Random {
+        /// The identity of this controller.
+        id: ElementId,
+        /// Seed for the per-user deterministic stream.
+        seed: u64,
+        /// Children in execution order.
+        children: Vec<Self>,
+    },
+    /// A controller that visits every child once in a deterministic seeded
+    /// permutation on each entry.
+    RandomOrder {
+        /// The identity of this controller.
+        id: ElementId,
+        /// Seed for the per-user deterministic stream.
+        seed: u64,
+        /// Children in execution order.
+        children: Vec<Self>,
+    },
     /// A controller retained at the runtime boundary but deliberately not
     /// executable by this subset.
     Unsupported {
@@ -334,6 +423,38 @@ impl ControllerNode {
         }
     }
 
+    /// Creates a disabled source controller.  Disabled descendants are
+    /// validated for bounded size/identity but are never executable.
+    #[must_use]
+    pub fn disabled(id: ElementId, children: Vec<Self>) -> Self {
+        Self::Disabled { id, children }
+    }
+
+    /// Creates a Once Only controller.
+    #[must_use]
+    pub fn once_only(id: ElementId, children: Vec<Self>) -> Self {
+        Self::OnceOnly { id, children }
+    }
+
+    /// Creates an Interleave controller with deterministic round-robin
+    /// selection.
+    #[must_use]
+    pub fn interleave(id: ElementId, children: Vec<Self>) -> Self {
+        Self::Interleave { id, children }
+    }
+
+    /// Creates a Random controller whose stream is explicitly seeded.
+    #[must_use]
+    pub fn random(id: ElementId, seed: u64, children: Vec<Self>) -> Self {
+        Self::Random { id, seed, children }
+    }
+
+    /// Creates a Random Order controller whose stream is explicitly seeded.
+    #[must_use]
+    pub fn random_order(id: ElementId, seed: u64, children: Vec<Self>) -> Self {
+        Self::RandomOrder { id, seed, children }
+    }
+
     /// Creates a retained but unsupported controller node.
     #[must_use]
     pub fn unsupported(id: ElementId, kind: impl Into<String>) -> Self {
@@ -351,6 +472,14 @@ pub enum ControllerKind {
     Simple,
     /// An ordered, repeated controller.
     Loop,
+    /// A first-root-iteration-only controller.
+    OnceOnly,
+    /// A round-robin one-child controller.
+    Interleave,
+    /// A one-child seeded random controller.
+    Random,
+    /// A seeded random permutation controller.
+    RandomOrder,
 }
 
 /// Limits applied while compiling a controller tree.
@@ -372,9 +501,9 @@ impl Default for ControllerLimits {
 impl ControllerLimits {
     /// Creates limits. Both values may be zero for a deliberately rejecting
     /// policy; compilation then reports the corresponding typed limit error.
-    /// Depth is capped to keep source-tree conversion bounded.
+    /// Node count and depth are capped to keep source-tree conversion bounded.
     pub const fn new(max_nodes: usize, max_depth: usize) -> Result<Self, ControllerError> {
-        if max_depth > MAX_ALLOWED_DEPTH {
+        if max_nodes > MAX_ALLOWED_NODES || max_depth > MAX_ALLOWED_DEPTH {
             Err(ControllerError::InvalidLimits {
                 max_nodes,
                 max_depth,
@@ -463,6 +592,11 @@ pub enum ControllerError {
         /// Controller whose diagnostic counter wrapped.
         controller: ElementId,
     },
+    /// A bounded counter or index could not be incremented without wrapping.
+    CounterOverflow {
+        /// Stable name of the counter that reached its representational limit.
+        counter: &'static str,
+    },
     /// The internal cursor could not find the compiled node it references.
     InvalidState {
         /// Compiled node index referenced by the cursor.
@@ -489,7 +623,7 @@ impl fmt::Display for ControllerError {
                 max_depth,
             } => write!(
                 formatter,
-                "controller limits exceed the bounded depth policy: max_nodes={max_nodes}, max_depth={max_depth}"
+                "controller limits exceed the bounded policy: max_nodes={max_nodes}, max_depth={max_depth}"
             ),
             Self::PlanTooLarge { nodes, max_nodes } => {
                 write!(
@@ -530,6 +664,9 @@ impl fmt::Display for ControllerError {
                     "loop controller {controller} iteration counter overflowed"
                 )
             }
+            Self::CounterOverflow { counter } => {
+                write!(formatter, "controller counter {counter} overflowed")
+            }
             Self::InvalidState { node } => {
                 write!(
                     formatter,
@@ -559,6 +696,7 @@ impl ControllerError {
             Self::RunBudgetExhausted { .. } => "runtime.controller.run-budget",
             Self::SampleBudgetExhausted { .. } => "runtime.controller.sample-budget",
             Self::IterationOverflow { .. } => "runtime.controller.iteration-overflow",
+            Self::CounterOverflow { .. } => "runtime.controller.counter-overflow",
             Self::InvalidState { .. } => "runtime.controller.invalid-state",
             Self::DuplicateElementId { .. } => "runtime.controller.duplicate-element-id",
         }
@@ -595,7 +733,10 @@ impl StepBudget {
     /// Returns remaining transitions.
     #[must_use]
     pub const fn remaining(self) -> usize {
-        self.limit.saturating_sub(self.used)
+        match self.limit.checked_sub(self.used) {
+            Some(remaining) => remaining,
+            None => 0,
+        }
     }
 
     fn spend(&mut self) -> Result<(), ControllerError> {
@@ -605,7 +746,12 @@ impl StepBudget {
                 limit: self.limit,
             });
         }
-        self.used = self.used.saturating_add(1);
+        self.used = self
+            .used
+            .checked_add(1)
+            .ok_or(ControllerError::CounterOverflow {
+                counter: "step-budget",
+            })?;
         Ok(())
     }
 }
@@ -666,8 +812,13 @@ impl RunBudget {
         Ok(StepBudget::new(self.max_transitions - self.transitions))
     }
 
-    fn record_step(&mut self, budget: StepBudget) {
-        self.transitions = self.transitions.saturating_add(budget.used());
+    fn record_step(&mut self, budget: StepBudget) -> Result<(), ControllerError> {
+        self.transitions = self.transitions.checked_add(budget.used()).ok_or(
+            ControllerError::CounterOverflow {
+                counter: "run-budget.transitions",
+            },
+        )?;
+        Ok(())
     }
 
     fn reserve_sample(&mut self) -> Result<(), ControllerError> {
@@ -677,7 +828,12 @@ impl RunBudget {
                 limit: self.max_samples,
             });
         }
-        self.emitted = self.emitted.saturating_add(1);
+        self.emitted = self
+            .emitted
+            .checked_add(1)
+            .ok_or(ControllerError::CounterOverflow {
+                counter: "run-budget.samples",
+            })?;
         Ok(())
     }
 }
@@ -741,6 +897,27 @@ enum CompiledNode {
         count: LoopCount,
         children: Box<[NodeIndex]>,
     },
+    Disabled {
+        id: ElementId,
+    },
+    OnceOnly {
+        id: ElementId,
+        children: Box<[NodeIndex]>,
+    },
+    Interleave {
+        id: ElementId,
+        children: Box<[NodeIndex]>,
+    },
+    Random {
+        id: ElementId,
+        seed: u64,
+        children: Box<[NodeIndex]>,
+    },
+    RandomOrder {
+        id: ElementId,
+        seed: u64,
+        children: Box<[NodeIndex]>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -795,6 +972,10 @@ enum CompileTask<'a> {
         node: &'a ControllerNode,
         depth: usize,
     },
+    InspectDisabled {
+        node: &'a ControllerNode,
+        depth: usize,
+    },
     Build {
         node: &'a ControllerNode,
     },
@@ -805,8 +986,9 @@ fn compile_tree(
     limits: ControllerLimits,
 ) -> Result<(Vec<CompiledNode>, NodeIndex), ControllerError> {
     // Postorder compilation avoids recursive calls on user-provided trees.
-    // The task and result stacks are bounded by max_nodes, while depth is
-    // checked before any child task is scheduled.
+    // Every source node is accounted before descendants are scheduled, so the
+    // task/result vectors stay proportional to the configured node bound;
+    // depth is checked before any child task is scheduled.
     let mut tasks = vec![CompileTask::Enter {
         node: root,
         depth: 0,
@@ -819,64 +1001,99 @@ fn compile_tree(
     while let Some(task) = tasks.pop() {
         match task {
             CompileTask::Enter { node, depth } => {
-                if depth > limits.max_depth {
-                    return Err(ControllerError::PlanTooDeep {
-                        depth,
-                        max_depth: limits.max_depth,
-                    });
-                }
-                if seen >= limits.max_nodes {
-                    return Err(ControllerError::PlanTooLarge {
-                        nodes: seen.saturating_add(1),
-                        max_nodes: limits.max_nodes,
-                    });
-                }
-                seen = seen.saturating_add(1);
-                let id = match node {
-                    ControllerNode::Sample { id }
-                    | ControllerNode::Simple { id, .. }
-                    | ControllerNode::Loop { id, .. }
-                    | ControllerNode::Unsupported { id, .. } => *id,
-                };
-                if !seen_ids.insert(id) {
-                    return Err(ControllerError::DuplicateElementId { id });
-                }
+                account_source_node(node, depth, limits, &mut seen, &mut seen_ids)?;
                 match node {
                     ControllerNode::Sample { id } => {
                         let index = nodes.len();
                         nodes.push(CompiledNode::Sample { id: *id });
                         results.push(index);
                     }
+                    ControllerNode::Disabled { id, children } => {
+                        let index = nodes.len();
+                        nodes.push(CompiledNode::Disabled { id: *id });
+                        results.push(index);
+                        ensure_child_capacity(children.len(), seen, limits)?;
+                        let child_depth =
+                            depth
+                                .checked_add(1)
+                                .ok_or(ControllerError::CounterOverflow {
+                                    counter: "controller-depth",
+                                })?;
+                        // Disabled descendants remain subject to resource and
+                        // identity validation, but their unsupported kinds
+                        // cannot reject an executable plan because the whole
+                        // subtree is intentionally removed before traversal.
+                        for child in children.iter().rev() {
+                            tasks.push(CompileTask::InspectDisabled {
+                                node: child,
+                                depth: child_depth,
+                            });
+                        }
+                    }
                     ControllerNode::Unsupported { id, kind } => {
                         return Err(ControllerError::UnsupportedController {
                             id: *id,
-                            kind: kind.clone(),
+                            // The enum variant is public, so callers can
+                            // construct it without going through
+                            // `ControllerNode::unsupported`. Keep the
+                            // diagnostic bounded at the compilation
+                            // boundary as well as at the convenience
+                            // constructor.
+                            kind: bounded_kind(kind.clone()),
                         });
                     }
                     ControllerNode::Simple { children, .. }
-                    | ControllerNode::Loop { children, .. } => {
-                        let remaining = limits.max_nodes.saturating_sub(seen);
-                        if children.len() > remaining {
-                            return Err(ControllerError::PlanTooLarge {
-                                nodes: seen.saturating_add(children.len()),
-                                max_nodes: limits.max_nodes,
-                            });
-                        }
+                    | ControllerNode::Loop { children, .. }
+                    | ControllerNode::OnceOnly { children, .. }
+                    | ControllerNode::Interleave { children, .. }
+                    | ControllerNode::Random { children, .. }
+                    | ControllerNode::RandomOrder { children, .. } => {
+                        ensure_child_capacity(children.len(), seen, limits)?;
                         tasks.push(CompileTask::Build { node });
+                        let child_depth =
+                            depth
+                                .checked_add(1)
+                                .ok_or(ControllerError::CounterOverflow {
+                                    counter: "controller-depth",
+                                })?;
                         for child in children.iter().rev() {
                             tasks.push(CompileTask::Enter {
                                 node: child,
-                                depth: depth.saturating_add(1),
+                                depth: child_depth,
                             });
                         }
                     }
                 }
             }
+            CompileTask::InspectDisabled { node, depth } => {
+                account_source_node(node, depth, limits, &mut seen, &mut seen_ids)?;
+                let Some(children) = source_children(node) else {
+                    continue;
+                };
+                ensure_child_capacity(children.len(), seen, limits)?;
+                let child_depth = depth
+                    .checked_add(1)
+                    .ok_or(ControllerError::CounterOverflow {
+                        counter: "controller-depth",
+                    })?;
+                for child in children.iter().rev() {
+                    tasks.push(CompileTask::InspectDisabled {
+                        node: child,
+                        depth: child_depth,
+                    });
+                }
+            }
             CompileTask::Build { node } => {
                 let child_count = match node {
                     ControllerNode::Simple { children, .. }
-                    | ControllerNode::Loop { children, .. } => children.len(),
-                    ControllerNode::Sample { .. } | ControllerNode::Unsupported { .. } => {
+                    | ControllerNode::Loop { children, .. }
+                    | ControllerNode::OnceOnly { children, .. }
+                    | ControllerNode::Interleave { children, .. }
+                    | ControllerNode::Random { children, .. }
+                    | ControllerNode::RandomOrder { children, .. } => children.len(),
+                    ControllerNode::Sample { .. }
+                    | ControllerNode::Disabled { .. }
+                    | ControllerNode::Unsupported { .. } => {
                         return Err(ControllerError::InvalidState { node: nodes.len() });
                     }
                 };
@@ -894,7 +1111,27 @@ fn compile_tree(
                         count: *count,
                         children: children.into_boxed_slice(),
                     },
-                    ControllerNode::Sample { .. } | ControllerNode::Unsupported { .. } => {
+                    ControllerNode::OnceOnly { id, .. } => CompiledNode::OnceOnly {
+                        id: *id,
+                        children: children.into_boxed_slice(),
+                    },
+                    ControllerNode::Interleave { id, .. } => CompiledNode::Interleave {
+                        id: *id,
+                        children: children.into_boxed_slice(),
+                    },
+                    ControllerNode::Random { id, seed, .. } => CompiledNode::Random {
+                        id: *id,
+                        seed: *seed,
+                        children: children.into_boxed_slice(),
+                    },
+                    ControllerNode::RandomOrder { id, seed, .. } => CompiledNode::RandomOrder {
+                        id: *id,
+                        seed: *seed,
+                        children: children.into_boxed_slice(),
+                    },
+                    ControllerNode::Sample { .. }
+                    | ControllerNode::Disabled { .. }
+                    | ControllerNode::Unsupported { .. } => {
                         return Err(ControllerError::InvalidState { node: nodes.len() });
                     }
                 };
@@ -914,11 +1151,133 @@ fn compile_tree(
     Ok((nodes, root))
 }
 
+fn source_id(node: &ControllerNode) -> ElementId {
+    match node {
+        ControllerNode::Sample { id }
+        | ControllerNode::Simple { id, .. }
+        | ControllerNode::Loop { id, .. }
+        | ControllerNode::Disabled { id, .. }
+        | ControllerNode::OnceOnly { id, .. }
+        | ControllerNode::Interleave { id, .. }
+        | ControllerNode::Random { id, .. }
+        | ControllerNode::RandomOrder { id, .. }
+        | ControllerNode::Unsupported { id, .. } => *id,
+    }
+}
+
+fn source_children(node: &ControllerNode) -> Option<&[ControllerNode]> {
+    match node {
+        ControllerNode::Simple { children, .. }
+        | ControllerNode::Loop { children, .. }
+        | ControllerNode::Disabled { children, .. }
+        | ControllerNode::OnceOnly { children, .. }
+        | ControllerNode::Interleave { children, .. }
+        | ControllerNode::Random { children, .. }
+        | ControllerNode::RandomOrder { children, .. } => Some(children),
+        ControllerNode::Sample { .. } | ControllerNode::Unsupported { .. } => None,
+    }
+}
+
+fn account_source_node(
+    node: &ControllerNode,
+    depth: usize,
+    limits: ControllerLimits,
+    seen: &mut usize,
+    seen_ids: &mut BTreeSet<ElementId>,
+) -> Result<(), ControllerError> {
+    if depth > limits.max_depth {
+        return Err(ControllerError::PlanTooDeep {
+            depth,
+            max_depth: limits.max_depth,
+        });
+    }
+    let next = seen
+        .checked_add(1)
+        .ok_or(ControllerError::CounterOverflow {
+            counter: "controller-nodes",
+        })?;
+    if next > limits.max_nodes {
+        return Err(ControllerError::PlanTooLarge {
+            nodes: next,
+            max_nodes: limits.max_nodes,
+        });
+    }
+    *seen = next;
+    let id = source_id(node);
+    if !seen_ids.insert(id) {
+        return Err(ControllerError::DuplicateElementId { id });
+    }
+    Ok(())
+}
+
+fn ensure_child_capacity(
+    child_count: usize,
+    seen: usize,
+    limits: ControllerLimits,
+) -> Result<(), ControllerError> {
+    let remaining = limits
+        .max_nodes
+        .checked_sub(seen)
+        .ok_or(ControllerError::CounterOverflow {
+            counter: "controller-node-budget",
+        })?;
+    if child_count > remaining {
+        let nodes = seen
+            .checked_add(child_count)
+            .ok_or(ControllerError::CounterOverflow {
+                counter: "controller-node-budget",
+            })?;
+        return Err(ControllerError::PlanTooLarge {
+            nodes,
+            max_nodes: limits.max_nodes,
+        });
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+enum FrameMode {
+    /// Ordinary ordered traversal.
+    Ordered,
+    /// Disabled or already-consumed Once Only subtree.
+    Skip,
+    /// One-child controller whose selected node is retained until the frame
+    /// is popped.
+    OneShot { child: Option<NodeIndex> },
+    /// Random-order controller.  The order is generated lazily at entry so a
+    /// zero-child controller makes no random draw and cannot spin.
+    RandomOrder { order: Option<Box<[NodeIndex]>> },
+}
+
 #[derive(Debug, Clone, Copy)]
+enum CompiledNodeKind {
+    Sample,
+    Disabled,
+    Simple,
+    Loop { count: LoopCount },
+    OnceOnly,
+    Interleave { id: ElementId },
+    Random { id: ElementId, seed: u64 },
+    RandomOrder { id: ElementId, seed: u64 },
+}
+
+#[derive(Debug, Clone, Copy)]
+enum FrameState {
+    Ordered,
+    Skip,
+    OneShot(Option<NodeIndex>),
+    RandomOrder {
+        child: Option<NodeIndex>,
+        missing: bool,
+    },
+}
+
+#[derive(Debug, Clone)]
 struct Frame {
     node: NodeIndex,
     next_child: usize,
     iteration: u64,
+    mode: FrameMode,
 }
 
 /// Per-virtual-user mutable state for an immutable [`ControllerProgram`].
@@ -930,6 +1289,9 @@ pub struct ControllerRunner {
     finished: bool,
     terminal: Option<ControlSignal>,
     completed_iterations: u64,
+    once_done: BTreeSet<ElementId>,
+    interleave_next: BTreeMap<ElementId, usize>,
+    random_states: BTreeMap<ElementId, u64>,
 }
 
 impl ControllerRunner {
@@ -941,6 +1303,9 @@ impl ControllerRunner {
             finished: false,
             terminal: None,
             completed_iterations: 0,
+            once_done: BTreeSet::new(),
+            interleave_next: BTreeMap::new(),
+            random_states: BTreeMap::new(),
         }
     }
 
@@ -964,6 +1329,9 @@ impl ControllerRunner {
         self.finished = false;
         self.terminal = None;
         self.completed_iterations = 0;
+        self.once_done.clear();
+        self.interleave_next.clear();
+        self.random_states.clear();
     }
 
     /// Starts the next root traversal while retaining the completed-iteration
@@ -993,8 +1361,18 @@ impl ControllerRunner {
             match node {
                 CompiledNode::Loop { id, .. } if *id == controller => Some(frame.iteration),
                 CompiledNode::Simple { id, .. } if *id == controller => Some(0),
+                CompiledNode::OnceOnly { id, .. } if *id == controller => Some(0),
+                CompiledNode::Interleave { id, .. } if *id == controller => Some(0),
+                CompiledNode::Random { id, .. } if *id == controller => Some(0),
+                CompiledNode::RandomOrder { id, .. } if *id == controller => Some(0),
                 CompiledNode::Sample { .. } => None,
-                CompiledNode::Loop { .. } | CompiledNode::Simple { .. } => None,
+                CompiledNode::Disabled { .. }
+                | CompiledNode::Loop { .. }
+                | CompiledNode::Simple { .. }
+                | CompiledNode::OnceOnly { .. }
+                | CompiledNode::Interleave { .. }
+                | CompiledNode::Random { .. }
+                | CompiledNode::RandomOrder { .. } => None,
             }
         })
     }
@@ -1011,7 +1389,16 @@ impl ControllerRunner {
         cancellation: &Cancellation,
         budget: &mut StepBudget,
     ) -> Result<ControllerStep, ControllerError> {
-        self.step_with_signal(cancellation.take_signal(), budget)
+        // Peek before executing so a one-shot NextLoop is not lost when the
+        // caller supplied an exhausted budget or the cursor reports an
+        // invariant error.  A successful transition acknowledges the action
+        // afterwards; persistent stop signals remain visible.
+        let signal = cancellation.signal();
+        let result = self.step_with_signal(signal, budget);
+        if result.is_ok() && signal == ControlSignal::NextLoop {
+            let _ = cancellation.take_signal();
+        }
+        result
     }
 
     /// Advances one bounded controller step with a typed control signal.
@@ -1039,8 +1426,10 @@ impl ControllerRunner {
             return Ok(ControllerStep::Stopped(signal));
         }
         if signal == ControlSignal::NextLoop {
-            budget.spend()?;
-            self.apply_next_loop()?;
+            if !self.finished {
+                budget.spend()?;
+                self.apply_next_loop()?;
+            }
             if self.finished {
                 return Ok(ControllerStep::Complete);
             }
@@ -1072,7 +1461,7 @@ impl ControllerRunner {
         loop {
             let mut step_budget = budget.next_step_budget()?;
             let outcome = self.step_with_run_budget(signal, &mut step_budget, budget);
-            budget.record_step(step_budget);
+            budget.record_step(step_budget)?;
             let outcome = outcome?;
             signal = ControlSignal::Continue;
             match &outcome {
@@ -1109,8 +1498,10 @@ impl ControllerRunner {
             return Ok(ControllerStep::Stopped(signal));
         }
         if signal == ControlSignal::NextLoop {
-            budget.spend()?;
-            self.apply_next_loop()?;
+            if !self.finished {
+                budget.spend()?;
+                self.apply_next_loop()?;
+            }
             if self.finished {
                 return Ok(ControllerStep::Complete);
             }
@@ -1149,13 +1540,17 @@ impl ControllerRunner {
                         self.root_started = true;
                         return Ok(ControllerStep::Sample(self.selection(*id)));
                     }
-                    Some(CompiledNode::Simple { .. } | CompiledNode::Loop { .. }) => {
+                    Some(
+                        CompiledNode::Simple { .. }
+                        | CompiledNode::Loop { .. }
+                        | CompiledNode::Disabled { .. }
+                        | CompiledNode::OnceOnly { .. }
+                        | CompiledNode::Interleave { .. }
+                        | CompiledNode::Random { .. }
+                        | CompiledNode::RandomOrder { .. },
+                    ) => {
                         self.root_started = true;
-                        self.stack.push(Frame {
-                            node: self.program.compiled.root,
-                            next_child: 0,
-                            iteration: 0,
-                        });
+                        self.push_frame(self.program.compiled.root, 0)?;
                         continue;
                     }
                     None => {
@@ -1167,41 +1562,31 @@ impl ControllerRunner {
             }
 
             let Some(frame_index) = self.stack.len().checked_sub(1) else {
+                let controller = self.root_identity()?;
+                let completed_iterations = self
+                    .completed_iterations
+                    .checked_add(1)
+                    .ok_or(ControllerError::IterationOverflow { controller })?;
                 self.finished = true;
-                self.completed_iterations = self.completed_iterations.checked_add(1).ok_or(
-                    ControllerError::IterationOverflow {
-                        controller: self.program.compiled.root as ElementId,
-                    },
-                )?;
+                self.completed_iterations = completed_iterations;
                 return Ok(ControllerStep::Complete);
             };
 
-            let action = self.frame_action(frame_index)?;
+            let action = self.frame_action(frame_index, budget, run_budget)?;
             match action {
                 FrameAction::Select(child) => match self.program.compiled.nodes.get(child) {
                     Some(CompiledNode::Sample { id }) => {
-                        run_budget.reserve_sample()?;
-                        let frame = self.stack.get_mut(frame_index).ok_or(
-                            ControllerError::InvalidState {
-                                node: self.program.compiled.root,
-                            },
-                        )?;
-                        frame.next_child = frame.next_child.saturating_add(1);
                         return Ok(ControllerStep::Sample(self.selection(*id)));
                     }
-                    Some(CompiledNode::Simple { .. } | CompiledNode::Loop { .. }) => {
-                        let frame = self.stack.get_mut(frame_index).ok_or(
-                            ControllerError::InvalidState {
-                                node: self.program.compiled.root,
-                            },
-                        )?;
-                        frame.next_child = frame.next_child.saturating_add(1);
-                        self.stack.push(Frame {
-                            node: child,
-                            next_child: 0,
-                            iteration: 0,
-                        });
-                    }
+                    Some(
+                        CompiledNode::Simple { .. }
+                        | CompiledNode::Loop { .. }
+                        | CompiledNode::Disabled { .. }
+                        | CompiledNode::OnceOnly { .. }
+                        | CompiledNode::Interleave { .. }
+                        | CompiledNode::Random { .. }
+                        | CompiledNode::RandomOrder { .. },
+                    ) => self.push_frame(child, 0)?,
                     None => return Err(ControllerError::InvalidState { node: child }),
                 },
                 FrameAction::Finish => {
@@ -1228,73 +1613,399 @@ impl ControllerRunner {
                         .ok_or(ControllerError::InvalidState { node })?;
                     frame.next_child = 0;
                     frame.iteration = iteration;
+                    frame.mode = FrameMode::Ordered;
                 }
             }
         }
     }
 
-    fn frame_action(&self, frame_index: usize) -> Result<FrameAction, ControllerError> {
+    fn push_frame(&mut self, node: NodeIndex, iteration: u64) -> Result<(), ControllerError> {
+        let mode = match self.program.compiled.nodes.get(node) {
+            Some(CompiledNode::Disabled { .. }) => FrameMode::Skip,
+            Some(CompiledNode::OnceOnly { id, .. }) => {
+                if self.once_done.insert(*id) {
+                    FrameMode::Ordered
+                } else {
+                    FrameMode::Skip
+                }
+            }
+            Some(CompiledNode::Interleave { .. } | CompiledNode::Random { .. }) => {
+                FrameMode::OneShot { child: None }
+            }
+            Some(CompiledNode::RandomOrder { .. }) => FrameMode::RandomOrder { order: None },
+            Some(
+                CompiledNode::Sample { .. }
+                | CompiledNode::Simple { .. }
+                | CompiledNode::Loop { .. },
+            ) => FrameMode::Ordered,
+            None => return Err(ControllerError::InvalidState { node }),
+        };
+        self.stack.push(Frame {
+            node,
+            next_child: 0,
+            iteration,
+            mode,
+        });
+        Ok(())
+    }
+
+    fn advance_child(&mut self, frame_index: usize) -> Result<(), ControllerError> {
         let frame = self
             .stack
-            .get(frame_index)
+            .get_mut(frame_index)
             .ok_or(ControllerError::InvalidState {
                 node: self.program.compiled.root,
             })?;
-        let node = self
-            .program
-            .compiled
-            .nodes
-            .get(frame.node)
-            .ok_or(ControllerError::InvalidState { node: frame.node })?;
-        match node {
-            CompiledNode::Sample { .. } => Err(ControllerError::InvalidState { node: frame.node }),
-            CompiledNode::Simple { children, .. } => {
-                if frame.next_child < children.len() {
-                    Ok(FrameAction::Select(children[frame.next_child]))
+        frame.next_child =
+            frame
+                .next_child
+                .checked_add(1)
+                .ok_or(ControllerError::CounterOverflow {
+                    counter: "controller-child-index",
+                })?;
+        Ok(())
+    }
+
+    fn reserve_child_sample(
+        &self,
+        child: NodeIndex,
+        run_budget: &mut RunBudget,
+    ) -> Result<(), ControllerError> {
+        if matches!(
+            self.program.compiled.nodes.get(child),
+            Some(CompiledNode::Sample { .. })
+        ) {
+            run_budget.reserve_sample()?;
+        }
+        Ok(())
+    }
+
+    fn random_index(
+        &mut self,
+        id: ElementId,
+        seed: u64,
+        bound: usize,
+        budget: &mut StepBudget,
+    ) -> Result<usize, ControllerError> {
+        if bound <= 1 {
+            return Ok(0);
+        }
+        if u64::try_from(bound).is_err() {
+            return Err(ControllerError::CounterOverflow {
+                counter: "random-bound",
+            });
+        }
+        let state = self.random_states.entry(id).or_insert(seed);
+        loop {
+            let value = next_seeded_value(state);
+            if let Some(index) = uniform_index(value, bound) {
+                return Ok(index);
+            }
+            // Rejected-prefix draws are bounded transitions, so an
+            // adversarial seed cannot turn one controller step into an
+            // unbounded loop.
+            budget.spend()?;
+        }
+    }
+
+    fn compiled_node_kind(&self, node: NodeIndex) -> Result<CompiledNodeKind, ControllerError> {
+        match self.program.compiled.nodes.get(node) {
+            Some(CompiledNode::Sample { .. }) => Ok(CompiledNodeKind::Sample),
+            Some(CompiledNode::Disabled { .. }) => Ok(CompiledNodeKind::Disabled),
+            Some(CompiledNode::Simple { .. }) => Ok(CompiledNodeKind::Simple),
+            Some(CompiledNode::Loop { count, .. }) => Ok(CompiledNodeKind::Loop { count: *count }),
+            Some(CompiledNode::OnceOnly { .. }) => Ok(CompiledNodeKind::OnceOnly),
+            Some(CompiledNode::Interleave { id, .. }) => {
+                Ok(CompiledNodeKind::Interleave { id: *id })
+            }
+            Some(CompiledNode::Random { id, seed, .. }) => Ok(CompiledNodeKind::Random {
+                id: *id,
+                seed: *seed,
+            }),
+            Some(CompiledNode::RandomOrder { id, seed, .. }) => Ok(CompiledNodeKind::RandomOrder {
+                id: *id,
+                seed: *seed,
+            }),
+            None => Err(ControllerError::InvalidState { node }),
+        }
+    }
+
+    fn compiled_children(&self, node: NodeIndex) -> Result<&[NodeIndex], ControllerError> {
+        match self.program.compiled.nodes.get(node) {
+            Some(CompiledNode::Simple { children, .. })
+            | Some(CompiledNode::Loop { children, .. })
+            | Some(CompiledNode::OnceOnly { children, .. })
+            | Some(CompiledNode::Interleave { children, .. })
+            | Some(CompiledNode::Random { children, .. })
+            | Some(CompiledNode::RandomOrder { children, .. }) => Ok(children),
+            Some(CompiledNode::Sample { .. } | CompiledNode::Disabled { .. }) | None => {
+                Err(ControllerError::InvalidState { node })
+            }
+        }
+    }
+
+    fn compiled_child_at(
+        &self,
+        node: NodeIndex,
+        position: usize,
+    ) -> Result<Option<NodeIndex>, ControllerError> {
+        Ok(self.compiled_children(node)?.get(position).copied())
+    }
+
+    fn frame_action(
+        &mut self,
+        frame_index: usize,
+        budget: &mut StepBudget,
+        run_budget: &mut RunBudget,
+    ) -> Result<FrameAction, ControllerError> {
+        let (node, next_child, iteration, mode) = {
+            let frame = self
+                .stack
+                .get(frame_index)
+                .ok_or(ControllerError::InvalidState {
+                    node: self.program.compiled.root,
+                })?;
+            let mode = match &frame.mode {
+                FrameMode::Ordered => FrameState::Ordered,
+                FrameMode::Skip => FrameState::Skip,
+                FrameMode::OneShot { child } => FrameState::OneShot(*child),
+                FrameMode::RandomOrder { order } => FrameState::RandomOrder {
+                    child: order
+                        .as_deref()
+                        .and_then(|order| order.get(frame.next_child).copied()),
+                    missing: order.is_none(),
+                },
+            };
+            (frame.node, frame.next_child, frame.iteration, mode)
+        };
+        match self.compiled_node_kind(node)? {
+            CompiledNodeKind::Sample => Err(ControllerError::InvalidState { node }),
+            CompiledNodeKind::Disabled => Ok(FrameAction::Finish),
+            CompiledNodeKind::Simple => {
+                if let Some(child) = self.compiled_child_at(node, next_child)? {
+                    self.reserve_child_sample(child, run_budget)?;
+                    self.advance_child(frame_index)?;
+                    Ok(FrameAction::Select(child))
                 } else {
                     Ok(FrameAction::Finish)
                 }
             }
-            CompiledNode::Loop {
-                count, children, ..
-            } => match count {
+            CompiledNodeKind::Loop { count } => match count {
                 LoopCount::Finite(0) => Ok(FrameAction::Finish),
-                LoopCount::Finite(total) if frame.next_child < children.len() => {
-                    Ok(FrameAction::Select(children[frame.next_child]))
+                LoopCount::Finite(_total)
+                    if self.compiled_child_at(node, next_child)?.is_some() =>
+                {
+                    let child = self
+                        .compiled_child_at(node, next_child)?
+                        .ok_or(ControllerError::InvalidState { node })?;
+                    self.reserve_child_sample(child, run_budget)?;
+                    self.advance_child(frame_index)?;
+                    Ok(FrameAction::Select(child))
                 }
                 LoopCount::Finite(total) => {
-                    if frame.iteration.saturating_add(1) >= *total {
+                    let next = iteration
+                        .checked_add(1)
+                        .ok_or_else(|| self.iteration_overflow(node))?;
+                    if next >= total {
                         Ok(FrameAction::Finish)
                     } else {
                         Ok(FrameAction::AdvanceLoop)
                     }
                 }
-                LoopCount::Forever if frame.next_child < children.len() => {
-                    Ok(FrameAction::Select(children[frame.next_child]))
+                LoopCount::Forever if self.compiled_child_at(node, next_child)?.is_some() => {
+                    let child = self
+                        .compiled_child_at(node, next_child)?
+                        .ok_or(ControllerError::InvalidState { node })?;
+                    self.reserve_child_sample(child, run_budget)?;
+                    self.advance_child(frame_index)?;
+                    Ok(FrameAction::Select(child))
                 }
                 LoopCount::Forever => Ok(FrameAction::AdvanceLoop),
             },
+            CompiledNodeKind::OnceOnly => {
+                if matches!(mode, FrameState::Skip) {
+                    return Ok(FrameAction::Finish);
+                }
+                if let Some(child) = self.compiled_child_at(node, next_child)? {
+                    self.reserve_child_sample(child, run_budget)?;
+                    self.advance_child(frame_index)?;
+                    Ok(FrameAction::Select(child))
+                } else {
+                    Ok(FrameAction::Finish)
+                }
+            }
+            CompiledNodeKind::Interleave { id } => {
+                let child_count = self.compiled_children(node)?.len();
+                if child_count == 0 {
+                    return Ok(FrameAction::Finish);
+                }
+                let FrameState::OneShot(selected) = mode else {
+                    return Err(ControllerError::InvalidState { node });
+                };
+                if selected.is_some() {
+                    return Ok(FrameAction::Finish);
+                }
+                let cursor = match self.interleave_next.get(&id) {
+                    Some(cursor) => *cursor,
+                    None => 0,
+                };
+                let index = cursor % child_count;
+                let child = self
+                    .compiled_child_at(node, index)?
+                    .ok_or(ControllerError::InvalidState { node })?;
+                let next_cursor =
+                    cursor
+                        .checked_add(1)
+                        .ok_or(ControllerError::CounterOverflow {
+                            counter: "interleave-cursor",
+                        })?;
+                self.reserve_child_sample(child, run_budget)?;
+                self.interleave_next.insert(id, next_cursor);
+                self.stack[frame_index].mode = FrameMode::OneShot { child: Some(child) };
+                Ok(FrameAction::Select(child))
+            }
+            CompiledNodeKind::Random { id, seed } => {
+                let child_count = self.compiled_children(node)?.len();
+                if child_count == 0 {
+                    return Ok(FrameAction::Finish);
+                }
+                let FrameState::OneShot(selected) = mode else {
+                    return Err(ControllerError::InvalidState { node });
+                };
+                if selected.is_some() {
+                    return Ok(FrameAction::Finish);
+                }
+                let previous_state = self.random_states.get(&id).copied();
+                let index = match self.random_index(id, seed, child_count, budget) {
+                    Ok(index) => index,
+                    Err(error) => {
+                        restore_random_state(&mut self.random_states, id, previous_state);
+                        return Err(error);
+                    }
+                };
+                let child = self
+                    .compiled_child_at(node, index)?
+                    .ok_or(ControllerError::InvalidState { node })?;
+                if let Err(error) = self.reserve_child_sample(child, run_budget) {
+                    restore_random_state(&mut self.random_states, id, previous_state);
+                    return Err(error);
+                }
+                self.stack[frame_index].mode = FrameMode::OneShot { child: Some(child) };
+                Ok(FrameAction::Select(child))
+            }
+            CompiledNodeKind::RandomOrder { id, seed } => {
+                let child_count = self.compiled_children(node)?.len();
+                if child_count == 0 {
+                    return Ok(FrameAction::Finish);
+                }
+                let FrameState::RandomOrder {
+                    child: current_child,
+                    missing: order_missing,
+                } = mode
+                else {
+                    return Err(ControllerError::InvalidState { node });
+                };
+                if order_missing {
+                    let previous_state = self.random_states.get(&id).copied();
+                    let mut order = self.compiled_children(node)?.to_vec();
+                    for position in (1..order.len()).rev() {
+                        let bound =
+                            position
+                                .checked_add(1)
+                                .ok_or(ControllerError::CounterOverflow {
+                                    counter: "random-order-bound",
+                                })?;
+                        let index = match self.random_index(id, seed, bound, budget) {
+                            Ok(index) => index,
+                            Err(error) => {
+                                restore_random_state(&mut self.random_states, id, previous_state);
+                                return Err(error);
+                            }
+                        };
+                        order.swap(position, index);
+                    }
+                    if let Some(child) = order.first().copied()
+                        && let Err(error) = self.reserve_child_sample(child, run_budget)
+                    {
+                        restore_random_state(&mut self.random_states, id, previous_state);
+                        return Err(error);
+                    }
+                    self.stack[frame_index].mode = FrameMode::RandomOrder {
+                        order: Some(order.into_boxed_slice()),
+                    };
+                }
+                let child = current_child.or_else(|| {
+                    self.stack
+                        .get(frame_index)
+                        .and_then(|frame| match &frame.mode {
+                            FrameMode::RandomOrder { order: Some(order) } => {
+                                order.get(next_child).copied()
+                            }
+                            _ => None,
+                        })
+                });
+                let Some(child) = child else {
+                    return Ok(FrameAction::Finish);
+                };
+                if !order_missing {
+                    self.reserve_child_sample(child, run_budget)?;
+                }
+                self.advance_child(frame_index)?;
+                Ok(FrameAction::Select(child))
+            }
         }
     }
 
     fn iteration_overflow(&self, node: NodeIndex) -> ControllerError {
-        let controller = match self.program.compiled.nodes.get(node) {
-            Some(CompiledNode::Simple { id, .. } | CompiledNode::Loop { id, .. }) => *id,
-            Some(CompiledNode::Sample { id }) => *id,
-            None => node as ElementId,
-        };
-        ControllerError::IterationOverflow { controller }
+        match self.node_identity(node) {
+            Some(controller) => ControllerError::IterationOverflow { controller },
+            None => ControllerError::CounterOverflow {
+                counter: "controller-identity",
+            },
+        }
+    }
+
+    fn root_identity(&self) -> Result<ElementId, ControllerError> {
+        self.node_identity(self.program.compiled.root)
+            .ok_or(ControllerError::CounterOverflow {
+                counter: "controller-identity",
+            })
+    }
+
+    fn node_identity(&self, node: NodeIndex) -> Option<ElementId> {
+        match self.program.compiled.nodes.get(node) {
+            Some(
+                CompiledNode::Simple { id, .. }
+                | CompiledNode::Loop { id, .. }
+                | CompiledNode::Disabled { id, .. }
+                | CompiledNode::OnceOnly { id, .. }
+                | CompiledNode::Interleave { id, .. }
+                | CompiledNode::Random { id, .. }
+                | CompiledNode::RandomOrder { id, .. }
+                | CompiledNode::Sample { id },
+            ) => Some(*id),
+            None => u64::try_from(node).ok(),
+        }
     }
 
     fn apply_next_loop(&mut self) -> Result<(), ControllerError> {
+        if self.finished {
+            return Ok(());
+        }
         let Some(loop_index) = self.stack.iter().rposition(|frame| {
             matches!(
                 self.program.compiled.nodes.get(frame.node),
                 Some(CompiledNode::Loop { .. })
             )
         }) else {
+            let controller = self.root_identity()?;
+            let completed_iterations = self
+                .completed_iterations
+                .checked_add(1)
+                .ok_or(ControllerError::IterationOverflow { controller })?;
             self.stack.clear();
             self.root_started = true;
+            self.completed_iterations = completed_iterations;
             self.finished = true;
             return Ok(());
         };
@@ -1302,18 +2013,23 @@ impl ControllerRunner {
         let frame = self
             .stack
             .get(loop_index)
-            .copied()
+            .cloned()
             .ok_or(ControllerError::InvalidState {
                 node: self.program.compiled.root,
             })?;
         let (controller, count) = match self.program.compiled.nodes.get(frame.node) {
             Some(CompiledNode::Loop { id, count, .. }) => (*id, *count),
-            Some(CompiledNode::Sample { .. } | CompiledNode::Simple { .. }) | None => {
-                return Err(ControllerError::InvalidState { node: frame.node });
-            }
+            Some(_) | None => return Err(ControllerError::InvalidState { node: frame.node }),
         };
         let next_iteration = match count {
-            LoopCount::Finite(total) if frame.iteration.saturating_add(1) >= total => None,
+            LoopCount::Finite(total)
+                if frame
+                    .iteration
+                    .checked_add(1)
+                    .is_some_and(|next| next >= total) =>
+            {
+                None
+            }
             LoopCount::Finite(_) => Some(
                 frame
                     .iteration
@@ -1328,7 +2044,12 @@ impl ControllerRunner {
             ),
         };
 
-        self.stack.truncate(loop_index.saturating_add(1));
+        let stack_len = loop_index
+            .checked_add(1)
+            .ok_or(ControllerError::CounterOverflow {
+                counter: "controller-stack-index",
+            })?;
+        self.stack.truncate(stack_len);
         let loop_frame = self
             .stack
             .get_mut(loop_index)
@@ -1337,6 +2058,7 @@ impl ControllerRunner {
             Some(iteration) => {
                 loop_frame.iteration = iteration;
                 loop_frame.next_child = 0;
+                loop_frame.mode = FrameMode::Ordered;
             }
             None => {
                 let child_count = match self.program.compiled.nodes.get(loop_frame.node) {
@@ -1348,6 +2070,7 @@ impl ControllerRunner {
                     }
                 };
                 loop_frame.next_child = child_count;
+                loop_frame.mode = FrameMode::Ordered;
             }
         }
         Ok(())
@@ -1373,6 +2096,27 @@ impl ControllerRunner {
                             kind: ControllerKind::Loop,
                             iteration: frame.iteration,
                         }),
+                        CompiledNode::OnceOnly { id, .. } => Some(ControllerCursor {
+                            id: *id,
+                            kind: ControllerKind::OnceOnly,
+                            iteration: 0,
+                        }),
+                        CompiledNode::Interleave { id, .. } => Some(ControllerCursor {
+                            id: *id,
+                            kind: ControllerKind::Interleave,
+                            iteration: 0,
+                        }),
+                        CompiledNode::Random { id, .. } => Some(ControllerCursor {
+                            id: *id,
+                            kind: ControllerKind::Random,
+                            iteration: 0,
+                        }),
+                        CompiledNode::RandomOrder { id, .. } => Some(ControllerCursor {
+                            id: *id,
+                            kind: ControllerKind::RandomOrder,
+                            iteration: 0,
+                        }),
+                        CompiledNode::Disabled { .. } => None,
                         CompiledNode::Sample { .. } => None,
                     })
             })
@@ -1722,6 +2466,10 @@ mod tests {
             LoopCount::from_jmeter(-2),
             Err(ControllerError::InvalidLoopCount { value: -2 })
         ));
+        assert!(matches!(
+            ControllerLimits::new(MAX_ALLOWED_NODES + 1, 1),
+            Err(ControllerError::InvalidLimits { .. })
+        ));
     }
 
     #[test]
@@ -1767,6 +2515,39 @@ mod tests {
     }
 
     #[test]
+    fn cancellation_next_loop_is_not_lost_when_the_first_budget_is_exhausted() {
+        let program = ControllerProgram::compile(ControllerNode::loop_controller(
+            1,
+            LoopCount::finite(2),
+            vec![ControllerNode::sample(2)],
+        ))
+        .expect("compile");
+        let mut runner = program.runner();
+        let cancellation = Cancellation::new();
+        assert!(matches!(
+            runner
+                .step_with_cancellation(&cancellation, &mut StepBudget::new(8))
+                .expect("first sample"),
+            ControllerStep::Sample(_)
+        ));
+        cancellation.request(ControlSignal::NextLoop);
+        assert_eq!(
+            runner
+                .step_with_cancellation(&cancellation, &mut StepBudget::new(0))
+                .expect_err("exhausted budget"),
+            ControllerError::StepBudgetExhausted { used: 0, limit: 0 }
+        );
+        assert_eq!(cancellation.signal(), ControlSignal::NextLoop);
+        assert!(matches!(
+            runner
+                .step_with_cancellation(&cancellation, &mut StepBudget::new(8))
+                .expect("retry next-loop"),
+            ControllerStep::Sample(_)
+        ));
+        assert_eq!(cancellation.signal(), ControlSignal::Continue);
+    }
+
+    #[test]
     fn sample_budget_is_checked_before_root_selection() {
         let program =
             ControllerProgram::compile(ControllerNode::sample(1)).expect("sample plan compiles");
@@ -1782,5 +2563,438 @@ mod tests {
             }
         );
         assert_eq!(runner.completed_iterations(), 0);
+    }
+
+    #[test]
+    fn sample_budget_failure_does_not_consume_a_nested_selection() {
+        let program =
+            ControllerProgram::compile(ControllerNode::simple(1, vec![ControllerNode::sample(2)]))
+                .expect("compile");
+        let mut runner = program.runner();
+        let error = runner
+            .run_to_completion(&mut RunBudget::new(0, 8))
+            .expect_err("sample budget");
+        assert_eq!(
+            error,
+            ControllerError::SampleBudgetExhausted {
+                emitted: 0,
+                limit: 0
+            }
+        );
+        let trace = runner
+            .run_to_completion(&mut RunBudget::new(1, 8))
+            .expect("retry with a larger budget");
+        assert_eq!(ids(&trace), vec![2]);
+    }
+
+    #[test]
+    fn random_order_sample_budget_failure_retries_the_same_seeded_order() {
+        let root = ControllerNode::random_order(
+            1,
+            0x1234,
+            vec![ControllerNode::sample(2), ControllerNode::sample(3)],
+        );
+        let program = ControllerProgram::compile(root).expect("compile");
+        let mut runner = program.runner();
+        assert_eq!(
+            runner
+                .run_to_completion(&mut RunBudget::new(0, 16))
+                .expect_err("sample budget"),
+            ControllerError::SampleBudgetExhausted {
+                emitted: 0,
+                limit: 0
+            }
+        );
+        let retry = runner
+            .run_to_completion(&mut RunBudget::new(2, 32))
+            .expect("retry seeded order");
+
+        let mut fresh = program.runner();
+        let expected = fresh
+            .run_to_completion(&mut RunBudget::new(2, 32))
+            .expect("fresh seeded order");
+        assert_eq!(ids(&retry), ids(&expected));
+    }
+
+    #[test]
+    fn one_child_selection_budget_failures_leave_controller_state_retryable() {
+        let interleave = ControllerProgram::compile(ControllerNode::interleave(
+            1,
+            vec![ControllerNode::sample(2), ControllerNode::sample(3)],
+        ))
+        .expect("interleave compiles");
+        let mut interleave_runner = interleave.runner();
+        assert!(matches!(
+            interleave_runner.run_to_completion(&mut RunBudget::new(0, 16)),
+            Err(ControllerError::SampleBudgetExhausted { .. })
+        ));
+        let retry = interleave_runner
+            .run_to_completion(&mut RunBudget::new(1, 16))
+            .expect("interleave retry");
+        assert_eq!(ids(&retry), vec![2]);
+
+        let random = ControllerProgram::compile(ControllerNode::random(
+            4,
+            0xCAFE,
+            vec![ControllerNode::sample(5), ControllerNode::sample(6)],
+        ))
+        .expect("random controller compiles");
+        let mut random_runner = random.runner();
+        assert!(matches!(
+            random_runner.run_to_completion(&mut RunBudget::new(0, 16)),
+            Err(ControllerError::SampleBudgetExhausted { .. })
+        ));
+        let retry = random_runner
+            .run_to_completion(&mut RunBudget::new(1, 16))
+            .expect("random retry");
+        let mut fresh = random.runner();
+        let expected = fresh
+            .run_to_completion(&mut RunBudget::new(1, 16))
+            .expect("fresh random run");
+        assert_eq!(ids(&retry), ids(&expected));
+    }
+
+    #[test]
+    fn interleave_cursor_overflow_is_reported_before_sample_reservation() {
+        let program = ControllerProgram::compile(ControllerNode::interleave(
+            1,
+            vec![ControllerNode::sample(2)],
+        ))
+        .expect("interleave compiles");
+        let mut runner = program.runner();
+        runner.interleave_next.insert(1, usize::MAX);
+        let mut budget = StepBudget::new(16);
+        assert_eq!(
+            runner
+                .step(&mut budget)
+                .expect_err("cursor overflow must be typed"),
+            ControllerError::CounterOverflow {
+                counter: "interleave-cursor"
+            }
+        );
+    }
+
+    #[test]
+    fn root_iteration_overflow_reports_the_root_element_identity() {
+        let program = ControllerProgram::compile(ControllerNode::simple(42, Vec::new()))
+            .expect("empty root compiles");
+        let mut runner = program.runner();
+        runner.completed_iterations = u64::MAX;
+        let mut budget = StepBudget::new(8);
+        assert_eq!(
+            runner
+                .step(&mut budget)
+                .expect_err("root iteration must use checked arithmetic"),
+            ControllerError::IterationOverflow { controller: 42 }
+        );
+    }
+
+    #[test]
+    fn unsupported_variant_diagnostics_are_bounded_at_compile_time() {
+        let error = ControllerProgram::compile(ControllerNode::Unsupported {
+            id: 9,
+            kind: "x".repeat(MAX_CONTROLLER_KIND_BYTES + 1),
+        })
+        .expect_err("unsupported controller must fail during compilation");
+        let ControllerError::UnsupportedController { kind, .. } = error else {
+            panic!("expected unsupported-controller error");
+        };
+        assert_eq!(kind.len(), MAX_CONTROLLER_KIND_BYTES);
+    }
+
+    #[test]
+    fn finite_loop_model_matches_trace_for_generated_counts_and_children() {
+        for count in 0..=8_u64 {
+            for child_count in 0..=4_u64 {
+                let children: Vec<_> = (0..child_count)
+                    .map(|id| ControllerNode::sample(100 + id))
+                    .collect();
+                let expected: Vec<_> = (0..count)
+                    .flat_map(|_| (0..child_count).map(|id| 100 + id))
+                    .collect();
+                let program = ControllerProgram::compile(ControllerNode::loop_controller(
+                    1,
+                    LoopCount::finite(count),
+                    children,
+                ))
+                .expect("generated finite loop compiles");
+                let mut runner = program.runner();
+                let trace = runner
+                    .run_to_completion(&mut RunBudget::new(expected.len(), 1_000))
+                    .expect("generated finite loop completes");
+                assert_eq!(ids(&trace), expected);
+                assert_eq!(trace.terminal, ControllerStep::Complete);
+            }
+        }
+    }
+
+    #[test]
+    fn next_loop_without_an_active_loop_completes_one_root_iteration() {
+        let program =
+            ControllerProgram::compile(ControllerNode::simple(42, vec![ControllerNode::sample(1)]))
+                .expect("simple plan compiles");
+        let mut runner = program.runner();
+        let mut budget = StepBudget::new(8);
+        assert_eq!(
+            runner
+                .step_with_signal(ControlSignal::NextLoop, &mut budget)
+                .expect("next-loop action completes root"),
+            ControllerStep::Complete
+        );
+        assert_eq!(runner.completed_iterations(), 1);
+        let mut budget = StepBudget::new(8);
+        assert_eq!(
+            runner
+                .step_with_signal(ControlSignal::NextLoop, &mut budget)
+                .expect("replayed next-loop action is a no-op"),
+            ControllerStep::Complete
+        );
+        assert_eq!(runner.completed_iterations(), 1);
+    }
+
+    #[test]
+    fn disabled_ancestor_prunes_children_without_executing_unsupported_descendants() {
+        let root = ControllerNode::simple(
+            1,
+            vec![
+                ControllerNode::sample(2),
+                ControllerNode::disabled(
+                    3,
+                    vec![ControllerNode::unsupported(4, "plugin.controller")],
+                ),
+                ControllerNode::sample(5),
+            ],
+        );
+        let program = ControllerProgram::compile(root).expect("disabled subtree compiles");
+        let mut runner = program.runner();
+        let trace = runner
+            .run_to_completion(&mut RunBudget::new(2, 32))
+            .expect("disabled subtree is skipped");
+        assert_eq!(ids(&trace), vec![2, 5]);
+        assert_eq!(trace.terminal, ControllerStep::Complete);
+    }
+
+    #[test]
+    fn disabled_descendants_still_obey_depth_and_identity_bounds() {
+        let root = ControllerNode::disabled(1, vec![ControllerNode::sample(2)]);
+        let limits = ControllerLimits::new(8, 0).expect("zero depth is valid");
+        assert_eq!(
+            ControllerProgram::compile_with_limits(root, limits)
+                .expect_err("disabled child depth is source-bounded"),
+            ControllerError::PlanTooDeep {
+                depth: 1,
+                max_depth: 0
+            }
+        );
+
+        let duplicate = ControllerNode::disabled(1, vec![ControllerNode::sample(1)]);
+        assert_eq!(
+            ControllerProgram::compile(duplicate).expect_err("identity remains source-visible"),
+            ControllerError::DuplicateElementId { id: 1 }
+        );
+    }
+
+    #[test]
+    fn once_only_is_per_user_and_survives_root_iteration_reset_boundary() {
+        let program = ControllerProgram::compile(ControllerNode::once_only(
+            10,
+            vec![ControllerNode::sample(1)],
+        ))
+        .expect("once-only compiles");
+        let mut first = program.runner();
+        let mut second = program.runner();
+
+        assert_eq!(
+            first
+                .run_to_completion(&mut RunBudget::new(1, 16))
+                .expect("first user")
+                .samples
+                .len(),
+            1
+        );
+        first.next_root_iteration().expect("next root");
+        assert!(
+            first
+                .run_to_completion(&mut RunBudget::new(1, 16))
+                .expect("once-only second iteration")
+                .samples
+                .is_empty()
+        );
+
+        assert_eq!(
+            second
+                .run_to_completion(&mut RunBudget::new(1, 16))
+                .expect("independent user")
+                .samples
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn interleave_preserves_round_robin_order_across_root_iterations() {
+        let program = ControllerProgram::compile(ControllerNode::loop_controller(
+            10,
+            LoopCount::finite(3),
+            vec![ControllerNode::interleave(
+                20,
+                vec![ControllerNode::sample(1), ControllerNode::sample(2)],
+            )],
+        ))
+        .expect("interleave compiles");
+        let mut runner = program.runner();
+        let trace = runner
+            .run_to_completion(&mut RunBudget::new(3, 64))
+            .expect("interleave run");
+        assert_eq!(ids(&trace), vec![1, 2, 1]);
+        assert!(trace.samples.iter().all(|sample| {
+            sample
+                .path
+                .iter()
+                .any(|cursor| cursor.kind == ControllerKind::Interleave)
+        }));
+    }
+
+    #[test]
+    fn seeded_random_and_random_order_are_reproducible_without_ambient_rng() {
+        let root = ControllerNode::loop_controller(
+            10,
+            LoopCount::finite(3),
+            vec![ControllerNode::simple(
+                11,
+                vec![
+                    ControllerNode::random(
+                        12,
+                        0xA5A5,
+                        vec![ControllerNode::sample(1), ControllerNode::sample(2)],
+                    ),
+                    ControllerNode::random_order(
+                        13,
+                        0x5A5A,
+                        vec![
+                            ControllerNode::sample(3),
+                            ControllerNode::sample(4),
+                            ControllerNode::sample(5),
+                        ],
+                    ),
+                ],
+            )],
+        );
+        let first = run(root.clone(), 12, 256);
+        let second = run(root, 12, 256);
+        assert_eq!(ids(&first), ids(&second));
+        assert_eq!(first.samples.len(), 12);
+
+        let different = run(
+            ControllerNode::loop_controller(
+                10,
+                LoopCount::finite(3),
+                vec![ControllerNode::random_order(
+                    13,
+                    0x5A5B,
+                    vec![
+                        ControllerNode::sample(3),
+                        ControllerNode::sample(4),
+                        ControllerNode::sample(5),
+                    ],
+                )],
+            ),
+            9,
+            256,
+        );
+        assert_ne!(ids(&first), ids(&different));
+    }
+
+    #[test]
+    fn deep_iterative_compilation_and_traversal_do_not_use_call_stack() {
+        let mut root = ControllerNode::sample(9_999);
+        for id in 1..=512 {
+            root = ControllerNode::simple(id, vec![root]);
+        }
+        let limits = ControllerLimits::new(1_024, 512).expect("deep limits");
+        let program = ControllerProgram::compile_with_limits(root, limits)
+            .expect("deep tree compiles iteratively");
+        let mut runner = program.runner();
+        let trace = runner
+            .run_to_completion(&mut RunBudget::new(1, 4_096))
+            .expect("deep traversal");
+        assert_eq!(ids(&trace), vec![9_999]);
+    }
+
+    #[test]
+    fn empty_selection_controllers_complete_without_no_progress_spin() {
+        for node in [
+            ControllerNode::once_only(1, Vec::new()),
+            ControllerNode::interleave(2, Vec::new()),
+            ControllerNode::random(3, 7, Vec::new()),
+            ControllerNode::random_order(4, 7, Vec::new()),
+        ] {
+            let program = ControllerProgram::compile(node).expect("empty controller compiles");
+            let mut runner = program.runner();
+            let trace = runner
+                .run_to_completion(&mut RunBudget::new(0, 16))
+                .expect("empty controller completes");
+            assert!(trace.samples.is_empty());
+            assert_eq!(trace.terminal, ControllerStep::Complete);
+        }
+    }
+
+    #[test]
+    fn checked_budget_arithmetic_never_saturates() {
+        let program = ControllerProgram::compile(ControllerNode::sample(1)).expect("compile");
+        let mut runner = program.runner();
+        let mut budget = StepBudget::new(usize::MAX);
+        budget.used = usize::MAX;
+        assert_eq!(
+            runner
+                .step(&mut budget)
+                .expect_err("used budget cannot wrap"),
+            ControllerError::StepBudgetExhausted {
+                used: usize::MAX,
+                limit: usize::MAX
+            }
+        );
+        assert_eq!(budget.remaining(), 0);
+
+        let mut run_budget = RunBudget::new(usize::MAX, usize::MAX);
+        run_budget.transitions = usize::MAX;
+        let mut spent = StepBudget::new(usize::MAX);
+        spent.used = 1;
+        assert_eq!(
+            run_budget
+                .record_step(spent)
+                .expect_err("run transition count cannot wrap"),
+            ControllerError::CounterOverflow {
+                counter: "run-budget.transitions"
+            }
+        );
+
+        run_budget.emitted = usize::MAX;
+        assert_eq!(
+            run_budget
+                .reserve_sample()
+                .expect_err("maximum sample budget rejects without wrapping"),
+            ControllerError::SampleBudgetExhausted {
+                emitted: usize::MAX,
+                limit: usize::MAX
+            }
+        );
+    }
+
+    #[test]
+    fn completed_runner_is_idempotent_even_when_next_loop_has_no_budget() {
+        let program = ControllerProgram::compile(ControllerNode::simple(1, Vec::new()))
+            .expect("empty controller compiles");
+        let mut runner = program.runner();
+        runner
+            .run_to_completion(&mut RunBudget::new(0, 8))
+            .expect("empty controller completes");
+        let mut no_budget = StepBudget::new(0);
+        assert_eq!(
+            runner
+                .step_with_signal(ControlSignal::NextLoop, &mut no_budget)
+                .expect("next-loop after completion is a no-op"),
+            ControllerStep::Complete
+        );
     }
 }

@@ -5,7 +5,9 @@
 //! replacing arbitrary hexadecimal text. It hashes the active profile and the
 //! two documentation sources referenced by the fixture provenance schemas,
 //! then checks the bridge constant and the exact JSON pointers declared by
-//! those schemas. Generation is opt-in and patches only those locations.
+//! those schemas. The JSON audit also rejects a newly added profile
+//! path/hash reference unless its pointer is added to this catalog. Generation
+//! is opt-in and patches only those locations.
 
 use crate::diagnostics::{Diagnostic, Diagnostics};
 use crate::profile::display_path;
@@ -21,11 +23,15 @@ use std::path::{Path, PathBuf};
 use std::os::unix::fs::OpenOptionsExt;
 
 const ACTIVE_PROFILE_RELATIVE: &str = "compat/profiles/jmeter-5.6.3.json";
+const FIXTURE_JSON_ROOT_RELATIVE: &str = "compat/fixtures/jmeter-5.6.3";
+const CAPABILITY_SET_RELATIVE: &str = "compat/capability-sets/standalone-native.json";
 const ARCHITECTURE_RELATIVE: &str = "docs/architecture.md";
 const COMPAT_README_RELATIVE: &str = "compat/README.md";
 const BRIDGE_RELATIVE: &str = "crates/bridge-protocol/src/jvm_capability.rs";
 const BRIDGE_CONSTANT: &str = "JVM_PROFILE_SHA256_HEX";
 const MAX_REFERENCE_FILE_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_REFERENCE_JSON_FILES: usize = 4096;
+const MAX_REFERENCE_DIRECTORY_DEPTH: usize = 32;
 const READ_CHUNK_BYTES: usize = 16 * 1024;
 const MAX_JSON_DEPTH: usize = 64;
 const GENERATOR_COMMAND: &str = "cargo xtask profile-references --generate";
@@ -79,6 +85,13 @@ const JSON_TARGETS: &[JsonTarget] = &[
         guard: Some(("/repository_inputs/profile/0/path", ACTIVE_PROFILE_RELATIVE)),
         source: SourceKind::Profile,
         role: "harness repository-input profile pin",
+    },
+    JsonTarget {
+        relative_path: CAPABILITY_SET_RELATIVE,
+        pointer: "/parent_profile/sha256",
+        guard: Some(("/parent_profile/path", ACTIVE_PROFILE_RELATIVE)),
+        source: SourceKind::Profile,
+        role: "standalone capability-set parent profile pin",
     },
     JsonTarget {
         relative_path: "compat/fixtures/jmeter-5.6.3/harness/provenance.json",
@@ -352,11 +365,247 @@ pub(crate) fn run(root: &Path, profile_path: &Path, action: Action) -> Diagnosti
         });
     }
 
+    audit_profile_json_coverage(root, &plans, &mut diagnostics);
+
     if action == Action::Generate && diagnostics.is_empty() {
         write_plans(root, plans, &mut diagnostics);
     }
     diagnostics.sort_deterministically();
     diagnostics
+}
+
+/// Reject profile hash references that are not represented by the closed
+/// catalog. A broad replacement of every 64-character hexadecimal string is
+/// unsafe because fixture files also contain hashes for plans, inputs, and
+/// expected outputs. The audit therefore recognizes only the profile path
+/// paired with a sibling `sha256`, plus the two named harness scalar fields.
+fn audit_profile_json_coverage(
+    root: &Path,
+    plans: &BTreeMap<PathBuf, FilePlan>,
+    diagnostics: &mut Diagnostics,
+) {
+    let declared = JSON_TARGETS
+        .iter()
+        .filter(|target| target.source == SourceKind::Profile)
+        .map(|target| (target.relative_path, target.pointer))
+        .collect::<std::collections::BTreeSet<_>>();
+    let fixture_root = root.join(FIXTURE_JSON_ROOT_RELATIVE);
+    let fixture_metadata = match fs::symlink_metadata(&fixture_root) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return,
+        Err(error) => {
+            diagnostics.push(Diagnostic::new(
+                "PROFILE-REFERENCE-SCAN",
+                display_path(root, &fixture_root),
+                format!("cannot inspect fixture JSON root: {error}"),
+            ));
+            return;
+        }
+    };
+    if fixture_metadata.file_type().is_symlink() || !fixture_metadata.is_dir() {
+        diagnostics.push(Diagnostic::new(
+            "PROFILE-REFERENCE-SCAN",
+            display_path(root, &fixture_root),
+            "fixture JSON root must be a regular non-symlink directory",
+        ));
+        return;
+    }
+    let mut paths = std::collections::BTreeSet::new();
+    collect_fixture_json_paths(root, &fixture_root, 0, &mut paths, diagnostics);
+
+    for path in paths {
+        let relative_path = match path.strip_prefix(root).ok().and_then(Path::to_str) {
+            Some(relative_path) => relative_path,
+            None => {
+                diagnostics.push(Diagnostic::new(
+                    "PROFILE-REFERENCE-SCAN",
+                    display_path(root, &path),
+                    "fixture JSON path is not a UTF-8 path below the repository root",
+                ));
+                continue;
+            }
+        };
+        let bytes = if let Some(plan) = plans.get(&path) {
+            plan.bytes.clone()
+        } else {
+            match read_bounded_file(&path, MAX_REFERENCE_FILE_BYTES) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    diagnostics.push(Diagnostic::new(
+                        "PROFILE-REFERENCE-SCAN",
+                        relative_path,
+                        format!("cannot inspect fixture JSON for profile references: {error}"),
+                    ));
+                    continue;
+                }
+            }
+        };
+        let document = match serde_json::from_slice::<Value>(&bytes) {
+            Ok(document) => document,
+            Err(error) if plans.contains_key(&path) => {
+                // The normal target validation reports invalid JSON at each
+                // declared pointer. Keep this audit additive and deterministic.
+                let _ = error;
+                continue;
+            }
+            Err(error) => {
+                diagnostics.push(Diagnostic::new(
+                    "PROFILE-REFERENCE-SCAN",
+                    relative_path,
+                    format!("fixture JSON is not valid JSON: {error}"),
+                ));
+                continue;
+            }
+        };
+        let mut discovered = std::collections::BTreeSet::new();
+        if let Err(error) = collect_profile_json_references(&document, "", 0, &mut discovered) {
+            diagnostics.push(Diagnostic::new(
+                "PROFILE-REFERENCE-SCAN",
+                relative_path,
+                error,
+            ));
+            continue;
+        }
+        for pointer in discovered {
+            if declared.contains(&(relative_path, pointer.as_str())) {
+                continue;
+            }
+            diagnostics.push(Diagnostic::new(
+                "PROFILE-REFERENCE-CATALOG",
+                format!("{relative_path}#{pointer}"),
+                format!("profile hash reference is not declared in the closed catalog; refusing to patch it; add an explicit target to tools/xtask/src/profile_references.rs, then run {GENERATOR_COMMAND}"),
+            ));
+        }
+    }
+}
+
+fn collect_fixture_json_paths(
+    root: &Path,
+    directory: &Path,
+    depth: usize,
+    paths: &mut std::collections::BTreeSet<PathBuf>,
+    diagnostics: &mut Diagnostics,
+) {
+    if depth > MAX_REFERENCE_DIRECTORY_DEPTH {
+        diagnostics.push(Diagnostic::new(
+            "PROFILE-REFERENCE-SCAN",
+            display_path(root, directory),
+            format!(
+                "fixture directory nesting exceeds the {MAX_REFERENCE_DIRECTORY_DEPTH}-level bound"
+            ),
+        ));
+        return;
+    }
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) => {
+            diagnostics.push(Diagnostic::new(
+                "PROFILE-REFERENCE-SCAN",
+                display_path(root, directory),
+                format!("cannot enumerate fixture directory: {error}"),
+            ));
+            return;
+        }
+    };
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                diagnostics.push(Diagnostic::new(
+                    "PROFILE-REFERENCE-SCAN",
+                    display_path(root, directory),
+                    format!("cannot read fixture directory entry: {error}"),
+                ));
+                continue;
+            }
+        };
+        let path = entry.path();
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                diagnostics.push(Diagnostic::new(
+                    "PROFILE-REFERENCE-SCAN",
+                    display_path(root, &path),
+                    format!("cannot inspect fixture directory entry: {error}"),
+                ));
+                continue;
+            }
+        };
+        if metadata.file_type().is_symlink() {
+            diagnostics.push(Diagnostic::new(
+                "PROFILE-REFERENCE-SCAN",
+                display_path(root, &path),
+                "symlinked fixture entries are not eligible for profile-reference scanning",
+            ));
+            continue;
+        }
+        if metadata.is_dir() {
+            collect_fixture_json_paths(root, &path, depth + 1, paths, diagnostics);
+            continue;
+        }
+        if metadata.is_file()
+            && path
+                .extension()
+                .is_some_and(|extension| extension == std::ffi::OsStr::new("json"))
+        {
+            if paths.len() >= MAX_REFERENCE_JSON_FILES {
+                diagnostics.push(Diagnostic::new(
+                    "PROFILE-REFERENCE-SCAN",
+                    display_path(root, directory),
+                    format!(
+                        "fixture JSON file count exceeds the {MAX_REFERENCE_JSON_FILES}-file bound"
+                    ),
+                ));
+                return;
+            }
+            paths.insert(path);
+        }
+    }
+}
+
+fn collect_profile_json_references(
+    value: &Value,
+    pointer: &str,
+    depth: usize,
+    discovered: &mut std::collections::BTreeSet<String>,
+) -> Result<(), String> {
+    if depth > MAX_JSON_DEPTH {
+        return Err(format!(
+            "fixture JSON nesting exceeds the {MAX_JSON_DEPTH}-level profile-reference bound"
+        ));
+    }
+    match value {
+        Value::Object(object) => {
+            if object
+                .get("path")
+                .and_then(Value::as_str)
+                .is_some_and(|path| path == ACTIVE_PROFILE_RELATIVE)
+                && object.contains_key("sha256")
+            {
+                discovered.insert(json_pointer_child(pointer, "sha256"));
+            }
+            for (key, nested) in object {
+                let child = json_pointer_child(pointer, key);
+                if matches!(key.as_str(), "profile_sha256" | "profile_hash") && nested.is_string() {
+                    discovered.insert(child.clone());
+                }
+                collect_profile_json_references(nested, &child, depth + 1, discovered)?;
+            }
+        }
+        Value::Array(values) => {
+            for (index, nested) in values.iter().enumerate() {
+                let child = json_pointer_child(pointer, &index.to_string());
+                collect_profile_json_references(nested, &child, depth + 1, discovered)?;
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+    Ok(())
+}
+
+fn json_pointer_child(parent: &str, segment: &str) -> String {
+    let escaped = segment.replace('~', "~0").replace('/', "~1");
+    format!("{parent}/{escaped}")
 }
 
 fn read_source_digests(
@@ -926,8 +1175,9 @@ const O_NONBLOCK: i32 = 0o4000;
 mod tests {
     use super::{
         ACTIVE_PROFILE_RELATIVE, ARCHITECTURE_RELATIVE, Action, BRIDGE_RELATIVE,
-        COMPAT_README_RELATIVE, JSON_TARGETS, SourceKind, is_sha256, json_pointer_string,
-        locate_json_string, read_bounded_file, run, rust_string_constant, sha256_hex,
+        CAPABILITY_SET_RELATIVE, COMPAT_README_RELATIVE, JSON_TARGETS, RUST_TARGETS, SourceKind,
+        is_sha256, json_pointer_string, locate_json_string, read_bounded_file, run,
+        rust_string_constant, sha256_hex,
     };
     use crate::Options;
     use serde_json::json;
@@ -975,6 +1225,18 @@ mod tests {
                 BRIDGE_RELATIVE,
                 format!("pub const JVM_PROFILE_SHA256_HEX: &str = \"{profile_hash}\";\n")
                     .as_bytes(),
+            );
+            let capability_set = json!({
+                "parent_profile": {
+                    "path": ACTIVE_PROFILE_RELATIVE,
+                    "sha256": profile_hash
+                }
+            });
+            self.write(
+                CAPABILITY_SET_RELATIVE,
+                serde_json::to_vec(&capability_set)
+                    .unwrap_or_default()
+                    .as_slice(),
             );
             let manifest = json!({
                 "profile": {"path": ACTIVE_PROFILE_RELATIVE, "sha256": profile_hash},
@@ -1041,7 +1303,7 @@ mod tests {
             "unexpected diagnostics: {diagnostics:?}"
         );
         assert_eq!(profile_hash.len(), 64);
-        assert_eq!(JSON_TARGETS.len(), 11);
+        assert_eq!(JSON_TARGETS.len(), 12);
     }
 
     #[test]
@@ -1066,6 +1328,9 @@ mod tests {
                 && diagnostic
                     .path
                     .ends_with("harness/manifest.json#/profile/sha256")
+                && diagnostic
+                    .message
+                    .contains("cargo xtask profile-references --generate")
         }));
         assert_eq!(fs::read(&path).unwrap_or_default(), changed);
         assert_ne!(changed, original);
@@ -1130,6 +1395,94 @@ mod tests {
         );
         let generated = fs::read_to_string(&path).unwrap_or_default();
         assert!(generated.contains(&"0".repeat(64)));
+    }
+
+    #[test]
+    fn catalog_covers_each_checked_in_profile_reference_surface() {
+        let profile_targets = JSON_TARGETS
+            .iter()
+            .filter(|target| target.source == SourceKind::Profile)
+            .map(|target| (target.relative_path, target.pointer))
+            .collect::<std::collections::BTreeSet<_>>();
+        let expected = [
+            (
+                "compat/fixtures/jmeter-5.6.3/harness/manifest.json",
+                "/profile/sha256",
+            ),
+            (
+                "compat/fixtures/jmeter-5.6.3/harness/manifest.json",
+                "/repository_inputs/profile/0/sha256",
+            ),
+            (CAPABILITY_SET_RELATIVE, "/parent_profile/sha256"),
+            (
+                "compat/fixtures/jmeter-5.6.3/harness/provenance.json",
+                "/inputs/profile_sha256",
+            ),
+            (
+                "compat/fixtures/jmeter-5.6.3/harness/evidence-unavailable.json",
+                "/profile_ref/sha256",
+            ),
+            (
+                "compat/fixtures/jmeter-5.6.3/harness/evidence-unavailable.json",
+                "/identity/profile_hash/sha256",
+            ),
+            (
+                "compat/fixtures/jmeter-5.6.3/processors-extractors/core/provenance.json",
+                "/source_references/4/sha256",
+            ),
+            (
+                "compat/fixtures/jmeter-5.6.3/processors-extractors/negative-bounds/provenance.json",
+                "/source_references/4/sha256",
+            ),
+        ]
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(profile_targets, expected);
+        assert_eq!(RUST_TARGETS.len(), 1);
+        assert_eq!(RUST_TARGETS[0].relative_path, BRIDGE_RELATIVE);
+    }
+
+    #[test]
+    fn unlisted_profile_path_hash_fails_closed_without_writing_any_target() {
+        let tree = TempTree::new();
+        let profile_hash = tree.seed();
+        let manifest_path = tree
+            .root
+            .join("compat/fixtures/jmeter-5.6.3/harness/manifest.json");
+        let original_bridge = fs::read(tree.root.join(BRIDGE_RELATIVE)).unwrap_or_default();
+        let document = json!({
+            "profile": {"path": ACTIVE_PROFILE_RELATIVE, "sha256": profile_hash},
+            "repository_inputs": {"profile": [{"path": ACTIVE_PROFILE_RELATIVE, "sha256": profile_hash}]},
+            "future_profile_pin": {"path": ACTIVE_PROFILE_RELATIVE, "sha256": "0".repeat(64)}
+        });
+        assert!(
+            fs::write(
+                &manifest_path,
+                serde_json::to_vec(&document).unwrap_or_default()
+            )
+            .is_ok()
+        );
+        let original_manifest = fs::read(&manifest_path).unwrap_or_default();
+
+        let diagnostics = run(
+            &tree.root,
+            &tree.root.join(ACTIVE_PROFILE_RELATIVE),
+            Action::Generate,
+        );
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "PROFILE-REFERENCE-CATALOG"
+                && diagnostic
+                    .path
+                    .ends_with("harness/manifest.json#/future_profile_pin/sha256")
+        }));
+        assert_eq!(
+            fs::read(&manifest_path).unwrap_or_default(),
+            original_manifest
+        );
+        assert_eq!(
+            fs::read(tree.root.join(BRIDGE_RELATIVE)).unwrap_or_default(),
+            original_bridge
+        );
     }
 
     #[test]
