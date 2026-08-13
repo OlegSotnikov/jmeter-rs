@@ -1,0 +1,71 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-FUNCTIONS-FILES-NEGATIVE",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored bounded negative corpus for missing and empty files, a truly ragged three-row CSV with a blank-line CSV companion, bounded StringFromFile sequence-file formatting, malformed XML, and a malformed XPath expression; all inputs are local and finite.",
+    "upstream_plan_copied": false
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter is an external pinned oracle only; no upstream plan, result, binary, or machine path is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true
+  },
+  "runtime": {
+    "java": {
+      "vendor": null,
+      "version": null,
+      "vm": null,
+      "major": null
+    },
+    "target_triple": null,
+    "os_image": null,
+    "future_recording": {
+      "target_triple": "required on a future oracle run",
+      "os_image": "required on a future oracle run"
+    },
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "jvm_charset_requirement": {
+      "file_encoding": "UTF-8",
+      "required": true,
+      "verification": "A future oracle runner must verify JVM file.encoding=UTF-8 before execution; this static corpus does not infer it from the process locale."
+    },
+    "hostname_policy": "not asserted; hostname saving is disabled",
+    "environment_allowlist": ["LC_ALL=en_US.UTF-8", "LANG=en_US.UTF-8", "TZ=UTC"],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "profile-pinned Apache JMeter 5.6.3 distribution (SHA-512 checked; PGP verification required before oracle use) when an oracle run is explicitly requested"
+  },
+  "inputs": {
+    "plan_sha256": "58c971c2f6b594cca1b57d33fb480fa6413d5932eabda028299930994325808c",
+    "property_sha256": "2da5c59c8fd27205b5cf2144580323e329715df7e180bad5ef314cdf23b8536a",
+    "input_files": [
+      {"path": "inputs/empty.csv", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "max_bytes": 16},
+      {"path": "inputs/empty.txt", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "max_bytes": 16},
+      {"path": "inputs/invalid.xml", "sha256": "6820bc337ea7b6e6219236306e44cbad77cf7faa9bb7cec51a41a020036bb561", "max_bytes": 128},
+      {"path": "inputs/ragged.csv", "sha256": "ad01e2faad999f53ef66cc6bc1d4a63c2e2b008728cc5962d6872f849ed96414", "max_bytes": 128},
+      {"path": "inputs/blank-line.csv", "sha256": "37cd5d5dae6835319da88c2495a231acf90b72a4176f517e28a12be4357ba0cc", "max_bytes": 128},
+      {"path": "inputs/bounded-lines-2.txt", "sha256": "fa01d969dced8aa577c7625507d2dbd91b0d9ffabee7133f830e07df966f7453", "max_bytes": 128}
+    ],
+    "missing_inputs": ["inputs/missing.txt", "inputs/missing-lines.txt", "inputs/missing.csv"],
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  }
+}

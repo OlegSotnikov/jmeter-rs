@@ -1,0 +1,246 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-ELEMENTS-EXTERNAL-ELEM-009",
+  "format": "jmx-semantic",
+  "evidence_status": "external-unavailable",
+  "source": {
+    "kind": "original-static-descriptor",
+    "oracle_status": "not-run",
+    "note": "No Java, JMeter, JVM worker, script engine, report renderer, MongoDB service, network client, or subprocess was run while creating this corpus."
+  },
+  "capability_accounting": {
+    "status": "external-unavailable",
+    "required_boundaries": ["EXT-JVM-001", "EXT-SERVICE-001"],
+    "unsupported_error_code": "unsupported-capability",
+    "no_silent_success": true,
+    "no_sample_output_claimed": true,
+    "missing_adapter_behavior": "preserve the complete disabled legacy node, original alias, upgrade-relevant properties, and ordered hashTree companion; report unavailable capability rather than dropping, modernizing, or executing it"
+  },
+  "topology": {
+    "root": "jmeterTestPlan",
+    "alternating_pairs": true,
+    "thread_groups": 1,
+    "threads": 1,
+    "iterations": 1,
+    "planned_legacy_nodes": 14,
+    "planned_external_nodes": 8,
+    "planned_opaque_nodes": 6,
+    "planned_samples": 0,
+    "executed_samples": null
+  },
+  "elements": [
+    {
+      "position": 0,
+      "tag": "BSFSampler",
+      "testclass": "BSFSampler",
+      "guiclass": "TestBeanGUI",
+      "name": "Deprecated BSF sampler",
+      "enabled": false,
+      "property_names": ["filename", "scriptLanguage", "parameters", "script"],
+      "legacy_family": "BSF",
+      "boundary": "EXT-JVM-001",
+      "status": "external-unavailable",
+      "upgrade_mapping": {
+        "old_guiclass": "org.apache.jmeter.protocol.java.control.gui.BSFSamplerGui",
+        "canonical_guiclass": "TestBeanGUI",
+        "old_properties": {
+          "BSFSampler.filename": "filename",
+          "BSFSampler.language": "scriptLanguage",
+          "BSFSampler.parameters": "parameters",
+          "BSFSampler.query": "script"
+        }
+      }
+    },
+    {
+      "position": 1,
+      "tag": "BSFAssertion",
+      "testclass": "BSFAssertion",
+      "guiclass": "AssertionGui",
+      "name": "Deprecated BSF assertion",
+      "enabled": false,
+      "property_names": ["filename", "scriptLanguage", "parameters", "script"],
+      "legacy_family": "BSF",
+      "boundary": "EXT-JVM-001",
+      "status": "external-unavailable"
+    },
+    {
+      "position": 2,
+      "tag": "BSFPreProcessor",
+      "testclass": "BSFPreProcessor",
+      "guiclass": "TestBeanGUI",
+      "name": "Deprecated BSF pre-processor",
+      "enabled": false,
+      "property_names": ["filename", "scriptLanguage", "parameters", "script"],
+      "legacy_family": "BSF",
+      "boundary": "EXT-JVM-001",
+      "status": "external-unavailable"
+    },
+    {
+      "position": 3,
+      "tag": "BSFPostProcessor",
+      "testclass": "BSFPostProcessor",
+      "guiclass": "TestBeanGUI",
+      "name": "Deprecated BSF post-processor",
+      "enabled": false,
+      "property_names": ["filename", "scriptLanguage", "parameters", "script"],
+      "legacy_family": "BSF",
+      "boundary": "EXT-JVM-001",
+      "status": "external-unavailable"
+    },
+    {
+      "position": 4,
+      "tag": "BSFTimer",
+      "testclass": "BSFTimer",
+      "guiclass": "TestBeanGUI",
+      "name": "Deprecated BSF timer",
+      "enabled": false,
+      "property_names": ["filename", "scriptLanguage", "parameters", "script"],
+      "legacy_family": "BSF",
+      "boundary": "EXT-JVM-001",
+      "status": "external-unavailable"
+    },
+    {
+      "position": 5,
+      "tag": "BSFListener",
+      "testclass": "BSFListener",
+      "guiclass": "TestBeanGUI",
+      "name": "Deprecated BSF listener",
+      "enabled": false,
+      "property_names": ["filename", "scriptLanguage", "parameters", "script"],
+      "legacy_family": "BSF",
+      "boundary": "EXT-JVM-001",
+      "status": "external-unavailable"
+    },
+    {
+      "position": 12,
+      "tag": "MongoSourceElement",
+      "testclass": "MongoSourceElement",
+      "guiclass": "TestBeanGUI",
+      "name": "Deprecated MongoDB source alias",
+      "enabled": false,
+      "property_names": ["connection", "source"],
+      "legacy_family": "MongoDB",
+      "boundary": "EXT-SERVICE-001",
+      "status": "external-unavailable"
+    },
+    {
+      "position": 13,
+      "tag": "MongoScriptSampler",
+      "testclass": "MongoScriptSampler",
+      "guiclass": "TestBeanGUI",
+      "name": "Deprecated MongoDB script alias",
+      "enabled": false,
+      "property_names": ["MongoScriptSampler.source", "MongoScriptSampler.database", "MongoScriptSampler.username", "MongoScriptSampler.password", "MongoScriptSampler.script"],
+      "legacy_family": "MongoDB",
+      "boundary": "EXT-SERVICE-001",
+      "status": "external-unavailable"
+    }
+  ],
+  "opaque_legacy": [
+    {
+      "position": 6,
+      "tag": "ReportPlan",
+      "testclass": "ReportPlan",
+      "guiclass": "ReportPlanGui",
+      "name": "Legacy Report Plan alias",
+      "enabled": false,
+      "executable": false,
+      "status": "opaque-legacy-unknown",
+      "property_names": ["ReportPlan.output", "ReportPlan.title"],
+      "save_service_alias_present": false,
+      "diagnostic": "ReportPlan is absent from the pinned 5.6.3 SaveService vocabulary; preserve opaque XML and emit a deleted-or-unknown legacy diagnostic."
+    },
+    {
+      "position": 7,
+      "tag": "ReportTable",
+      "testclass": "ReportTable",
+      "guiclass": "ReportTableGui",
+      "name": "Legacy Report Table alias",
+      "enabled": false,
+      "executable": false,
+      "status": "opaque-legacy-unknown",
+      "property_names": ["ReportTable.columns"],
+      "save_service_alias_present": false,
+      "diagnostic": "ReportTable is absent from the pinned 5.6.3 SaveService vocabulary; preserve opaque XML and emit a deleted-or-unknown legacy diagnostic."
+    },
+    {
+      "position": 8,
+      "tag": "HTMLReportWriter",
+      "testclass": "HTMLReportWriter",
+      "guiclass": "HTMLReportWriterGui",
+      "name": "Legacy HTML Report Writer alias",
+      "enabled": false,
+      "executable": false,
+      "status": "opaque-legacy-unknown",
+      "property_names": ["HTMLReportWriter.output"],
+      "save_service_alias_present": false,
+      "diagnostic": "HTMLReportWriter is absent from the pinned 5.6.3 SaveService vocabulary; preserve opaque XML and emit a deleted-or-unknown legacy diagnostic."
+    },
+    {
+      "position": 9,
+      "tag": "ReportPage",
+      "testclass": "ReportPage",
+      "guiclass": "ReportPageGui",
+      "name": "Legacy Report Page alias",
+      "enabled": false,
+      "executable": false,
+      "status": "opaque-legacy-unknown",
+      "property_names": ["ReportPage.name"],
+      "save_service_alias_present": false,
+      "diagnostic": "ReportPage is absent from the pinned 5.6.3 SaveService vocabulary; preserve opaque XML and emit a deleted-or-unknown legacy diagnostic."
+    },
+    {
+      "position": 10,
+      "tag": "LineGraph",
+      "testclass": "LineGraph",
+      "guiclass": "LineGraphGui",
+      "name": "Legacy Line Graph alias",
+      "enabled": false,
+      "executable": false,
+      "status": "opaque-legacy-unknown",
+      "property_names": ["LineGraph.metric"],
+      "save_service_alias_present": false,
+      "diagnostic": "LineGraph is absent from the pinned 5.6.3 SaveService vocabulary; preserve opaque XML and emit a deleted-or-unknown legacy diagnostic."
+    },
+    {
+      "position": 11,
+      "tag": "BarChart",
+      "testclass": "BarChart",
+      "guiclass": "BarChartGui",
+      "name": "Legacy Bar Chart alias",
+      "enabled": false,
+      "executable": false,
+      "status": "opaque-legacy-unknown",
+      "property_names": ["BarChart.metric"],
+      "save_service_alias_present": false,
+      "diagnostic": "BarChart is absent from the pinned 5.6.3 SaveService vocabulary; preserve opaque XML and emit a deleted-or-unknown legacy diagnostic."
+    }
+  ],
+  "alias_contract": {
+    "accepted_legacy_families": ["BSF", "report-plan", "MongoDB"],
+    "preserve_original_wire_tag": true,
+    "apply_profile_upgrade_rules": true,
+    "report_aliases_absent_from_pinned_saveservice": true,
+    "unknown_or_deleted_target": "retain opaque XML and emit a diagnostic",
+    "must_not_map_to": ["HTTPSamplerProxy", "DebugSampler", "JSR223Sampler", "SummaryReport"]
+  },
+  "requirements": [
+    {"element": "BSFSampler/BSFAssertion/BSFPreProcessor/BSFPostProcessor/BSFTimer/BSFListener", "adapter": "versioned JVM worker and BSF/BeanShell-compatible engine", "service": "none", "version_pin": "required-but-not-pinned", "driver": "script engine required-but-not-supplied", "driver_version": "required-but-not-pinned", "license": "required-but-not-recorded", "provenance": "required-but-not-recorded", "artifact_sha256": "required-but-not-recorded", "fixture_source_revision": "required-but-not-recorded", "status": "external-unavailable"},
+    {"element": "MongoSourceElement/MongoScriptSampler", "adapter": "versioned MongoDB Java driver plus local MongoDB fixture", "service": "MongoDB", "version_pin": "required-but-not-pinned", "driver": "MongoDB Java driver required-but-not-supplied", "driver_version": "required-but-not-pinned", "license": "required-but-not-recorded", "provenance": "required-but-not-recorded", "artifact_sha256": "required-but-not-recorded", "fixture_source_revision": "required-but-not-recorded", "status": "external-unavailable"}
+  ],
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations": 1,
+    "max_samples": 0,
+    "max_response_bytes": 0,
+    "max_network_requests": 0,
+    "max_processes": 0,
+    "max_script_output_bytes": 0
+  },
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.ts", "sample.by", "sample.sby", "sample.hn", "xml_lexical_whitespace"],
+    "reason": "There is no oracle result to normalize. Legacy wire tags, exact class/GUI attributes, common BSF TestBean property names, opaque report nodes, ordered topology, disabled state, and explicit unavailable diagnostics remain observable; no script, report, MongoDB, or sample output is fabricated."
+  }
+}

@@ -1,0 +1,501 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-ELEM-008-PROCESSORS-EXTRACTORS-CORE",
+  "format": "jmx-semantic",
+  "evidence_status": "not-run-static",
+  "rust_conformance_claim": false,
+  "expectation_basis": "Original source-only contract grounded in the pinned JMeter 5.6.3 component classes, schemas, demo wire files, and compatibility research. No Java/JMeter output or extracted value is asserted.",
+  "root": {
+    "element": "jmeterTestPlan",
+    "version": "1.2",
+    "properties": "5.0",
+    "jmeter": "5.6.3",
+    "attributes": {"version": "1.2", "properties": "5.0", "jmeter": "5.6.3"},
+    "ordered_children": ["hashTree"]
+  },
+  "source": {
+    "kind": "original-static-declarative-descriptor",
+    "oracle_status": "not-run",
+    "runtime_executed": false,
+    "materialization": "case.materialization.response_bindings selects one local response corpus entry per isolated carrier-sampler run and loads inputs/variables.properties before phase snapshots; no runtime values are asserted"
+  },
+  "ordered_hash_tree_pairs": [
+    {"position": 0, "element": {"tag": "TestPlan", "guiclass": "TestPlanGui", "testclass": "TestPlan", "testname": "ELEM-008 processor and extractor corpus", "enabled": "true"}, "hash_tree_children": ["ThreadGroup", "ResultAction"]},
+    {"position": 1, "element": {"tag": "ThreadGroup", "guiclass": "ThreadGroupGui", "testclass": "ThreadGroup", "testname": "One deterministic user", "enabled": "true"}, "hash_tree_children": ["DebugSampler"]},
+    {"position": 2, "element": {"tag": "DebugSampler", "guiclass": "TestBeanGUI", "testclass": "DebugSampler", "testname": "Processor response carrier", "enabled": "true"}, "hash_tree_children": ["UserParameters", "RegExUserParameters", "SampleTimeout", "BeanShellPreProcessor", "JSR223PreProcessor", "JDBCPreProcessor", "BSFPreProcessor", "AnchorModifier", "URLRewritingModifier", "RegexExtractor", "RegexExtractor", "RegexExtractor", "RegexExtractor", "BoundaryExtractor", "HtmlExtractor", "XPathExtractor", "XPath2Extractor", "JSONPostProcessor", "JMESPathExtractor", "DebugPostProcessor", "BeanShellPostProcessor", "JSR223PostProcessor", "JDBCPostProcessor", "BSFPostProcessor", "PluginPostProcessor"]},
+    {"position": 3, "element": {"tag": "UserParameters", "guiclass": "UserParametersGui", "testclass": "UserParameters", "testname": "Deterministic user parameters", "enabled": "true"}, "hash_tree_children": []},
+    {"position": 4, "element": {"tag": "RegExUserParameters", "guiclass": "RegExUserParametersGui", "testclass": "RegExUserParameters", "testname": "Regex user parameters", "enabled": "true"}, "hash_tree_children": []},
+    {"position": 5, "element": {"tag": "SampleTimeout", "guiclass": "TestBeanGUI", "testclass": "SampleTimeout", "testname": "Bounded sample timeout", "enabled": "true"}, "hash_tree_children": []},
+    {"position": 6, "element": {"tag": "BeanShellPreProcessor", "guiclass": "TestBeanGUI", "testclass": "BeanShellPreProcessor", "testname": "Disabled BeanShell preprocessor", "enabled": "false"}, "hash_tree_children": []},
+    {"position": 7, "element": {"tag": "JSR223PreProcessor", "guiclass": "TestBeanGUI", "testclass": "JSR223PreProcessor", "testname": "Disabled JSR223 preprocessor", "enabled": "false"}, "hash_tree_children": []},
+    {"position": 8, "element": {"tag": "JDBCPreProcessor", "guiclass": "TestBeanGUI", "testclass": "JDBCPreProcessor", "testname": "Disabled JDBC preprocessor", "enabled": "false"}, "hash_tree_children": []},
+    {"position": 9, "element": {"tag": "BSFPreProcessor", "guiclass": "TestBeanGUI", "testclass": "BSFPreProcessor", "testname": "Disabled legacy BSF preprocessor", "enabled": "false"}, "hash_tree_children": []},
+    {"position": 10, "element": {"tag": "AnchorModifier", "guiclass": "AnchorModifierGui", "testclass": "AnchorModifier", "testname": "Disabled HTML link modifier", "enabled": "false"}, "hash_tree_children": []},
+    {"position": 11, "element": {"tag": "URLRewritingModifier", "guiclass": "URLRewritingModifierGui", "testclass": "URLRewritingModifier", "testname": "Disabled URL rewriting modifier", "enabled": "false"}, "hash_tree_children": []},
+    {"position": 12, "element": {"tag": "RegexExtractor", "guiclass": "RegexExtractorGui", "testclass": "RegexExtractor", "testname": "Regex all matches", "enabled": "true"}, "hash_tree_children": []},
+    {"position": 13, "element": {"tag": "RegexExtractor", "guiclass": "RegexExtractorGui", "testclass": "RegexExtractor", "testname": "Regex first match", "enabled": "true"}, "hash_tree_children": []},
+    {"position": 14, "element": {"tag": "RegexExtractor", "guiclass": "RegexExtractorGui", "testclass": "RegexExtractor", "testname": "Regex header match", "enabled": "true"}, "hash_tree_children": []},
+    {"position": 15, "element": {"tag": "RegexExtractor", "guiclass": "RegexExtractorGui", "testclass": "RegexExtractor", "testname": "Regex empty default", "enabled": "true"}, "hash_tree_children": []},
+    {"position": 16, "element": {"tag": "BoundaryExtractor", "guiclass": "BoundaryExtractorGui", "testclass": "BoundaryExtractor", "testname": "Boundary all matches", "enabled": "true"}, "hash_tree_children": []},
+    {"position": 17, "element": {"tag": "HtmlExtractor", "guiclass": "HtmlExtractorGui", "testclass": "HtmlExtractor", "testname": "CSS attribute extractor", "enabled": "true"}, "hash_tree_children": []},
+    {"position": 18, "element": {"tag": "XPathExtractor", "guiclass": "XPathExtractorGui", "testclass": "XPathExtractor", "testname": "XPath text extractor", "enabled": "true"}, "hash_tree_children": []},
+    {"position": 19, "element": {"tag": "XPath2Extractor", "guiclass": "XPath2ExtractorGui", "testclass": "XPath2Extractor", "testname": "XPath 2 text extractor", "enabled": "true"}, "hash_tree_children": []},
+    {"position": 20, "element": {"tag": "JSONPostProcessor", "guiclass": "JSONPostProcessorGui", "testclass": "JSONPostProcessor", "testname": "JSONPath extractor matrix", "enabled": "true"}, "hash_tree_children": []},
+    {"position": 21, "element": {"tag": "JMESPathExtractor", "guiclass": "JMESPathExtractorGui", "testclass": "JMESPathExtractor", "testname": "JMESPath extractor", "enabled": "true"}, "hash_tree_children": []},
+    {"position": 22, "element": {"tag": "DebugPostProcessor", "guiclass": "TestBeanGUI", "testclass": "DebugPostProcessor", "testname": "Candidate variable snapshot", "enabled": "true"}, "hash_tree_children": []},
+    {"position": 23, "element": {"tag": "BeanShellPostProcessor", "guiclass": "TestBeanGUI", "testclass": "BeanShellPostProcessor", "testname": "Disabled BeanShell postprocessor", "enabled": "false"}, "hash_tree_children": []},
+    {"position": 24, "element": {"tag": "JSR223PostProcessor", "guiclass": "TestBeanGUI", "testclass": "JSR223PostProcessor", "testname": "Disabled JSR223 postprocessor", "enabled": "false"}, "hash_tree_children": []},
+    {"position": 25, "element": {"tag": "JDBCPostProcessor", "guiclass": "TestBeanGUI", "testclass": "JDBCPostProcessor", "testname": "Disabled JDBC postprocessor", "enabled": "false"}, "hash_tree_children": []},
+    {"position": 26, "element": {"tag": "BSFPostProcessor", "guiclass": "TestBeanGUI", "testclass": "BSFPostProcessor", "testname": "Disabled legacy BSF postprocessor", "enabled": "false"}, "hash_tree_children": []},
+    {"position": 27, "element": {"tag": "PluginPostProcessor", "guiclass": "com.example.jmeter.PluginPostProcessorGui", "testclass": "com.example.jmeter.PluginPostProcessor", "testname": "Opaque processor plug-in", "enabled": "false", "extra_attributes": {"pluginVersion": "0.1", "custom": "retain-me"}, "opaque": true}, "hash_tree_children": ["PluginChild"]},
+    {"position": 28, "element": {"tag": "PluginChild", "guiclass": "com.example.jmeter.PluginChildGui", "testclass": "com.example.jmeter.PluginChild", "testname": "Opaque child", "enabled": "false", "extra_attributes": {"childFlag": "keep"}, "opaque": true}, "hash_tree_children": []},
+    {"position": 29, "element": {"tag": "ResultAction", "guiclass": "ResultActionGui", "testclass": "ResultAction", "testname": "Disabled result status action", "enabled": "false"}, "hash_tree_children": []}
+  ],
+  "nested_element_properties": [
+    {"path": "TestPlan/TestPlan.user_defined_variables", "tag": "elementProp", "element_type": "Arguments", "guiclass": "ArgumentsPanel", "testclass": "Arguments", "testname": "Initial variables", "enabled": "true", "property_order": ["Arguments.arguments"], "ordered_children": ["fixture.initial", "fixture.iteration", "fixture.property"]},
+    {"path": "TestPlan/TestPlan.user_defined_variables/fixture.initial", "tag": "elementProp", "element_type": "Argument", "property_order": ["Argument.name", "Argument.value", "Argument.metadata"], "wire_properties": {"Argument.name": "fixture.initial", "Argument.value": "seed", "Argument.metadata": "="}},
+    {"path": "TestPlan/TestPlan.user_defined_variables/fixture.iteration", "tag": "elementProp", "element_type": "Argument", "property_order": ["Argument.name", "Argument.value", "Argument.metadata"], "wire_properties": {"Argument.name": "fixture.iteration", "Argument.value": "0", "Argument.metadata": "="}},
+    {"path": "TestPlan/TestPlan.user_defined_variables/fixture.property", "tag": "elementProp", "element_type": "Argument", "property_order": ["Argument.name", "Argument.value", "Argument.metadata"], "wire_properties": {"Argument.name": "fixture.property", "Argument.value": "${__P(processor.fixture.property,property-value)}", "Argument.metadata": "="}},
+    {"path": "ThreadGroup/ThreadGroup.main_controller", "tag": "elementProp", "element_type": "LoopController", "guiclass": "LoopControlPanel", "testclass": "LoopController", "testname": "One iteration", "enabled": "true", "property_order": ["LoopController.continue_forever", "LoopController.loops"], "wire_properties": {"LoopController.continue_forever": "false", "LoopController.loops": "1"}}
+  ],
+  "execution_contract": {
+    "phase_order": [
+      "configuration",
+      "preprocessors",
+      "timers",
+      "sampler",
+      "postprocessors",
+      "assertions",
+      "listeners-and-results"
+    ],
+    "same_category_order": "serialized source order is retained; exact runtime tie-breaking remains candidate-unobserved",
+    "thread_scope": "variables are thread-local; property input is process-global and is not silently copied into a variable snapshot",
+    "disabled_policy": "disabled elements remain in source topology and are excluded from executable behavior",
+    "null_or_empty_sampler_policy": "postprocessor output is unobserved for empty or missing response data; no default is promoted to an observed value"
+  },
+  "processor_contracts": [
+    {
+      "id": "user-parameters",
+      "category": "preprocessor",
+      "wire_tag": "UserParameters",
+      "testclass": "UserParameters",
+      "guiclass": "UserParametersGui",
+      "testname": "Deterministic user parameters",
+      "enabled": true,
+      "element_attributes": {"guiclass": "UserParametersGui", "testclass": "UserParameters", "testname": "Deterministic user parameters", "enabled": "true"},
+      "property_order": ["UserParameters.names", "UserParameters.thread_values", "UserParameters.per_iteration"],
+      "properties": {
+        "UserParameters.names": ["fixture.user", "fixture.mode"],
+        "UserParameters.thread_values": "two bounded rows; values are source inputs",
+        "UserParameters.per_iteration": true
+      },
+      "output_variables": ["fixture.user", "fixture.mode"],
+      "output_status": "candidate-unobserved"
+    },
+    {
+      "id": "regex-user-parameters",
+      "category": "preprocessor",
+      "wire_tag": "RegExUserParameters",
+      "testclass": "RegExUserParameters",
+      "guiclass": "RegExUserParametersGui",
+      "testname": "Regex user parameters",
+      "enabled": true,
+      "element_attributes": {"guiclass": "RegExUserParametersGui", "testclass": "RegExUserParameters", "testname": "Regex user parameters", "enabled": "true"},
+      "property_order": ["RegExUserParameters.regex_ref_name", "RegExUserParameters.param_names_gr_nr", "RegExUserParameters.param_values_gr_nr"],
+      "properties": {
+        "RegExUserParameters.regex_ref_name": "fixture.regex",
+        "RegExUserParameters.param_names_gr_nr": "1",
+        "RegExUserParameters.param_values_gr_nr": "2"
+      },
+      "output_status": "candidate-unobserved; previous-response scope is required"
+    },
+    {
+      "id": "sample-timeout",
+      "category": "preprocessor",
+      "wire_tag": "SampleTimeout",
+      "testclass": "SampleTimeout",
+      "guiclass": "TestBeanGUI",
+      "testname": "Bounded sample timeout",
+      "enabled": true,
+      "element_attributes": {"guiclass": "TestBeanGUI", "testclass": "SampleTimeout", "testname": "Bounded sample timeout", "enabled": "true"},
+      "property_order": ["InterruptTimer.timeout"],
+      "properties": {"InterruptTimer.timeout": "1000"},
+      "output_status": "candidate-unobserved; elapsed and cancellation are not fabricated"
+    },
+    {
+      "id": "regex-all",
+      "category": "postprocessor-extractor",
+      "wire_tag": "RegexExtractor",
+      "testclass": "RegexExtractor",
+      "guiclass": "RegexExtractorGui",
+      "testname": "Regex all matches",
+      "enabled": true,
+      "element_attributes": {"guiclass": "RegexExtractorGui", "testclass": "RegexExtractor", "testname": "Regex all matches", "enabled": "true"},
+      "property_order": ["RegexExtractor.useHeaders", "RegexExtractor.refname", "RegexExtractor.regex", "RegexExtractor.template", "RegexExtractor.default", "RegexExtractor.match_number"],
+      "properties": {
+        "RegexExtractor.useHeaders": "false",
+        "RegexExtractor.refname": "rx_all",
+        "RegexExtractor.regex": "first=([^\\r\\n]+)",
+        "RegexExtractor.template": "$1$",
+        "RegexExtractor.default": "RX_DEFAULT",
+        "RegexExtractor.match_number": "-1"
+      },
+      "generated_variable_names": ["rx_all", "rx_all_g1", "rx_all_matchNr"],
+      "generated_variable_contract": {"base": "rx_all", "match_count": "rx_all_matchNr", "indexed_value_pattern": "rx_all_{n}", "indexed_capture_pattern": "rx_all_{n}_g{group}", "match_index_range": [1, 32], "capture_group_range": [1, 1], "max_generated_variables": 66},
+      "resource_budget": {"max_input_bytes": 4096, "max_steps": 4096, "max_capture_groups": 8},
+      "match_contract": "-1 means all matches; numbered capture variables and _matchNr are candidate-unobserved"
+    },
+    {
+      "id": "regex-first",
+      "category": "postprocessor-extractor",
+      "wire_tag": "RegexExtractor",
+      "testclass": "RegexExtractor",
+      "guiclass": "RegexExtractorGui",
+      "testname": "Regex first match",
+      "enabled": true,
+      "element_attributes": {"guiclass": "RegexExtractorGui", "testclass": "RegexExtractor", "testname": "Regex first match", "enabled": "true"},
+      "property_order": ["RegexExtractor.useHeaders", "RegexExtractor.refname", "RegexExtractor.regex", "RegexExtractor.template", "RegexExtractor.default", "RegexExtractor.match_number"],
+      "properties": {
+        "RegexExtractor.useHeaders": "false",
+        "RegexExtractor.refname": "rx_first",
+        "RegexExtractor.regex": "first=([^\\r\\n]+)",
+        "RegexExtractor.template": "$1$",
+        "RegexExtractor.default": "RX_FIRST_DEFAULT",
+        "RegexExtractor.match_number": "1"
+      },
+      "generated_variable_names": ["rx_first", "rx_first_g1", "rx_first_matchNr"],
+      "generated_variable_contract": {"base": "rx_first", "match_count": "rx_first_matchNr", "indexed_value_pattern": "rx_first_{n}", "indexed_capture_pattern": "rx_first_{n}_g{group}", "match_index_range": [1, 1], "capture_group_range": [1, 1], "max_generated_variables": 4},
+      "resource_budget": {"max_input_bytes": 4096, "max_steps": 4096, "max_capture_groups": 8},
+      "match_contract": "positive match number selects one match; value is candidate-unobserved"
+    },
+    {
+      "id": "regex-headers",
+      "category": "postprocessor-extractor",
+      "wire_tag": "RegexExtractor",
+      "testclass": "RegexExtractor",
+      "guiclass": "RegexExtractorGui",
+      "testname": "Regex header match",
+      "enabled": true,
+      "element_attributes": {"guiclass": "RegexExtractorGui", "testclass": "RegexExtractor", "testname": "Regex header match", "enabled": "true"},
+      "property_order": ["RegexExtractor.useHeaders", "RegexExtractor.refname", "RegexExtractor.regex", "RegexExtractor.template", "RegexExtractor.default", "RegexExtractor.match_number"],
+      "properties": {
+        "RegexExtractor.useHeaders": "true",
+        "RegexExtractor.refname": "rx_header",
+        "RegexExtractor.regex": "X-Fixture-Token: ([^\\r\\n]+)",
+        "RegexExtractor.template": "$1$",
+        "RegexExtractor.default": "RX_HEADER_DEFAULT",
+        "RegexExtractor.match_number": "1"
+      },
+      "input_binding": "response_headers",
+      "generated_variable_names": ["rx_header", "rx_header_g1", "rx_header_matchNr"],
+      "generated_variable_contract": {"base": "rx_header", "match_count": "rx_header_matchNr", "indexed_value_pattern": "rx_header_{n}", "indexed_capture_pattern": "rx_header_{n}_g{group}", "match_index_range": [1, 1], "capture_group_range": [1, 1]},
+      "output_status": "candidate-unobserved; response header bytes are selected by the future materialization route"
+    },
+    {
+      "id": "regex-empty-default",
+      "category": "postprocessor-extractor",
+      "wire_tag": "RegexExtractor",
+      "testclass": "RegexExtractor",
+      "guiclass": "RegexExtractorGui",
+      "testname": "Regex empty default",
+      "enabled": true,
+      "element_attributes": {"guiclass": "RegexExtractorGui", "testclass": "RegexExtractor", "testname": "Regex empty default", "enabled": "true"},
+      "property_order": ["RegexExtractor.useHeaders", "RegexExtractor.refname", "RegexExtractor.regex", "RegexExtractor.template", "RegexExtractor.default", "RegexExtractor.match_number", "RegexExtractor.default_empty_value"],
+      "properties": {
+        "RegexExtractor.useHeaders": "false",
+        "RegexExtractor.refname": "rx_empty",
+        "RegexExtractor.regex": "never-present=([^\\r\\n]+)",
+        "RegexExtractor.template": "$1$",
+        "RegexExtractor.default": "",
+        "RegexExtractor.match_number": "0",
+        "RegexExtractor.default_empty_value": true
+      },
+      "generated_variable_contract": {"base": "rx_empty", "match_count": "rx_empty_matchNr", "indexed_value_pattern": "rx_empty_{n}", "indexed_capture_pattern": "rx_empty_{n}_g{group}", "match_index_range": [0, 0], "capture_group_range": [], "max_generated_variables": 2},
+      "resource_budget": {"max_input_bytes": 4096, "max_steps": 4096, "max_capture_groups": 8},
+      "default_contract": "no match with default_empty_value=true writes an empty default; runtime variable mutation is candidate-unobserved"
+    },
+    {
+      "id": "boundary-all",
+      "category": "postprocessor-extractor",
+      "wire_tag": "BoundaryExtractor",
+      "testclass": "BoundaryExtractor",
+      "guiclass": "BoundaryExtractorGui",
+      "testname": "Boundary all matches",
+      "enabled": true,
+      "element_attributes": {"guiclass": "BoundaryExtractorGui", "testclass": "BoundaryExtractor", "testname": "Boundary all matches", "enabled": "true"},
+      "property_order": ["BoundaryExtractor.refname", "BoundaryExtractor.lboundary", "BoundaryExtractor.rboundary", "BoundaryExtractor.match_number", "BoundaryExtractor.default", "BoundaryExtractor.default_empty_value", "BoundaryExtractor.useHeaders"],
+      "properties": {
+        "BoundaryExtractor.refname": "boundary_all",
+        "BoundaryExtractor.lboundary": "first=",
+        "BoundaryExtractor.rboundary": "\n",
+        "BoundaryExtractor.match_number": "-1",
+        "BoundaryExtractor.default": "BOUNDARY_DEFAULT",
+        "BoundaryExtractor.default_empty_value": false,
+        "BoundaryExtractor.useHeaders": "false"
+      },
+      "generated_variable_names": ["boundary_all", "boundary_all_matchNr"],
+      "generated_variable_contract": {"base": "boundary_all", "match_count": "boundary_all_matchNr", "indexed_value_pattern": "boundary_all_{n}", "indexed_capture_pattern": null, "match_index_range": [1, 32], "capture_group_range": [], "max_generated_variables": 33},
+      "resource_budget": {"max_input_bytes": 4096, "max_steps": 4096, "max_capture_groups": 0},
+      "match_contract": "-1 saves all boundary matches; empty boundaries and defaults are covered by the negative case"
+    },
+    {
+      "id": "css-selector",
+      "category": "postprocessor-extractor",
+      "wire_tag": "HtmlExtractor",
+      "testclass": "HtmlExtractor",
+      "guiclass": "HtmlExtractorGui",
+      "testname": "CSS attribute extractor",
+      "enabled": true,
+      "element_attributes": {"guiclass": "HtmlExtractorGui", "testclass": "HtmlExtractor", "testname": "CSS attribute extractor", "enabled": "true"},
+      "property_order": ["HtmlExtractor.extractor_impl", "HtmlExtractor.attribute", "HtmlExtractor.expr", "HtmlExtractor.refname", "HtmlExtractor.match_number", "HtmlExtractor.default", "HtmlExtractor.default_empty_value"],
+      "properties": {
+        "HtmlExtractor.extractor_impl": "JSOUP",
+        "HtmlExtractor.attribute": "data-id",
+        "HtmlExtractor.expr": "a.item",
+        "HtmlExtractor.refname": "css_ids",
+        "HtmlExtractor.match_number": "-1",
+        "HtmlExtractor.default": "CSS_DEFAULT",
+        "HtmlExtractor.default_empty_value": false
+      },
+      "generated_variable_names": ["css_ids", "css_ids_matchNr"],
+      "generated_variable_contract": {"base": "css_ids", "match_count": "css_ids_matchNr", "indexed_value_pattern": "css_ids_{n}", "indexed_capture_pattern": null, "match_index_range": [1, 32], "capture_group_range": [], "max_generated_variables": 33},
+      "resource_budget": {"max_input_bytes": 4096, "max_steps": 4096, "max_capture_groups": 0},
+      "match_contract": "CSS implementation and ordered matches are candidate-unobserved"
+    },
+    {
+      "id": "xpath-1",
+      "category": "postprocessor-extractor",
+      "wire_tag": "XPathExtractor",
+      "testclass": "XPathExtractor",
+      "guiclass": "XPathExtractorGui",
+      "testname": "XPath text extractor",
+      "enabled": true,
+      "element_attributes": {"guiclass": "XPathExtractorGui", "testclass": "XPathExtractor", "testname": "XPath text extractor", "enabled": "true"},
+      "property_order": ["XPathExtractor.xpathQuery", "XPathExtractor.refname", "XPathExtractor.default", "XPathExtractor.tolerant", "XPathExtractor.namespace", "XPathExtractor.report_errors", "XPathExtractor.show_warnings", "XPathExtractor.quiet", "XPathExtractor.fragment", "XPathExtractor.whitespace", "XPathExtractor.validate", "XPathExtractor.download_dtds", "XPathExtractor.matchNumber"],
+      "properties": {
+        "XPathExtractor.xpathQuery": "/*[local-name()='fixture']/*[local-name()='item']/text()",
+        "XPathExtractor.refname": "xpath_text",
+        "XPathExtractor.default": "XPATH_DEFAULT",
+        "XPathExtractor.tolerant": false,
+        "XPathExtractor.namespace": true,
+        "XPathExtractor.report_errors": true,
+        "XPathExtractor.show_warnings": true,
+        "XPathExtractor.quiet": false,
+        "XPathExtractor.fragment": false,
+        "XPathExtractor.whitespace": true,
+        "XPathExtractor.validate": false,
+        "XPathExtractor.download_dtds": false,
+        "XPathExtractor.matchNumber": "-1"
+      },
+      "generated_variable_names": ["xpath_text", "xpath_text_matchNr"],
+      "generated_variable_contract": {"base": "xpath_text", "match_count": "xpath_text_matchNr", "indexed_value_pattern": "xpath_text_{n}", "indexed_capture_pattern": null, "match_index_range": [1, 32], "capture_group_range": [], "max_generated_variables": 33},
+      "namespace_mapping": {},
+      "namespace_strategy": "namespace-aware parse with local-name() query; XPathExtractor has no authored namespace-prefix map property",
+      "resource_budget": {"max_input_bytes": 4096, "max_steps": 4096, "max_capture_groups": 0},
+      "error_contract": "parser and namespace errors are typed candidate outcomes; no exception text is fabricated"
+    },
+    {
+      "id": "xpath-2",
+      "category": "postprocessor-extractor",
+      "wire_tag": "XPath2Extractor",
+      "testclass": "XPath2Extractor",
+      "guiclass": "XPath2ExtractorGui",
+      "testname": "XPath 2 text extractor",
+      "enabled": true,
+      "element_attributes": {"guiclass": "XPath2ExtractorGui", "testclass": "XPath2Extractor", "testname": "XPath 2 text extractor", "enabled": "true"},
+      "property_order": ["XPathExtractor2.xpathQuery", "XPathExtractor2.refname", "XPathExtractor2.default", "XPathExtractor2.fragment", "XPathExtractor2.namespaces", "XPathExtractor2.matchNumber"],
+      "properties": {
+        "XPathExtractor2.xpathQuery": "/fixture:fixture/fixture:item/text()",
+        "XPathExtractor2.refname": "xpath2_text",
+        "XPathExtractor2.default": "XPATH2_DEFAULT",
+        "XPathExtractor2.fragment": false,
+        "XPathExtractor2.namespaces": "fixture=urn:jmeter-rs:processor-fixture",
+        "XPathExtractor2.matchNumber": "-1"
+      },
+      "generated_variable_names": ["xpath2_text", "xpath2_text_matchNr"],
+      "generated_variable_contract": {"base": "xpath2_text", "match_count": "xpath2_text_matchNr", "indexed_value_pattern": "xpath2_text_{n}", "indexed_capture_pattern": null, "match_index_range": [1, 32], "capture_group_range": [], "max_generated_variables": 33},
+      "namespace_mapping": {"fixture": "urn:jmeter-rs:processor-fixture"},
+      "resource_budget": {"max_input_bytes": 4096, "max_steps": 4096, "max_capture_groups": 0},
+      "error_contract": "XPath 2 parser/runtime outcome is candidate-unobserved"
+    },
+    {
+      "id": "jsonpath",
+      "category": "postprocessor-extractor",
+      "wire_tag": "JSONPostProcessor",
+      "testclass": "JSONPostProcessor",
+      "guiclass": "JSONPostProcessorGui",
+      "testname": "JSONPath extractor matrix",
+      "enabled": true,
+      "element_attributes": {"guiclass": "JSONPostProcessorGui", "testclass": "JSONPostProcessor", "testname": "JSONPath extractor matrix", "enabled": "true"},
+      "property_order": ["JSONPostProcessor.jsonPathExprs", "JSONPostProcessor.referenceNames", "JSONPostProcessor.defaultValues", "JSONPostProcessor.compute_concat", "JSONPostProcessor.match_numbers"],
+      "properties": {
+        "JSONPostProcessor.jsonPathExprs": "$.request.id;$.items[*].name;$.missing",
+        "JSONPostProcessor.referenceNames": "json_id;json_names;json_missing",
+        "JSONPostProcessor.defaultValues": "JSON_DEFAULT;JSON_EMPTY;JSON_MISSING_DEFAULT",
+        "JSONPostProcessor.compute_concat": true,
+        "JSONPostProcessor.match_numbers": "0;-1;1"
+      },
+      "generated_variable_names": ["json_id", "json_id_matchNr", "json_names", "json_names_matchNr", "json_missing", "json_missing_matchNr"],
+      "generated_variable_contracts": [
+        {"base": "json_id", "match_count": "json_id_matchNr", "indexed_value_pattern": "json_id_{n}", "indexed_capture_pattern": null, "match_index_range": [1, 1], "max_generated_variables": 3},
+        {"base": "json_names", "match_count": "json_names_matchNr", "indexed_value_pattern": "json_names_{n}", "indexed_capture_pattern": null, "match_index_range": [1, 32], "max_generated_variables": 34},
+        {"base": "json_missing", "match_count": "json_missing_matchNr", "indexed_value_pattern": "json_missing_{n}", "indexed_capture_pattern": null, "match_index_range": [1, 1], "max_generated_variables": 3}
+      ],
+      "resource_budget": {"max_json_path_expressions": 8, "max_input_bytes": 4096, "max_steps": 4096, "max_capture_groups": 0},
+      "match_contract": "match 0/positive/all, defaults, and concatenation are separate observable policies; values are candidate-unobserved",
+      "error_contract": "argument-count mismatch is an explicit error, not a silent zip or default"
+    },
+    {
+      "id": "jmespath",
+      "category": "postprocessor-extractor",
+      "wire_tag": "JMESPathExtractor",
+      "testclass": "JMESPathExtractor",
+      "guiclass": "JMESPathExtractorGui",
+      "testname": "JMESPath extractor",
+      "enabled": true,
+      "element_attributes": {"guiclass": "JMESPathExtractorGui", "testclass": "JMESPathExtractor", "testname": "JMESPath extractor", "enabled": "true"},
+      "property_order": ["JMESExtractor.jmesPathExpr", "JMESExtractor.referenceName", "JMESExtractor.defaultValue", "JMESExtractor.matchNumber"],
+      "properties": {
+        "JMESExtractor.jmesPathExpr": "items[*].name",
+        "JMESExtractor.referenceName": "jmes_names",
+        "JMESExtractor.defaultValue": "JMES_DEFAULT",
+        "JMESExtractor.matchNumber": "-1"
+      },
+      "generated_variable_names": ["jmes_names", "jmes_names_matchNr"],
+      "generated_variable_contract": {"base": "jmes_names", "match_count": "jmes_names_matchNr", "indexed_value_pattern": "jmes_names_{n}", "indexed_capture_pattern": null, "match_index_range": [1, 32], "capture_group_range": [], "max_generated_variables": 33},
+      "resource_budget": {"max_json_path_expressions": 8, "max_input_bytes": 4096, "max_steps": 4096, "max_capture_groups": 0},
+      "match_contract": "JMESPath list and out-of-range default behavior are candidate-unobserved"
+    },
+    {
+      "id": "debug-postprocessor",
+      "category": "postprocessor",
+      "wire_tag": "DebugPostProcessor",
+      "testclass": "DebugPostProcessor",
+      "guiclass": "TestBeanGUI",
+      "testname": "Candidate variable snapshot",
+      "enabled": true,
+      "element_attributes": {"guiclass": "TestBeanGUI", "testclass": "DebugPostProcessor", "testname": "Candidate variable snapshot", "enabled": "true"},
+      "property_order": ["displayJMeterProperties", "displayJMeterVariables", "displaySystemProperties", "displaySamplerProperties"],
+      "properties": {
+        "displayJMeterProperties": true,
+        "displayJMeterVariables": true,
+        "displaySystemProperties": false,
+        "displaySamplerProperties": true
+      },
+      "output_status": "variable and property snapshot candidate; dynamic lines are not synthesized"
+    },
+    {
+      "id": "disabled-external-and-unknown",
+      "category": "preprocessor/postprocessor",
+      "enabled": false,
+      "wire_tags": ["BeanShellPreProcessor", "JSR223PreProcessor", "JDBCPreProcessor", "BSFPreProcessor", "AnchorModifier", "URLRewritingModifier", "BeanShellPostProcessor", "JSR223PostProcessor", "JDBCPostProcessor", "BSFPostProcessor", "PluginPostProcessor", "ResultAction"],
+      "policy": "retain exact tag, attributes, typed property names/order, and opaque descendants; return explicit unsupported capability when an enable request reaches an unavailable runtime"
+    }
+  ],
+  "disabled_elements": [
+    {"tag": "BeanShellPreProcessor", "guiclass": "TestBeanGUI", "testclass": "BeanShellPreProcessor", "testname": "Disabled BeanShell preprocessor", "enabled": "false", "property_order": ["filename", "parameters", "resetInterpreter", "script"], "wire_properties": {"filename": "", "parameters": "source-only-disabled", "resetInterpreter": "false", "script": "vars.put('disabled', 'must-not-run')"}},
+    {"tag": "JSR223PreProcessor", "guiclass": "TestBeanGUI", "testclass": "JSR223PreProcessor", "testname": "Disabled JSR223 preprocessor", "enabled": "false", "property_order": ["scriptLanguage", "parameters", "filename", "cacheKey", "script"], "wire_properties": {"scriptLanguage": "groovy", "parameters": "source-only-disabled", "filename": "", "cacheKey": "processor-disabled-cache", "script": "vars.put('disabled', 'must-not-run')"}},
+    {"tag": "JDBCPreProcessor", "guiclass": "TestBeanGUI", "testclass": "JDBCPreProcessor", "testname": "Disabled JDBC preprocessor", "enabled": "false", "property_order": ["dataSource", "query", "queryArguments", "queryArgumentsTypes", "queryType", "resultVariable", "variableNames"], "wire_properties": {"dataSource": "source-only-no-database", "query": "SELECT fixture_value", "queryArguments": "", "queryArgumentsTypes": "", "queryType": "Select Statement", "resultVariable": "jdbc_result", "variableNames": "jdbc_value"}},
+    {"tag": "BSFPreProcessor", "guiclass": "TestBeanGUI", "testclass": "BSFPreProcessor", "testname": "Disabled legacy BSF preprocessor", "enabled": "false", "property_order": ["scriptLanguage", "parameters", "filename", "script"], "wire_properties": {"scriptLanguage": "beanshell", "parameters": "source-only-disabled", "filename": "", "script": "vars.put('disabled', 'must-not-run')"}},
+    {"tag": "AnchorModifier", "guiclass": "AnchorModifierGui", "testclass": "AnchorModifier", "testname": "Disabled HTML link modifier", "enabled": "false", "property_order": [], "wire_properties": {}},
+    {"tag": "URLRewritingModifier", "guiclass": "URLRewritingModifierGui", "testclass": "URLRewritingModifier", "testname": "Disabled URL rewriting modifier", "enabled": "false", "property_order": ["path_extension", "path_extension_no_questionmark", "argument_name", "path_extension_no_equals", "cache_value"], "wire_properties": {"path_extension": "false", "path_extension_no_questionmark": "false", "argument_name": "fixture_token", "path_extension_no_equals": "false", "cache_value": "true"}},
+    {"tag": "BeanShellPostProcessor", "guiclass": "TestBeanGUI", "testclass": "BeanShellPostProcessor", "testname": "Disabled BeanShell postprocessor", "enabled": "false", "property_order": ["filename", "parameters", "resetInterpreter", "script"], "wire_properties": {"filename": "", "parameters": "source-only-disabled", "resetInterpreter": "false", "script": "vars.put('disabled', 'must-not-run')"}},
+    {"tag": "JSR223PostProcessor", "guiclass": "TestBeanGUI", "testclass": "JSR223PostProcessor", "testname": "Disabled JSR223 postprocessor", "enabled": "false", "property_order": ["scriptLanguage", "parameters", "filename", "cacheKey", "script"], "wire_properties": {"scriptLanguage": "groovy", "parameters": "source-only-disabled", "filename": "", "cacheKey": "processor-disabled-cache", "script": "vars.put('disabled', 'must-not-run')"}},
+    {"tag": "JDBCPostProcessor", "guiclass": "TestBeanGUI", "testclass": "JDBCPostProcessor", "testname": "Disabled JDBC postprocessor", "enabled": "false", "property_order": ["dataSource", "query", "queryArguments", "queryArgumentsTypes", "queryType", "resultVariable", "variableNames"], "wire_properties": {"dataSource": "source-only-no-database", "query": "SELECT fixture_value", "queryArguments": "", "queryArgumentsTypes": "", "queryType": "Select Statement", "resultVariable": "jdbc_result", "variableNames": "jdbc_value"}},
+    {"tag": "BSFPostProcessor", "guiclass": "TestBeanGUI", "testclass": "BSFPostProcessor", "testname": "Disabled legacy BSF postprocessor", "enabled": "false", "property_order": ["scriptLanguage", "parameters", "filename", "script"], "wire_properties": {"scriptLanguage": "beanshell", "parameters": "source-only-disabled", "filename": "", "script": "vars.put('disabled', 'must-not-run')"}},
+    {"tag": "PluginPostProcessor", "guiclass": "com.example.jmeter.PluginPostProcessorGui", "testclass": "com.example.jmeter.PluginPostProcessor", "testname": "Opaque processor plug-in", "enabled": "false", "extra_attributes": {"pluginVersion": "0.1", "custom": "retain-me"}, "property_order": ["plugin.known", "plugin.opaque", "pluginExtension"], "wire_properties": {"plugin.known": "known & value", "plugin.opaque": "opaque & property <bytes>"}, "opaque_descendants": [{"tag": "pluginProperty", "name": "plugin.opaque", "encoding": "raw", "text": "opaque & property <bytes>"}, {"tag": "pluginExtension", "format": "nested", "marker": "α", "children": [{"tag": "opaqueChild", "key": "one", "cdata": "raw <plugin> bytes"}]}]},
+    {"tag": "PluginChild", "guiclass": "com.example.jmeter.PluginChildGui", "testclass": "com.example.jmeter.PluginChild", "testname": "Opaque child", "enabled": "false", "extra_attributes": {"childFlag": "keep"}, "property_order": ["pluginChildProperty"], "opaque_descendants": [{"tag": "pluginChildProperty", "name": "child.raw", "text": "child & raw"}]},
+    {"tag": "ResultAction", "guiclass": "ResultActionGui", "testclass": "ResultAction", "testname": "Disabled result status action", "enabled": "false", "property_order": ["TestLogicalAction"], "wire_properties": {"TestLogicalAction": "START_NEXT_ITERATION_OF_CURRENT_LOOP"}}
+  ],
+  "response_corpus": [
+    {"id": "html", "path": "inputs/response-html.html", "sha256": "79877a1e8895dc8b667d71c9e9229ab38c7c6d76a7821580e68bc2dec892f4e4", "media_type": "text/html", "status": "candidate-input", "max_bytes": 1024},
+    {"id": "json", "path": "inputs/response-json.payload", "sha256": "458c174a725103bdb76bce97afabc55bbc71326580b6dc2a7c4adf5fc67e586e", "media_type": "application/json", "status": "candidate-input", "max_bytes": 1024},
+    {"id": "xml", "path": "inputs/response-xml.xml", "sha256": "8dfa6fffba08276f19e93b41e66cbfe71d1ea10803cb9721da76b9c2f342c5d7", "media_type": "application/xml", "status": "candidate-input", "max_bytes": 1024},
+    {"id": "text", "path": "inputs/response-text.txt", "sha256": "32970d50e154e338af6ed9d38f0c290f34dbddf8dd9211fb9fd0c65011fd9e4e", "media_type": "text/plain", "status": "candidate-input", "max_bytes": 256},
+    {"id": "headers", "path": "inputs/response-headers.txt", "sha256": "6222af8439c395ab23b88bb55ea39f21986e99428f26ffbe6a508bb00eb79430", "media_type": "message/http", "status": "candidate-input", "max_bytes": 256},
+    {"id": "malformed", "path": "inputs/response-malformed.payload", "sha256": "7aa774e640a6916e1be48d360a8f9953fdee3079bb5c52276b584acc70f6ccda", "media_type": "application/json", "status": "candidate-error-input", "max_bytes": 256},
+    {"id": "empty", "path": "inputs/response-empty.txt", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "media_type": "application/octet-stream", "status": "candidate-empty-input", "max_bytes": 0}
+  ],
+  "response_bindings": [
+    {"response_id": "text", "input_binding": "response_data", "processor_ids": ["regex-all", "regex-first", "regex-empty-default", "boundary-all"]},
+    {"response_id": "headers", "input_binding": "response_headers", "processor_ids": ["regex-headers"]},
+    {"response_id": "html", "input_binding": "response_data", "processor_ids": ["css-selector"]},
+    {"response_id": "xml", "input_binding": "response_data", "processor_ids": ["xpath-1", "xpath-2"]},
+    {"response_id": "json", "input_binding": "response_data", "processor_ids": ["jsonpath", "jmespath"]},
+    {"response_id": "empty", "input_binding": "response_data", "processor_ids": ["regex-empty-default", "boundary-all", "css-selector", "xpath-1", "xpath-2", "jsonpath", "jmespath"]},
+    {"response_id": "malformed", "input_binding": "response_data", "processor_ids": ["jsonpath", "jmespath"]}
+  ],
+  "variable_snapshots": [
+    {
+      "id": "initial-thread",
+      "phase": "configuration",
+      "scope": "thread",
+      "source": "TestPlan.user_defined_variables and inputs/variables.properties",
+      "source_path": "inputs/variables.properties",
+      "source_sha256": "afda47718ef4a8f5ef17e73ca780d0738abe1390f527f6627d5798706e0415f4",
+      "status": "static-input",
+      "values": [
+        {"name": "fixture.initial", "value": "seed", "status": "input"},
+        {"name": "fixture.iteration", "value": "0", "status": "input"},
+        {"name": "fixture.property", "value": "${__P(processor.fixture.property,property-value)}", "status": "function-expression-input"}
+      ]
+    },
+    {
+      "id": "after-preprocessors",
+      "phase": "preprocessors",
+      "scope": "thread",
+      "status": "candidate-unobserved",
+      "names": ["fixture.user", "fixture.mode", "fixture.regex"],
+      "values": null,
+      "reason": "UserParameters and RegExUserParameters mutate thread-local variables; no sampler response was executed"
+    },
+    {
+      "id": "after-postprocessors",
+      "phase": "postprocessors",
+      "scope": "thread",
+      "status": "candidate-unobserved",
+      "names": ["rx_all", "rx_first", "rx_header", "rx_empty", "boundary_all", "css_ids", "xpath_text", "xpath2_text", "json_id", "json_names", "json_missing", "jmes_names"],
+      "values": null,
+      "reason": "Extractor output depends on response corpus injection, parser implementation, match selection, and default/error paths"
+    }
+  ],
+  "negative_cases": [
+    {"id": "empty-response", "input": "inputs/response-empty.txt", "expected": "typed empty-source handling; no fabricated match", "observed": false},
+    {"id": "malformed-json", "input": "inputs/response-malformed.payload", "expected": "typed JSON parse error with source context; no silent default", "observed": false},
+    {"id": "missing-json-path", "input": "inputs/response-json.payload", "expected": "configured default policy, distinct from parser error", "observed": false},
+    {"id": "invalid-match-number", "plan_node": "Invalid match number", "expected": "typed numeric configuration error or pinned component diagnostic", "observed": false},
+    {"id": "json-argument-cardinality", "plan_node": "Mismatched JSON extractor arguments", "expected": "explicit argument-count mismatch", "observed": false},
+    {"id": "malformed-xpath-and-jmespath", "plan_nodes": ["Malformed XPath", "Malformed JMESPath"], "expected": "typed parser errors; no fabricated exception text", "observed": false},
+    {"id": "disabled-plugin", "plan_node": "Opaque processor plug-in", "expected": "lossless disabled source retention and explicit unsupported enable outcome", "observed": false}
+  ],
+  "resource_limits": {
+    "max_threads": 1,
+    "max_iterations": 1,
+    "max_samples": 1,
+    "max_plan_nodes": 80,
+    "max_plan_depth": 8,
+    "max_response_bytes": 4096,
+    "max_variable_count": 64,
+    "max_variable_value_bytes": 4096,
+    "max_extractor_matches": 32,
+    "max_json_path_expressions": 8,
+    "max_regex_input_bytes": 4096,
+    "max_regex_steps": 4096,
+    "max_regex_capture_groups": 8,
+    "max_process_wait_seconds": 30,
+    "network": "none"
+  },
+  "generated_from": {
+    "generator": "original static fixture authoring",
+    "generator_version": "not applicable",
+    "oracle_execution": "not run; no Java, JMeter, response service, or subprocess was invoked",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "none; no oracle output is committed"
+  },
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.ts", "sample.by", "debug_response.dynamic_lines", "candidate_unobserved_values"],
+    "reason": "Only source topology, wire property names/order, bounded input bytes, and explicit candidate/error contracts are asserted. Runtime values, timing, parser diagnostics, and extractor matches require a pinned oracle observation."
+  }
+}

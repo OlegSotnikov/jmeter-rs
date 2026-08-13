@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Rust no-drop/parser variant; this is intentionally not JMeter writer wire. -->
+<testResults version="1.2"><rootExtension kind="root"><nestedRoot code="child">root opaque nested</nestedRoot></rootExtension><sample s="true" lb="parser extension" case__id="preserve" comma__value="left,right"><pluginData kind="extension"><pluginChild code="nested">opaque nested</pluginChild></pluginData></sample></testResults>

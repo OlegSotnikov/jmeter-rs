@@ -1,0 +1,107 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-SCRIPT-JAVA-CLASS-LOADING",
+  "format": "jmx-semantic",
+  "evidence_status": "planned",
+  "source": {
+    "kind": "original-static-contract",
+    "oracle_status": "not-run",
+    "note": "No Java, JMeter, compiler, subprocess, or network service was run while creating this corpus; class descriptors are intentionally unresolved."
+  },
+  "capability_accounting": {
+    "status": "external-unavailable",
+    "required_boundaries": ["EXT-JVM-001", "EXT-PLUGIN-001"],
+    "unsupported_error_code": "unsupported-capability",
+    "stable_error_code_family": "script.*",
+    "no_silent_success": true,
+    "no_sample_output_claimed": true,
+    "missing_adapter_behavior": "preserve Java Sampler/JUnit nodes, exact class/method/wire properties, and descriptors; return script.class.unavailable without mapping to a native sampler or claiming success"
+  },
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations": 1,
+    "max_samples": 4,
+    "max_response_bytes": 8192,
+    "max_network_requests": 0,
+    "max_processes": 0,
+    "max_script_output_bytes": 0
+  },
+  "class_loading_contract": {
+    "classpath_roots": ["inputs/classes"],
+    "compiled_artifacts_present": false,
+    "jar_artifacts_present": false,
+    "class_loader_policy": [
+      "resolve only from explicit user.classpath/search_paths roots",
+      "do not inherit arbitrary ambient classpath or environment paths",
+      "retain exact requested class and method names in diagnostics",
+      "isolate user classes from native Rust code and from unrelated virtual users"
+    ],
+    "java_sampler": {
+      "testclass": "JavaSampler",
+      "wire_property": "classname",
+      "descriptor": "inputs/java-sampler-class.properties",
+      "class_name": "org.jmeter.rs.fixture.StaticJavaSampler",
+      "required_interface": "org.apache.jmeter.protocol.java.sampler.JavaSamplerClient",
+      "arguments": {"marker": "descriptor-only"},
+      "timeout_property": {"status": "not-present", "reason": "JavaSampler has no timeout wire property; timeout control belongs to a separate Sample Timeout element."}
+    },
+    "missing_java_sampler": {
+      "testclass": "JavaSampler",
+      "wire_property": "classname",
+      "class_name": "org.jmeter.rs.fixture.MissingSampler",
+      "required_interface": "org.apache.jmeter.protocol.java.sampler.JavaSamplerClient",
+      "expected_outcome": "class lookup/invocation fails as a typed unavailable capability; preserve class name and do not map to a built-in sampler"
+    },
+    "junit3_request": {
+      "testclass": "JUnitSampler",
+      "mode_wire_property": "junitsampler.junit4",
+      "mode_wire_value": false,
+      "wire_properties": ["junitSampler.classname", "junitsampler.constructorstring", "junitsampler.method", "junitsampler.pkg.filter", "junitsampler.success", "junitsampler.success.code", "junitsampler.failure", "junitsampler.failure.code", "junitsampler.error", "junitsampler.error.code", "junitsampler.exec.setup", "junitsampler.append.error", "junitsampler.append.exception"],
+      "descriptor": "inputs/junit-class.properties",
+      "class_name": "org.jmeter.rs.fixture.StaticJUnit3Case",
+      "required_superclass": "junit.framework.TestCase",
+      "method": "testFixturePasses",
+      "constructor_contract": "empty constructor is selected when constructor string is empty",
+      "annotation_contract": "none; JUnit3 method naming/superclass semantics apply",
+      "expected_outcome": "class lookup or invocation requires the pinned JVM/JUnit class path; absent classes are not successful samples"
+    },
+    "junit4_request": {
+      "testclass": "JUnitSampler",
+      "mode_wire_property": "junitsampler.junit4",
+      "mode_wire_value": true,
+      "wire_properties": ["junitSampler.classname", "junitsampler.constructorstring", "junitsampler.method", "junitsampler.pkg.filter", "junitsampler.success", "junitsampler.success.code", "junitsampler.failure", "junitsampler.failure.code", "junitsampler.error", "junitsampler.error.code", "junitsampler.exec.setup", "junitsampler.append.error", "junitsampler.append.exception"],
+      "descriptor": "inputs/junit4-class.properties",
+      "class_name": "org.jmeter.rs.fixture.StaticJUnit4Case",
+      "required_annotation": "org.junit.Test",
+      "method": "fixturePasses",
+      "annotation_contract": {"annotation": "org.junit.Test", "method_discovery": "annotation", "expected_attribute": "org.junit.Test$None", "timeout_attribute": "opaque-not-asserted"},
+      "expected_outcome": "class lookup, @Test discovery, and invocation require the pinned JVM/JUnit class path; absent classes are not successful samples"
+    }
+  },
+  "unknown_property_policy": {
+    "timeout": {"status": "not-present", "action": "opaque-preserve-only if encountered in an input plan", "not_a_claimed_java_sampler_wire_property": true},
+    "junitSampler.execTime": {"status": "not-present", "action": "opaque-preserve-only if encountered in an input plan", "not_a_claimed_junit_wire_property": true}
+  },
+  "error_normalization": {
+    "stable_code_family": "script.*",
+    "scope": "adapter normalization categories only; these are not universal claims about every JMeter class-loading path",
+    "mappings": [
+      {"trigger": "requested JavaSamplerClient or JUnit class is absent", "category": "class-unavailable", "stable_error_code": "script.class.unavailable", "sample_effect": "typed capability failure; preserve class and method"},
+      {"trigger": "class exists but required JavaSamplerClient/interface/annotation contract is not satisfied", "category": "class-contract-invalid", "stable_error_code": "script.class.contract-invalid", "sample_effect": "adapter failure; preserve class contract diagnostics"},
+      {"trigger": "constructor, method, setup, teardown, assertion, or invocation throws", "category": "evaluation-failed", "stable_error_code": "script.evaluation.failed", "sample_effect": "failure/error mapping is oracle-required"},
+      {"trigger": "explicit classpath root is missing or outside the allowlist", "category": "classpath-unavailable", "stable_error_code": "script.classpath.unavailable", "sample_effect": "configuration/capability failure; preserve requested path"}
+    ]
+  },
+  "unavailable_capability": {
+    "capabilities": ["EXT-JVM-001", "EXT-PLUGIN-001"],
+    "category": "class-unavailable",
+    "stable_error_code": "script.class.unavailable",
+    "behavior": "retain JMX node, exact class/method/properties, and descriptor; return a typed unavailable result and never silently omit, translate, or claim success"
+  },
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "Class names, exact mixed-case/lowercase dotted wire property names, JavaSamplerClient/JUnit3/JUnit4 contracts, explicit unavailable timeout policy, classpath roots, ordered sampler nodes, and typed missing-class behavior remain observable. No runtime result fields were measured."
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-PROXY-003-MIRROR",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored bounded HTTP Mirror Server wire corpus and source-contract descriptors for PROXY-003.",
+    "upstream_plan_copied": false,
+    "upstream_source_copied": false
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter 5.6.3 is a pinned external oracle target; no upstream plan, result, source file, binary, certificate, or key is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "source_files": [
+      {
+        "path": "src/protocol/http/src/main/java/org/apache/jmeter/protocol/http/control/HttpMirrorControl.java",
+        "url": "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/src/protocol/http/src/main/java/org/apache/jmeter/protocol/http/control/HttpMirrorControl.java",
+        "use": "read-only semantic reference; not copied"
+      },
+      {
+        "path": "src/protocol/http/src/main/java/org/apache/jmeter/protocol/http/control/HttpMirrorServer.java",
+        "url": "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/src/protocol/http/src/main/java/org/apache/jmeter/protocol/http/control/HttpMirrorServer.java",
+        "use": "read-only semantic reference; not copied"
+      },
+      {
+        "path": "src/protocol/http/src/main/java/org/apache/jmeter/protocol/http/control/HttpMirrorThread.java",
+        "url": "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/src/protocol/http/src/main/java/org/apache/jmeter/protocol/http/control/HttpMirrorThread.java",
+        "use": "read-only semantic reference; not copied"
+      }
+    ],
+    "execution_status": "not-run-static-handoff",
+    "raw_oracle_artifacts": false
+  },
+  "runtime": {
+    "java": {
+      "vendor": null,
+      "version": null,
+      "vm": null,
+      "major": null
+    },
+    "target_triple": null,
+    "os_image": null,
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "not asserted; upstream mirror binds the platform wildcard address and future runs require explicit network isolation",
+    "environment_allowlist": [
+      "LC_ALL=C",
+      "LANG=C",
+      "TZ=UTC"
+    ],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "not used during static authoring"
+  },
+  "inputs": {
+    "requests_sha256": "4a3de3e7b179a4520a8d54b67f035cea51d3cd9150b61e0b029df8ce2146399e",
+    "expected_api_sha256": "0a66b762c97288643eca4841376641fc7e4e46de71fab9f4c1420cc1e6df0be3",
+    "expected_semantic_sha256": "9b16d0452bd1cfbe61d7669db3cab0a02df93e86af6840fba73c97dc22899c5d",
+    "public_network_used": false,
+    "loopback_service_used": false,
+    "network_isolation": "not used during static authoring; required from a future driver",
+    "secrets_or_credentials": false,
+    "certificates_or_keys_generated": false,
+    "java_oracle_process_invoked": false,
+    "mirror_server_process_invoked": false,
+    "network_client_invoked": false
+  },
+  "review": {
+    "source_provenance": "Pinned to the profile's Apache JMeter source commit; descriptors are original and source-derived.",
+    "redistribution_review": "Only original JSON, Markdown, and minimal probe source are present; no upstream source or raw oracle artifacts are present.",
+    "compatibility_claim": "planned; evidence requires a later local differential run against the exact pinned JMeter 5.6.3 artifact."
+  }
+}

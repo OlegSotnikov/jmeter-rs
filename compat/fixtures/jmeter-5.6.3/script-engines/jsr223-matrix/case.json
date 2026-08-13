@@ -1,0 +1,48 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-SCRIPT-JSR223-MATRIX",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-SCRIPT-001",
+  "conformance_ids": ["SCRIPT-001", "TEST-001"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-JMX-001", "NORM-EXTERNAL-001", "NORM-ENV-001"],
+  "plan": {
+    "path": "plan.jmx",
+      "sha256": "c484a8c8236af11df38034f9ff52fc79045f0eab25abe7ca4664d5bd526cef58"
+  },
+  "property_files": [
+    {
+      "path": "oracle.properties",
+      "sha256": "70e5b2eca174514f171568c2b12f8711b7492ea55600e835637a665aac7730a6"
+    }
+  ],
+  "input_files": [
+    {"path": "inputs/scripts/bindings.groovy", "sha256": "9b343966b3244ef635ed5dfe182f4fd3f472321ceda822314244cc816c67fe1c", "language": "groovy", "max_bytes": 4096},
+    {"path": "inputs/scripts/failure.groovy", "sha256": "1df7e11d375f54a14654aaab0141fb41b11e04e5c78c4d1fbc8a26d42c8368d0", "language": "groovy", "max_bytes": 256},
+    {"path": "inputs/scripts/beanshell-file.bsh", "sha256": "d6ac067aa326352f736667182e64a76caf1a0675d46b083ecef778480f82981f", "language": "beanshell", "max_bytes": 256},
+    {"path": "inputs/scripts/jexl3-file.jexl", "sha256": "96bdc12b871a1953db02aca4ca18fb4a548115492368d97721fee0531b866e66", "language": "jexl3", "max_bytes": 256},
+    {"path": "inputs/scripts/rhino-file.js", "sha256": "1b5cca3118e1c8e7379bc219ec9202275a5976a434a339f25ac5e6d9b974c100", "language": "javascript/rhino", "max_bytes": 256}
+  ],
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/script-engines/jsr223-matrix",
+    "mode": "nongui",
+    "argv_template": ["jmeter", "-n", "-q", "oracle.properties", "-t", "plan.jmx", "-l", "<ignored>/oracle.jtl", "-j", "<ignored>/oracle.log"],
+    "network": "none",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null
+  },
+  "execution": {
+    "status": "not-run-static-external",
+    "process_exit": null,
+    "sample_count": null,
+    "raw_artifacts": "oracle-runs/script-engines/jsr223-matrix/ (ignored local evidence only)",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "This manifest is a static, original JMX and script contract; Java, JMeter, a script engine, a compiler, a subprocess, and network access were not used.",
+    "The manifest records each bundled script-engine artifact path, version, and SHA-256 from the pinned JMeter 5.6.3 distribution; no standalone engine or plugin JAR is permitted here.",
+    "Binding availability, Compilable behavior, cache eviction, exception text, and sample failure mapping are planned observations. Missing engines normalize to script.engine.unavailable and preserve source data."
+  ]
+}

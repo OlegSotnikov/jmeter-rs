@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="JMX no-drop boundary topology" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <stringProp name="TestPlan.comments">Original static boundary fixture: disabled plugin, legacy, GUI, and recorder nodes remain lossless.</stringProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="One disabled-boundary user" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="One bounded iteration" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">1</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">0</stringProp>
+        <longProp name="ThreadGroup.start_time">0</longProp>
+        <longProp name="ThreadGroup.end_time">0</longProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <stringProp name="ThreadGroup.duration"></stringProp>
+        <stringProp name="ThreadGroup.delay"></stringProp>
+      </ThreadGroup>
+      <hashTree>
+        <PluginSampler guiclass="com.example.jmeter.PluginSamplerGui" testclass="com.example.jmeter.PluginSampler" testname="Repeated opaque plug-in" enabled="false" pluginVersion="0.1" custom="retain-first">
+          <stringProp name="plugin.known">known &amp; value</stringProp>
+          <stringProp name="plugin.function.expression">${__fixturePluginFunction(α,&amp;beta)}</stringProp>
+          <pluginProperty name="plugin.opaque" encoding="raw">opaque &amp; property &lt;bytes&gt;</pluginProperty>
+          <!-- This comment is inside the opaque plugin subtree. -->
+          <pluginExtension format="nested" marker="α">
+            <opaqueChild key="one"><![CDATA[raw <plugin> bytes]]></opaqueChild>
+          </pluginExtension>
+          <objProp name="plugin.object">
+            <value type="com.example.jmeter.PluginBytes" encoding="utf-8" extra="preserve">opaque object &amp; bytes</value>
+          </objProp>
+        </PluginSampler>
+        <hashTree>
+          <PluginChild guiclass="com.example.jmeter.PluginChildGui" testclass="com.example.jmeter.PluginChild" testname="Opaque child" enabled="false" childFlag="keep">
+            <pluginChildProperty name="child.raw">child &amp; raw</pluginChildProperty>
+          </PluginChild>
+          <hashTree/>
+        </hashTree>
+
+        <!-- Same class and name as the preceding node: identity is position, not name. -->
+        <PluginSampler guiclass="com.example.jmeter.PluginSamplerGui" testclass="com.example.jmeter.PluginSampler" testname="Repeated opaque plug-in" enabled="false" pluginVersion="0.1" custom="retain-second">
+          <stringProp name="plugin.known">second value</stringProp>
+          <pluginProperty name="plugin.opaque" encoding="raw">second opaque payload</pluginProperty>
+        </PluginSampler>
+        <hashTree/>
+
+        <BSFSampler guiclass="BSFSamplerGui" testclass="BSFSampler" testname="Legacy BSF alias" enabled="false">
+          <stringProp name="BSFSampler.filename">legacy-fixture.bsf</stringProp>
+          <stringProp name="BSFSampler.language">beanshell</stringProp>
+          <stringProp name="BSFSampler.parameters">fixture-parameter</stringProp>
+          <stringProp name="BSFSampler.query">return 'fixture';</stringProp>
+        </BSFSampler>
+        <hashTree/>
+
+        <ReportPlan guiclass="ReportPlanGui" testclass="ReportPlan" testname="Legacy report alias" enabled="false" legacy="retain">
+          <stringProp name="ReportPlan.output">legacy-fixture/report</stringProp>
+          <stringProp name="ReportPlan.title">static legacy report descriptor</stringProp>
+          <reportExtension format="opaque" marker="report"><![CDATA[legacy report bytes]]></reportExtension>
+        </ReportPlan>
+        <hashTree/>
+
+        <MongoScriptSampler guiclass="TestBeanGUI" testclass="MongoScriptSampler" testname="Legacy MongoDB alias" enabled="false">
+          <stringProp name="MongoScriptSampler.source">legacy-fixture-source</stringProp>
+          <stringProp name="MongoScriptSampler.database">fixture</stringProp>
+          <stringProp name="MongoScriptSampler.script">return { legacy: true };</stringProp>
+        </MongoScriptSampler>
+        <hashTree/>
+
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="Recorder-generated HTTPS request" enabled="false">
+          <boolProp name="HTTPSampler.postBodyRaw">false</boolProp>
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="Recorded arguments" enabled="true">
+            <collectionProp name="Arguments.arguments">
+              <elementProp name="recorded-value" elementType="HTTPArgument">
+                <stringProp name="Argument.name">fixture</stringProp>
+                <stringProp name="Argument.value">recorded &amp; value</stringProp>
+                <boolProp name="HTTPArgument.use_equals">true</boolProp>
+                <boolProp name="HTTPArgument.always_encode">false</boolProp>
+              </elementProp>
+            </collectionProp>
+          </elementProp>
+          <stringProp name="HTTPSampler.domain">127.0.0.1</stringProp>
+          <stringProp name="HTTPSampler.port">443</stringProp>
+          <stringProp name="HTTPSampler.protocol">https</stringProp>
+          <stringProp name="HTTPSampler.path">/recorded</stringProp>
+          <stringProp name="HTTPSampler.method">POST</stringProp>
+          <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
+          <stringProp name="HTTPSampler.embedded_url_re"></stringProp>
+          <stringProp name="recorder.generated.marker">fixture-recorder-v1</stringProp>
+        </HTTPSamplerProxy>
+        <hashTree/>
+
+        <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager" testname="Recorder-generated headers" enabled="false">
+          <collectionProp name="HeaderManager.headers">
+            <elementProp name="recorded-header-one" elementType="Header">
+              <stringProp name="Header.name">X-Recorder-Fixture</stringProp>
+              <stringProp name="Header.value">one</stringProp>
+            </elementProp>
+            <elementProp name="recorded-header-two" elementType="Header">
+              <stringProp name="Header.name">X-Recorder-Fixture</stringProp>
+              <stringProp name="Header.value">two</stringProp>
+            </elementProp>
+          </collectionProp>
+        </HeaderManager>
+        <hashTree/>
+
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="Known disabled sibling" enabled="false">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">false</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

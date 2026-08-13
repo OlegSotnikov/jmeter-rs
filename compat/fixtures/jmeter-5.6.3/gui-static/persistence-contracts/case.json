@@ -1,0 +1,248 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-GUI-STATIC-PERSISTENCE",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-GUI-001",
+  "conformance_ids": ["GUI-002"],
+  "external_runtime_boundary_ids": ["EXT-JVM-001", "EXT-OS-001"],
+  "normalization_policy_refs": ["NORM-CONFIG-001", "NORM-ENV-001", "NORM-EXTERNAL-001"],
+  "plan": {
+    "path": "../guiclass-roundtrip/plan.jmx",
+    "sha256": "c3a83e0ea161a541e5def081cda82721f1dbab57ed4239b1c42efe6b0038e62f"
+  },
+  "property_files": [
+    {
+      "path": "gui-persistence.properties",
+      "sha256": "ecece2c7a2309492657a6ce1d9629b895f1c7a83c07c35d006659a165217cab9"
+    }
+  ],
+  "inputs": [
+    {
+      "path": "../guiclass-roundtrip/plan.jmx",
+      "sha256": "c3a83e0ea161a541e5def081cda82721f1dbab57ed4239b1c42efe6b0038e62f"
+    },
+    {
+      "path": "gui-persistence.properties",
+      "sha256": "ecece2c7a2309492657a6ce1d9629b895f1c7a83c07c35d006659a165217cab9"
+    },
+    {
+      "path": "filesystem/layout.json",
+      "sha256": "366bed36ccb5a118a0efc11610c7749c4652fb6ac623c79544fedd69f95f17bb"
+    },
+    {
+      "path": "expected/persistence.json",
+      "sha256": "ef4a1a3076168b680fd11375fa7e27455a72e5885410a142be56bea0738b9d72"
+    }
+  ],
+  "command": {
+    "working_directory": "<temporary-root>/workspace/persistence-contracts",
+    "workspace_root": "<temporary-root>/workspace/persistence-contracts",
+    "output_root": "<temporary-root>/oracle-runs/gui-static/persistence-contracts",
+    "gui_save_as_destination": "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last/saved-plan.jmx",
+    "working_directory_by_template": [
+      "<temporary-root>/workspace/persistence-contracts",
+      "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last",
+      "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last"
+    ],
+    "path_policy": {
+      "copy_inputs_to_workspace": true,
+      "generated_outputs_root": "<temporary-root>/oracle-runs/gui-static/persistence-contracts",
+      "static_corpus_writes": "forbidden",
+      "path_expansion": "Expand <temporary-root> once to a fresh absolute root; each argv template uses the declared per-template working directory."
+    },
+    "mode": "gui and nongui; future only",
+    "argv_templates": [
+      ["jmeter", "-d", "<temporary-root>/jmeter-home", "-q", "<temporary-root>/workspace/persistence-contracts/gui-persistence.properties", "-j", "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last/gui.log", "-t", "<temporary-root>/workspace/persistence-contracts/gui-static-plan.jmx"],
+      ["jmeter", "-d", "<temporary-root>/jmeter-home", "-q", "<temporary-root>/workspace/persistence-contracts/gui-persistence.properties", "-n", "-t", "LAST", "-l", "LAST", "-j", "LAST"],
+      ["jmeter", "-d", "<temporary-root>/jmeter-home", "-q", "<temporary-root>/workspace/persistence-contracts/gui-persistence.properties", "-n", "-t", "LAST", "-j", "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last/last-plan.log"]
+    ],
+    "network": "none",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null,
+    "launcher_environment": {
+      "JMETER_LANGUAGE": "-Duser.language=en -Duser.region=US"
+    },
+    "jvm_system_properties": {
+      "user.language": "en",
+      "user.region": "US",
+      "user.timezone": "UTC",
+      "file.encoding": "UTF-8",
+      "java.util.prefs.userRoot": "<temporary-root>/prefs/persistence-contracts/<scenario-id>"
+    },
+    "pre_launch": {
+      "materialize_property_file": {
+        "source": "gui-persistence.properties",
+        "destination": "<temporary-root>/workspace/persistence-contracts/gui-persistence.properties",
+        "token": "${JMETER_HOME}",
+        "replacement": "<temporary-root>/jmeter-home",
+        "copy_only": true,
+        "jmeter_expands_token": false,
+        "path_encoding": {
+          "canonical_form": "absolute path with forward slashes in the copied Java-properties value",
+          "windows_form": "A future runner may use backslashes only when each backslash is Java-properties escaped as \\\\; shell quoting is not path escaping.",
+          "record_resolved_path": true
+        }
+      },
+      "materialize_inputs": [
+        {
+          "source": "../guiclass-roundtrip/plan.jmx",
+          "destination": "<temporary-root>/workspace/persistence-contracts/gui-static-plan.jmx",
+          "copy_only": true
+        }
+      ],
+      "materialize_tokens": {
+        "<temporary-root>": "fresh allowlisted temporary root"
+      },
+      "working_directories": {
+        "gui": "<temporary-root>/workspace/persistence-contracts",
+        "last_commands": "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last"
+      },
+      "preferences": {
+        "user_root_template": "<temporary-root>/prefs/persistence-contracts/<scenario-id>",
+        "fresh_root_per_scenario": true,
+        "clear_before_each_scenario": true,
+        "preference_nodes": {
+          "recent_file_0": "org/apache/jmeter/gui/action",
+          "save_before_run": "org/apache/jmeter/gui"
+        },
+        "required_keys_by_scenario": {
+          "fallback_absent": ["recent_file_0"],
+          "preference_true": ["recent_file_0", "save_before_run"],
+          "preference_false": ["recent_file_0", "save_before_run"],
+          "last_missing_recent": []
+        },
+        "last_requires_recent_file_0": true
+      },
+      "preference_scenarios": [
+        {
+          "id": "fallback_absent",
+          "user_root": "<temporary-root>/prefs/persistence-contracts/fallback_absent",
+          "clear_before_run": true,
+          "seed": {
+            "save_before_run": "absent",
+            "recent_file_0": "absent"
+          },
+          "property_fallback": "true",
+          "command_template": "argv_templates[0]",
+          "plan_path": "<temporary-root>/workspace/persistence-contracts/gui-static-plan.jmx",
+          "plan_sha256": "c3a83e0ea161a541e5def081cda82721f1dbab57ed4239b1c42efe6b0038e62f",
+          "gui_action": "Start",
+          "dirty_plan": true,
+          "actions": [
+            "Load and dirty the plan in the GUI.",
+            "Invoke the GUI Start action with save_automatically_before_run=true and no save_before_run preference.",
+            "Record the save-before-run event, backup event, and resulting recent_file_0."
+          ],
+          "expected": "property fallback enables autosave before run"
+        },
+        {
+          "id": "preference_true",
+          "user_root": "<temporary-root>/prefs/persistence-contracts/preference_true",
+          "clear_before_run": true,
+          "seed": {
+            "save_before_run": "true",
+            "recent_file_0": "absent"
+          },
+          "property_fallback": "true",
+          "command_template": "argv_templates[0]",
+          "plan_path": "<temporary-root>/workspace/persistence-contracts/gui-static-plan.jmx",
+          "plan_sha256": "c3a83e0ea161a541e5def081cda82721f1dbab57ed4239b1c42efe6b0038e62f",
+          "gui_action": "Start",
+          "dirty_plan": true,
+          "actions": [
+            "Seed save_before_run=true, then load and dirty the plan in the GUI.",
+            "Invoke the GUI Start action.",
+            "Record that the existing true preference wins and capture save/backup order."
+          ],
+          "expected": "existing true preference enables autosave"
+        },
+        {
+          "id": "preference_false",
+          "user_root": "<temporary-root>/prefs/persistence-contracts/preference_false",
+          "clear_before_run": true,
+          "seed": {
+            "save_before_run": "false",
+            "recent_file_0": "absent"
+          },
+          "property_fallback": "true",
+          "command_template": "argv_templates[0]",
+          "plan_path": "<temporary-root>/workspace/persistence-contracts/gui-static-plan.jmx",
+          "plan_sha256": "c3a83e0ea161a541e5def081cda82721f1dbab57ed4239b1c42efe6b0038e62f",
+          "gui_action": "Start",
+          "dirty_plan": true,
+          "actions": [
+            "Seed save_before_run=false, then load and dirty the plan in the GUI.",
+            "Invoke the GUI Start action.",
+            "Record that no autosave or backup occurs before the run despite the true property fallback."
+          ],
+          "expected": "existing false preference disables autosave"
+        },
+        {
+          "id": "last_missing_recent",
+          "user_root": "<temporary-root>/prefs/persistence-contracts/last_missing_recent",
+          "clear_before_run": true,
+          "seed": {
+            "save_before_run": "absent",
+            "recent_file_0": "absent"
+          },
+          "command_template": "argv_templates[1]",
+          "actions": [
+            "Do not load a plan through the GUI and invoke the -n -t LAST -l LAST -j LAST template from the declared last-command working directory.",
+            "Record the explicit missing recent_file_0 diagnostic and do not guess a plan from the fixture or current directory."
+          ],
+          "expected": "unavailable/error; no ambient preference or guessed path"
+        }
+      ],
+      "required": [
+        "Set java.util.prefs.userRoot before JVM startup; LAST and save-before-run otherwise read ambient state.",
+        "Do not pass the literal ${JMETER_HOME} string to JMeter and expect interpolation.",
+        "The GUI save-as path is <temporary-root>/oracle-runs/gui-static/persistence-contracts/last/saved-plan.jmx; the following LAST commands use its recent_file_0 entry."
+      ]
+    }
+  },
+  "bounds": {
+    "schema_id": "jmeter-rs.fixture-bounds",
+    "schema_version": 1,
+    "enforcement": "declared; static-only; future runner must enforce",
+    "comparator_enforced": false,
+    "max_plan_bytes": 65536,
+    "max_plan_nodes": 32,
+    "max_plan_depth": 8,
+    "max_property_text_bytes": 8192,
+    "max_property_count_per_element": 32,
+    "max_backup_files": 10,
+    "max_backup_name_bytes": 96,
+    "max_template_files": 4,
+    "max_template_entries": 64,
+    "max_template_file_bytes": 65536,
+    "max_toolbar_entries": 64,
+    "max_icon_resource_bytes": 65536,
+    "max_output_bytes": 65536,
+    "max_log_bytes": 65536,
+    "max_gui_wait_seconds": 30
+  },
+  "future_oracle_actions": [
+    "Materialize the referenced original plan and gui-persistence.properties at the declared workspace destinations, and allocate a fresh preference root and output directory for each preference_scenarios entry; do not write generated files under this corpus.",
+    "Launch the GUI, mark the plan dirty, save repeatedly, and record the backup directory, first six-digit name (000001), sequence, maximum count, and maximum-age behavior. Backups are created only for an existing file and a dirty save.",
+    "Run fallback_absent, preference_true, and preference_false with their fresh cleared roots and exact GUI Start action. Record whether autosave occurs, the save/backup event order, and which preference/property value supplied the decision.",
+    "For a positive LAST run, save-as to <temporary-root>/oracle-runs/gui-static/persistence-contracts/last/saved-plan.jmx so recent_file_0 is absolute and isolated, then run both LAST argv templates from the declared last-command working directory. -l LAST derives saved-plan.jtl; -j LAST remains the literal LAST log path in that working directory. Run last_missing_recent separately and require an explicit unavailable/error diagnostic.",
+    "Resolve template.files as JMeterHome + /bin/templates/templates.xml, record template names/descriptions and selected output, and verify the empty WorkBench is discarded while the non-empty migration case produces a disabled TestFragmentController."
+  ],
+  "execution": {
+    "status": "static-only; oracle not executed",
+    "process_exit": null,
+    "sample_count": null,
+    "raw_artifacts": "<temporary-root>/oracle-runs/gui-static/persistence-contracts/ (ignored; no artifacts committed)",
+    "expected": "expected/persistence.json"
+  },
+  "limitations": [
+    "The property file and filesystem layout are original descriptors; no backup, autosave, LAST, template, or WorkBench event was observed.",
+    "The command templates are future oracle inputs, not commands run during corpus creation.",
+    "Path normalization is limited to the temporary root token declared in the expected descriptor; directory contents and numbering remain evidence fields.",
+    "The literal ${JMETER_HOME} token is never treated as JMeter expansion; only the future runner may replace it in an isolated property-file copy.",
+    "The Java preferences root is a future-run isolation requirement; no LAST resolution, save event, process exit, or diagnostic was observed."
+  ]
+}

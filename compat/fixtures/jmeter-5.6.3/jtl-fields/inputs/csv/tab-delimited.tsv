@@ -1,0 +1,2 @@
+elapsed	label	responseCode	responseMessage	threadName	dataType	success	failureMessage	"case_id"	"comma_value"
+12	"tab	label"	500	"server	error"	thread-1	text	false	"failed: ""needle"""	jtl-fields	"left,right"

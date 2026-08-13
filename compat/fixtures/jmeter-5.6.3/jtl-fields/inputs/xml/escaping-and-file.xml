@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testResults version="1.2"><httpSample t="1" s="true" lb="label &amp; &quot;quoted&quot;" rc="200" rm="OK &lt;ready&gt;" dt="text" de="UTF-8" case_id="jtl-fields" comma_value="left,right"><responseData class="java.lang.String">body &lt;tag&gt; &amp; text</responseData><responseFile class="java.lang.String">results/body.txt</responseFile><java.net.URL>https://example.invalid/a?x=1&amp;y=2</java.net.URL></httpSample></testResults>

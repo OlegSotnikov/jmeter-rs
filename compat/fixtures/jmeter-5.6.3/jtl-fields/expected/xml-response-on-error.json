@@ -1,0 +1,44 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JTL-FIELDS",
+  "format": "jtl-xml",
+  "contract_kind": "jmeter-writer-wire",
+  "projection_schema": "neutral-xml-v1",
+  "evidence_status": "planned",
+  "expectation_basis": "Hand-authored projection of inputs/xml/response-on-error.xml; no Apache JMeter output was measured.",
+  "writer_configuration": "switches/xml-rich-on-error.properties",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 1,
+  "wire_contract": {
+    "sample_variable_attributes": {
+      "spelling": "exact-configured-name",
+      "configured_names": ["case_id"],
+      "underscore_doubling": false
+    },
+    "string_children": [{"element": "responseData", "class": "java.lang.String"}],
+    "child_order": ["responseData"],
+    "wire_order": ["responseData"],
+    "response_data": {"enabled": false, "on_error": true},
+    "response_file": {"enabled": false, "expected": false}
+  },
+  "samples": [{
+    "position": 0,
+    "element": "sample",
+    "attributes": {
+      "t": "8", "s": "false", "lb": "failed response", "rc": "500",
+      "rm": "Internal Server Error", "dt": "text", "de": "UTF-8", "case_id": "jtl-fields"
+    },
+    "assertions": [],
+    "sections": {"responseData": "failure body: <not-found>"},
+    "wire_children": {
+      "wire_child_order": ["responseData"],
+      "string_children_class": ["responseData"]
+    }
+  }],
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "This isolated failed sample exercises response_data.on_error; responseFile is absent because filename saving is disabled."
+  }
+}

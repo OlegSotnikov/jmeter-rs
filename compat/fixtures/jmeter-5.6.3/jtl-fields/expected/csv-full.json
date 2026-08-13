@@ -1,0 +1,59 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JTL-FIELDS",
+  "format": "jtl-csv",
+  "contract_kind": "jmeter-writer-wire",
+  "projection_schema": "neutral-csv-v1",
+  "evidence_status": "planned",
+  "expectation_basis": "Hand-authored projection of inputs/csv/full-fields.csv; no Apache JMeter output was measured.",
+  "header": ["timeStamp", "elapsed", "label", "responseCode", "responseMessage", "threadName", "dataType", "success", "failureMessage", "bytes", "sentBytes", "grpThreads", "allThreads", "URL", "Filename", "Latency", "Encoding", "SampleCount", "ErrorCount", "Hostname", "IdleTime", "Connect", "case_id", "comma_value", "quote_value", "multiline_value"],
+  "writer_wire": {
+    "header_line": "timeStamp,elapsed,label,responseCode,responseMessage,threadName,dataType,success,failureMessage,bytes,sentBytes,grpThreads,allThreads,URL,Filename,Latency,Encoding,SampleCount,ErrorCount,Hostname,IdleTime,Connect,\"case_id\",\"comma_value\",\"quote_value\",\"multiline_value\"",
+    "sample_variable_headers_quoted": true,
+    "delimiter": ",",
+    "line_ending": "LF"
+  },
+  "rows": [{
+    "position": 0,
+    "fields": {
+      "timeStamp": "1700000000123",
+      "elapsed": "37",
+      "label": "label, with comma",
+      "responseCode": "200",
+      "responseMessage": "OK \"ready\"",
+      "threadName": "thread-1",
+      "dataType": "text",
+      "success": "true",
+      "failureMessage": "",
+      "bytes": "123",
+      "sentBytes": "9",
+      "grpThreads": "2",
+      "allThreads": "3",
+      "URL": "https://example.invalid/a?x=1&y=2",
+      "Filename": "",
+      "Latency": "4",
+      "Encoding": "UTF-8",
+      "SampleCount": "1",
+      "ErrorCount": "0",
+      "Hostname": "host-a",
+      "IdleTime": "0",
+      "Connect": "2",
+      "case_id": "jtl-fields",
+      "comma_value": "left,right",
+      "quote_value": "a \"quoted\" value",
+      "multiline_value": "line one\nline two"
+    }
+  }],
+  "quoting_assertions": [
+    {"field": "label", "parsed_value": "label, with comma", "serialized_csv_token": "\"label, with comma\""},
+    {"field": "responseMessage", "parsed_value": "OK \"ready\"", "serialized_csv_token": "\"OK \"\"ready\"\"\""},
+    {"field": "quote_value", "parsed_value": "a \"quoted\" value", "serialized_csv_token": "\"a \"\"quoted\"\" value\""},
+    {"field": "multiline_value", "parsed_value": "line one\nline two", "serialized_csv_token": "\"line one\nline two\""}
+  ],
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "All values in this hand-authored wire input are fixed; quoting, header order, empty fields, and embedded line breaks are exact static targets."
+  }
+}

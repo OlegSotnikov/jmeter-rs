@@ -1,0 +1,262 @@
+{
+  "schema_id": "jmeter-rs.http-trace",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-HTTP-STATE-HEADERS",
+  "fixture_family_id": "FX-ELEMENTS-CORE-001",
+  "conformance_ids": [
+    "ELEM-001",
+    "ELEM-005"
+  ],
+  "normalization_policy_refs": [
+    "NORM-STRUCTURE-001",
+    "NORM-TIME-001",
+    "NORM-ENV-001",
+    "NORM-SECURITY-001"
+  ],
+  "format": "http-trace",
+  "evidence_status": "not-run-static",
+  "process_exit": null,
+  "process_exit_asserted": false,
+  "oracle_available": false,
+  "trace_schema": {
+    "schema_id": "jmeter-rs.http-trace",
+    "schema_version": 1,
+    "encoding": "jsonl",
+    "event_type": "request-response",
+    "request_fields": [
+      "sequence",
+      "method",
+      "path",
+      "query",
+      "request_headers",
+      "request_headers_sha256",
+      "body_length",
+      "body_sha256"
+    ],
+    "response_fields": [
+      "status",
+      "headers",
+      "headers_sha256",
+      "body_length",
+      "body_sha256",
+      "wire_body_length"
+    ],
+    "required_event_fields": [
+      "sequence",
+      "method",
+      "path",
+      "query",
+      "request_headers",
+      "request_headers_sha256",
+      "body_length",
+      "body_sha256",
+      "response.status",
+      "response.headers",
+      "response.headers_sha256",
+      "response.body_length",
+      "response.body_sha256",
+      "response.wire_body_length"
+    ],
+    "digest_algorithm": "SHA-256",
+    "body_digest_observable": true,
+    "header_digest_observable": true,
+    "duplicate_header_values": "ordered-list",
+    "authorization_projection": "<scheme> <redacted>",
+    "limits": {
+      "max_events": 64,
+      "max_requests": 64,
+      "max_request_target_bytes": 8192,
+      "max_query_fields": 32,
+      "max_request_header_fields": 128,
+      "max_response_header_fields": 128,
+      "max_request_header_bytes": 65536,
+      "max_response_header_bytes": 65536,
+      "max_request_body_bytes": 1048576,
+      "max_response_body_bytes": 1048576,
+      "max_trace_record_bytes": 131072,
+      "max_trace_bytes": 8388608,
+      "max_ready_bytes": 16384,
+      "max_redirect_hops": 5,
+      "max_auth_challenges": 8,
+      "max_cache_entries": 3,
+      "max_cookie_entries": 64
+    }
+  },
+  "counts": {
+    "planned": true,
+    "sampler_count": 3,
+    "request_count": 3,
+    "response_count": 3,
+    "redirect_hop_count": 0,
+    "auth_challenge_count": 0,
+    "cache_network_request_count": 0,
+    "cache_hit_count": 0,
+    "cache_revalidation_count": 0,
+    "cache_eviction_count": 0,
+    "cookie_set_count": 0,
+    "cookie_sent_count": 0,
+    "cookie_reset_count": 0,
+    "cookie_persist_count": 0,
+    "response_header_count_max": 7
+  },
+  "events": [
+    {
+      "sampler": "GET /headers/echo",
+      "logical_request_count": 1,
+      "request_count": 1,
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/headers/echo",
+          "response_status": 200,
+          "request_body_length": 0,
+          "request_body_sha256": "not-recorded-until-pinned-oracle-run",
+          "response_body_sha256": "not-recorded-until-pinned-oracle-run",
+          "response_headers_sha256": "not-recorded-until-pinned-oracle-run",
+          "request_headers": {
+            "accept": "text/plain",
+            "x-base": "base-value",
+            "x-duplicate-first": "first-value",
+            "x-duplicate-second": "second-value"
+          }
+        }
+      ]
+    },
+    {
+      "sampler": "GET /defaults/echo",
+      "logical_request_count": 1,
+      "request_count": 1,
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/defaults/echo",
+          "response_status": 200,
+          "request_body_length": 0,
+          "request_body_sha256": "not-recorded-until-pinned-oracle-run",
+          "response_body_sha256": "not-recorded-until-pinned-oracle-run",
+          "response_headers_sha256": "not-recorded-until-pinned-oracle-run",
+          "request_headers": {
+            "accept": "text/plain",
+            "x-base": "nested-base-value",
+            "x-duplicate-first": "first-value",
+            "x-duplicate-second": "second-value",
+            "x-override": "nested-value"
+          },
+          "merge": {
+            "policy": "local-wins",
+            "replaced_name": "X-Base",
+            "replaced_value": "nested-base-value"
+          }
+        }
+      ]
+    },
+    {
+      "sampler": "GET /dns/echo",
+      "logical_request_count": 1,
+      "request_count": 1,
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/dns/echo",
+          "response_status": 200,
+          "request_body_length": 0,
+          "request_body_sha256": "not-recorded-until-pinned-oracle-run",
+          "response_body_sha256": "not-recorded-until-pinned-oracle-run",
+          "response_headers_sha256": "not-recorded-until-pinned-oracle-run",
+          "request_headers": {
+            "accept": "text/plain",
+            "host": "fixture.test",
+            "x-base": "base-value",
+            "x-duplicate-first": "first-value",
+            "x-duplicate-second": "second-value"
+          }
+        }
+      ]
+    }
+  ],
+  "state_projection": {
+    "planned": true,
+    "host": "fixture.test",
+    "implementation": "HttpClient4",
+    "merge": {
+      "policy": "local-wins",
+      "same_name_override": {
+        "name": "X-Base",
+        "outer": "base-value",
+        "inner": "nested-base-value",
+        "effective": "nested-base-value"
+      },
+      "added_local": {
+        "name": "X-Override",
+        "value": "nested-value"
+      },
+      "distinct_ordered_names": [
+        [
+          "X-Duplicate-First",
+          "first-value"
+        ],
+        [
+          "X-Duplicate-Second",
+          "second-value"
+        ]
+      ]
+    },
+    "static_host_fields": {
+      "name": "fixture.test",
+      "address": "127.0.0.1"
+    }
+  },
+  "result_projection": {
+    "fields": [
+      "label",
+      "url",
+      "method",
+      "response_code",
+      "response_message",
+      "successful",
+      "requestHeaders",
+      "responseHeaders",
+      "bytes",
+      "sent_bytes",
+      "response_data"
+    ],
+    "response_header_count_bound": 128,
+    "response_header_bytes_bound": 65536
+  },
+  "normalization": {
+    "ignored_fields": [
+      "timestamp",
+      "elapsed",
+      "latency",
+      "connect_time",
+      "idle_time",
+      "ephemeral_port",
+      "JVM_object_id"
+    ],
+    "required_fields": [
+      "sequence",
+      "method",
+      "path",
+      "query",
+      "request_headers",
+      "request_headers_sha256",
+      "body_length",
+      "body_sha256",
+      "response.status",
+      "response.headers",
+      "response.headers_sha256",
+      "response.body_length",
+      "response.body_sha256",
+      "response.wire_body_length"
+    ],
+    "observable_digest_fields": [
+      "body_sha256",
+      "request_headers_sha256",
+      "response.headers_sha256",
+      "response.body_sha256"
+    ],
+    "reason": "Static not-run contract: only explicitly listed timing, identity, and ephemeral endpoint fields are ignored; request and response body/header SHA-256 values remain observable."
+  }
+}
+

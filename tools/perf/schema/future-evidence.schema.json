@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/OlegSotnikov/jmeter-rs/blob/main/tools/perf/schema/future-evidence.schema.json",
+  "x-schema-id": "jmeter-rs.perf-evidence",
+  "x-schema-version": 1,
+  "title": "Future performance evidence envelope",
+  "description": "Reserved for a separately reviewed execution adapter. The current orchestrator never emits collected evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "status"],
+  "properties": {
+    "schema_id": {"const": "jmeter-rs.perf-evidence"},
+    "schema_version": {"const": 1},
+    "status": {"enum": ["not-generated", "collected", "failed"]}
+  }
+}

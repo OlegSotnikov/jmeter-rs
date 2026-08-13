@@ -1,0 +1,56 @@
+# Rust build output
+/target/
+/.cache/
+
+# Rust compiler artifacts accidentally emitted at the repository root. Build
+# output belongs under target/ and must not be staged as source.
+/*.rlib
+/*.rmeta
+/*.o
+/*.obj
+/*.a
+/*.so
+/*.dylib
+/*.dll
+/*.d
+/*.pdb
+/rust_out
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.local
+/secrets/
+/local-certs/
+/local-keystores/
+
+# Generated interpreter caches. Keep source and golden fixture extensions
+# visible everywhere else.
+__pycache__/
+
+# JMeter generated results, logs, dashboards, backups, and oracle downloads
+/jmeter.log
+/report-output/
+/jmeter-results/
+/oracle-runs/
+/run-root/
+/jmeter-oracle-cache/
+
+# Nested fixture oracle output and temporary run roots are local evidence and
+# generated material. Source/golden files elsewhere in compat/ remain visible,
+# including fuzz and expected/source fixtures whose extensions overlap output.
+compat/fixtures/**/oracle-runs/
+compat/fixtures/**/run-root/
+
+/backups/
+/local-plugins/
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/

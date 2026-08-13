@@ -1,0 +1,30 @@
+[package]
+name = "jmeter-rs-process-supervision"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[target.'cfg(unix)'.dependencies]
+# rustix is the sole Unix process boundary.  `waitid` (including WNOWAIT),
+# `getpgid`, and process-group signalling are safe wrappers; no libc/native
+# build dependency is pulled into this crate.
+rustix = { version = "=1.1.4", default-features = false, features = ["std", "process"] }
+
+[target.'cfg(windows)'.dependencies]
+# The Windows backend is the narrow audited raw CreateProcessW/Job boundary.
+# ToolHelp enumeration and std::process::Command are deliberately absent.
+windows-sys = { version = "=0.61.2", default-features = false, features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }

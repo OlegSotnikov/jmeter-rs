@@ -1,0 +1,53 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JTL-FIELDS",
+  "format": "jtl-csv",
+  "contract_kind": "jmeter-writer-wire",
+  "projection_schema": "neutral-csv-v1",
+  "evidence_status": "planned",
+  "expectation_basis": "Original hand-authored semantic hypothesis; no Apache JMeter output was measured.",
+  "writer_wire": {
+    "header_line": "elapsed,label,responseCode,responseMessage,threadName,dataType,success,failureMessage,bytes,sentBytes,grpThreads,allThreads,URL,Filename,Latency,Encoding,SampleCount,ErrorCount,IdleTime,Connect,\"case_id\",\"comma_value\"",
+    "sample_variable_headers_quoted": true,
+    "delimiter": ",",
+    "line_ending": "LF"
+  },
+  "header": ["elapsed", "label", "responseCode", "responseMessage", "threadName", "dataType", "success", "failureMessage", "bytes", "sentBytes", "grpThreads", "allThreads", "URL", "Filename", "Latency", "Encoding", "SampleCount", "ErrorCount", "IdleTime", "Connect", "case_id", "comma_value"],
+  "rows": [{
+    "position": 0,
+    "fields": {
+      "label": "jtl-field-sample",
+      "responseCode": "200",
+      "responseMessage": "OK",
+      "threadName": "One deterministic user 1-1",
+      "dataType": "text",
+      "success": "true",
+      "failureMessage": "",
+      "sentBytes": "0",
+      "grpThreads": "1",
+      "allThreads": "1",
+      "URL": "null",
+      "Filename": "",
+      "Latency": "0",
+      "Encoding": "US-ASCII",
+      "SampleCount": "1",
+      "ErrorCount": "0",
+      "IdleTime": "0",
+      "Connect": "0",
+      "case_id": "jtl-fields",
+      "comma_value": "left,right"
+    },
+    "ignored_fields": ["elapsed", "bytes"]
+  }],
+  "quoting_assertions": [{
+    "field": "comma_value",
+    "parsed_value": "left,right",
+    "serialized_csv_token": "\"left,right\""
+  }],
+  "normalization": {
+    "ignored_fields": ["rows[*].elapsed", "rows[*].bytes"],
+    "reason": "Elapsed time and the Debug Sampler byte count are intentionally not fixed in this original smoke hypothesis; CSV field order, quoting, and stable semantic values remain exact targets for a future oracle comparison."
+  }
+}

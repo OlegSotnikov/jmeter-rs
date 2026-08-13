@@ -1,0 +1,191 @@
+{
+  "schema_id": "jmeter-rs.gui-persistence-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-GUI-STATIC-PERSISTENCE",
+  "evidence_status": "not-run",
+  "normalization_policy_refs": ["NORM-CONFIG-001", "NORM-ENV-001", "NORM-EXTERNAL-001"],
+  "source": {
+    "kind": "original-static-descriptor",
+    "oracle_status": "not-run",
+    "runtime_observations": false,
+    "note": "No Java, JMeter, JVM, GUI, filesystem mutation, or subprocess was run while creating this corpus."
+  },
+  "validation_contract": {
+    "contract_version": 1,
+    "comparator_enforced": false,
+    "comparator_id": null,
+    "comparator_route": "static-descriptor",
+    "validator_scope": "static schema, profile-reference, command/path, and input-hash checks only",
+    "comparator_scope": "GUI filesystem persistence comparison is not implemented; no backup, autosave, LAST, template, or WorkBench observation is claimed",
+    "activation": "Enable comparison only after a dedicated GUI persistence comparator and pinned oracle evidence are recorded."
+  },
+  "status": "planned; static expectation only",
+  "contracts": {
+    "backup_on_save": {
+      "property": "jmeter.gui.action.save.backup_on_save",
+      "static_value": "true",
+      "default_from_research": "true",
+      "property_token": "${JMETER_HOME}/backups",
+      "destination": "<JMETER_HOME>/backups",
+      "jmeter_expands_property_tokens": false,
+      "runner_materializes_before_launch": true,
+      "name_pattern": "<saved-plan-stem>-NNNNNN.jmx",
+      "number_width": 6,
+      "first_backup_number": 1,
+      "retention": {
+        "keep_backup_max_count": 10,
+        "keep_backup_max_hours": 0
+      },
+      "conditions": ["existing target file", "GUI tree is dirty"],
+      "observation": "planned; record exact sequence and retention after repeated GUI saves"
+    },
+    "autosave_before_run": {
+      "property": "save_automatically_before_run",
+      "static_value": "true",
+      "preference_node": "org/apache/jmeter/gui",
+      "preference_key": "save_before_run",
+      "preference_precedence": "existing user preference wins; property is fallback only when key is absent",
+      "requires_dirty_plan": true,
+      "backup_order": "backup dirty existing file, save, then delete expired backups after successful save",
+      "observation": "planned; record save-before-run event and backup ordering"
+    },
+    "last_resolution": {
+      "loaded_by": "GUI load of the copied plan at <temporary-root>/workspace/persistence-contracts/gui-static-plan.jmx in the isolated scenario",
+      "argv_templates": [
+        ["jmeter", "-d", "<temporary-root>/jmeter-home", "-q", "<temporary-root>/workspace/persistence-contracts/gui-persistence.properties", "-j", "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last/gui.log", "-t", "<temporary-root>/workspace/persistence-contracts/gui-static-plan.jmx"],
+        ["jmeter", "-d", "<temporary-root>/jmeter-home", "-q", "<temporary-root>/workspace/persistence-contracts/gui-persistence.properties", "-n", "-t", "LAST", "-l", "LAST", "-j", "LAST"],
+        ["jmeter", "-d", "<temporary-root>/jmeter-home", "-q", "<temporary-root>/workspace/persistence-contracts/gui-persistence.properties", "-n", "-t", "LAST", "-j", "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last/last-plan.log"]
+      ],
+      "working_directory_by_template": [
+        "<temporary-root>/workspace/persistence-contracts",
+        "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last",
+        "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last"
+      ],
+      "template_expectations": [
+        {
+          "template_index": 0,
+          "kind": "gui-load-and-save",
+          "working_directory": "<temporary-root>/workspace/persistence-contracts",
+          "expected_paths": {
+            "plan_path": "<temporary-root>/workspace/persistence-contracts/gui-static-plan.jmx",
+            "plan_sha256": "c3a83e0ea161a541e5def081cda82721f1dbab57ed4239b1c42efe6b0038e62f",
+            "jtl_path": null,
+            "log_path": "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last/gui.log"
+          },
+          "observation": "planned; no GUI load or save was attempted"
+        },
+        {
+          "template_index": 1,
+          "kind": "nongui-last-with-jtl-and-literal-log",
+          "working_directory": "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last",
+          "expected_paths": {
+            "plan_path": "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last/saved-plan.jmx",
+            "plan_sha256": null,
+            "jtl_path": "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last/saved-plan.jtl",
+            "log_path": "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last/LAST"
+          },
+          "observation": "planned; no positive LAST resolution was attempted"
+        },
+        {
+          "template_index": 2,
+          "kind": "nongui-last-with-explicit-log",
+          "working_directory": "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last",
+          "expected_paths": {
+            "plan_path": "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last/saved-plan.jmx",
+            "plan_sha256": null,
+            "jtl_path": null,
+            "log_path": "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last/last-plan.log"
+          },
+          "observation": "planned; no positive LAST resolution was attempted"
+        }
+      ],
+      "preference_root": "<temporary-root>/prefs/persistence-contracts/<scenario-id>",
+      "preference_node": "org/apache/jmeter/gui/action",
+      "preference_key": "recent_file_0",
+      "precondition": "GUI load followed by save-as writes the absolute saved-plan path to recent_file_0 in this isolated scenario root",
+      "missing_precondition": "error/diagnostic; no ambient preference or guessed path",
+      "expected_resolution_fields": ["plan_path", "jtl_path", "log_path", "exit_status", "diagnostic_code"],
+      "static_tokens": {
+        "plan": "LAST_PLAN",
+        "jtl": "LAST_JTL",
+        "log": "LAST_LOG_LITERAL"
+      },
+      "derivation": "-t LAST uses recent_file_0; -l LAST replaces the .JMX suffix with .jtl; -j LAST is passed literally to the launcher and does not derive a .log path",
+      "literal_log_working_directory": "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last",
+      "resolved_path_templates": {
+        "plan_path": "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last/saved-plan.jmx",
+        "plan_sha256": null,
+        "jtl_path": "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last/saved-plan.jtl",
+        "log_path": "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last/LAST"
+      },
+      "observation": "planned; no LAST resolution was attempted"
+    },
+    "templates": {
+      "property": "template.files",
+      "static_value": "/bin/templates/templates.xml",
+      "resolved_path": "<JMETER_HOME>/bin/templates/templates.xml",
+      "path_rule": "TemplateManager resolves each entry as JMeterHome + entry",
+      "materialized_template_files": false,
+      "max_files": 4,
+      "max_entries_per_file": 64,
+      "observation": "planned; record template path, title, and selected plan output"
+    },
+    "workbench": {
+      "source_element": "WorkBench",
+      "source_guiclass": "WorkBenchGui",
+      "source_testclass": "WorkBench",
+      "empty_input_outcome": "discard empty WorkBench pair during GUI load; saved plan has no WorkBench sibling",
+      "nonempty_input_outcome": "migrate children into TestPlan; remaining test elements are wrapped in disabled WorkBench Test Fragment",
+      "empty_case": "../guiclass-roundtrip/plan.jmx",
+      "nonempty_case": "../workbench-migration/plan.jmx",
+      "execution_rule": "WorkBench is not an executable TestPlan child; only pinned migration output is retained",
+      "observation": "planned; compare saved normalized XML"
+    },
+    "opaque_property_probe": {
+      "source_case": "../guiclass-roundtrip/plan.jmx",
+      "path": "hashTree/TestPlan/hashTree/ThreadGroup/hashTree/HTTPSamplerProxy",
+      "name": "jmeter-rs.gui.opaque.disabled",
+      "type": "stringProp",
+      "value": "Opaque & <unknown> café 雪",
+      "enabled_ancestor": "false",
+      "no_drop_requirement": "GUI save/load and the headless parser must retain the exact XML-decoded value; this is original fixture data and does not require a plugin artifact.",
+      "observation": "planned; no no-drop oracle observation was attempted"
+    }
+  },
+  "normalization": {
+    "path_tokens": ["<temporary-root>", "<JMETER_HOME>", "<temporary-root>/prefs/persistence-contracts/<scenario-id>", "${JMETER_HOME}", "LAST_PLAN", "LAST_JTL", "LAST_LOG_LITERAL"],
+    "ignored_fields": ["host-specific temporary prefixes", "timestamps used only for backup-age diagnostics"],
+    "not_ignored": ["backup numbering", "save event order", "retention count", "WorkBench topology", "template path resolution", "preference-root isolation", "missing-LAST diagnostics"],
+    "literal_token_rule": "${JMETER_HOME} is not an observed expansion; only a runner-materialized property-file copy may contain the resolved path"
+  },
+  "headless_contract": {
+    "display_required": false,
+    "parser_mode": "-n",
+    "allowed_observations": ["LAST resolution diagnostics", "JMX parser diagnostics", "preserved GUI metadata"],
+    "forbidden_gui_claims": ["look-and-feel", "toolbar rendering", "tree icon rendering", "HiDPI rendering", "undo UI"],
+    "status": "planned; no headless process was run"
+  },
+  "bounds": {
+    "max_plan_bytes": 65536,
+    "max_plan_nodes": 32,
+    "max_plan_depth": 8,
+    "max_property_text_bytes": 8192,
+    "max_property_count_per_element": 32,
+    "max_backup_files": 10,
+    "max_backup_name_bytes": 96,
+    "max_template_files": 4,
+    "max_template_entries": 64,
+    "max_template_file_bytes": 65536,
+    "max_toolbar_entries": 64,
+    "max_icon_resource_bytes": 65536,
+    "max_output_bytes": 65536,
+    "max_log_bytes": 65536,
+    "max_gui_wait_seconds": 30
+  },
+  "oracle_observation": {
+    "performed": false,
+    "status": "planned; not observed",
+    "required_before_promotion": "Pinned JMeter GUI filesystem persistence run on Linux, Windows, and macOS"
+  }
+}

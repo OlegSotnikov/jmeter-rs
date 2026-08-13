@@ -1,0 +1,108 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-JMX-TOPOLOGY",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-JMX-001",
+  "conformance_ids": ["JMX-001", "TEST-001"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-JMX-001", "NORM-TIME-001", "NORM-ENV-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "3ca94d67d013176d36a78ff39fd10899f27e0c014b223285473313a1f1230fd9"
+  },
+  "property_files": [{
+    "path": "oracle.properties",
+    "sha256": "ac2a04e9a7dd74f0abc9528d498b1c53f0224d2d8ae2a85a727bdef5e0fe3298"
+  }],
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/jmx-topology",
+    "mode": "nongui",
+    "argv_template": ["jmeter", "-n", "-q", "oracle.properties", "-t", "plan.jmx", "-l", "<ignored>/oracle.jtl", "-j", "<ignored>/oracle.log"],
+    "network": "none",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null
+  },
+  "determinism": {
+    "environment_allowlist": ["LC_ALL=C", "LANG=C", "TZ=UTC"],
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null,
+    "randomness": "not-used-by-plan",
+    "clock_mode": "system-wall-clock",
+    "clock_controlled": false,
+    "network": "none",
+    "normalized_fields": [
+      "oracle_execution.sample.t",
+      "oracle_execution.sample.it",
+      "oracle_execution.sample.lt",
+      "oracle_execution.sample.ct",
+      "oracle_execution.sample.ts",
+      "oracle_execution.sample.by",
+      "xml_lexical_whitespace"
+    ]
+  },
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations_per_thread": 1,
+    "max_samples": 1,
+    "max_plan_nodes": 33,
+    "max_plan_depth": 6,
+    "max_property_text_bytes": 4096,
+    "max_result_bytes": 65536,
+    "max_log_bytes": 65536,
+    "max_process_output_bytes": 65536,
+    "max_process_wait_seconds": 30
+  },
+  "execution": {
+    "status": "external-raw-observation",
+    "rust_conformance_claim": false,
+    "process_exit": 0,
+    "sample_count": 1,
+    "raw_artifacts": "oracle-runs/jmx-topology/ (ignored; local evidence only)",
+    "expected": "expected/semantic.json"
+  },
+  "evidence": {
+    "status": "external-raw-observation",
+    "oracle_invoked": true,
+    "measured_output_present": true,
+    "comparator_ready": false,
+    "rust_conformance_claim": false,
+    "raw_artifacts": "oracle-runs/jmx-topology/ (ignored; local evidence only)",
+    "observed_runtime": {
+      "working_directory": "repository-root",
+      "file_server_base": "compat/fixtures/jmeter-5.6.3/jmx-topology",
+      "locale": "en_EN",
+      "java_default_charset": "ANSI_X3.4-1968",
+      "save_service_encoding": "UTF-8",
+      "timezone": "UTC"
+    },
+    "metadata_divergences": [
+      {
+        "field": "command.working_directory",
+        "declared": "compat/fixtures/jmeter-5.6.3/jmx-topology",
+        "observed": "repository-root",
+        "source": "oracle.log user.dir/PWD; absolute host path intentionally omitted"
+      },
+      {
+        "field": "command.locale",
+        "declared": "C",
+        "observed": "en_EN",
+        "source": "oracle.log JMeterUtils/Default Locale"
+      },
+      {
+        "field": "command.default_charset",
+        "declared": "UTF-8",
+        "observed": "ANSI_X3.4-1968",
+        "source": "oracle.log file.encoding; SaveService separately reports UTF-8"
+      }
+    ]
+  },
+  "limitations": [
+    "The JMX expectation compares root metadata, ordered alternating element/hashTree pairs, attributes, and typed property values; XML lexical whitespace is not asserted.",
+    "The XML JTL smoke result only records that the pinned JMeter oracle accepted and executed the plan; it is external raw observation, not Rust comparator evidence.",
+    "The JMX projection is static and pending a load/save round-trip comparison; no JMX semantic conformance or Rust support claim is made."
+  ]
+}

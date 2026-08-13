@@ -1,0 +1,89 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-HARNESS-REPRODUCIBILITY",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-HARNESS-001",
+  "conformance_ids": ["TEST-001", "TEST-002", "TEST-004"],
+  "coverage_by_conformance_id": {
+    "TEST-001": {
+      "normalization_policy_refs": ["NORM-ENV-001", "NORM-SECURITY-001"],
+      "external_runtime_boundary_ids": []
+    },
+    "TEST-002": {
+      "normalization_policy_refs": ["NORM-EXTERNAL-001", "NORM-ENV-001", "NORM-SECURITY-001"],
+      "external_runtime_boundary_ids": ["EXT-JVM-001", "EXT-SERVICE-001", "EXT-TLS-001", "EXT-PLUGIN-001"]
+    },
+    "TEST-004": {
+      "normalization_policy_refs": ["NORM-EXTERNAL-001", "NORM-SECURITY-001", "NORM-TIME-001"],
+      "external_runtime_boundary_ids": ["EXT-RMI-001", "EXT-TLS-001", "EXT-SERVICE-001"]
+    }
+  },
+  "normalization_policy_refs": ["NORM-ENV-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001", "NORM-TIME-001"],
+  "materialization": {
+    "source_fixture_present": true,
+    "oracle_evidence_materialized": false,
+    "observed_run": false
+  },
+  "inputs": [
+    {"path": "manifest.json", "sha256": "a29f4bc40ebf0920b6cfc0e493c6a976d501a60581932379cbb23c0c4c77b018", "format": "harness-manifest"},
+    {"path": "evidence-unavailable.json", "sha256": "e3327c4668bd41fff57580078221d2f253baf92f30cb2dc0cca6555c86834bd7", "format": "harness-evidence"},
+    {"path": "normalized-diff-example.json", "sha256": "bb8403cddec08d9f826ad8347055bcd089087f24c3311798ece7c62b55115c9f", "format": "normalized-diff"},
+    {"path": "schemas/manifest.schema.json", "sha256": "2c3e280f4059997a1eb310d0f5f211e31ff50e365979ec37d259c57a02150cd1", "format": "json-schema"},
+    {"path": "schemas/evidence.schema.json", "sha256": "d6fdf7e52a97bc870962ab386158ca90fbd8f12d3ee238429ed975a7d87d1d08", "format": "json-schema"},
+    {"path": "schemas/normalized-diff.schema.json", "sha256": "d838f15969d9ce259822c7322d726a24ff99395c29b946819e949c647d24eb50", "format": "json-schema"}
+  ],
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/harness",
+    "mode": "static-only",
+    "argv_template": ["<not-run: harness data validation only>"],
+    "network": "none",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null,
+    "environment_allowlist": ["LANG=C", "LC_ALL=C", "TZ=UTC", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"],
+    "source_date_epoch": null
+  },
+  "execution": {
+    "status": "not-run-static",
+    "process_exit": null,
+    "oracle_available": false,
+    "sample_count": null,
+    "raw_artifacts": "oracle-runs/harness/<case-id>/ (ignored; no raw artifacts committed)",
+    "expected": [
+      {"path": "manifest.json", "sha256": "a29f4bc40ebf0920b6cfc0e493c6a976d501a60581932379cbb23c0c4c77b018"},
+      {"path": "evidence-unavailable.json", "sha256": "e3327c4668bd41fff57580078221d2f253baf92f30cb2dc0cca6555c86834bd7"},
+      {"path": "normalized-diff-example.json", "sha256": "bb8403cddec08d9f826ad8347055bcd089087f24c3311798ece7c62b55115c9f"},
+      {"path": "schemas/manifest.schema.json", "sha256": "2c3e280f4059997a1eb310d0f5f211e31ff50e365979ec37d259c57a02150cd1"},
+      {"path": "schemas/evidence.schema.json", "sha256": "d6fdf7e52a97bc870962ab386158ca90fbd8f12d3ee238429ed975a7d87d1d08"},
+      {"path": "schemas/normalized-diff.schema.json", "sha256": "d838f15969d9ce259822c7322d726a24ff99395c29b946819e949c647d24eb50"}
+    ]
+  },
+  "bounds": {
+    "max_manifest_bytes": 262144,
+    "max_evidence_bytes": 262144,
+    "max_process_output_bytes": 1048576,
+    "max_artifact_bytes": 134217728,
+    "max_raw_artifact_bytes": 134217728,
+    "max_jtl_bytes": 67108864,
+    "max_log_bytes": 1048576,
+    "max_diff_entries": 128,
+    "max_diff_bytes": 1048576,
+    "max_raw_diff_bytes": 1048576,
+    "max_human_diff_bytes": 8192,
+    "max_raw_artifact_references": 32,
+    "max_environment_entries": 32,
+    "max_plugin_pins": 16,
+    "max_service_pins": 16,
+    "max_external_retries": 2,
+    "oracle_timeout_seconds": 300
+  },
+  "limitations": [
+    "This is an original source-only data corpus; no oracle execution, process, container, service, network client, Java runtime, or JMeter distribution was started.",
+    "Source fixture hashes are integrity pins for checked-in inputs. A future observed evidence record must additionally carry a concrete jmeter-rs source commit and observed Cargo.toml, Cargo.lock, and rust-toolchain.toml hashes.",
+    "The Apache digest and signer are declarations only in this source corpus; the future runner must pass both verification gates before unpacking or executing JMeter.",
+    "Raw archive, signature, keyring, JTL, log, process output, structured diff, raw diff, plugin, service, certificate, and environment artifacts remain outside Git under the bounded ignored run root.",
+    "An unavailable or not-run oracle is fail-closed: developer mode may skip with a stable reason, while release conformance must fail and cannot substitute a Rust-only result."
+  ]
+}

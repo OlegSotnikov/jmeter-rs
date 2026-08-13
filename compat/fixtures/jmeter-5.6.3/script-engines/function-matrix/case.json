@@ -1,0 +1,41 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-SCRIPT-FUNCTION-MATRIX",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-SCRIPT-001",
+  "conformance_ids": ["FUNC-003", "TEST-001"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-EXTERNAL-001", "NORM-ENV-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "cc0af31e3d966fbd94d76490a1ad862a18b6569e11ba710956ffb4a234ebfe4e"
+  },
+  "property_files": [
+    {
+      "path": "oracle.properties",
+      "sha256": "98dc9e69f54e2fb6a3afc2bbeae1d6206855343406f0677f2381195a9a3a167e"
+    }
+  ],
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/script-engines/function-matrix",
+    "mode": "nongui",
+    "argv_template": ["jmeter", "-n", "-q", "oracle.properties", "-t", "plan.jmx", "-l", "<ignored>/oracle.jtl", "-j", "<ignored>/oracle.log"],
+    "network": "none",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null
+  },
+  "execution": {
+    "status": "not-run-static-external",
+    "process_exit": null,
+    "sample_count": null,
+    "raw_artifacts": "oracle-runs/script-engines/function-matrix/ (ignored local evidence only)",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "This manifest is a static, original JMX contract; Java, JMeter, a script engine, a compiler, a subprocess, and network access were not used.",
+    "BeanShell, Groovy, Commons JEXL 2/3, and Rhino require the exact pinned JMeter 5.6.3 class path; missing engines normalize to script.engine.unavailable.",
+    "The expressions intentionally cover failures and bindings, but their output, exception text, and expansion timing are planned oracle observations rather than measured evidence."
+  ]
+}

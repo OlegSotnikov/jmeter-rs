@@ -1,0 +1,171 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-FUNCTIONS-RANDOM-TIME",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-FUNCTIONS-001",
+  "conformance_ids": ["FUNC-001", "FUNC-002"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-JTL-001", "NORM-TIME-001", "NORM-ENV-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "1c7b235e0836db16e02f0d6363e8e69f527cfc9dc9df5864381e80ac6ba3b447"
+  },
+  "property_files": [{
+    "path": "oracle.properties",
+    "sha256": "a97084ed29d23c71db204d86bdc45ab1f1cf2798ae4e53d6463dac2236a41e06"
+  }],
+  "coverage_contracts": {
+    "variable_side_effects": "expected/semantic.json#/side_effect_probe_contract",
+    "expansion_phases": "expected/semantic.json#/expansion_phase_contract",
+    "status": "planned; comparator_enforced=false"
+  },
+  "command": {
+    "executable": "<jmeter-home>/bin/jmeter",
+    "executable_resolution": "Resolve <jmeter-home> only from the future runner manifest after verifying the profile-pinned Apache JMeter 5.6.3 artifact; never resolve the executable through inherited PATH.",
+    "java_executable": "<java-home>/bin/java",
+    "working_directory": "<case-root>",
+    "working_directory_repository_relative": "compat/fixtures/jmeter-5.6.3/functions-random-time",
+    "input_paths_relative_to": "working_directory",
+    "output_paths_relative_to": "working_directory",
+    "mode": "nongui",
+    "argv_template": ["<jmeter-home>/bin/jmeter", "-Duser.timezone=UTC", "-Dfile.encoding=UTF-8", "-n", "-q", "oracle.properties", "-t", "plan.jmx", "-l", "<ignored>/oracle.jtl", "-j", "<ignored>/oracle.log"],
+    "network": "none",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "environment_allowlist": ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL=en_US.UTF-8", "LANG=en_US.UTF-8", "TZ=UTC"],
+    "locale_evidence": {
+      "requested": "en-US",
+      "observed": null,
+      "status": "pending-oracle",
+      "verification": "Record the materialized launcher locale and effective JVM Locale.getDefault().toLanguageTag() before comparison; fail evidence promotion if either observation is missing or differs from the requested profile locale."
+    },
+    "locale_materialization": {
+      "profile_locale": "en-US",
+      "portable_contract": "Materialize an installed target-OS locale with an explicit UTF-8 codeset; POSIX may use en_US.UTF-8 and Windows may use en-US.",
+      "installed_locale_required": true,
+      "observed": null,
+      "status": "pending-oracle",
+      "unavailable_behavior": "Fail fixture setup or evidence promotion; do not silently fall back to C/POSIX or an uninstalled locale alias."
+    },
+    "charset_evidence": {
+      "requested_default": "UTF-8",
+      "observed_file_encoding": null,
+      "observed_default_charset": null,
+      "status": "pending-oracle",
+      "verification": "Record System.getProperty(\"file.encoding\") and Charset.defaultCharset().name() from the effective JVM; do not infer either value from the launcher locale or requested command field."
+    },
+    "jvm_requirements": {
+      "file_encoding": "UTF-8",
+      "default_charset": "UTF-8",
+      "user_timezone": "UTC",
+      "required_system_properties": {
+        "user.timezone": "UTC",
+        "file.encoding": "UTF-8"
+      },
+      "required": true,
+      "verification": {
+        "status": "pending-oracle",
+        "fields": ["System.getProperty(\"user.timezone\")", "System.getProperty(\"file.encoding\")", "Charset.defaultCharset().name()", "Locale.getDefault().toLanguageTag()"],
+        "required_values": {"user.timezone": "UTC", "file.encoding": "UTF-8", "default_charset": "UTF-8", "locale": "en-US"},
+        "missing_behavior": "Fail evidence promotion; requested -D values and environment settings are not observations."
+      }
+    },
+    "materialization": {
+      "jmeter_executable": "<jmeter-home>/bin/jmeter",
+      "java_executable": "<java-home>/bin/java",
+      "case_root": "<case-root>",
+      "resolution": "The future runner must materialize all three placeholders from an allowlisted runner manifest and launch the exact child without shell interpolation or PATH lookup.",
+      "artifact_digest_gate": "profile_digest_verification must pass before launch; case_run_verification remains null until an oracle process actually runs."
+    },
+    "process_lifecycle": {
+      "shell": false,
+      "exact_child": true,
+      "stdin": "null",
+      "stdout": "<ignored>/oracle.stdout",
+      "stderr": "<ignored>/oracle.stderr",
+      "timeout_seconds": 30,
+      "timeout_behavior": "Cancel the owned launcher, wait/reap the exact child, and record a bounded timeout diagnostic; no generic PID/name cleanup is permitted.",
+      "wait_reap": "Wait and reap the exact launcher/Java child on success, error, timeout, and cancellation before evidence is considered complete."
+    },
+    "random_seed": null,
+    "clock_mode": "ambient-wall-clock-only-for-__time; fixed date/time-shift inputs elsewhere",
+    "timing_normalization": {
+      "normalization_policy_ref": "NORM-TIME-001",
+      "comparison": "descriptor-only",
+      "runtime_values": "not present in this static corpus",
+      "allowed_variance": "not asserted"
+    }
+  },
+  "bounds": {
+    "schema_id": "jmeter-rs.fixture-bounds",
+    "schema_version": 1,
+    "enforcement": "declared; future runner must enforce; not runtime-enforced by this static corpus",
+    "comparator_enforced": false,
+    "max_plan_bytes": 32768,
+    "max_plan_nodes": 64,
+    "max_plan_depth": 8,
+    "max_property_text_bytes": 16384,
+    "max_property_count_per_element": 64,
+    "max_threads": 2,
+    "max_iterations_per_thread": 2,
+    "max_samplers_per_iteration": 3,
+    "max_samples": 12,
+    "max_label_bytes": 2048,
+    "max_result_bytes": 131072,
+    "max_jtl_bytes": 131072,
+    "max_log_bytes": 65536,
+    "max_stdout_bytes": 65536,
+    "max_stderr_bytes": 65536,
+    "max_process_output_bytes": 65536,
+    "max_artifact_bytes": 1048576,
+    "max_processes": 1,
+    "max_child_processes": 1,
+    "max_process_wait_seconds": 30,
+    "max_operation_seconds": 30,
+    "max_case_seconds": 60,
+    "network": {
+      "policy": "none",
+      "max_connections": 0,
+      "allowed_hosts": [],
+      "max_request_bytes": 0,
+      "max_response_bytes": 0
+    },
+    "random_domains": {
+      "__Random(4,4,config_phase_random)": {"inclusive_min": 4, "inclusive_max": 4},
+      "__Random(1,3)": {"inclusive_min": 1, "inclusive_max": 3},
+      "__RandomDate(2024-03-01,2024-03-04)": {"start_inclusive": "2024-03-01", "end_exclusive": "2024-03-04"},
+      "__RandomFromMultipleVars(choice1|choice2)": ["red", "blue"],
+      "__RandomFromMultipleVars(multi)": ["one", "two", "three"],
+      "__RandomString(6,ab)": {"length": 6, "alphabet": "ab"},
+      "__UUID": {"format": "RFC-4122-version-4"}
+    },
+    "counter_domains": {
+      "per_thread": {"first": 1, "last": 2, "threads": 2},
+      "global": {"first": 1, "last": 4, "samples": 4}
+    }
+  },
+  "execution": {
+    "status": "not-run-static-corpus",
+    "process_exit": null,
+    "process_exit_asserted": false,
+    "oracle_invoked": false,
+    "comparator_executed": false,
+    "sample_count": 12,
+    "sample_count_status": "planned-from-topology",
+    "sample_count_asserted": false,
+    "raw_artifacts": "oracle-runs/functions-random-time/ (ignored; not generated in this task)",
+    "expected": {
+      "path": "expected/semantic.json",
+      "sha256": "fe495b9d62cca4ba90bd83876e8ec04d78d1762c51323b9fe0fb51af02f1dc02"
+    }
+  },
+  "limitations": [
+    "Apache JMeter 5.6.3 uses ThreadLocalRandom for Random, RandomDate, RandomFromMultipleVars, and RandomString, while __UUID delegates to java.util.UUID.randomUUID(); neither source exposes a supported per-fixture seed setter, so random_seed is null and exact values are asserted only for one-value domains.",
+    "__RandomDate in the pinned 5.6.3 source samples an inclusive start and exclusive end epoch-day bound; the one-day fixed case uses 2024-02-29 through 2024-03-01 to make its result deterministic.",
+    "__time reads the wall clock. Its millisecond, second, and date outputs are explicitly shape-normalized under NORM-TIME-001; __dateTimeConvert and __timeShift use fixed inputs but their epoch forms require an observed JVM user.timezone=UTC.",
+    "The side-effects sampler consumes the preceding capture variables in the same virtual user. Cross-thread interleaving, global-counter order, and plan/configuration expansion results remain unobserved; every side-effect and phase contract is planned and not comparator-enforced.",
+    "The plan/configuration probes identify Test Plan, configuration-element, and sampler expansion sites. Preprocessor/postprocessor/listener expansion is not represented in this offline case and requires a separate future fixture; no phase gap is silently treated as covered.",
+    "No Java/JMeter process was run while creating this static corpus; process_exit is null and sample_count_asserted is false. The sample_count value is only a topology-derived plan bound, not observed output. The expected semantic file is hash-pinned but contains no observed Apache output."
+  ]
+}

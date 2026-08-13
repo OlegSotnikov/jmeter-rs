@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Original extended logic controller plan" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="ForEach variables" enabled="true">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="item_1" elementType="Argument"><stringProp name="Argument.name">item_1</stringProp><stringProp name="Argument.value">one</stringProp><stringProp name="Argument.metadata">=</stringProp></elementProp>
+          <elementProp name="item_2" elementType="Argument"><stringProp name="Argument.name">item_2</stringProp><stringProp name="Argument.value">two</stringProp><stringProp name="Argument.metadata">=</stringProp></elementProp>
+          <elementProp name="item_matchNr" elementType="Argument"><stringProp name="Argument.name">item_matchNr</stringProp><stringProp name="Argument.value">2</stringProp><stringProp name="Argument.metadata">=</stringProp></elementProp>
+        </collectionProp>
+      </elementProp>
+      <collectionProp name="TestPlan.thread_groups"/>
+      <stringProp name="TestPlan.comments">Original bounded matrix for Random Order, Switch, ForEach, Module, Include, Recording, and Critical Section controllers.</stringProp>
+      <stringProp name="TestPlan.user_define_classpath"></stringProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Extended controller matrix" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="One extended iteration" enabled="true"><boolProp name="LoopController.continue_forever">false</boolProp><stringProp name="LoopController.loops">1</stringProp></elementProp>
+        <stringProp name="ThreadGroup.num_threads">1</stringProp><stringProp name="ThreadGroup.ramp_time">0</stringProp><longProp name="ThreadGroup.start_time">0</longProp><longProp name="ThreadGroup.end_time">0</longProp><boolProp name="ThreadGroup.scheduler">false</boolProp><stringProp name="ThreadGroup.duration"></stringProp><stringProp name="ThreadGroup.delay"></stringProp>
+      </ThreadGroup>
+      <hashTree>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="extended-before" enabled="true"><boolProp name="displayJMeterProperties">false</boolProp><boolProp name="displayJMeterVariables">false</boolProp><boolProp name="displaySystemProperties">false</boolProp></DebugSampler><hashTree/>
+        <RandomOrderController guiclass="RandomOrderControllerGui" testclass="RandomOrderController" testname="random-order" enabled="true"/>
+        <hashTree>
+          <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="random-order-a" enabled="true"><boolProp name="displayJMeterProperties">false</boolProp><boolProp name="displayJMeterVariables">false</boolProp><boolProp name="displaySystemProperties">false</boolProp></DebugSampler><hashTree/>
+          <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="random-order-b" enabled="true"><boolProp name="displayJMeterProperties">false</boolProp><boolProp name="displayJMeterVariables">false</boolProp><boolProp name="displaySystemProperties">false</boolProp></DebugSampler><hashTree/>
+        </hashTree>
+        <RandomController guiclass="RandomControlGui" testclass="RandomController" testname="random-one-of" enabled="true"/>
+        <hashTree>
+          <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="random-child-a" enabled="true"><boolProp name="displayJMeterProperties">false</boolProp><boolProp name="displayJMeterVariables">false</boolProp><boolProp name="displaySystemProperties">false</boolProp></DebugSampler><hashTree/>
+          <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="random-child-b" enabled="true"><boolProp name="displayJMeterProperties">false</boolProp><boolProp name="displayJMeterVariables">false</boolProp><boolProp name="displaySystemProperties">false</boolProp></DebugSampler><hashTree/>
+        </hashTree>
+        <SwitchController guiclass="SwitchControllerGui" testclass="SwitchController" testname="switch-second" enabled="true"><stringProp name="SwitchController.value">1</stringProp></SwitchController>
+        <hashTree>
+          <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="switch-first" enabled="true"><boolProp name="displayJMeterProperties">false</boolProp><boolProp name="displayJMeterVariables">false</boolProp><boolProp name="displaySystemProperties">false</boolProp></DebugSampler><hashTree/>
+          <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="switch-second-child" enabled="true"><boolProp name="displayJMeterProperties">false</boolProp><boolProp name="displayJMeterVariables">false</boolProp><boolProp name="displaySystemProperties">false</boolProp></DebugSampler><hashTree/>
+        </hashTree>
+        <ForeachController guiclass="ForeachControlPanel" testclass="ForeachController" testname="foreach-items" enabled="true">
+          <stringProp name="ForeachController.inputVal">item</stringProp>
+          <stringProp name="ForeachController.returnVal">value</stringProp>
+          <boolProp name="ForeachController.useSeparator">true</boolProp>
+        </ForeachController>
+        <hashTree><DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="foreach-child-${value}" enabled="true"><boolProp name="displayJMeterProperties">false</boolProp><boolProp name="displayJMeterVariables">false</boolProp><boolProp name="displaySystemProperties">false</boolProp></DebugSampler><hashTree/></hashTree>
+        <ModuleController guiclass="ModuleControllerGui" testclass="ModuleController" testname="module-disabled-no-target" enabled="false"><collectionProp name="ModuleController.node_path"/></ModuleController>
+        <hashTree/>
+        <IncludeController guiclass="IncludeControllerGui" testclass="IncludeController" testname="include-disabled-no-path" enabled="false"><stringProp name="IncludeController.includepath"></stringProp></IncludeController>
+        <hashTree/>
+        <RecordingController guiclass="RecordController" testclass="RecordingController" testname="recording-disabled" enabled="false"/>
+        <hashTree/>
+        <CriticalSectionController guiclass="CriticalSectionControllerGui" testclass="CriticalSectionController" testname="critical-section" enabled="true"><stringProp name="CriticalSectionController.lockName">controllers-full-static-lock</stringProp></CriticalSectionController>
+        <hashTree><DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="critical-section-child" enabled="true"><boolProp name="displayJMeterProperties">false</boolProp><boolProp name="displayJMeterVariables">false</boolProp><boolProp name="displaySystemProperties">false</boolProp></DebugSampler><hashTree/></hashTree>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="extended-after" enabled="true"><boolProp name="displayJMeterProperties">false</boolProp><boolProp name="displayJMeterVariables">false</boolProp><boolProp name="displaySystemProperties">false</boolProp></DebugSampler><hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

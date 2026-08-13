@@ -1,0 +1,123 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-JMX-TOPOLOGY",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored local JMX containing root metadata, alternating hashTree topology, XML-escaped values, and typed properties.",
+    "upstream_plan_copied": false
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter is executed as a pinned external oracle; no upstream plan, result, or binary is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "signature_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.asc",
+    "keys_url": "https://archive.apache.org/dist/jmeter/KEYS",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true,
+    "signature_verified_before_execution": false,
+    "signing_fingerprint": null,
+    "pgp": {
+      "algorithm": "OpenPGP",
+      "signature_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.asc",
+      "keys_url": "https://archive.apache.org/dist/jmeter/KEYS",
+      "required_fingerprint": null,
+      "observed_fingerprint": null,
+      "status": "not-verified-quarantined",
+      "signature_verified": false,
+      "verified_at": null,
+      "method": null
+    },
+    "verification_status": "sha512-verified-pgp-not-verified-quarantined",
+    "verification_scope": "sha512-only",
+    "verification_note": "The pinned artifact digest was checked before this run. PGP signature verification was not performed; this external raw observation remains quarantined and is not release or conformance evidence."
+  },
+  "runtime": {
+    "java": {
+      "vendor": "Ubuntu OpenJDK",
+      "version": "17.0.19+10-1-24.04.2-Ubuntu",
+      "vm": "OpenJDK 64-Bit Server VM",
+      "major": 17
+    },
+    "target_triple": "x86_64-unknown-linux-gnu",
+    "os_image": "Ubuntu 24.04 (noble), Linux x86_64",
+      "locale": "C",
+      "timezone": "UTC",
+      "default_charset": "UTF-8",
+      "clock_mode": "system-wall-clock",
+      "clock_controlled": false,
+      "random_seed": null,
+      "hostname_policy": "not asserted; hostname saving disabled",
+      "environment_allowlist": ["LC_ALL=C", "LANG=C", "TZ=UTC"],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "SHA-512-checked but PGP-unverified Apache JMeter 5.6.3 distribution; external raw observation remains quarantined",
+    "classpath_artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076"
+  },
+  "inputs": {
+    "plan_sha256": "3ca94d67d013176d36a78ff39fd10899f27e0c014b223285473313a1f1230fd9",
+    "property_sha256": "ac2a04e9a7dd74f0abc9528d498b1c53f0224d2d8ae2a85a727bdef5e0fe3298",
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  },
+  "evidence": {
+    "status": "external-raw-observation",
+    "oracle_invoked": true,
+    "measured_output_present": true,
+    "comparator_ready": false,
+    "rust_conformance_claim": false,
+    "raw_artifacts": "oracle-runs/jmx-topology/ (ignored; local evidence only)",
+    "observed_runtime": {
+      "working_directory": "repository-root",
+      "file_server_base": "compat/fixtures/jmeter-5.6.3/jmx-topology",
+      "locale": "en_EN",
+      "java_default_charset": "ANSI_X3.4-1968",
+      "save_service_encoding": "UTF-8",
+      "timezone": "UTC"
+    },
+    "metadata_divergences": [
+      {
+        "field": "command.working_directory",
+        "declared": "compat/fixtures/jmeter-5.6.3/jmx-topology",
+        "observed": "repository-root",
+        "source": "oracle.log user.dir/PWD; absolute host path intentionally omitted"
+      },
+      {
+        "field": "command.locale",
+        "declared": "C",
+        "observed": "en_EN",
+        "source": "oracle.log JMeterUtils/Default Locale"
+      },
+      {
+        "field": "command.default_charset",
+        "declared": "UTF-8",
+        "observed": "ANSI_X3.4-1968",
+        "source": "oracle.log file.encoding; SaveService separately reports UTF-8"
+      }
+    ]
+  },
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations_per_thread": 1,
+    "max_samples": 1,
+    "max_plan_nodes": 33,
+    "max_plan_depth": 6,
+    "max_property_text_bytes": 4096,
+    "max_result_bytes": 65536,
+    "max_log_bytes": 65536,
+    "max_process_output_bytes": 65536,
+    "max_process_wait_seconds": 30
+  }
+}

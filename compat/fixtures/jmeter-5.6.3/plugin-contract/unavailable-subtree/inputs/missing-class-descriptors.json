@@ -1,0 +1,63 @@
+{
+  "schema_id": "jmeter-rs.planned-constraint-contract",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-PLUGIN-001",
+  "case_id": "ORACLE-JMETER-563-PLUGIN-UNAVAILABLE-SUBTREE",
+  "conformance_ids": ["PLUG-003", "JMX-004", "SCRIPT-002"],
+  "normalization_policy_refs": ["NORM-JMX-001", "NORM-STRUCTURE-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001"],
+  "external_runtime_boundary_ids": ["EXT-JVM-001", "EXT-PLUGIN-001"],
+  "expectation_basis": "original static missing-class descriptor; no runtime observation",
+  "descriptor_kind": "missing-class-and-no-drop",
+  "status": "declarative-static-only",
+  "oracle_status": "not-run",
+  "plugin_artifacts": [],
+  "user_class_roots": ["inputs/classes"],
+  "classes_present": false,
+  "requests": [
+    {
+      "element_tag": "JavaSampler",
+      "testclass": "JavaSampler",
+      "class_name": "com.example.plugin.MissingJavaSampler",
+      "required_contract": "org.apache.jmeter.protocol.java.sampler.JavaSamplerClient",
+      "stable_error_code": "script.class.unavailable",
+      "preserve_fields": ["classname", "arguments", "testname", "guiclass", "testclass"]
+    },
+    {
+      "element_tag": "JUnitSampler",
+      "testclass": "JUnitSampler",
+      "class_name": "com.example.plugin.MissingJUnitCase",
+      "required_contract": "JUnit4 @Test class",
+      "stable_error_code": "script.class.unavailable",
+      "preserve_fields": ["junitSampler.classname", "junitsampler.junit4", "junitSampler.method", "testname", "guiclass", "testclass"]
+    },
+    {
+      "element_tag": "OpaqueSampler",
+      "testclass": "com.example.plugin.OpaqueSampler",
+      "class_name": "com.example.plugin.OpaqueSampler",
+      "required_contract": "plugin element registry entry",
+      "stable_error_code": "plugin.class.unavailable",
+      "preserve_fields": ["pluginVersion", "unknownA", "unknownB", "plugin.order.0", "plugin.order.1", "plugin.raw.0", "plugin.raw.1"]
+    }
+  ],
+  "no_drop_contract": {
+    "preserve_unknown_element_tags": true,
+    "preserve_unknown_attributes": true,
+    "preserve_unknown_property_tags": true,
+    "preserve_comments_and_cdata": true,
+    "preserve_duplicate_order": true,
+    "preserve_hash_tree_companions": true,
+    "execution_when_unavailable": "typed capability error; never map to a built-in or emit a successful sample"
+  },
+  "bounds": {
+    "max_class_requests": 3,
+    "max_plugin_artifacts": 0,
+    "max_opaque_subtree_bytes": 8192,
+    "max_plan_nodes": 16,
+    "max_descriptor_bytes": 8192
+  },
+  "invariants": [
+    "Missing classes return typed unavailable diagnostics and retain all source fields.",
+    "Unknown subtree bytes, comments, CDATA, duplicate order, and hashTree companions are never dropped."
+  ]
+}

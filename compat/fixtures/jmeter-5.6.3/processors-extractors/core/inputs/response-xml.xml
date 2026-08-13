@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<fixture:fixture xmlns:fixture="urn:jmeter-rs:processor-fixture">
+  <fixture:item id="x1">one</fixture:item>
+  <fixture:item id="x2">two</fixture:item>
+  <fixture:empty/>
+</fixture:fixture>

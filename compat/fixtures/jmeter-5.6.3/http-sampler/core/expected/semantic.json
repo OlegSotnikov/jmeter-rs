@@ -1,0 +1,47 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-HTTP-SAMPLER-CORE",
+  "format": "jtl-xml",
+  "evidence_status": "not-run-static",
+  "process_exit": null,
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 21,
+  "ordered_labels": [
+    "GET 200 success",
+    "POST raw body",
+    "PUT raw body",
+    "DELETE no body",
+    "PATCH raw body",
+    "POST form arguments",
+    "POST multipart arguments",
+    "Duplicate request headers",
+    "399 is successful",
+    "400 is unsuccessful",
+    "Chunked response",
+    "Connection close",
+    "Connection reuse one",
+    "Connection reuse two",
+    "Gzip response",
+    "Deflate response",
+    "UTF-8 response",
+    "ISO-8859-1 response",
+    "Partial response",
+    "Connection reset",
+    "Response timeout"
+  ],
+  "normalization": {
+    "ignored_fields": [
+      "sample.ts",
+      "sample.t",
+      "sample.it",
+      "sample.lt",
+      "sample.ct",
+      "sample.by",
+      "sample.host",
+      "sample.port"
+    ],
+    "reason": "The comparator asserts the stable JTL-XML root, sample count, and ordered labels. Timing, byte counters, host, and port are ignored only under the declared profile policies; body, header, response-data, and transport facts are carried by the linked static trace contract."
+  }
+}

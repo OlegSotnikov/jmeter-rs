@@ -1,0 +1,161 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-CLI-MATRIX",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored bounded CLI option, combination, report, logging, process-contract, and future-runner-setup descriptors for Apache JMeter 5.6.3. No oracle execution or captured output was used.",
+    "upstream_plan_copied": false
+  },
+  "behavior_references": [
+    "docs/research/compatibility-surface.md",
+    "docs/research/upstream-semantics.md",
+    "https://jmeter.apache.org/usermanual/get-started.html#options",
+    "https://jmeter.apache.org/usermanual/get-started.html#non_gui",
+    "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/src/core/src/main/java/org/apache/jmeter/JMeter.java",
+    "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/src/launcher/src/main/java/org/apache/jmeter/NewDriver.java",
+    "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/src/core/src/main/java/org/apache/jmeter/engine/StandardJMeterEngine.java"
+  ],
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter is a pinned external oracle only; no upstream plan, result, log, binary, or source file is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true,
+    "execution_status": "not-run-static-corpus",
+    "verification_basis": "The artifact digest is copied from the active profile; this corpus did not execute or capture the artifact."
+  },
+  "oracle_source_audit": {
+    "commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "files": [
+      "src/core/src/main/java/org/apache/jmeter/JMeter.java",
+      "src/launcher/src/main/java/org/apache/jmeter/NewDriver.java",
+      "src/core/src/main/java/org/apache/jmeter/engine/StandardJMeterEngine.java"
+    ],
+    "claims_used": [
+      "JMeter.java report-only parser disallows only -n/-r/-R/-l; -X is accepted without remote selection and has no remote engine to stop",
+      "JMeter.java processLAST handles LAST/LAST.jtl for -l; NewDriver handles -j separately, while the paired-date formatter remains unresolved between the research wording and the pinned source call site",
+      "JMeter.start returns for CLArgsParser and IllegalUserActionException paths, while its outer Throwable catch calls System.exit(1)",
+      "StandardJMeterEngine uses -J for local stop-failure policy and receives remote exit policy through -G"
+    ],
+    "source_ambiguities": [
+      {
+        "surface": "-j paired-single-quote date pattern",
+        "research_reference": "docs/research/compatibility-surface.md describes the CLI date pattern as SimpleDateFormat",
+        "pinned_source_reference": "JMeter.java/NewDriver.java call-site behavior requires exact-source and oracle confirmation in a future evidence run",
+        "candidate_engines": ["java.text.SimpleDateFormat", "java.time.format.DateTimeFormatter"],
+        "status": "unresolved",
+        "asserted": false,
+        "resolution_rule": "Do not implement or compare a formatter choice from this static corpus; inspect commit 34a2785748e9e0b14702595e8682c387869deda3 and compare the expanded path under a fixed UTC clock."
+      }
+    ]
+  },
+  "runtime": {
+    "java": {
+      "vendor": "not executed (static corpus)",
+      "version": "not measured (static corpus)",
+      "vm": "not measured (static corpus)",
+      "major": 0
+    },
+    "target_triple": "not measured; every future run must materialize and record the target triple",
+    "os_image": "not measured; static validation only",
+    "locale": "target-materialized-locale-neutral",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "not asserted; no host identity is in the static expectation",
+    "environment_allowlist": ["PATH=<target-specific absolute allowlisted entries>", "LC_ALL=<target-supported locale-neutral value>", "LANG=<target-supported locale-neutral value>", "TZ=UTC"],
+    "environment_materialization_ref": "inputs/runner-contract.json#platform_materialization",
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "not executed; a future oracle run must use only the pinned Apache JMeter 5.6.3 distribution",
+    "classpath_artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076"
+  },
+  "inputs": {
+    "input_sha256": {
+      "inputs/option-catalog.json": "cc539ad9e4a22076897fc3ab8ae367756649c16f8d00cf4c8e97da2cb9c29fc1",
+      "inputs/scenarios.json": "bfd8682851d42eff3d0ba44ea07c110041bbaaccd331b7de74a1e289472f3ea7",
+      "inputs/process-contract.json": "263ce7611a38256e0e106eeed2ef900a5578b27df320ff2be6f350ec84b27ce2",
+      "inputs/runner-contract.json": "4dfe2f857f1d40adb48cce8aa488bbfe56212bb0d1370fbb87cfd062abc2deca",
+      "inputs/cli-plan.jmx": "02a1004df15cad7b7e0b073a7ea1de96275b74d0b5f68c51de9fa69362bdbc69",
+      "inputs/cli-sample-failure-plan.jmx": "a6d6f30e3cc79fbef396a3f2e67b8968831c287269036a5f9f81e37f231c4070",
+      "inputs/report-input.csv": "10d25bfeb3c8e1ed89c3d79f21465fd296f7666c2d855e20e46ba09afd69e287",
+      "inputs/primary.properties": "87b91176c899f387f517b1ed9feab9628ae492927837a6f538da83b8d6cba5b8",
+      "inputs/additional-a.properties": "738f30ffeba58c8281342dba80858576422e00ce1e9e4a10702d8ffd313342fb",
+      "inputs/additional-b.properties": "36dba893cec05162bce439e430a9a7fd1d3936b7729810d6c4a924fa0c2d59a8",
+      "inputs/system-a.properties": "1cb64d00abfaff8d07f6ace108f54898cf52f48e0ba4dfe40302bf7f6c275867",
+      "inputs/system-b.properties": "edef9a1f08a8ab68fc06322dd372c3d127f4b601ad31e37683c6a54e8db4a786",
+      "inputs/log4j2.xml": "fa791a7a18021e443ef622e736471e7103c8024d463ea13777e39e86f911213c",
+      "expected/semantic.json": "7fa1091078551c158d14bf97f6cc1d1b98f9a94f5e9ff206a63a9532412d5bcc"
+    },
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  },
+  "bounds": {
+    "max_option_definitions": 30,
+    "max_scenarios": 48,
+    "max_option_value_bytes": 4096,
+    "max_argv_tokens_per_scenario": 32,
+    "max_repeat_occurrences": 4,
+    "max_help_output_bytes": 65536,
+    "max_version_output_bytes": 4096,
+    "max_diagnostic_bytes": 65536,
+    "max_log_bytes": 65536,
+    "max_report_entries": 128,
+    "max_process_wait_seconds": 30,
+    "max_plan_nodes": 40,
+    "max_plan_depth": 7,
+    "max_property_text_bytes": 4096
+  },
+  "corpus": {
+    "fixture_family_id": "FX-CLI-001",
+    "conformance_ids": ["CLI-001", "CLI-002", "CLI-003"],
+    "normalization_policy_refs": ["NORM-CLI-001", "NORM-ENV-001"],
+    "static_files": [
+      "inputs/option-catalog.json",
+      "inputs/scenarios.json",
+      "inputs/process-contract.json",
+      "inputs/runner-contract.json",
+      "inputs/cli-plan.jmx",
+      "inputs/cli-sample-failure-plan.jmx",
+      "inputs/report-input.csv",
+      "inputs/primary.properties",
+      "inputs/additional-a.properties",
+      "inputs/additional-b.properties",
+      "inputs/system-a.properties",
+      "inputs/system-b.properties",
+      "inputs/log4j2.xml",
+      "expected/semantic.json",
+      "case.json",
+      "provenance.json",
+      "README.md"
+    ],
+    "original_inputs": true,
+    "copied_upstream_plan": false,
+    "raw_outputs": "none",
+    "future_raw_output_root": "oracle-runs/cli-matrix/ (ignored)",
+    "runner": "not materialized; inputs/runner-contract.json records setup obligations only, and no shell or subprocess runner is part of this static corpus"
+  },
+  "oracle_execution": {
+    "status": "not-run-static-corpus",
+    "oracle_invoked": false,
+    "jmeter_rs_invoked": false,
+    "java_invoked": false,
+    "shell_fixture_invoked": false,
+    "remote_service_invoked": false,
+    "subprocess_invoked": false,
+    "reason": "The task is restricted to original static descriptors and safe validation; measured JMeter output is intentionally absent.",
+    "expected_projections": "planned contract descriptors only; no fabricated usage text, log, JTL, report, or exit evidence"
+  }
+}

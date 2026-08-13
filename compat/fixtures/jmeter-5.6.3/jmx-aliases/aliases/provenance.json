@@ -1,0 +1,61 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-JMX-ALIASES",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored JMX corpus for SaveService structural aliases, historical aliases, class upgrades, insertion-ordered typed properties, XML escaping, and absent-versus-empty values.",
+    "upstream_plan_copied": false,
+    "source_material": "Clean-room fixture design from the profile and cited upstream property vocabulary; no upstream plan or source file was copied."
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "The pinned Apache JMeter distribution is an external oracle reference only; no upstream plan, result, binary, or source is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true,
+    "verification_scope": "The active profile records the artifact digest verification; this static case intentionally performs no oracle execution."
+  },
+  "runtime": {
+    "java": {
+      "vendor": "Ubuntu OpenJDK (profile baseline; not invoked for this case)",
+      "version": "17.0.19+10-1-24.04.2-Ubuntu",
+      "vm": "OpenJDK 64-Bit Server VM",
+      "major": 17
+    },
+    "target_triple": "x86_64-unknown-linux-gnu",
+    "os_image": "Ubuntu 24.04 (noble), Linux x86_64; static-only case",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "not asserted; no process was run",
+    "environment_allowlist": ["LC_ALL=C", "LANG=C", "TZ=UTC"],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "profile-pinned Apache JMeter 5.6.3 distribution (not invoked)",
+    "classpath_artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076"
+  },
+  "inputs": {
+    "plan_sha256": "98ce7b3687c9255dc34c63cd4397a0f17f8ed586d0cb07bb03bead1bc4673e0e",
+    "property_sha256": "09078c1f6a7c8b573cbb835a33b929bc5a98eecc90b31c88e0ed376e499f8d31",
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  },
+  "oracle_execution": {
+    "performed": false,
+    "reason": "Static corpus task explicitly forbids Java/JMeter/subprocess execution.",
+    "raw_artifacts": "none"
+  }
+}

@@ -1,0 +1,2 @@
+timeStamp,elapsed,label,responseCode,responseMessage,threadName,dataType,success,bytes
+1700000000003,7,"☃, café",200,"réponse",thread-☃,text,true,9

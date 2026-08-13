@@ -1,0 +1,138 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-ASSERTIONS-FULL-BOUNDARIES",
+  "format": "jtl-xml",
+  "evidence_status": "planned",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 4,
+  "sample_count_asserted": false,
+  "observed_sample_count": null,
+  "candidate_status": "duration-and-exception-values-candidate-unobserved-until-oracle",
+  "ordered_labels": ["response-empty", "response-code-boundary", "duration-boundary", "size-boundary"],
+  "assertion_result_encoding": {
+    "node": "assertionResult",
+    "children": [
+      {"name": "name", "kind": "text", "required": true},
+      {"name": "failure", "kind": "text", "required": true, "values": ["true", "false"]},
+      {"name": "error", "kind": "text", "required": true, "values": ["true", "false"]},
+      {"name": "failureMessage", "kind": "text", "required": false}
+    ],
+    "child_order": ["name", "failure", "error", "failureMessage"],
+    "all_results_saved": true,
+    "child_order_status": "comparator-supported",
+    "child_order_note": "Each sample carries wire_children.assertion_child_elements; the comparator checks the pinned ordered prefix, with optional failureMessage as the fourth child."
+  },
+  "save_service_contract": {
+    "jmeter.save.saveservice.filename": "false",
+    "responseFile": "absent"
+  },
+  "wire_contract": {
+    "response_file": {"enabled": false, "expected": false}
+  },
+  "samples": [
+    {
+      "position": 0,
+      "element": "sample",
+      "label": "response-empty",
+      "attributes": {
+        "s": "false", "lb": "response-empty", "rc": "200", "rm": "OK",
+        "tn": "One assertion user 1-1", "dt": "text", "de": "US-ASCII",
+        "by": "0", "sby": "0", "sc": "1", "ec": "1", "ng": "1", "na": "1"
+      },
+      "ignored_attributes": ["t", "it", "lt", "ct", "ts"],
+      "empty_children": ["responseData"],
+      "absent_children": ["responseFile"],
+      "wire_children": {"assertion_child_elements": ["name", "failure", "error", "failureMessage"]},
+      "assertions": [
+        {"name": "Empty response accepts negated contains", "failure": "false", "error": "false"},
+        {"name": "Empty response reports null for equals", "failure": "true", "error": "false", "failure_message": "Response was null"},
+        {"name": "Empty body has zero bytes", "failure": "false", "error": "false"}
+      ]
+    },
+    {
+      "position": 1,
+      "element": "sample",
+      "label": "response-code-boundary",
+      "attributes": {
+        "s": "false", "lb": "response-code-boundary", "rc": "200", "rm": "OK",
+        "tn": "One assertion user 1-1", "dt": "text", "de": "US-ASCII",
+        "by": "0", "sby": "0", "sc": "1", "ec": "1", "ng": "1", "na": "1"
+      },
+      "ignored_attributes": ["t", "it", "lt", "ct", "ts"],
+      "empty_children": ["responseData"],
+      "absent_children": ["responseFile"],
+      "wire_children": {"assertion_child_elements": ["name", "failure", "error", "failureMessage"]},
+      "assertions": [
+        {"name": "Response code exact boundary", "failure": "false", "error": "false"},
+        {"name": "Response code has three bytes", "failure": "false", "error": "false"},
+        {"name": "Response message has two bytes", "failure": "false", "error": "false"},
+        {"name": "Response code off by one fails", "failure": "true", "error": "false", "failure_message": "The result was the wrong size: It was 3 bytes, but should have been equal to 2 bytes."}
+      ]
+    },
+    {
+      "position": 2,
+      "element": "sample",
+      "label": "duration-boundary",
+      "attributes": {
+        "s": "true", "lb": "duration-boundary", "rc": "200", "rm": "OK",
+        "tn": "One assertion user 1-1", "dt": "text", "de": "US-ASCII",
+        "by": "0", "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"
+      },
+      "ignored_attributes": ["t", "it", "lt", "ct", "ts"],
+      "empty_children": ["responseData"],
+      "absent_children": ["responseFile"],
+      "wire_children": {"assertion_child_elements": ["name", "failure", "error", "failureMessage"]},
+      "assertions": [
+        {"name": "Zero duration disables assertion", "failure": "false", "error": "false"},
+        {"name": "Negative duration disables assertion", "failure": "false", "error": "false"},
+        {"name": "Large duration accepts local work", "failure": "false", "error": "false"}
+      ]
+    },
+    {
+      "position": 3,
+      "element": "sample",
+      "label": "size-boundary",
+      "attributes": {
+        "s": "true", "lb": "size-boundary", "rc": "200", "rm": "OK",
+        "tn": "One assertion user 1-1", "dt": "text", "de": "US-ASCII",
+        "by": "0", "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"
+      },
+      "ignored_attributes": ["t", "it", "lt", "ct", "ts"],
+      "empty_children": ["responseData"],
+      "absent_children": ["responseFile"],
+      "wire_children": {"assertion_child_elements": ["name", "failure", "error", "failureMessage"]},
+      "assertions": [
+        {"name": "Size equals boundary", "failure": "false", "error": "false"},
+        {"name": "Size not-equal below boundary", "failure": "false", "error": "false"},
+        {"name": "Size greater-than below boundary", "failure": "false", "error": "false"},
+        {"name": "Size less-than above boundary", "failure": "false", "error": "false"},
+        {"name": "Size greater-or-equal exact boundary", "failure": "false", "error": "false"},
+        {"name": "Size less-or-equal exact boundary", "failure": "false", "error": "false"}
+      ]
+    }
+  ],
+  "resource_bounds": {
+    "max_threads": 1,
+    "max_iterations": 1,
+    "max_samples": 4,
+    "max_response_bytes": 65536,
+    "max_assertion_results": 16,
+    "network": "none"
+  },
+  "generated_from": {
+    "status": "not-run",
+    "reason": "The fixture authoring task forbids Java/JMeter execution; run the pinned oracle command during conformance.",
+    "generator": "Apache JMeter",
+    "generator_version": "5.6.3",
+    "random_seed": null,
+    "oracle_command": "env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C LANG=C TZ=UTC jmeter-oracle-cache/apache-jmeter-5.6.3/bin/jmeter -n -q compat/fixtures/jmeter-5.6.3/assertions-full/boundaries/oracle.properties -t compat/fixtures/jmeter-5.6.3/assertions-full/boundaries/plan.jmx -l oracle-runs/assertions-full/boundaries/oracle.jtl -j oracle-runs/assertions-full/boundaries/oracle.log",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "oracle-runs/assertions-full/boundaries/ (ignored; no oracle evidence captured)"
+  },
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.ts"],
+    "reason": "Boundary comparator semantics, assertion names/flags/messages, response code/message, zero-body size, and zero received bytes remain exact. Only elapsed and timestamp counters are normalized."
+  }
+}

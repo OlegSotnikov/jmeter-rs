@@ -1,0 +1,68 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-TIMER-INVALID-VALUES",
+  "format": "jmx-semantic",
+  "evidence_status": "planned",
+  "source": {
+    "kind": "original-static-contract",
+    "oracle_status": "not-run",
+    "note": "No JMeter or Java process was run while creating this corpus."
+  },
+  "timer_contract": {
+    "kind": "negative-input-preservation",
+    "oracle_status": "pending",
+    "values": [
+      {
+        "path": "ThreadGroup.ramp_time",
+        "value": "-1",
+        "scheduler": false,
+        "behavior": "clamp-to-zero",
+        "effective_value": "0",
+        "reason": "negative ramp_time is clamped to zero when scheduler is disabled"
+      },
+      {
+        "path": "ConstantTimer.delay",
+        "value": "-1",
+        "behavior": "timer-field-preserve-oracle-pending",
+        "reason": "negative constant delay wire value is retained for the pinned oracle"
+      },
+      {
+        "path": "RandomTimer.range",
+        "value": "-2.0",
+        "behavior": "timer-field-preserve-oracle-pending",
+        "reason": "negative random range wire value is retained for the pinned oracle"
+      }
+    ],
+    "scheduler_invalid_fields": [
+      {
+        "path": "ThreadGroup.duration",
+        "value": "-1",
+        "scheduler": true,
+        "behavior": "invalid-scheduler-field-oracle-pending"
+      },
+      {
+        "path": "ThreadGroup.delay",
+        "value": "-1",
+        "scheduler": true,
+        "behavior": "invalid-scheduler-field-oracle-pending"
+      }
+    ],
+    "planned_sample_count_upper_bound": 3,
+    "observed_sample_count": null,
+    "sample_count_asserted": false,
+    "behavior_asserted": false,
+    "preservation_assertion": "Exact negative property strings must survive parse and round trip; acceptance, clamping, or runtime sample behavior remains oracle-pending."
+  },
+  "normalization": {
+    "ignored_fields": [],
+    "timing_tolerances": {
+      "enforcement": "not-applicable",
+      "comparator_enforced": false,
+      "runtime_values": "No sample is observed until the pinned oracle accepts or rejects the preserved wire values."
+    },
+    "byte_policy": {"bytes": "retained; no normalization", "sent_bytes": "retained; no normalization"},
+    "reason": "Static JMX preservation contract only; no runtime result or rejection behavior is asserted."
+  }
+}

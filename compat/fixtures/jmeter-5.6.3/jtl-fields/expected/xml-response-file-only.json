@@ -1,0 +1,40 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JTL-FIELDS",
+  "format": "jtl-xml",
+  "contract_kind": "jmeter-writer-wire",
+  "projection_schema": "neutral-xml-v1",
+  "evidence_status": "planned",
+  "expectation_basis": "Hand-authored projection of inputs/xml/response-file-only.xml; no Apache JMeter output was measured.",
+  "writer_configuration": "switches/xml-response-file-only.properties",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 1,
+  "wire_contract": {
+    "string_children": [{"element": "responseFile", "class": "java.lang.String"}],
+    "child_order": ["responseFile"],
+    "wire_order": ["responseFile"],
+    "response_data": {"enabled": false, "expected": false},
+    "response_file": {
+      "enabled": true,
+      "expected": true,
+      "resource_reference": "resources/response-file-body.txt"
+    }
+  },
+  "samples": [{
+    "position": 0,
+    "element": "sample",
+    "attributes": {"t": "8", "s": "true", "lb": "file response", "rc": "200", "rm": "OK", "dt": "text", "de": "UTF-8"},
+    "assertions": [],
+    "sections": {"responseFile": "resources/response-file-body.txt"},
+    "wire_children": {
+      "wire_child_order": ["responseFile"],
+      "string_children_class": ["responseFile"]
+    }
+  }],
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "responseFile is expected only in the filename-enabled vector; responseData is intentionally absent."
+  }
+}

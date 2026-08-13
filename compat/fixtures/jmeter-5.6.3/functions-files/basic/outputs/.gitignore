@@ -1,0 +1,3 @@
+# __StringToFile writes only to this ignored, case-local output directory.
+*
+!.gitignore

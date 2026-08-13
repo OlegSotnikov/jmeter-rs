@@ -1,0 +1,3 @@
+# The CRLF vector is a byte-level fixture.  Keep it unnormalized when this
+# corpus is materialized into a Git worktree.
+inputs/csv/tab-crlf.csv -text

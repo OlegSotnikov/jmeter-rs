@@ -1,0 +1,110 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JTL-FIELDS",
+  "format": "jtl-xml",
+  "contract_kind": "jmeter-writer-wire",
+  "projection_schema": "neutral-xml-v1",
+  "evidence_status": "planned",
+  "expectation_basis": "Hand-authored projection of inputs/xml/rich-nested.xml; no Apache JMeter output was measured.",
+  "writer_configuration": "switches/xml-writer-rich.properties",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 2,
+  "ordered_labels": ["GET /a?x=1&y=2", "standalone"],
+  "wire_contract": {
+    "assertion_result": {
+      "representation": "child-elements",
+      "child_order": ["name", "failure", "error", "failureMessage"]
+    },
+    "url_child": {"element": "java.net.URL", "class": null},
+    "response_file": {"enabled": false, "expected": false}
+  },
+  "samples": [
+    {
+      "position": 0,
+      "element": "httpSample",
+      "attributes": {
+        "t": "42", "it": "3", "lt": "7", "ct": "11", "ts": "1700000000123", "s": "false",
+        "lb": "GET /a?x=1&y=2", "rc": "500", "rm": "Internal & ready", "tn": "thread-1",
+        "dt": "text", "de": "UTF-8", "by": "123", "sby": "9", "sc": "1", "ec": "1",
+        "ng": "2", "na": "3", "hn": "host-a", "case_id": "jtl-fields",
+        "comma_value": "left,right", "quote_value": "a \"quoted\" value"
+      },
+      "assertions": [
+        {"error": "false", "failure": "false", "name": "header & body"},
+        {"error": "false", "failure": "true", "failure_message": "expected \"needle\" in body, line 1", "name": "missing needle"}
+      ],
+      "sections": {
+        "responseHeader": "Content-Type: text/plain\nX-Trace: a&b",
+        "requestHeader": "X-Test: \"quoted\"\nAccept: text/plain",
+        "responseData": "JMeterVariables:\ncase_id=jtl-fields\ncomma_value=left,right",
+        "samplerData": "GET /a?x=1&y=2 HTTP/1.1\nHost: example.invalid"
+      },
+      "wire_children": {
+        "wire_child_order": ["assertionResult", "assertionResult", "httpSample", "responseHeader", "requestHeader", "responseData", "samplerData", "java.net.URL"],
+        "string_children_class": ["responseHeader", "requestHeader", "responseData", "samplerData"],
+        "assertion_child_elements": ["name", "failure", "error", "failureMessage"]
+      },
+      "sub_results": {
+        "count": 1,
+        "ordered_labels": ["redirect child"],
+        "nested": [{
+          "position": 0,
+          "element": "httpSample",
+          "attributes": {
+            "t": "13", "it": "0", "lt": "2", "ct": "4", "ts": "1700000000100",
+            "s": "true", "lb": "redirect child", "rc": "302", "rm": "Found",
+            "tn": "thread-1", "dt": "text", "de": "UTF-8", "by": "18", "sby": "0",
+            "sc": "1", "ec": "0", "case_id": "jtl-fields"
+          },
+          "sections": {"responseHeader": "Location: /next"},
+          "assertions": [{"error": "false", "failure": "false", "name": "child check"}],
+          "wire_children": {
+            "wire_child_order": ["assertionResult", "sample", "responseHeader"],
+            "string_children_class": ["responseHeader"],
+            "assertion_child_elements": ["name", "failure", "error", "failureMessage"]
+          },
+          "sub_results": {
+            "count": 1,
+            "ordered_labels": ["leaf"],
+            "nested": [{
+              "position": 0,
+              "element": "sample",
+              "attributes": {
+                "t": "2", "it": "0", "lt": "0", "ct": "0", "ts": "1700000000101",
+                "s": "true", "lb": "leaf", "rc": "200", "rm": "OK", "tn": "thread-1",
+                "dt": "text", "de": "UTF-8", "by": "4", "sby": "0", "sc": "1", "ec": "0"
+              },
+              "sections": {"samplerData": "leaf request"},
+              "wire_children": {
+                "wire_child_order": ["samplerData"],
+                "string_children_class": ["samplerData"]
+              }
+            }]
+          }
+        }]
+      },
+      "debug_response_projection": {
+        "required_sections": ["JMeterVariables:"],
+        "variables": {"case_id": "jtl-fields", "comma_value": "left,right"}
+      }
+    },
+    {
+      "position": 1,
+      "element": "sample",
+      "attributes": {
+        "t": "9", "it": "0", "lt": "0", "ct": "0", "ts": "1700000000200", "s": "true",
+        "lb": "standalone", "rc": "200", "rm": "OK", "tn": "thread-1", "dt": "text",
+        "de": "UTF-8", "by": "0", "sby": "0", "sc": "1", "ec": "0"
+      },
+      "assertions": [],
+      "sections": {},
+      "wire_children": {"wire_child_order": []}
+    }
+  ],
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "Every field in the original wire input is fixed. Sections and assertions are comparator-executable; failureMessage is optional per assertion, child order and String classes are per-sample, the java.net.URL element is kept separate from typed subresults, and responseFile is absent."
+  }
+}

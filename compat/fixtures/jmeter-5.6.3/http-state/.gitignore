@@ -1,0 +1,4 @@
+# Python bytecode is a local test by-product, never fixture evidence.
+__pycache__/
+__pycache__/*.pyc
+*.py[cod]

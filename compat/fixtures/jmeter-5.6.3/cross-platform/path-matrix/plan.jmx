@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Cross-platform path matrix" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="Path probes" enabled="true">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="relative_path" elementType="Argument">
+            <stringProp name="Argument.name">relative_path</stringProp>
+            <stringProp name="Argument.value">fixtures/data/input.txt</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="spaced_path" elementType="Argument">
+            <stringProp name="Argument.name">spaced_path</stringProp>
+            <stringProp name="Argument.value">fixtures/data with space/input.txt</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="unicode_path" elementType="Argument">
+            <stringProp name="Argument.name">unicode_path</stringProp>
+            <stringProp name="Argument.value">fixtures/données/雪.txt</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="case_path" elementType="Argument">
+            <stringProp name="Argument.name">case_path</stringProp>
+            <stringProp name="Argument.value">fixtures/case-probe/CaseProbe.txt</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="explicit_root" elementType="Argument">
+            <stringProp name="Argument.name">explicit_root</stringProp>
+            <stringProp name="Argument.value">fixtures</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="explicit_root_relative_path" elementType="Argument">
+            <stringProp name="Argument.name">explicit_root_relative_path</stringProp>
+            <stringProp name="Argument.value">explicit-root/input.txt</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="windows_separator" elementType="Argument">
+            <stringProp name="Argument.name">windows_separator</stringProp>
+            <stringProp name="Argument.value">\</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="windows_drive_absolute" elementType="Argument">
+            <stringProp name="Argument.name">windows_drive_absolute</stringProp>
+            <stringProp name="Argument.value">C:\fixture-root\data\input.txt</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="windows_drive_relative" elementType="Argument">
+            <stringProp name="Argument.name">windows_drive_relative</stringProp>
+            <stringProp name="Argument.value">C:fixture-root\data\input.txt</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="windows_unc" elementType="Argument">
+            <stringProp name="Argument.name">windows_unc</stringProp>
+            <stringProp name="Argument.value">\\server\share\fixture-root\data\input.txt</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="windows_relative_escape" elementType="Argument">
+            <stringProp name="Argument.name">windows_relative_escape</stringProp>
+            <stringProp name="Argument.value">..\outside.txt</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="posix_relative_escape" elementType="Argument">
+            <stringProp name="Argument.name">posix_relative_escape</stringProp>
+            <stringProp name="Argument.value">../outside.txt</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="windows_drive_escape" elementType="Argument">
+            <stringProp name="Argument.name">windows_drive_escape</stringProp>
+            <stringProp name="Argument.value">C:\outside.txt</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="unicode_path_nfd" elementType="Argument">
+            <stringProp name="Argument.name">unicode_path_nfd</stringProp>
+            <stringProp name="Argument.value">fixtures/données/雪.txt</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="opened_ascii" elementType="Argument">
+            <stringProp name="Argument.name">opened_ascii</stringProp>
+            <stringProp name="Argument.value">${__FileToString(fixtures/data/input.txt,,)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="opened_space" elementType="Argument">
+            <stringProp name="Argument.name">opened_space</stringProp>
+            <stringProp name="Argument.value">${__FileToString(fixtures/data with space/input.txt,,)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="opened_unicode" elementType="Argument">
+            <stringProp name="Argument.name">opened_unicode</stringProp>
+            <stringProp name="Argument.value">${__FileToString(fixtures/données/雪.txt,,)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="opened_case" elementType="Argument">
+            <stringProp name="Argument.name">opened_case</stringProp>
+            <stringProp name="Argument.value">${__FileToString(fixtures/case-probe/CaseProbe.txt,,)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="opened_explicit_root" elementType="Argument">
+            <stringProp name="Argument.name">opened_explicit_root</stringProp>
+            <stringProp name="Argument.value">${__FileToString(fixtures/explicit-root/input.txt,,)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+      <collectionProp name="TestPlan.thread_groups"/>
+      <stringProp name="TestPlan.comments">Original cross-platform path source; concrete open probes cover spaces, Unicode, case spelling, and explicit roots. Unicode and spaces are intentional.</stringProp>
+      <stringProp name="TestPlan.user_define_classpath"></stringProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="One bounded path user" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="One iteration" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">1</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">0</stringProp>
+        <longProp name="ThreadGroup.start_time">0</longProp>
+        <longProp name="ThreadGroup.end_time">0</longProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <stringProp name="ThreadGroup.duration"></stringProp>
+        <stringProp name="ThreadGroup.delay"></stringProp>
+      </ThreadGroup>
+      <hashTree>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="Path values are source data only" enabled="true">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">true</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

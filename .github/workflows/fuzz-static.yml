@@ -1,0 +1,95 @@
+# SPDX-License-Identifier: Apache-2.0
+
+name: Standalone fuzz static policy
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-static-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_NET_RETRY: "3"
+  CARGO_TERM_COLOR: always
+  CARGO_HOME: ${{ runner.temp }}/fuzz-cargo-home
+  CARGO_TARGET_DIR: ${{ runner.temp }}/fuzz-target
+  LANG: C
+  LC_ALL: C
+  RUST_BACKTRACE: short
+  TZ: UTC
+  FUZZ_LIBFUZZER_SYS_VERSION: "0.4.13"
+  FUZZ_CARGO_FUZZ_VERSION: "0.12.0"
+  FUZZ_CARGO_DENY_VERSION: "0.20.2"
+  FUZZ_CARGO_AUDIT_VERSION: "0.22.2"
+
+jobs:
+  static:
+    name: fuzz metadata / check / rustfmt / graph policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      # actions/checkout v7.0.1; tag verified against the official repository.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # actions-rust-lang/setup-rust-toolchain v1.17.0; tag verified against the official repository.
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: 1.97.1
+          components: rustfmt
+          cache: false
+          rustflags: ""
+      - name: Install exact static-policy tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$CARGO_HOME/bin:$PATH"
+          echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
+          cargo install --locked cargo-deny --version 0.20.2
+          cargo install --locked cargo-audit --version 0.22.2
+          # Install only to pin the future campaign tool. No cargo-fuzz
+          # build/run command is permitted in this static-only lane.
+          cargo install --locked cargo-fuzz --version 0.12.0
+      - name: Validate standalone fuzz metadata
+        run: cargo metadata --manifest-path fuzz/Cargo.toml --locked --format-version 1 --no-deps
+      - name: Assert standalone fuzz dependency pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          manifest = tomllib.loads(Path("fuzz/Cargo.toml").read_text(encoding="utf-8"))
+          dependency = manifest["dependencies"]["libfuzzer-sys"]
+          if dependency != "=0.4.13":
+              raise SystemExit(f"libfuzzer-sys pin changed: {dependency!r}")
+          print("libfuzzer-sys = 0.4.13")
+          PY
+      - name: Check standalone fuzz targets
+        run: cargo check --manifest-path fuzz/Cargo.toml --locked --bins
+      - name: Check standalone fuzz rustfmt
+        run: rustfmt --edition 2024 --check fuzz/fuzz_targets/*.rs
+      - name: Check standalone fuzz dependency policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          metadata="$RUNNER_TEMP/fuzz-metadata.json"
+          cargo metadata \
+            --manifest-path fuzz/Cargo.toml \
+            --locked \
+            --format-version 1 > "$metadata"
+          cargo-deny \
+            --metadata-path "$metadata" \
+            --config fuzz/deny.toml \
+            --graph "$RUNNER_TEMP/fuzz-deny" \
+            check
+      - name: Audit standalone fuzz lock graph
+        run: cargo audit --file fuzz/Cargo.lock --deny warnings

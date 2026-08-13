@@ -1,0 +1,34 @@
+# Dependency policy for jmeter-rs. Keep this file in sync with the current
+# ledger in docs/third-party-provenance.md before adding a production
+# dependency; historical research is context, not the release inventory.
+
+[graph]
+all-features = true
+# Audit test/tooling dependencies as well as normal dependencies. This is the
+# cargo-deny 0.20 spelling for including development dependencies.
+exclude-dev = false
+
+[advisories]
+version = 2
+
+[bans]
+# Keep any future duplicate-version resolution visible without making it a
+# release-blocking policy bypass.
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+
+[licenses]
+version = 2
+confidence-threshold = 0.8
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "Unicode-3.0",
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

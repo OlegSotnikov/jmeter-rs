@@ -1,0 +1,124 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-CROSS-PLATFORM-LINE-ENDINGS",
+  "format": "jmx-semantic",
+  "evidence_status": "planned",
+  "normalization_policy_refs": ["NORM-CONFIG-001", "NORM-ENV-001", "NORM-TIME-001", "NORM-EXTERNAL-001"],
+  "projection_schema": "line-ending-input-matrix",
+  "expectation_basis": "Original LF/CRLF bytes and a future parser-equivalence comparison; no result was measured.",
+  "projection_policy": {
+    "kind": "declarative-static-projection",
+    "jmx_semantic_role": "parser-input and wire-contract metadata, not a captured JMX/JTL result",
+    "runtime_observations": false,
+    "comparator_route": "static-descriptor",
+    "status": "planned"
+  },
+  "plan_materialization": {
+    "kind": "future-input-materialization",
+    "artifact_kind": "jmx-plan",
+    "materialization_id": "cross-platform-line-endings-plan",
+    "reference": "future-fixture://FX-CROSS-PLATFORM-001/line-endings/plan.jmx",
+    "typed_argv_token": "<materialize:jmx-plan:cross-platform-line-endings-plan>",
+    "status": "planned",
+    "required_before_execution": true,
+    "hash_required_before_evidence": true,
+    "source_plan_sha256": null
+  },
+  "matrix_status": "future-ci-targets-only",
+  "current_ci": {
+    "status": "not-configured",
+    "targets": [],
+    "runs_recorded": 0,
+    "note": "The six target rows below are future CI lane descriptors, not current parser evidence."
+  },
+  "target_matrix": [
+    {"target_os": "linux", "architecture": "x86_64", "target_triple": "x86_64-unknown-linux-gnu", "status": "planned", "run_status": "not-run"},
+    {"target_os": "linux", "architecture": "arm64", "target_triple": "aarch64-unknown-linux-gnu", "status": "planned", "run_status": "not-run"},
+    {"target_os": "macos", "architecture": "x86_64", "target_triple": "x86_64-apple-darwin", "status": "planned", "run_status": "not-run"},
+    {"target_os": "macos", "architecture": "arm64", "target_triple": "aarch64-apple-darwin", "status": "planned", "run_status": "not-run"},
+    {"target_os": "windows", "architecture": "x86_64", "target_triple": "x86_64-pc-windows-msvc", "status": "planned", "run_status": "not-run"},
+    {"target_os": "windows", "architecture": "arm64", "target_triple": "aarch64-pc-windows-msvc", "status": "planned", "run_status": "not-run"}
+  ],
+  "target_outcomes": [
+    {"target_os": "linux", "architecture": "x86_64", "target_triple": "x86_64-unknown-linux-gnu", "separator": "/", "line_endings": ["LF", "CRLF"], "charset_rows": ["UTF-8", "ISO-8859-1"], "status": "planned", "observed": false, "run_status": "not-run"},
+    {"target_os": "linux", "architecture": "arm64", "target_triple": "aarch64-unknown-linux-gnu", "separator": "/", "line_endings": ["LF", "CRLF"], "charset_rows": ["UTF-8", "ISO-8859-1"], "status": "planned", "observed": false, "run_status": "not-run"},
+    {"target_os": "macos", "architecture": "x86_64", "target_triple": "x86_64-apple-darwin", "separator": "/", "line_endings": ["LF", "CRLF"], "charset_rows": ["UTF-8", "ISO-8859-1"], "unicode_source_forms": ["NFC", "NFD"], "status": "planned", "observed": false, "run_status": "not-run"},
+    {"target_os": "macos", "architecture": "arm64", "target_triple": "aarch64-apple-darwin", "separator": "/", "line_endings": ["LF", "CRLF"], "charset_rows": ["UTF-8", "ISO-8859-1"], "unicode_source_forms": ["NFC", "NFD"], "status": "planned", "observed": false, "run_status": "not-run"},
+    {"target_os": "windows", "architecture": "x86_64", "target_triple": "x86_64-pc-windows-msvc", "separator": "\\", "line_endings": ["LF", "CRLF"], "charset_rows": ["UTF-8", "ISO-8859-1"], "newline_materialization": "preserve-byte-input-before-parser", "status": "planned", "observed": false, "run_status": "not-run"},
+    {"target_os": "windows", "architecture": "arm64", "target_triple": "aarch64-pc-windows-msvc", "separator": "\\", "line_endings": ["LF", "CRLF"], "charset_rows": ["UTF-8", "ISO-8859-1"], "newline_materialization": "preserve-byte-input-before-parser", "status": "planned", "observed": false, "run_status": "not-run"}
+  ],
+  "inputs": [
+    {
+      "id": "lf",
+      "path": "inputs/fixture-lf.properties",
+      "physical_line_ending": "LF",
+      "expected_source_bytes": "UTF-8 bytes with LF delimiters; exact digest is in the case/provenance manifests",
+      "semantic_projection": {"fixture.name": "cross-platform-line-endings", "fixture.path": "directory with space/input.txt", "fixture.unicode": "☃", "fixture.empty": ""},
+      "status": "planned"
+    },
+    {
+      "id": "crlf",
+      "path": "inputs/fixture-crlf.properties",
+      "physical_line_ending": "CRLF",
+      "expected_source_bytes": "UTF-8 bytes with CRLF delimiters; exact digest is in the case/provenance manifests",
+      "semantic_projection": {"fixture.name": "cross-platform-line-endings", "fixture.path": "directory with space/input.txt", "fixture.unicode": "☃", "fixture.empty": ""},
+      "status": "planned"
+    },
+    {
+      "id": "literal-utf8",
+      "path": "inputs/fixture-utf8.properties",
+      "physical_line_ending": "LF",
+      "source_charset": "UTF-8",
+      "expected_source_bytes": "Literal UTF-8 non-ASCII bytes; exact digest is in the case/provenance manifests",
+      "source_projection": {"fixture.name": "cross-platform-charset", "fixture.literal_utf8": "literal-雪-☃", "fixture.path": "directory with space/input.txt", "fixture.empty": ""},
+      "effective_value_status": "not-asserted-until-pinned-oracle",
+      "status": "planned"
+    }
+  ],
+  "charset_probes": [
+    {
+      "id": "literal-utf8",
+      "path": "inputs/fixture-utf8.properties",
+      "source_charset": "UTF-8",
+      "literal_non_ascii_key": "fixture.literal_utf8",
+      "literal_source_value": "literal-雪-☃",
+      "source_bytes_sha256": "ecc5044595affaf436a7fac2a638857ec9012bf162cc6d397f8b5e560d6e15ef",
+      "requested_charset": "UTF-8",
+      "expected_decoded_value": "not asserted until the pinned Java oracle run",
+      "status": "planned"
+    },
+    {
+      "id": "literal-utf8-under-iso-8859-1",
+      "path": "inputs/fixture-utf8.properties",
+      "source_charset": "UTF-8",
+      "literal_non_ascii_key": "fixture.literal_utf8",
+      "literal_source_value": "literal-雪-☃",
+      "source_bytes_sha256": "ecc5044595affaf436a7fac2a638857ec9012bf162cc6d397f8b5e560d6e15ef",
+      "requested_charset": "ISO-8859-1",
+      "expected_decoded_value": "not asserted; raw UTF-8 bytes must remain observable rather than being silently normalized",
+      "status": "planned"
+    }
+  ],
+  "future_command_inputs": ["inputs/fixture-lf.properties", "inputs/fixture-crlf.properties", "inputs/fixture-utf8.properties"],
+  "equivalence_contract": {
+    "expected": "LF and CRLF inputs expose the same ordered key/value source semantics after decoding",
+    "decoded_escape_contract": {"key": "fixture.unicode", "source_value": "\\u2603", "decoded_value": "☃", "status": "planned"},
+    "preserve_source_bytes": true,
+    "mixed_line_endings": {"status": "planned", "expected_error_code": "config-error", "stable_error_code": "config.invalid-operation", "note": "A future strict mode may reject mixed input; the oracle must decide and record it."},
+    "trailing_newline": {"status": "planned", "must_be_recorded": true}
+  },
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "Line-ending bytes and source encoding are the behavior under test. No host, time, process, or sample fields exist to normalize."
+  },
+  "generated_from": {
+    "generator": "Original jmeter-rs line-ending static inputs",
+    "generator_version": "not applicable",
+    "oracle_status": "not-run",
+    "oracle_command": "future pinned JMeter 5.6.3 parser recipe only; no process was started",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "ignored; no oracle artifacts collected"
+  }
+}

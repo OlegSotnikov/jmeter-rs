@@ -1,0 +1,63 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-PLUGIN-ELEMENT-FUNCTION-ALIAS",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored bounded disabled plugin elements with duplicate identity, literal plugin function text, primary/historical aliases, and unknown nested fields.",
+    "upstream_plan_copied": false,
+    "source_material": "Clean-room contract design from the active profile and plugin/JMX research; no upstream plan, source, class, plugin artifact, or function engine was copied."
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "The pinned Apache JMeter release is an external oracle reference only; no distribution, plugin JAR, Java class, source, or runtime output is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true,
+    "verification_scope": "Profile pin only; this static case intentionally performs no oracle execution."
+  },
+  "runtime": {
+    "java": {"vendor": null, "version": null, "vm": null, "major": null},
+    "target_triple": null,
+    "os_image": null,
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "not asserted; no process was run",
+    "environment_allowlist": ["LC_ALL=C", "LANG=C", "TZ=UTC"],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": null,
+    "classpath_artifact_sha512": null,
+    "classpath_status": "not measured; no JMeter, JVM, plugin, or function classpath was materialized"
+  },
+  "inputs": {
+    "plan_sha256": "b1faf9d6d9c2da27e95a38c3a065d3aeb9071ab333187c2ce100a43a735d2216",
+    "property_sha256": "08462fd79cc3a593f4242429f1a6acd246277cd28afc569da36670b5f4a26410",
+    "input_files": [
+      {"path": "inputs/alias-contract.json", "sha256": "88d917dcb318f61d5b3f750b0fae028d04f66bfbe17b2b21ab1d1e24fbbd33cf", "max_bytes": 8192}
+    ],
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  },
+  "oracle_execution": {
+    "performed": false,
+    "status": "not-run-static",
+    "process_exit": null,
+    "sample_count": null,
+    "reason": "Static corpus task forbids Java/JMeter/plugin/function/process/network execution.",
+    "raw_artifacts": "none"
+  }
+}

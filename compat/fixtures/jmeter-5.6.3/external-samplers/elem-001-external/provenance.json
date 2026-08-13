@@ -1,0 +1,72 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-ELEMENTS-EXTERNAL-ELEM-001",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored bounded JMX and property corpus with pinned 5.6.3 wire identities for the non-HTTP ELEM-001 samplers: FTP, JDBC, Java, LDAP, LDAP Extended, and TCP. Direct property inventories are minimal-authored and do not claim exhaustive optional fields.",
+    "upstream_plan_copied": false,
+    "source_material": "Clean-room fixture design from the profile, compatibility-surface component inventory, and upstream-semantics external-boundary rules; no upstream plan, source, driver, or service artifact was copied."
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "The pinned Apache JMeter distribution is an external oracle reference only; no upstream plan, result, binary, Java class, plugin, driver, or service output is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true,
+    "verification_scope": "Profile provenance only; this static case intentionally performs no oracle execution."
+  },
+  "runtime": {
+    "java": {
+      "vendor": "not invoked",
+      "version": "not invoked",
+      "vm": "not invoked",
+      "major": null
+    },
+    "target_triple": "not asserted; static-only case",
+    "os_image": "not asserted; static-only case",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "not asserted; no process was run",
+    "environment_allowlist": ["LC_ALL=C", "LANG=C", "TZ=UTC"],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "driver_artifacts": [],
+    "service_images": [],
+    "jmeter_classpath": "profile-pinned distribution not invoked",
+    "classpath_artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076"
+  },
+  "external_requirements": {
+    "service_or_driver_versions": "required-but-not-pinned",
+    "licenses": "required-but-not-recorded",
+    "checksums": "required-but-not-recorded",
+    "fixture_provenance": "required-but-not-recorded",
+    "credential_policy": "none; placeholders only",
+    "network_used": false
+  },
+  "inputs": {
+    "plan_sha256": "7582edbeb62131a862053776d9f79d0c670aa976b46410ce60ccde5f97c4f085",
+    "property_sha256": "0d522f2bcae5f9077b6fab378ea16b5a7c2028684554d5c382f54753e8372a77",
+    "expected_sha256": "7e65506d0b1dd1780ebd0578075007107a29542b4e4130b79053f2d2a12cd99f",
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  },
+  "oracle_execution": {
+    "performed": false,
+    "reason": "Static corpus task explicitly forbids Java/JMeter/JVM, external service, network, and subprocess execution.",
+    "raw_artifacts": "none"
+  }
+}

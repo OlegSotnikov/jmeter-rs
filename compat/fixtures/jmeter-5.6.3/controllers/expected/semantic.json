@@ -1,0 +1,44 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-CONTROLLERS",
+  "format": "jtl-xml",
+  "evidence_status": "external-raw-observation",
+  "rust_conformance_claim": false,
+  "expectation_basis": "Recorded Apache JMeter 5.6.3 XML output retained as external raw observation; no Rust output was compared and CSV/JTL-003 behavior is not claimed.",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 7,
+  "ordered_labels": ["simple-a", "loop", "loop", "once", "interleave-a", "simple-a", "interleave-b"],
+  "sample_contract": {
+    "attributes": {
+      "s": "true",
+      "rc": "200",
+      "rm": "OK",
+      "tn": "Two iterations 1-1",
+      "dt": "text",
+      "de": "US-ASCII",
+      "sby": "0",
+      "sc": "1",
+      "ec": "0",
+      "ng": "1",
+      "na": "1"
+    },
+    "ignored_attributes": ["t", "by", "it", "lt", "ct", "ts"]
+  },
+  "generated_from": {
+    "status": "external-raw-observation",
+    "rust_conformance_claim": false,
+    "comparator_ready": false,
+    "generator": "Apache JMeter",
+    "generator_version": "5.6.3",
+    "random_seed": null,
+    "oracle_command": "env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C LANG=C TZ=UTC jmeter-oracle-cache/apache-jmeter-5.6.3/bin/jmeter -n -q compat/fixtures/jmeter-5.6.3/controllers/oracle.properties -t compat/fixtures/jmeter-5.6.3/controllers/plan.jmx -l oracle-runs/controllers/oracle.jtl -j oracle-runs/controllers/oracle.log",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "oracle-runs/controllers/ (ignored; local evidence only)"
+  },
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.ts", "sample.by"],
+    "reason": "Debug Samplers are local fast operations and no controlled clock is part of this case; ordered controller events and all result identity/status fields remain exact."
+  }
+}

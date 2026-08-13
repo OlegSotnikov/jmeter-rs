@@ -1,0 +1,137 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-GUI-STATIC-GUICLASS",
+  "evidence_status": "not-run",
+  "normalization_policy_refs": ["NORM-JMX-001", "NORM-STRUCTURE-001", "NORM-EXTERNAL-001"],
+  "source": {
+    "kind": "original-static-descriptor",
+    "oracle_status": "not-run",
+    "runtime_observations": false,
+    "note": "No Java, JMeter, JVM, GUI, display server, or subprocess was run while creating this corpus."
+  },
+  "validation_contract": {
+    "contract_version": 1,
+    "comparator_enforced": false,
+    "comparator_id": null,
+    "comparator_route": "static-descriptor",
+    "validator_scope": "static schema, profile-reference, XML topology, disabled-content, and input-hash checks only",
+    "comparator_scope": "JMX GUI round-trip comparison is not implemented; this descriptor is a declarative preservation contract, not captured saved JMX evidence",
+    "activation": "Enable comparison only after a dedicated JMX GUI comparator and pinned oracle evidence are recorded."
+  },
+  "status": "planned; static expectation only",
+  "format": "jmx-semantic",
+  "root": {
+    "element": "jmeterTestPlan",
+    "attributes": {
+      "version": "1.2",
+      "properties": "5.0",
+      "jmeter": "5.6.3"
+    },
+    "ordered_children": ["hashTree"]
+  },
+  "ordered_hash_tree_pairs": [
+    {
+      "path": "hashTree/TestPlan",
+      "tag": "TestPlan",
+      "guiclass": "TestPlanGui",
+      "testclass": "TestPlan",
+      "testname": "GUI static preservation plan",
+      "enabled": "true",
+      "child_pairs": ["ThreadGroup"]
+    },
+    {
+      "path": "hashTree/TestPlan/hashTree/ThreadGroup",
+      "tag": "ThreadGroup",
+      "guiclass": "ThreadGroupGui",
+      "testclass": "ThreadGroup",
+      "testname": "GUI static thread group",
+      "enabled": "false",
+      "child_pairs": ["HTTPSamplerProxy", "ResultCollector"]
+    },
+    {
+      "path": "hashTree/TestPlan/hashTree/ThreadGroup/hashTree/HTTPSamplerProxy",
+      "tag": "HTTPSamplerProxy",
+      "guiclass": "HttpTestSampleGui",
+      "testclass": "HTTPSamplerProxy",
+      "testname": "GUI static disabled sampler",
+      "enabled": "false",
+      "child_pairs": []
+    },
+    {
+      "path": "hashTree/TestPlan/hashTree/ThreadGroup/hashTree/ResultCollector",
+      "tag": "ResultCollector",
+      "guiclass": "ViewResultsFullVisualizer",
+      "testclass": "ResultCollector",
+      "testname": "GUI static disabled results tree",
+      "enabled": "false",
+      "child_pairs": []
+    }
+  ],
+  "nested_gui_attributes": [
+    {
+      "path": "hashTree/TestPlan/hashTree/ThreadGroup/ThreadGroup.main_controller",
+      "tag": "elementProp",
+      "guiclass": "LoopControlPanel",
+      "testclass": "LoopController",
+      "testname": "One iteration",
+      "enabled": "true"
+    }
+  ],
+  "opaque_properties": [
+    {
+      "path": "hashTree/TestPlan/hashTree/ThreadGroup/hashTree/HTTPSamplerProxy",
+      "name": "jmeter-rs.gui.opaque.disabled",
+      "type": "stringProp",
+      "value": "Opaque & <unknown> café 雪",
+      "enabled_ancestor": "false"
+    }
+  ],
+  "preservation_rules": [
+    "Every guiclass, testclass, testname, and enabled attribute is retained on load/save, including the nested LoopController.",
+    "The source contains an empty WorkBench pair, but JMeter 5.6.3 discards an empty WorkBench when loading into the GUI tree; the saved tree therefore has no WorkBench sibling.",
+    "Typed properties retain insertion order, explicit empty values, XML-decoded Unicode, and the disabled sampler subtree.",
+    "The disabled sampler carries the opaque jmeter-rs.gui.opaque.disabled stringProp as a no-drop probe; it is not a plugin property and its XML-decoded value must remain exact.",
+    "The comparator ignores only XML lexical whitespace and empty-element spelling; it does not normalize GUI class names or node order."
+  ],
+  "workbench_source_behavior": {
+    "source_path": "hashTree/WorkBench",
+    "source_child_pairs": [],
+    "empty_outcome": "discarded during JMeterTreeModel.addSubTree; no saved WorkBench sibling",
+    "nonempty_case": "../workbench-migration/plan.jmx",
+    "nonempty_outcome": "migrated into TestPlan as disabled WorkBench Test Fragment or disabled non-test child according to pinned GUI classification",
+    "pinned_source": "JMeter 5.6.3 JMeterTreeModel.addSubTree/moveWorkBenchToTestPlan"
+  },
+  "headless_contract": {
+    "parser_mode": "-n",
+    "display_required": false,
+    "source_gui_metadata": "retain guiclass/testclass/testname/enabled and unknown properties",
+    "gui_settings_observable": false,
+    "sampler_execution": "disabled in source plan",
+    "status": "planned; no headless process was run"
+  },
+  "bounds": {
+    "max_plan_bytes": 65536,
+    "max_plan_nodes": 32,
+    "max_plan_depth": 8,
+    "max_property_text_bytes": 8192,
+    "max_property_count_per_element": 32,
+    "max_backup_files": 10,
+    "max_template_files": 4,
+    "max_template_entries": 64,
+    "max_toolbar_entries": 64,
+    "max_output_bytes": 65536,
+    "max_log_bytes": 65536,
+    "max_gui_wait_seconds": 30
+  },
+  "normalization": {
+    "ignored_fields": ["xml_lexical_whitespace", "xml_empty_element_spelling"],
+    "required_fields": ["guiclass", "testclass", "testname", "enabled", "ordered_hash_tree_pairs"]
+  },
+  "oracle_observation": {
+    "performed": false,
+    "status": "planned; not observed",
+    "required_before_promotion": "JMeter 5.6.3 GUI load/save on Linux, Windows, and macOS plus headless parser diagnostics"
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-CROSS-PLATFORM-PATHS",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-CROSS-PLATFORM-001",
+  "conformance_ids": ["CFG-003", "TEST-005"],
+  "normalization_policy_refs": ["NORM-CONFIG-001", "NORM-ENV-001", "NORM-TIME-001", "NORM-EXTERNAL-001"],
+  "external_runtime_boundary_ids": ["EXT-OS-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "bb88888f07554ca935f8452263add306e23ebe7d69dedb4cecd933667eaf3a43"
+  },
+  "property_files": [
+    {"path": "oracle.properties", "sha256": "00bd918673ec439c77d779593d950e8d612997febf6ac3a770a49ab4614bafda"}
+  ],
+  "probes": [
+    {"path": "fixtures/data/input.txt", "sha256": "086cb5cf2d6a81adf6006747a49235c99ab2cd7b2497886768f7d4a7b3afd1a9"},
+    {"path": "fixtures/data with space/input.txt", "sha256": "cc53837b6212d212f4ee75fae2dc07121ed620a67d57458a9371d9bab99e6485"},
+    {"path": "fixtures/données/雪.txt", "sha256": "140a236dbd9bc459a4f1f6183c755ea167f269634a95b45b9268b3d06bf2f2c3"},
+    {"path": "fixtures/case-probe/CaseProbe.txt", "sha256": "9d95eb53ae2b7384d145ed393ee314e15baa0ffd342794f96d797cd42c4cbfd5"},
+    {"path": "fixtures/explicit-root/input.txt", "sha256": "17210213f49c08f26939500d5c998c6866d01ef7f078fde5462525942d77bcec"}
+  ],
+  "descriptor": {
+    "path": "expected/semantic.json",
+    "sha256": "41fffd440dabed5454137be1623df8c412599f0c6c392265b0dbfd6adbb0a537",
+    "kind": "static-semantic-projection"
+  },
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/cross-platform/path-matrix",
+    "mode": "nongui",
+    "argv_templates": [
+      ["<jmeter-home>/bin/jmeter", "-n", "-q", "oracle.properties", "-t", "plan.jmx", "-l", "<ignored>/oracle.jtl", "-j", "<ignored>/oracle.log"]
+    ],
+    "network": "none",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": 20260812,
+    "environment_allowlist": []
+  },
+  "execution": {
+    "status": "planned",
+    "process_exit": null,
+    "process_exit_asserted": false,
+    "sample_count_asserted": false,
+    "raw_artifacts": "ignored; no Java/JMeter process or oracle artifacts were collected",
+    "expected": "expected/semantic.json"
+  },
+  "matrix_axes": {
+    "operating_systems": ["linux", "macos", "windows"],
+    "architectures": ["x86_64", "arm64"],
+    "target_matrix": [
+      {"target_os": "linux", "architecture": "x86_64", "target_triple": "x86_64-unknown-linux-gnu"},
+      {"target_os": "linux", "architecture": "arm64", "target_triple": "aarch64-unknown-linux-gnu"},
+      {"target_os": "macos", "architecture": "x86_64", "target_triple": "x86_64-apple-darwin"},
+      {"target_os": "macos", "architecture": "arm64", "target_triple": "aarch64-apple-darwin"},
+      {"target_os": "windows", "architecture": "x86_64", "target_triple": "x86_64-pc-windows-msvc"},
+      {"target_os": "windows", "architecture": "arm64", "target_triple": "aarch64-pc-windows-msvc"}
+    ],
+    "matrix_status": "future-ci-targets-only",
+    "current_ci": {"status": "not-configured", "targets": [], "runs_recorded": 0},
+    "path_forms": ["relative", "space", "unicode", "unicode-nfc", "unicode-nfd", "case", "explicit-root", "raw-non-unicode-bytes", "windows-drive", "windows-unc"],
+    "path_separators": ["/", "\\"],
+    "separator_contract": "Each target_separator value is one decoded path-separator scalar; the Windows value is exactly one backslash.",
+    "jmx_wire_probe_ids": ["windows-separator", "windows-drive-absolute", "windows-drive-relative", "windows-unc", "windows-relative-escape", "posix-relative-escape", "windows-drive-escape", "unicode-nfd"],
+    "target_outcomes_ref": "expected/semantic.json#/target_outcomes",
+    "unicode_normalization_contract_ref": "expected/semantic.json#/unicode_normalization_contract",
+    "root_escape_cases_ref": "expected/semantic.json#/root_escape_cases",
+    "case_sensitivity": "target-specific policy rows; no host assumption",
+    "root_policy": {
+      "root_id": "fixture-root",
+      "root_path": "fixtures",
+      "allowlist": ["fixtures"],
+      "escape_behavior": "reject and retain the requested path with config.outside-root",
+      "windows_drive_behavior": "reject drive-qualified absolute and drive-relative paths before joining the allowlisted root",
+      "windows_unc_behavior": "reject UNC paths before joining the allowlisted root",
+      "unicode_behavior": "preserve the source scalar sequence and record NFC/NFD lookup separately; never normalize silently",
+      "status": "planned"
+    }
+  },
+  "static_descriptor_routing": {
+    "kind": "declarative-only",
+    "plan_required": true,
+    "descriptor_ref": "expected/semantic.json#/projection_policy",
+    "oracle_route": "future-jmx-wire-and-filesystem-matrix",
+    "runtime_observations": false,
+    "status": "planned"
+  },
+  "limitations": [
+    "This is an original source plan, concrete repository-owned open-probe corpus, and static path capability projection; no Java, JMeter, Rust engine, subprocess, network, or filesystem matrix run was performed.",
+    "The path strings containing a backslash occur only as matrix data in the expectation; repository file references remain safe forward-slash relative paths.",
+    "The concrete probes cover opening files with spaces and Unicode components, an alternate case spelling, and an allowlisted explicit root. Results remain target- and filesystem-policy-dependent and are planned, not observed.",
+    "Raw non-Unicode-byte path handling is represented by a bounded hex payload in the expectation. A future adapter must return the declared stable unsupported-capability diagnostic or document a pinned byte-path representation; it must not silently reinterpret bytes as UTF-8.",
+    "The six target rows describe future CI lanes. No current CI target, target availability, or cross-platform run is recorded by this case.",
+    "No process exit, sample count, timing, throughput, allocation, or target availability is asserted."
+  ]
+}

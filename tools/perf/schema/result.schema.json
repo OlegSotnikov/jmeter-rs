@@ -1,0 +1,537 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/OlegSotnikov/jmeter-rs/blob/main/tools/perf/schema/result.schema.json",
+  "x-schema-id": "jmeter-rs.perf-result",
+  "x-schema-version": 3,
+  "title": "jmeter-rs performance run result",
+  "description": "A bounded result envelope. A dry-run result deliberately contains no measurements and cannot claim that thresholds passed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "status",
+    "config_id",
+    "config_sha256",
+    "kind",
+    "compatibility",
+    "future_evidence",
+    "metadata",
+    "planned_actions",
+    "measurements",
+    "thresholds",
+    "leak_sampling",
+    "safety"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "jmeter-rs.perf-result"
+    },
+    "schema_version": {
+      "const": 3
+    },
+    "status": {
+      "enum": [
+        "dry-run",
+        "completed",
+        "failed"
+      ]
+    },
+    "config_id": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-z0-9][a-z0-9-]{2,63}$"
+    },
+    "config_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "kind": {
+      "enum": [
+        "micro",
+        "macro",
+        "soak"
+      ]
+    },
+    "future_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_id",
+        "schema_version",
+        "status"
+      ],
+      "properties": {
+        "schema_id": {
+          "const": "jmeter-rs.perf-evidence"
+        },
+        "schema_version": {
+          "const": 1
+        },
+        "status": {
+          "const": "not-generated"
+        }
+      }
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_id",
+        "feature_ids",
+        "fixture_id",
+        "fixture_ids",
+        "normalization_policy_refs"
+      ],
+      "properties": {
+        "profile_id": {
+          "const": "jmeter-5.6.3"
+        },
+        "feature_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z]+-[0-9]{3}$"
+          }
+        },
+        "fixture_id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^FX-[A-Z0-9-]+$"
+        },
+        "fixture_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^FX-[A-Z0-9-]+$"
+          }
+        },
+        "normalization_policy_refs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^NORM-[A-Z0-9-]+$"
+          }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seed",
+        "locale",
+        "timezone",
+        "charset",
+        "target_os",
+        "target_arch",
+        "target_triple",
+        "os_image_id",
+        "os_image_reference",
+        "os_image_reference_sha256",
+        "os_image_artifact_digest_sha256",
+        "rust_toolchain",
+        "rust_toolchain_sha256",
+        "cargo_lock_sha256",
+        "source_date_epoch",
+        "environment_allowlist",
+        "clock_mode",
+        "collection_state",
+        "fixture_family_id",
+        "fixture_path",
+        "fixture_sha256",
+        "case_id",
+        "case_manifest_path",
+        "case_manifest_sha256",
+        "orchestrator_id",
+        "source_commit",
+        "repository_state"
+      ],
+      "properties": {
+        "seed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "locale": {
+          "const": "en-US"
+        },
+        "timezone": {
+          "const": "UTC"
+        },
+        "charset": {
+          "const": "UTF-8"
+        },
+        "target_os": {
+          "enum": [
+            "linux",
+            "windows",
+            "macos"
+          ]
+        },
+        "target_arch": {"enum": ["x86_64", "aarch64"]},
+        "target_triple": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "os_image_id": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128
+        },
+        "os_image_reference": {"type": "string", "maxLength": 256, "pattern": "^[A-Za-z0-9._:/@+-]{1,255}$"},
+        "os_image_reference_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "os_image_artifact_digest_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "rust_toolchain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "rust_toolchain_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "cargo_lock_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "source_date_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4102444800
+        },
+        "environment_allowlist": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z_][A-Z0-9_]{0,63}$"
+          }
+        },
+        "clock_mode": {
+          "enum": [
+            "controlled-fixture",
+            "monotonic-only"
+          ]
+        },
+        "collection_state": {
+          "enum": [
+            "not-collected",
+            "collected"
+          ]
+        },
+        "fixture_family_id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^FX-[A-Z0-9-]+$"
+        },
+        "fixture_path": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^compat/fixtures/[^/].*",
+          "not": {"pattern": "(^|/)\\.\\.?(/|$)"}
+        },
+        "fixture_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "case_id": {"type": "string", "maxLength": 128, "pattern": "^ORACLE-[A-Z0-9-]+$"},
+        "case_manifest_path": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^compat/fixtures/[^/].*",
+          "not": {"pattern": "(^|/)\\.\\.?(/|$)"}
+        },
+        "case_manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "orchestrator_id": {
+          "const": "tools/perf/orchestrator.py@1"
+        },
+        "source_commit": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "repository_state": {
+          "enum": [
+            "working-tree",
+            "committed"
+          ]
+        }
+      }
+    },
+    "planned_actions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100000,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind",
+          "enabled",
+          "performed",
+          "requires_process",
+          "owner"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "pattern": "^[a-z0-9][a-z0-9-]{2,63}$"
+          },
+          "kind": {
+            "enum": [
+              "operation",
+              "child",
+              "container",
+              "metric-sample",
+              "threshold-evaluation"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "performed": {
+            "const": false
+          },
+          "requires_process": {
+            "type": "boolean"
+          },
+          "owner": {
+            "enum": [
+              "in-process-plan",
+              "owned-child-handle",
+              "owned-container-id",
+              "runner"
+            ]
+          }
+        }
+      }
+    },
+    "measurements": {
+      "type": "array",
+      "maxItems": 10000000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "metric",
+          "value",
+          "unit",
+          "scope"
+        ],
+        "properties": {
+          "metric": {
+            "type": "string",
+            "maxLength": 96,
+            "pattern": "^[a-z][a-z0-9_.]{2,95}$"
+          },
+          "value": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000000000000000
+          },
+          "unit": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          },
+          "scope": {
+            "enum": [
+              "run",
+              "steady-state",
+              "final-window"
+            ]
+          }
+        }
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "evaluated",
+        "results"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "not-evaluated",
+            "passed",
+            "failed"
+          ]
+        },
+        "evaluated": {
+          "const": false
+        },
+        "results": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "status"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[a-z0-9][a-z0-9-]{2,63}$"
+              },
+              "status": {
+                "const": "not-evaluated"
+              }
+            }
+          }
+        }
+      }
+    },
+    "leak_sampling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "sample_count",
+        "samples",
+        "growth_status"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "not-collected",
+            "collected"
+          ]
+        },
+        "sample_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000000
+        },
+        "samples": {
+          "type": "array",
+          "maxItems": 1000000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sequence",
+              "monotonic_ns",
+              "values"
+            ],
+            "properties": {
+              "sequence": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10000000
+              },
+              "monotonic_ns": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000000000000000
+              },
+              "values": {
+                "type": "object",
+                "maxProperties": 64,
+                "additionalProperties": {
+                  "type": "number",
+                  "maximum": 1000000000000000,
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "growth_status": {
+          "enum": [
+            "not-evaluated",
+            "passed",
+            "failed"
+          ]
+        }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "execution_performed",
+        "subprocesses_spawned",
+        "services_started",
+        "containers_started",
+        "children_reaped",
+        "safety_checks"
+      ],
+      "properties": {
+        "execution_performed": {
+          "const": false
+        },
+        "subprocesses_spawned": {
+          "const": 0
+        },
+        "services_started": {
+          "const": 0
+        },
+        "containers_started": {
+          "const": 0
+        },
+        "children_reaped": {
+          "const": 0
+        },
+        "safety_checks": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "status"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[a-z0-9][a-z0-9-]{2,63}$"
+              },
+              "status": {
+                "const": "pass"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "completed"}}},
+      "then": {
+        "properties": {
+          "metadata": {
+            "properties": {
+              "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+              "repository_state": {"const": "committed"},
+              "collection_state": {"const": "collected"}
+            }
+          }
+        }
+      }
+    }
+  ]
+}

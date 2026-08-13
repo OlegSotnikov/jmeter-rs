@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jmeter-rs.invalid/schemas/harness-normalized-diff.schema.json",
+  "title": "jmeter-rs bounded normalized JTL comparison diff",
+  "description": "A bounded harness envelope for the structured_diff emitted by tools/jmeter-oracle/src/compare.rs::CompareReport. Ignored fields are declared separately; differences contain only comparator fields and never fabricate observations.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "case_id",
+    "profile_id",
+    "fixture_family_id",
+    "evidence_status",
+    "source_only",
+    "example_only",
+    "status",
+    "normalization_policy_refs",
+    "ignored_fields",
+    "ignored_line_patterns",
+    "differences",
+    "difference_count",
+    "retained_outside_git"
+  ],
+  "properties": {
+    "schema_id": {"const": "jmeter-rs.harness-normalized-diff"},
+    "schema_version": {"const": 1},
+    "case_id": {"const": "ORACLE-JMETER-563-HARNESS-REPRODUCIBILITY"},
+    "profile_id": {"const": "jmeter-5.6.3"},
+    "fixture_family_id": {"const": "FX-HARNESS-001"},
+    "evidence_status": {"enum": ["example-only", "not-run", "not-run-static", "unavailable-static", "observed"]},
+    "source_only": {"type": "boolean"},
+    "example_only": {"type": "boolean"},
+    "status": {"enum": ["example-only", "not-produced", "observed"]},
+    "normalization_policy_refs": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "NORM-STRUCTURE-001",
+          "NORM-JMX-001",
+          "NORM-JTL-001",
+          "NORM-TIME-001",
+          "NORM-CLI-001",
+          "NORM-CONFIG-001",
+          "NORM-ENV-001",
+          "NORM-REPORT-001",
+          "NORM-EXTERNAL-001",
+          "NORM-SECURITY-001"
+        ]
+      }
+    },
+    "ignored_fields": {
+      "type": "array",
+      "maxItems": 128,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 512}
+    },
+    "ignored_line_patterns": {
+      "type": "array",
+      "maxItems": 128,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 512}
+    },
+    "differences": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {"$ref": "#/$defs/difference"}
+    },
+    "difference_count": {
+      "anyOf": [
+        {"type": "null"},
+        {"type": "integer", "minimum": 0, "maximum": 128}
+      ]
+    },
+    "raw_reference": {
+      "anyOf": [
+        {"type": "null"},
+        {"type": "string", "pattern": "^oracle-runs/(?!/)(?!.*\\\\)(?!\\.\\.?/)(?!.*/\\.\\.?/)(?!.*/\\.\\.?$).+$"}
+      ]
+    },
+    "retained_outside_git": {"type": "boolean"},
+    "limitations": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {"type": "string", "minLength": 1, "maxLength": 4096}
+    }
+  },
+  "$defs": {
+    "boundedValue": {
+      "anyOf": [
+        {"type": "null"},
+        {"type": "boolean"},
+        {"type": "number"},
+        {"type": "string", "maxLength": 512},
+        {
+          "type": "array",
+          "maxItems": 16,
+          "items": {"$ref": "#/$defs/boundedValue"}
+        },
+        {
+          "type": "object",
+          "maxProperties": 32,
+          "additionalProperties": {"$ref": "#/$defs/boundedValue"}
+        }
+      ]
+    },
+    "difference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "kind", "expected", "actual"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^/", "maxLength": 512},
+        "kind": {"enum": ["missing", "unexpected", "changed"]},
+        "expected": {"$ref": "#/$defs/boundedValue"},
+        "actual": {"$ref": "#/$defs/boundedValue"}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "example-only"}}},
+      "then": {
+        "properties": {
+          "evidence_status": {"enum": ["example-only", "not-run", "not-run-static"]},
+          "source_only": {"const": true},
+          "example_only": {"const": true},
+          "raw_reference": {"type": "null"},
+          "retained_outside_git": {"const": false},
+          "difference_count": {"type": "integer", "minimum": 0, "maximum": 128}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "not-produced"}}},
+      "then": {
+        "properties": {
+          "example_only": {"const": false},
+          "source_only": {"const": true},
+              "differences": {"maxItems": 0},
+              "ignored_fields": {"maxItems": 0},
+              "ignored_line_patterns": {"maxItems": 0},
+              "difference_count": {"type": "null"},
+          "raw_reference": {"type": "null"},
+          "retained_outside_git": {"const": false}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "observed"}}},
+      "then": {
+        "required": ["raw_reference"],
+        "properties": {
+          "evidence_status": {"const": "observed"},
+          "source_only": {"const": false},
+          "example_only": {"const": false},
+          "raw_reference": {"type": "string", "pattern": "^oracle-runs/(?!/)(?!.*\\\\)(?!\\.\\.?/)(?!.*/\\.\\.?/)(?!.*/\\.\\.?$).+$"},
+          "retained_outside_git": {"const": true},
+          "difference_count": {"type": "integer", "minimum": 0, "maximum": 128}
+        }
+      }
+    }
+  ]
+}

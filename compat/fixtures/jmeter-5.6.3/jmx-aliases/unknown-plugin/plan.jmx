@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Unknown extension preservation" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <stringProp name="fixture.before">before-plugin</stringProp>
+      <stringProp name="fixture.after">after-plugin</stringProp>
+    </TestPlan>
+    <hashTree>
+      <PluginSampler guiclass="com.example.jmeter.PluginSamplerGui" testclass="com.example.jmeter.PluginSampler" testname="Unknown plug-in &lt;α&gt;" enabled="true" pluginVersion="0.1" custom="retain-me">
+        <stringProp name="plugin.known">known &amp; value</stringProp>
+        <pluginProperty name="plugin.opaque" encoding="raw">opaque &amp; property &lt;bytes&gt;</pluginProperty>
+        <!-- This comment is inside the opaque plugin subtree. -->
+        <pluginExtension format="nested" marker="α">
+          <opaqueChild key="one"><![CDATA[raw <plugin> bytes]]></opaqueChild>
+        </pluginExtension>
+        <objProp name="plugin.object">
+          <value type="com.example.jmeter.PluginBytes" encoding="utf-8" extra="preserve">opaque object &amp; bytes</value>
+        </objProp>
+        <elementProp name="plugin.config" elementType="com.example.jmeter.PluginConfig" custom="yes">
+          <pluginNested foo="bar">
+            <opaque value="1"/>
+          </pluginNested>
+          <stringProp name="plugin.config.known">nested known</stringProp>
+        </elementProp>
+      </PluginSampler>
+      <hashTree>
+        <PluginChild guiclass="com.example.jmeter.PluginChildGui" testclass="com.example.jmeter.PluginChild" testname="Opaque child" enabled="false" childFlag="keep">
+          <pluginChildProperty name="child.raw">child &amp; raw</pluginChildProperty>
+        </PluginChild>
+        <hashTree/>
+      </hashTree>
+      <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="Known sibling after plugin" enabled="false">
+        <boolProp name="displayJMeterProperties">false</boolProp>
+        <boolProp name="displayJMeterVariables">false</boolProp>
+        <boolProp name="displaySystemProperties">false</boolProp>
+      </DebugSampler>
+      <hashTree/>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

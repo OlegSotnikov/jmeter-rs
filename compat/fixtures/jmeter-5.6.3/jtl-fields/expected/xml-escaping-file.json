@@ -1,0 +1,55 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JTL-FIELDS",
+  "format": "jtl-xml",
+  "contract_kind": "jmeter-writer-wire",
+  "projection_schema": "neutral-xml-v1",
+  "evidence_status": "planned",
+  "expectation_basis": "Hand-authored projection of inputs/xml/escaping-and-file.xml; no Apache JMeter output was measured.",
+  "writer_configuration": "oracle-xml.properties",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 1,
+  "wire_contract": {
+    "sample_variable_attributes": {
+      "spelling": "exact-configured-name",
+      "configured_names": ["case_id", "comma_value"],
+      "underscore_doubling": false
+    },
+    "string_children": [
+      {"element": "responseData", "class": "java.lang.String"},
+      {"element": "responseFile", "class": "java.lang.String"}
+    ],
+    "url_child": {"element": "java.net.URL", "class": null},
+    "child_order": ["responseData", "responseFile", "java.net.URL"],
+    "wire_order": ["responseData", "responseFile", "java.net.URL"],
+    "response_file": {
+      "enabled": true,
+      "expected": true,
+      "resource_reference": "results/body.txt"
+    }
+  },
+  "samples": [{
+    "position": 0,
+    "element": "httpSample",
+    "attributes": {
+      "t": "1", "s": "true", "lb": "label & \"quoted\"", "rc": "200",
+      "rm": "OK <ready>", "dt": "text", "de": "UTF-8", "case_id": "jtl-fields",
+      "comma_value": "left,right"
+    },
+    "assertions": [],
+    "sections": {
+      "responseData": "body <tag> & text",
+      "responseFile": "results/body.txt"
+    },
+    "wire_children": {
+      "wire_child_order": ["responseData", "responseFile", "java.net.URL"],
+      "string_children_class": ["responseData", "responseFile"]
+    }
+  }],
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "Entities, String classes, URL child, responseData, and responseFile are fixed at the XML wire boundary; responseFile is expected only because filename saving is enabled in oracle-xml.properties."
+  }
+}

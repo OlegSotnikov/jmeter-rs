@@ -1,0 +1,62 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-CONTROLLERS-FULL-CONDITIONAL",
+  "format": "jtl-xml",
+  "evidence_status": "planned",
+  "expectation_basis": "Original hand-authored controller trace hypothesis; no Apache JMeter output was measured.",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 12,
+  "ordered_labels": [
+    "conditional-before", "if-true-child", "if-all-first", "if-all-second", "while-last-body", "conditional-after",
+    "conditional-before", "if-true-child", "if-all-first", "if-all-second", "while-last-body", "conditional-after"
+  ],
+  "expected_counts": {
+    "conditional-before": 2,
+    "if-true-child": 2,
+    "if-false-must-not-run": 0,
+    "if-all-first": 2,
+    "if-all-second": 2,
+    "while-false-must-not-run": 0,
+    "while-last-body": 2,
+    "conditional-after": 2
+  },
+  "failed_labels": ["while-last-body"],
+  "controller_contracts": [
+    {"testclass": "IfController", "wire_properties": {"IfController.condition": "${allow_true}", "IfController.evaluateAll": "false", "IfController.useExpression": "true"}, "observable": "one true child per outer iteration"},
+    {"testclass": "IfController", "wire_properties": {"IfController.condition": "${allow_false}", "IfController.evaluateAll": "false", "IfController.useExpression": "true"}, "observable": "false branch emits no child"},
+    {"testclass": "IfController", "wire_properties": {"IfController.condition": "${allow_true}", "IfController.evaluateAll": "true", "IfController.useExpression": "true"}, "observable": "all children are selected while condition remains true"},
+    {"testclass": "WhileController", "wire_properties": {"WhileController.condition": "false"}, "observable": "false condition skips its child"},
+    {"testclass": "WhileController", "wire_properties": {"WhileController.condition": "LAST"}, "observable": "enters after a successful predecessor and exits after the failing child"}
+  ],
+  "sample_contract": {
+    "attributes": {"s": "true", "rc": "200", "rm": "OK", "tn": "Two conditional iterations 1-1", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"},
+    "per_label_attributes": {
+      "while-last-body": {"s": "false", "rc": "200", "rm": "OK", "tn": "Two conditional iterations 1-1", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "1", "ng": "1", "na": "1"}
+    },
+    "absent_attributes": ["responseFile"],
+    "success_for_non_failed": "true",
+    "success_for_while_last_body": "false",
+    "retained_attributes": ["s", "tn", "sby", "rm", "ec"],
+    "ignored_attributes": ["t", "by", "it", "lt", "ct", "ts"],
+    "ignored_dynamic_sections": ["DebugSampler.response_data"]
+  },
+  "assertion_results": {
+    "configured": true,
+    "mode": "all",
+    "node": "assertionResult",
+    "child_order": ["name", "failure", "error", "failureMessage"],
+    "failure_message_property": "jmeter.save.saveservice.assertion_results_failure_message",
+    "total_count": 2,
+    "per_failed_sample_count": 1,
+    "failed_labels": ["while-last-body"],
+    "retained_fields": ["name", "failure", "error", "failureMessage"],
+    "failure_message_asserted": false,
+    "absence_labels": ["conditional-before", "if-true-child", "if-all-first", "if-all-second", "conditional-after"]
+  },
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.ts", "sample.by", "debug_response.dynamic_lines"],
+    "reason": "Controller branch selection and failure-state transitions remain exact targets; local timing, received-byte field, and Debug Sampler identity lines require explicit normalization while thread name and sent bytes remain retained."
+  }
+}

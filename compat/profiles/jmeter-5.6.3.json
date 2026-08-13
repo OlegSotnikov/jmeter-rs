@@ -1,0 +1,1381 @@
+{
+  "schema_id": "jmeter-rs.compatibility-profile",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "profile_version": 2,
+  "profile_date": "2026-08-13",
+  "checklist_source": {
+    "path": "docs/research/compatibility-surface.md",
+    "inventory_status_value": "TODO",
+    "inventory_status_meaning": "The source inventory has no implementation evidence yet."
+  },
+  "claim_policy": {
+    "target": "Apache JMeter 5.6.3 behavior for the declared profile and adapters",
+    "compatibility_scope": "The compatibility claim is exhaustive only over this profile's feature matrix, fixtures, runtime assumptions, and declared external adapters.",
+    "unverified_features_claimed": false,
+    "status_vocabulary": [
+      "planned",
+      "external",
+      "verified",
+      "blocked"
+    ],
+    "status_rules": {
+      "planned": "The feature is in scope, but no conformance evidence has been recorded.",
+      "external": "The feature is in scope and requires a declared external runtime, service, driver, plugin, or platform adapter; no support is claimed until that adapter has conformance evidence.",
+      "verified": "Reserved for a feature with the required pinned oracle fixture and evidence; none are verified in this initial profile.",
+      "blocked": "Reserved for an explicitly recorded reproducible blocker; none are blocked in this initial profile."
+    }
+  },
+  "upstream": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "release_page": "https://github.com/apache/jmeter/releases/tag/rel/v5.6.3",
+    "source_tree": "https://github.com/apache/jmeter/tree/34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": {
+      "filename": "apache-jmeter-5.6.3.zip",
+      "format": "zip",
+      "url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+      "digest_algorithm": "SHA-512",
+      "digest": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+      "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+      "signature_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.asc",
+      "keys_url": "https://archive.apache.org/dist/jmeter/KEYS",
+      "verification": {
+        "verified": true,
+        "verification_scope": "sha512-only",
+        "signature_verified": false,
+        "verified_at": "2026-08-12",
+        "method": "Downloaded the artifact and Apache's official .sha512 file, then compared sha512sum output with the published digest.",
+        "artifact_size_bytes": 90631635,
+        "published_digest_line_filename": "apache-jmeter-5.6.3.zip",
+        "official_digest_source": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+        "notes": "The ZIP hash matched the official Apache SHA-512 value. Release automation must still verify the PGP signature when the Apache signing key is available."
+      }
+    },
+    "official_sources": [
+      "https://jmeter.apache.org/download_jmeter.cgi",
+      "https://jmeter.apache.org/usermanual/get-started.html#requirements",
+      "https://jmeter.apache.org/changes.html",
+      "https://jmeter.apache.org/usermanual/component_reference.html",
+      "https://jmeter.apache.org/usermanual/listeners.html",
+      "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/bin/saveservice.properties",
+      "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/bin/upgrade.properties"
+    ]
+  },
+  "runtime_assumptions": {
+    "java": {
+      "minimum_major": 8,
+      "recommended_major": 17,
+      "distribution_policy": "Use a Java runtime compatible with Apache JMeter 5.6.3; record vendor, exact version, VM, and classpath hashes in every oracle run.",
+      "vendor": "not fixed by this profile",
+      "classpath_policy": "Only the pinned JMeter distribution and explicitly declared plugin or engine artifacts may be present."
+    },
+    "platform": {
+      "target_operating_systems": [
+        "linux",
+        "windows",
+        "macos"
+      ],
+      "target_triple_policy": "Record the exact target triple and OS image for every run; this profile does not mark any platform as verified.",
+      "filesystem_policy": "Use explicit allowlisted roots for plans, includes, data, scripts, keystores, plugins, and results.",
+      "network_policy": "Correctness fixtures use local deterministic services or offline traces; public endpoints are not an oracle.",
+      "process_policy": "OS-process and Java/plugin execution are explicit external adapters and must not use implicit shell interpolation."
+    },
+    "determinism": {
+      "locale": "en-US",
+      "timezone": "UTC",
+      "default_charset": "UTF-8",
+      "hostname_policy": "Normalize hostnames unless a fixture explicitly asserts one; record the source hostname in run metadata.",
+      "environment_allowlist": [],
+      "random_seed": "Supplied and recorded when the upstream surface supports deterministic seeding; otherwise the fixture records null plus the reason that JMeter randomness is not seedable.",
+      "clock_mode": "Use a virtual or controlled fixture clock where possible; normalize timestamps only under an explicit policy reference.",
+      "source_date_epoch": "Set when producing reproducible artifacts."
+    }
+  },
+  "external_runtime_boundaries": [
+    {
+      "id": "EXT-JVM-001",
+      "name": "Pinned JVM and Java classpath",
+      "kind": "runtime",
+      "status": "external",
+      "scope": "Java sampler, JUnit, Java plugin, BeanShell, Groovy, JEXL, Rhino, JSR223, and JVM/provider-backed processor/parser behavior including HTML/CSS, XPath 1/2, JSONPath, and JMESPath depends on the pinned JVM and classpath.",
+      "applies_to": [
+        "ELEM-001",
+        "ELEM-002",
+        "ELEM-008",
+        "ELEM-009",
+        "FUNC-003",
+        "SCRIPT-001",
+        "SCRIPT-002",
+        "GUI-001",
+        "GUI-002",
+        "GUI-003",
+        "TLS-002",
+        "PLUG-001",
+        "PLUG-002",
+        "TEST-002"
+      ],
+      "boundary_rule": "Use oracle/delegation mode or a versioned worker bridge; unavailable engines and classes must produce stable diagnostics and never silently map to another element."
+    },
+    {
+      "id": "EXT-SERVICE-001",
+      "name": "External protocol services and drivers",
+      "kind": "service-or-driver",
+      "status": "external",
+      "scope": "FTP, JDBC, LDAP, TCP, JMS, mail, MongoDB, Neo4j/Bolt, Graphite, InfluxDB, proxy, and other remote-service behavior.",
+      "applies_to": [
+        "ELEM-001",
+        "ELEM-002",
+        "ELEM-008",
+        "ELEM-009",
+        "REPORT-003",
+        "PROXY-001",
+        "PROXY-002",
+        "TLS-001",
+        "TEST-002",
+        "TEST-004"
+      ],
+      "boundary_rule": "Pin a local fixture service or driver version and compare protocol-visible behavior; a missing service or driver is an external capability failure, not completed support."
+    },
+    {
+      "id": "EXT-RMI-001",
+      "name": "JMeter distributed RMI workers",
+      "kind": "distributed-runtime",
+      "status": "external",
+      "scope": "Remote JMeter server lifecycle, RMI transport, SSL, worker filesystem, and sample sender behavior.",
+      "applies_to": [
+        "DIST-001",
+        "DIST-002",
+        "DIST-003",
+        "DIST-004",
+        "TEST-004"
+      ],
+      "boundary_rule": "Use two or more pinned local workers and declare Java, keystore, port, and sender-mode settings in the fixture manifest."
+    },
+    {
+      "id": "EXT-TLS-001",
+      "name": "TLS providers, trust stores, certificates, and keytool",
+      "kind": "cryptographic-platform",
+      "status": "external",
+      "scope": "HTTP TLS, recorder certificates, client certificates, JKS stores, trust policy, and RMI SSL.",
+      "applies_to": [
+        "DIST-002",
+        "PROXY-002",
+        "TLS-001",
+        "TLS-002",
+        "TEST-002",
+        "TEST-004"
+      ],
+      "boundary_rule": "Generate local certificates and record provider, protocol, trust-store, and keytool versions; do not use public certificates as correctness fixtures."
+    },
+    {
+      "id": "EXT-PLUGIN-001",
+      "name": "Third-party Java plugin artifacts",
+      "kind": "plugin",
+      "status": "external",
+      "scope": "Plugin JAR discovery, classpath ordering, aliases, dependencies, and plugin-provided elements or functions.",
+      "applies_to": [
+        "JMX-004",
+        "FUNC-003",
+        "PLUG-001",
+        "PLUG-002",
+        "PLUG-003",
+        "ELEM-008",
+        "SCRIPT-001",
+        "SCRIPT-002",
+        "GUI-001",
+        "TEST-002"
+      ],
+      "boundary_rule": "Every plugin is a separate versioned matrix entry with checksums, provenance, capability negotiation, and missing-class tests."
+    },
+    {
+      "id": "EXT-OS-001",
+      "name": "Operating-system processes, paths, and GUI facilities",
+      "kind": "platform",
+      "status": "external",
+      "scope": "OS Process Sampler, access-log files, filesystem locking/path rules, GUI display/persistence, and platform process semantics.",
+      "applies_to": [
+        "CFG-003",
+        "ELEM-002",
+        "GUI-001",
+        "GUI-002",
+        "GUI-003",
+        "TEST-005"
+      ],
+      "boundary_rule": "Run on declared OS images with explicit roots, no ambient environment inheritance, and platform-specific evidence."
+    }
+  ],
+  "normalization_policies": [
+    {
+      "id": "NORM-STRUCTURE-001",
+      "name": "Ordered semantic structure",
+      "rule": "Compare semantic trees and event streams while preserving ordered children, sample order, enabled state, source paths, and all declared fields. Sort only maps for which JMeter defines map semantics."
+    },
+    {
+      "id": "NORM-JMX-001",
+      "name": "JMX semantic round trip",
+      "rule": "Compare root metadata, alternating hashTree topology, typed properties, aliases, unknown payloads, and XML values semantically. Byte equality is required only for fixture regions explicitly marked lexical-preserving."
+    },
+    {
+      "id": "NORM-JTL-001",
+      "name": "JTL neutral event stream",
+      "rule": "Parse CSV or XML into a neutral sample event stream and compare tree shape, ordering, fields, nested results, assertions, headers, and configured columns. Do not discard fields that a format cannot represent."
+    },
+    {
+      "id": "NORM-TIME-001",
+      "name": "Controlled timing comparison",
+      "rule": "Use exact timing fields only with a controlled local fixture clock. Else apply only the tolerance recorded by the case manifest; timestamps, hostnames, and ephemeral ports are never normalized implicitly."
+    },
+    {
+      "id": "NORM-CLI-001",
+      "name": "CLI and process comparison",
+      "rule": "Compare option acceptance, exit status, fatal-versus-sample-failure mapping, and diagnostic category. Normalize only manifest-declared temporary paths, timestamps, or host-specific values; do not compare localized prose as the sole oracle."
+    },
+    {
+      "id": "NORM-CONFIG-001",
+      "name": "Configuration precedence",
+      "rule": "Compare property sources, load order, repeats, defaults, and effective values in a fixed environment. Unknown properties remain observable and are not silently dropped."
+    },
+    {
+      "id": "NORM-ENV-001",
+      "name": "Explicit environment normalization",
+      "rule": "Set locale, timezone, charset, working directory, and environment allowlist in the case manifest; set a seed when the upstream surface supports it, otherwise record null and the reason. Record target triple, JVM, hostname, and dependency hashes."
+    },
+    {
+      "id": "NORM-REPORT-001",
+      "name": "Report metric comparison",
+      "rule": "Compare report outputs from deterministic result corpora with the algorithm named by the feature. Keep dashboard percentile estimates separate from GUI aggregate algorithms."
+    },
+    {
+      "id": "NORM-EXTERNAL-001",
+      "name": "External boundary accounting",
+      "rule": "An external result is comparable only when its adapter, service, driver, plugin, or platform version is pinned. Missing capability must be reported; it cannot be normalized away or treated as Rust support."
+    },
+    {
+      "id": "NORM-SECURITY-001",
+      "name": "Security and resource boundary comparison",
+      "rule": "Compare stable error codes, bounded failure behavior, redaction, and no-drop invariants. Secrets, arbitrary network access, and ambient process execution are never fixture inputs."
+    }
+  ],
+  "oracle_fixture_catalog": [
+    {
+      "id": "FX-CLI-001",
+      "kind": "cli-differential",
+      "description": "5.6.3 option, property, report, logging, and exit-status matrix.",
+      "materialized": false,
+      "status": "planned",
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "FX-CONFIG-001",
+      "kind": "configuration-differential",
+      "description": "Property files, command-line overrides, environment, paths, locale, timezone, and encoding cases.",
+      "materialized": false,
+      "status": "planned",
+      "external_runtime_boundary_ids": [
+        "EXT-OS-001"
+      ]
+    },
+    {
+      "id": "FX-JMX-001",
+      "kind": "jmx-golden-differential",
+      "description": "Typed JMX plans covering topology, aliases, upgrades, unknown nodes, and lexical preservation cases.",
+      "materialized": false,
+      "status": "planned",
+      "external_runtime_boundary_ids": [
+        "EXT-JVM-001",
+        "EXT-PLUGIN-001"
+      ]
+    },
+    {
+      "id": "FX-JTL-001",
+      "kind": "jtl-golden-differential",
+      "description": "CSV and XML result files covering columns, nested samples, response data, timestamps, encoding, and save-service switches.",
+      "materialized": false,
+      "status": "planned",
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "FX-ELEMENTS-CORE-001",
+      "kind": "component-differential",
+      "description": "Built-in controller, sampler, configuration, assertion, timer, processor, extractor, and thread-group plans using deterministic local fixtures.",
+      "materialized": false,
+      "status": "planned",
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "FX-ELEMENTS-EXTERNAL-001",
+      "kind": "external-component-differential",
+      "description": "Pinned service, driver, OS-process, and JVM-adapter cases for external samplers, processors, extractors, and deprecated elements; the OS boundary is aggregate and is not by itself an ELEM-008 claim.",
+      "materialized": false,
+      "status": "external",
+      "external_runtime_boundary_ids": [
+        "EXT-JVM-001",
+        "EXT-SERVICE-001",
+        "EXT-OS-001"
+      ]
+    },
+    {
+      "id": "FX-FUNCTIONS-001",
+      "kind": "function-differential",
+      "description": "All 49 built-in functions, expansion timing, scope, errors, files, encoding, and deterministic random cases.",
+      "materialized": false,
+      "status": "planned",
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "FX-SCRIPT-001",
+      "kind": "script-and-jvm-differential",
+      "description": "BeanShell, Groovy, JEXL, Rhino, and JSR223 bindings, processor invocation, caching, exceptions, files, and class-loading cases.",
+      "materialized": false,
+      "status": "external",
+      "external_runtime_boundary_ids": [
+        "EXT-JVM-001",
+        "EXT-PLUGIN-001"
+      ]
+    },
+    {
+      "id": "FX-REPORT-001",
+      "kind": "report-golden-differential",
+      "description": "Listener, aggregate, summary, graph, dashboard, and percentile algorithm corpus.",
+      "materialized": false,
+      "status": "planned",
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "FX-REPORT-EXTERNAL-001",
+      "kind": "backend-listener-differential",
+      "description": "Graphite and InfluxDB protocol fixtures with pinned local services and credentials policy.",
+      "materialized": false,
+      "status": "external",
+      "external_runtime_boundary_ids": [
+        "EXT-SERVICE-001"
+      ]
+    },
+    {
+      "id": "FX-DIST-001",
+      "kind": "distributed-differential",
+      "description": "Two-worker RMI, SSL, ports, property transfer, sample sender modes, and plan/data transfer cases.",
+      "materialized": false,
+      "status": "external",
+      "external_runtime_boundary_ids": [
+        "EXT-RMI-001",
+        "EXT-TLS-001"
+      ]
+    },
+    {
+      "id": "FX-PROXY-TLS-001",
+      "kind": "proxy-recorder-tls-differential",
+      "description": "Outbound proxy, CONNECT, recorder filtering, local HTTPS certificates, trust stores, and mirror server cases.",
+      "materialized": false,
+      "status": "external",
+      "external_runtime_boundary_ids": [
+        "EXT-SERVICE-001",
+        "EXT-TLS-001"
+      ]
+    },
+    {
+      "id": "FX-PLUGIN-001",
+      "kind": "plugin-contract-differential",
+      "description": "Pinned plugin classpath, alias discovery, explicit plugin processor invocation, capability negotiation, unavailable classes, and subtree preservation.",
+      "materialized": false,
+      "status": "external",
+      "external_runtime_boundary_ids": [
+        "EXT-JVM-001",
+        "EXT-PLUGIN-001"
+      ]
+    },
+    {
+      "id": "FX-GUI-001",
+      "kind": "gui-persistence-differential",
+      "description": "GUI-created JMX, guiclass, backups, autosave, LAST, templates, WorkBench, and platform settings.",
+      "materialized": false,
+      "status": "planned",
+      "external_runtime_boundary_ids": [
+        "EXT-JVM-001",
+        "EXT-PLUGIN-001",
+        "EXT-OS-001"
+      ]
+    },
+    {
+      "id": "FX-HARNESS-001",
+      "kind": "harness-reproducibility",
+      "description": "Pinned oracle runner, manifests, dependency hashes, normalized diff, raw artifacts, and unavailable-oracle behavior.",
+      "materialized": false,
+      "status": "planned",
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "FX-FUZZ-001",
+      "kind": "fuzz-and-no-drop",
+      "description": "Malformed, oversized, unknown, and interrupted JMX/JTL inputs with bounded failure and no silent subtree loss.",
+      "materialized": false,
+      "status": "planned",
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "FX-CROSS-PLATFORM-001",
+      "kind": "cross-platform-and-performance",
+      "description": "Linux, Windows, macOS, locale, path, headless, capacity, and performance regression baselines.",
+      "materialized": false,
+      "status": "planned",
+      "external_runtime_boundary_ids": [
+        "EXT-OS-001"
+      ]
+    }
+  ],
+  "features": [
+    {
+      "id": "CLI-001",
+      "surface": "all short/long options, repeats, LAST, usage text",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "CLI golden tests against 5.6.3",
+      "required_oracle_fixture_ids": [
+        "FX-CLI-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-CLI-001",
+        "NORM-ENV-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "CLI-002",
+      "surface": "option combinations, -e/-l, report-only restrictions",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "parser/error differential tests",
+      "required_oracle_fixture_ids": [
+        "FX-CLI-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-CLI-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "CLI-003",
+      "surface": "normal/fatal/remote exit behavior and log output",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "subprocess exit/log tests",
+      "required_oracle_fixture_ids": [
+        "FX-CLI-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-CLI-001",
+        "NORM-ENV-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "CFG-001",
+      "surface": "property-file load order and -J/-G/-D/-S/-q precedence",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "property precedence tests",
+      "required_oracle_fixture_ids": [
+        "FX-CONFIG-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-CONFIG-001",
+        "NORM-ENV-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "CFG-002",
+      "surface": "documented property families/defaults",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "generated property inventory + tests",
+      "required_oracle_fixture_ids": [
+        "FX-CONFIG-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-CONFIG-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "CFG-003",
+      "surface": "path, locale, encoding, timezone, environment behavior",
+      "tier": "staged",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "Linux/Windows/macOS matrix",
+      "required_oracle_fixture_ids": [
+        "FX-CONFIG-001",
+        "FX-CROSS-PLATFORM-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-CONFIG-001",
+        "NORM-ENV-001",
+        "NORM-EXTERNAL-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-OS-001"
+      ]
+    },
+    {
+      "id": "JMX-001",
+      "surface": "root metadata and alternating hashTree topology",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "XML semantic round-trip fixtures",
+      "required_oracle_fixture_ids": [
+        "FX-JMX-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-JMX-001",
+        "NORM-STRUCTURE-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "JMX-002",
+      "surface": "typed properties, XML escaping, absent-vs-empty values",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "converter/golden tests",
+      "required_oracle_fixture_ids": [
+        "FX-JMX-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-JMX-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "JMX-003",
+      "surface": "aliases, historical aliases, upgrade mappings",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "all saveservice.properties/upgrade.properties entries",
+      "required_oracle_fixture_ids": [
+        "FX-JMX-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-JMX-001",
+        "NORM-STRUCTURE-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "JMX-004",
+      "surface": "unknown/plugin elements and properties preserved",
+      "tier": "staged/external",
+      "status": "external",
+      "inventory_status": "TODO",
+      "required_evidence": "plugin/unknown-element fixtures",
+      "required_oracle_fixture_ids": [
+        "FX-JMX-001",
+        "FX-PLUGIN-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-JMX-001",
+        "NORM-EXTERNAL-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-PLUGIN-001"
+      ]
+    },
+    {
+      "id": "JTL-001",
+      "surface": "XML root, sample/httpSample, abbreviated attributes",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "XML golden/differential tests",
+      "required_oracle_fixture_ids": [
+        "FX-JTL-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-JTL-001",
+        "NORM-STRUCTURE-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "JTL-002",
+      "surface": "nested sub-results, assertions, headers, sampler data/files",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "rich XML result fixtures",
+      "required_oracle_fixture_ids": [
+        "FX-JTL-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-JTL-001",
+        "NORM-STRUCTURE-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "JTL-003",
+      "surface": "CSV columns, delimiter, quoting, header and sample variables",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "parsed-row and byte fixtures",
+      "required_oracle_fixture_ids": [
+        "FX-JTL-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-JTL-001",
+        "NORM-ENV-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "JTL-004",
+      "surface": "timestamps, legacy date fallback, encoding/line endings",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "date/locale/encoding matrix",
+      "required_oracle_fixture_ids": [
+        "FX-JTL-001",
+        "FX-CONFIG-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-JTL-001",
+        "NORM-TIME-001",
+        "NORM-ENV-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "JTL-005",
+      "surface": "sampleresult.*, save-service switches, response-on-error",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "property matrix",
+      "required_oracle_fixture_ids": [
+        "FX-JTL-001",
+        "FX-CONFIG-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-JTL-001",
+        "NORM-CONFIG-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "ELEM-001",
+      "surface": "samplers: HTTP/FTP/JDBC/Java/LDAP/TCP",
+      "tier": "staged/external",
+      "status": "external",
+      "inventory_status": "TODO",
+      "required_evidence": "local services + driver/JVM adapters",
+      "required_oracle_fixture_ids": [
+        "FX-ELEMENTS-CORE-001",
+        "FX-ELEMENTS-EXTERNAL-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-STRUCTURE-001",
+        "NORM-TIME-001",
+        "NORM-EXTERNAL-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-JVM-001",
+        "EXT-SERVICE-001"
+      ]
+    },
+    {
+      "id": "ELEM-002",
+      "surface": "samplers: JMS/mail/MongoDB/Bolt/JUnit/OS/access log",
+      "tier": "external",
+      "status": "external",
+      "inventory_status": "TODO",
+      "required_evidence": "pinned external fixtures",
+      "required_oracle_fixture_ids": [
+        "FX-ELEMENTS-EXTERNAL-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-STRUCTURE-001",
+        "NORM-TIME-001",
+        "NORM-EXTERNAL-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-JVM-001",
+        "EXT-SERVICE-001",
+        "EXT-OS-001"
+      ]
+    },
+    {
+      "id": "ELEM-003",
+      "surface": "all logic controllers and thread-group lifecycle",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "deterministic state-machine tests",
+      "required_oracle_fixture_ids": [
+        "FX-ELEMENTS-CORE-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-STRUCTURE-001",
+        "NORM-TIME-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "ELEM-004",
+      "surface": "listeners/result collectors and sample filtering",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "listener/JTL differential tests",
+      "required_oracle_fixture_ids": [
+        "FX-JTL-001",
+        "FX-REPORT-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-JTL-001",
+        "NORM-STRUCTURE-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "ELEM-005",
+      "surface": "configuration elements and scope/precedence",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "component plan fixtures",
+      "required_oracle_fixture_ids": [
+        "FX-ELEMENTS-CORE-001",
+        "FX-CONFIG-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-STRUCTURE-001",
+        "NORM-CONFIG-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "ELEM-006",
+      "surface": "assertions and failure propagation",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "assertion corpus",
+      "required_oracle_fixture_ids": [
+        "FX-ELEMENTS-CORE-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-STRUCTURE-001",
+        "NORM-JTL-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "ELEM-007",
+      "surface": "timers and scheduler/ramp-up interaction",
+      "tier": "staged",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "seeded/tolerance timing tests",
+      "required_oracle_fixture_ids": [
+        "FX-ELEMENTS-CORE-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-TIME-001",
+        "NORM-STRUCTURE-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "ELEM-008",
+      "surface": "pre-processors/post-processors/extractors",
+      "tier": "staged/external",
+      "status": "external",
+      "inventory_status": "TODO",
+      "required_evidence": "response corpus + variable/request/result snapshots + pinned JVM/service/plugin differential",
+      "required_oracle_fixture_ids": [
+        "FX-ELEMENTS-CORE-001",
+        "FX-ELEMENTS-EXTERNAL-001",
+        "FX-SCRIPT-001",
+        "FX-PLUGIN-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-STRUCTURE-001",
+        "NORM-JTL-001",
+        "NORM-EXTERNAL-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-JVM-001",
+        "EXT-SERVICE-001",
+        "EXT-PLUGIN-001"
+      ]
+    },
+    {
+      "id": "ELEM-009",
+      "surface": "deprecated BSF/report/MongoDB aliases",
+      "tier": "staged/external",
+      "status": "external",
+      "inventory_status": "TODO",
+      "required_evidence": "legacy JMX fixtures",
+      "required_oracle_fixture_ids": [
+        "FX-JMX-001",
+        "FX-ELEMENTS-EXTERNAL-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-JMX-001",
+        "NORM-EXTERNAL-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-JVM-001",
+        "EXT-SERVICE-001"
+      ]
+    },
+    {
+      "id": "FUNC-001",
+      "surface": "all 49 built-in functions and case-sensitive names",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "one unit/golden test per function",
+      "required_oracle_fixture_ids": [
+        "FX-FUNCTIONS-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-STRUCTURE-001",
+        "NORM-ENV-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "FUNC-002",
+      "surface": "undefined expansion, scope, timing, thread safety",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "multi-thread expansion tests",
+      "required_oracle_fixture_ids": [
+        "FX-FUNCTIONS-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-STRUCTURE-001",
+        "NORM-ENV-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "FUNC-003",
+      "surface": "BeanShell/Groovy/JEXL/Rhino scripting functions",
+      "tier": "external",
+      "status": "external",
+      "inventory_status": "TODO",
+      "required_evidence": "pinned engine adapter tests",
+      "required_oracle_fixture_ids": [
+        "FX-SCRIPT-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-STRUCTURE-001",
+        "NORM-EXTERNAL-001",
+        "NORM-ENV-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-JVM-001",
+        "EXT-PLUGIN-001"
+      ]
+    },
+    {
+      "id": "SCRIPT-001",
+      "surface": "JSR223 bindings, caching, exceptions, script files",
+      "tier": "external",
+      "status": "external",
+      "inventory_status": "TODO",
+      "required_evidence": "engine matrix",
+      "required_oracle_fixture_ids": [
+        "FX-SCRIPT-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-STRUCTURE-001",
+        "NORM-EXTERNAL-001",
+        "NORM-ENV-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-JVM-001",
+        "EXT-PLUGIN-001"
+      ]
+    },
+    {
+      "id": "SCRIPT-002",
+      "surface": "Java Sampler/JUnit/user class loading",
+      "tier": "external",
+      "status": "external",
+      "inventory_status": "TODO",
+      "required_evidence": "JVM bridge/plugin fixtures",
+      "required_oracle_fixture_ids": [
+        "FX-SCRIPT-001",
+        "FX-PLUGIN-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-STRUCTURE-001",
+        "NORM-EXTERNAL-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-JVM-001",
+        "EXT-PLUGIN-001"
+      ]
+    },
+    {
+      "id": "REPORT-001",
+      "surface": "Aggregate/Summary/graph listeners",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "deterministic result corpus",
+      "required_oracle_fixture_ids": [
+        "FX-REPORT-001",
+        "FX-JTL-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-REPORT-001",
+        "NORM-JTL-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "REPORT-002",
+      "surface": "HTML/JSON dashboard metrics and percentile algorithms",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "report golden fixtures",
+      "required_oracle_fixture_ids": [
+        "FX-REPORT-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-REPORT-001",
+        "NORM-TIME-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "REPORT-003",
+      "surface": "Graphite/InfluxDB backend listeners",
+      "tier": "external",
+      "status": "external",
+      "inventory_status": "TODO",
+      "required_evidence": "local service protocol tests",
+      "required_oracle_fixture_ids": [
+        "FX-REPORT-EXTERNAL-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-REPORT-001",
+        "NORM-EXTERNAL-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-SERVICE-001"
+      ]
+    },
+    {
+      "id": "DIST-001",
+      "surface": "RMI server/client, -r/-R/-G/-X, thread multiplication",
+      "tier": "staged/external",
+      "status": "external",
+      "inventory_status": "TODO",
+      "required_evidence": "two-worker integration tests",
+      "required_oracle_fixture_ids": [
+        "FX-DIST-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-STRUCTURE-001",
+        "NORM-TIME-001",
+        "NORM-EXTERNAL-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-RMI-001"
+      ]
+    },
+    {
+      "id": "DIST-002",
+      "surface": "RMI SSL, ports, keystore/truststore, failure behavior",
+      "tier": "external",
+      "status": "external",
+      "inventory_status": "TODO",
+      "required_evidence": "generated cert/firewall tests",
+      "required_oracle_fixture_ids": [
+        "FX-DIST-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-EXTERNAL-001",
+        "NORM-SECURITY-001",
+        "NORM-TIME-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-RMI-001",
+        "EXT-TLS-001"
+      ]
+    },
+    {
+      "id": "DIST-003",
+      "surface": "all sample sender/backpressure modes",
+      "tier": "staged",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "mode-by-mode JTL tests",
+      "required_oracle_fixture_ids": [
+        "FX-DIST-001",
+        "FX-JTL-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-JTL-001",
+        "NORM-EXTERNAL-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-RMI-001"
+      ]
+    },
+    {
+      "id": "DIST-004",
+      "surface": "plan transfer versus data/dependency non-transfer",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "worker filesystem fixtures",
+      "required_oracle_fixture_ids": [
+        "FX-DIST-001",
+        "FX-CONFIG-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-CONFIG-001",
+        "NORM-EXTERNAL-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-RMI-001"
+      ]
+    },
+    {
+      "id": "PROXY-001",
+      "surface": "outbound HTTP proxy flags/system properties",
+      "tier": "exact/external",
+      "status": "external",
+      "inventory_status": "TODO",
+      "required_evidence": "proxy fixture tests",
+      "required_oracle_fixture_ids": [
+        "FX-PROXY-TLS-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-STRUCTURE-001",
+        "NORM-EXTERNAL-001",
+        "NORM-ENV-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-SERVICE-001"
+      ]
+    },
+    {
+      "id": "PROXY-002",
+      "surface": "HTTP(S) recorder filters, generated JMX, CONNECT/TLS",
+      "tier": "staged/external",
+      "status": "external",
+      "inventory_status": "TODO",
+      "required_evidence": "browser/proxy fixture tests",
+      "required_oracle_fixture_ids": [
+        "FX-PROXY-TLS-001",
+        "FX-JMX-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-JMX-001",
+        "NORM-EXTERNAL-001",
+        "NORM-SECURITY-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-SERVICE-001",
+        "EXT-TLS-001"
+      ]
+    },
+    {
+      "id": "PROXY-003",
+      "surface": "mirror server and binary/redirect/header behavior",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "local mirror integration tests",
+      "required_oracle_fixture_ids": [
+        "FX-PROXY-TLS-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-STRUCTURE-001",
+        "NORM-TIME-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "TLS-001",
+      "surface": "HTTP trust/client cert/SSL manager/keystore config",
+      "tier": "external",
+      "status": "external",
+      "inventory_status": "TODO",
+      "required_evidence": "local TLS CA/server tests",
+      "required_oracle_fixture_ids": [
+        "FX-PROXY-TLS-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-EXTERNAL-001",
+        "NORM-SECURITY-001",
+        "NORM-TIME-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-TLS-001",
+        "EXT-SERVICE-001"
+      ]
+    },
+    {
+      "id": "TLS-002",
+      "surface": "recorder JKS/dynamic cert defaults and keytool workflow",
+      "tier": "external",
+      "status": "external",
+      "inventory_status": "TODO",
+      "required_evidence": "certificate generation tests",
+      "required_oracle_fixture_ids": [
+        "FX-PROXY-TLS-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-EXTERNAL-001",
+        "NORM-SECURITY-001",
+        "NORM-ENV-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-TLS-001",
+        "EXT-JVM-001"
+      ]
+    },
+    {
+      "id": "PLUG-001",
+      "surface": "classpath/plugin discovery and ordering",
+      "tier": "external",
+      "status": "external",
+      "inventory_status": "TODO",
+      "required_evidence": "pinned plugin fixture",
+      "required_oracle_fixture_ids": [
+        "FX-PLUGIN-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-EXTERNAL-001",
+        "NORM-ENV-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-JVM-001",
+        "EXT-PLUGIN-001"
+      ]
+    },
+    {
+      "id": "PLUG-002",
+      "surface": "plugin element/function/JMX alias contract",
+      "tier": "external",
+      "status": "external",
+      "inventory_status": "TODO",
+      "required_evidence": "plugin contract suite",
+      "required_oracle_fixture_ids": [
+        "FX-PLUGIN-001",
+        "FX-JMX-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-JMX-001",
+        "NORM-EXTERNAL-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-JVM-001",
+        "EXT-PLUGIN-001"
+      ]
+    },
+    {
+      "id": "PLUG-003",
+      "surface": "unavailable plugin diagnostics and subtree preservation",
+      "tier": "staged",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "missing-class JMX tests",
+      "required_oracle_fixture_ids": [
+        "FX-PLUGIN-001",
+        "FX-JMX-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-JMX-001",
+        "NORM-EXTERNAL-001",
+        "NORM-SECURITY-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-PLUGIN-001"
+      ]
+    },
+    {
+      "id": "GUI-001",
+      "surface": "guiclass, GUI-created JMX round-trip",
+      "tier": "staged",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "JMeter GUI fixture corpus",
+      "required_oracle_fixture_ids": [
+        "FX-GUI-001",
+        "FX-JMX-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-JMX-001",
+        "NORM-EXTERNAL-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-JVM-001",
+        "EXT-PLUGIN-001",
+        "EXT-OS-001"
+      ]
+    },
+    {
+      "id": "GUI-002",
+      "surface": "backups, autosave, LAST, templates, WorkBench",
+      "tier": "staged",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "filesystem persistence tests",
+      "required_oracle_fixture_ids": [
+        "FX-GUI-001",
+        "FX-CONFIG-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-CONFIG-001",
+        "NORM-ENV-001",
+        "NORM-EXTERNAL-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-JVM-001",
+        "EXT-OS-001"
+      ]
+    },
+    {
+      "id": "GUI-003",
+      "surface": "locale/look-and-feel/toolbar/tree/undo settings",
+      "tier": "staged",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "platform GUI smoke tests",
+      "required_oracle_fixture_ids": [
+        "FX-GUI-001",
+        "FX-CROSS-PLATFORM-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-ENV-001",
+        "NORM-EXTERNAL-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-JVM-001",
+        "EXT-OS-001"
+      ]
+    },
+    {
+      "id": "TEST-001",
+      "surface": "unit/golden/differential test harness itself",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "reproducible pinned harness",
+      "required_oracle_fixture_ids": [
+        "FX-HARNESS-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-ENV-001",
+        "NORM-SECURITY-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "TEST-002",
+      "surface": "protocol fixtures and external dependency pins",
+      "tier": "external",
+      "status": "external",
+      "inventory_status": "TODO",
+      "required_evidence": "containerized fixture manifest",
+      "required_oracle_fixture_ids": [
+        "FX-HARNESS-001",
+        "FX-ELEMENTS-EXTERNAL-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-EXTERNAL-001",
+        "NORM-ENV-001",
+        "NORM-SECURITY-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-JVM-001",
+        "EXT-SERVICE-001",
+        "EXT-TLS-001",
+        "EXT-PLUGIN-001"
+      ]
+    },
+    {
+      "id": "TEST-003",
+      "surface": "fuzzing malformed/unknown JMX/JTL without data loss",
+      "tier": "exact",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "fuzz corpus and no-drop invariant",
+      "required_oracle_fixture_ids": [
+        "FX-FUZZ-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-JMX-001",
+        "NORM-JTL-001",
+        "NORM-SECURITY-001"
+      ],
+      "external_runtime_boundary_ids": []
+    },
+    {
+      "id": "TEST-004",
+      "surface": "distributed/recorder/TLS integration suite",
+      "tier": "external",
+      "status": "external",
+      "inventory_status": "TODO",
+      "required_evidence": "isolated CI environment",
+      "required_oracle_fixture_ids": [
+        "FX-DIST-001",
+        "FX-PROXY-TLS-001",
+        "FX-HARNESS-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-EXTERNAL-001",
+        "NORM-SECURITY-001",
+        "NORM-TIME-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-RMI-001",
+        "EXT-TLS-001",
+        "EXT-SERVICE-001"
+      ]
+    },
+    {
+      "id": "TEST-005",
+      "surface": "cross-platform and performance regression gates",
+      "tier": "staged",
+      "status": "planned",
+      "inventory_status": "TODO",
+      "required_evidence": "OS/perf baseline reports",
+      "required_oracle_fixture_ids": [
+        "FX-CROSS-PLATFORM-001"
+      ],
+      "normalization_policy_refs": [
+        "NORM-ENV-001",
+        "NORM-TIME-001",
+        "NORM-EXTERNAL-001"
+      ],
+      "external_runtime_boundary_ids": [
+        "EXT-OS-001"
+      ]
+    }
+  ]
+}

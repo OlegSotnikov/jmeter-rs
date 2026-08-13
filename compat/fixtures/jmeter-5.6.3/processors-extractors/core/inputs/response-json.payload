@@ -1,0 +1,9 @@
+{
+  "request": {"id": "r-01", "kind": "local"},
+  "items": [
+    {"name": "alpha", "value": 1},
+    {"name": "beta", "value": 2}
+  ],
+  "empty": [],
+  "missing": null
+}

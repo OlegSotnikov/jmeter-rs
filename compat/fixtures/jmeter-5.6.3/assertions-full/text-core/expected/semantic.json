@@ -1,0 +1,136 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-ASSERTIONS-FULL-TEXT-CORE",
+  "format": "jtl-xml",
+  "evidence_status": "planned",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 4,
+  "sample_count_asserted": false,
+  "observed_sample_count": null,
+  "candidate_status": "duration-and-exception-values-candidate-unobserved-until-oracle",
+  "ordered_labels": [
+    "Static text response",
+    "Numeric assertion source",
+    "Deterministic failure source",
+    "Negation source"
+  ],
+  "assertion_result_encoding": {
+    "node": "assertionResult",
+    "children": [
+      {"name": "name", "kind": "text", "required": true},
+      {"name": "failure", "kind": "text", "required": true, "values": ["true", "false"]},
+      {"name": "error", "kind": "text", "required": true, "values": ["true", "false"]},
+      {"name": "failureMessage", "kind": "text", "required": false}
+    ],
+    "child_order": ["name", "failure", "error", "failureMessage"],
+    "all_results_saved": true,
+    "child_order_status": "comparator-supported",
+    "child_order_note": "Each sample carries wire_children.assertion_child_elements; the comparator checks the pinned ordered prefix, with optional failureMessage as the fourth child."
+  },
+  "save_service_contract": {
+    "jmeter.save.saveservice.filename": "false",
+    "responseFile": "absent"
+  },
+  "wire_contract": {
+    "response_file": {"enabled": false, "expected": false}
+  },
+  "samples": [
+    {
+      "position": 0,
+      "element": "sample",
+      "label": "Static text response",
+      "attributes": {
+        "s": "true", "lb": "Static text response", "rc": "200", "rm": "OK",
+        "tn": "One assertion user 1-1", "dt": "text", "de": "US-ASCII",
+        "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"
+      },
+      "ignored_attributes": ["by", "t", "it", "lt", "ct", "ts"],
+      "absent_children": ["responseFile"],
+      "wire_children": {"assertion_child_elements": ["name", "failure", "error", "failureMessage"]},
+      "assertions": [
+        {"name": "Contains fixed marker", "failure": "false", "error": "false"}
+      ]
+    },
+    {
+      "position": 1,
+      "element": "sample",
+      "label": "Numeric assertion source",
+      "attributes": {
+        "s": "true", "lb": "Numeric assertion source", "rc": "200", "rm": "OK",
+        "tn": "One assertion user 1-1", "dt": "text", "de": "US-ASCII",
+        "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"
+      },
+      "ignored_attributes": ["by", "t", "it", "lt", "ct", "ts"],
+      "absent_children": ["responseFile"],
+      "wire_children": {"assertion_child_elements": ["name", "failure", "error", "failureMessage"]},
+      "assertions": [
+        {"name": "Duration accepts bounded local work", "failure": "false", "error": "false"},
+        {"name": "Response code has three bytes", "failure": "false", "error": "false"}
+      ]
+    },
+    {
+      "position": 2,
+      "element": "sample",
+      "label": "Deterministic failure source",
+      "attributes": {
+        "s": "false", "lb": "Deterministic failure source", "rc": "200", "rm": "OK",
+        "tn": "One assertion user 1-1", "dt": "text", "de": "US-ASCII",
+        "sby": "0", "sc": "1", "ec": "1", "ng": "1", "na": "1"
+      },
+      "ignored_attributes": ["by", "t", "it", "lt", "ct", "ts"],
+      "absent_children": ["responseFile"],
+      "wire_children": {"assertion_child_elements": ["name", "failure", "error", "failureMessage"]},
+      "assertions": [
+        {"name": "Response code rejects wrong marker", "failure": "true", "error": "false", "failure_message": "Test failed: code expected to contain /500/"},
+        {"name": "Response code off by one fails", "failure": "true", "error": "false", "failure_message": "The result was the wrong size: It was 3 bytes, but should have been equal to 2 bytes."}
+      ]
+    },
+    {
+      "position": 3,
+      "element": "sample",
+      "label": "Negation source",
+      "attributes": {
+        "s": "false", "lb": "Negation source", "rc": "200", "rm": "OK",
+        "tn": "One assertion user 1-1", "dt": "text", "de": "US-ASCII",
+        "sby": "0", "sc": "1", "ec": "1", "ng": "1", "na": "1"
+      },
+      "ignored_attributes": ["by", "t", "it", "lt", "ct", "ts"],
+      "absent_children": ["responseFile"],
+      "wire_children": {"assertion_child_elements": ["name", "failure", "error", "failureMessage"]},
+      "assertions": [
+        {"name": "Negated fixed marker fails", "failure": "true", "error": "false", "failure_message": "Test failed: text expected not to contain /assertion_marker=needle-present/"}
+      ]
+    }
+  ],
+  "sample_contract": {
+    "debug_response_projection": {
+      "required_sections": ["JMeterVariables:"],
+      "variables": {"assertion_marker": "needle-present"},
+      "ignored_line_patterns": ["JMeterThread.last_sample_ok=.*", "JMeterThread.pack=.*", "__jm__.*", "__jmv_.*", "START.*", "TESTSTART.*"]
+    }
+  },
+  "resource_bounds": {
+    "max_threads": 1,
+    "max_iterations": 1,
+    "max_samples": 4,
+    "max_response_bytes": 65536,
+    "max_assertion_results": 6,
+    "network": "none"
+  },
+  "generated_from": {
+    "status": "not-run",
+    "reason": "The fixture authoring task forbids Java/JMeter execution; run the pinned oracle command during conformance.",
+    "generator": "Apache JMeter",
+    "generator_version": "5.6.3",
+    "random_seed": null,
+    "oracle_command": "env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C LANG=C TZ=UTC jmeter-oracle-cache/apache-jmeter-5.6.3/bin/jmeter -n -q compat/fixtures/jmeter-5.6.3/assertions-full/text-core/oracle.properties -t compat/fixtures/jmeter-5.6.3/assertions-full/text-core/plan.jmx -l oracle-runs/assertions-full/text-core/oracle.jtl -j oracle-runs/assertions-full/text-core/oracle.log",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "oracle-runs/assertions-full/text-core/ (ignored; no oracle evidence captured)"
+  },
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.ts", "sample.by", "debug_response.dynamic_lines"],
+    "reason": "Assertion child order, names, failure/error flags, exact stable messages, Debug Sampler marker, and sample fields remain observable. Wall-clock timing, byte counts, and generated variable diagnostics are explicitly normalized."
+  }
+}

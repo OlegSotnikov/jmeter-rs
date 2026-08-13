@@ -1,0 +1,142 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-CONFIG-PRECEDENCE",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored property files and a no-network Debug Sampler plan for deterministic configuration-source, Java-properties parsing, CLI precedence, and explicit environment projections.",
+    "upstream_plan_copied": false
+  },
+  "behavior_references": [
+    "docs/research/upstream-semantics.md",
+    "https://jmeter.apache.org/usermanual/get-started.html#1.4.6-overriding-properties-via-the-command-line",
+    "https://jmeter.apache.org/usermanual/get-started.html#1.5-configuring-jmeter",
+    "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/src/core/src/main/java/org/apache/jmeter/JMeter.java"
+  ],
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter is a pinned external oracle only; no upstream plan, result, binary, or source file is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true,
+    "execution_status": "not_run"
+  },
+  "runtime": {
+    "java": {
+      "vendor": null,
+      "version": null,
+      "vm": null,
+      "major": null
+    },
+    "target_triple": null,
+    "os_image": null,
+    "locale": null,
+    "timezone": null,
+    "default_charset": null,
+    "locale_status": "pending-oracle",
+    "charset_status": "pending-oracle",
+    "requested_environment": {
+      "locale": "en-US",
+      "timezone": "UTC",
+      "default_charset": "UTF-8",
+      "environment_allowlist": []
+    },
+    "locale_materialization": {
+      "profile_locale": "en-US",
+      "portable_contract": "materialize en-US as an installed target-OS locale with an explicit UTF-8 codeset; POSIX may use en_US.UTF-8 and Windows may use en-US",
+      "target_os_examples": {
+        "posix": "en_US.UTF-8",
+        "windows": "en-US"
+      },
+      "installed_locale_required": true,
+      "observed": null,
+      "status": "pending-oracle",
+      "unavailable_behavior": "fail fixture setup or evidence promotion; never silently use C/POSIX or an uninstalled alias"
+    },
+    "jvm_encoding_observation": {
+      "required": true,
+      "status": "pending-oracle",
+      "fields": [
+        "System.getProperty(\"file.encoding\")",
+        "Charset.defaultCharset().name()"
+      ],
+      "observed_file_encoding": null,
+      "observed_default_charset": null,
+      "missing_behavior": "fail evidence promotion; requested UTF-8 is not an observation"
+    },
+    "property_file_decoder": {
+      "decoder": "ISO-8859-1",
+      "java_api": "Properties.load(InputStream)",
+      "status": "static-input-contract; effective literal UTF-8 probe remains oracle-pending"
+    },
+    "path_resolution": {
+      "working_directory": "<case-root>",
+      "repository_relative_case_root": "compat/fixtures/jmeter-5.6.3/config-precedence",
+      "relative_inputs": "working_directory",
+      "jmeter_executable": "<jmeter-home>/bin/jmeter",
+      "java_executable": "<java-home>/bin/java",
+      "inherited_path_lookup": false,
+      "implicit_user_system_lookup": ["working_directory", "<jmeter-home>/bin"]
+    },
+    "hostname_policy": "not asserted; no hostname is in the static expectation",
+    "environment_allowlist": [],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "not executed; future runs must use only the pinned Apache JMeter 5.6.3 distribution",
+    "static_only": true,
+    "runner_gaps": [
+      {
+        "component": "tools/jmeter-oracle option validation",
+        "status": "known-gap",
+        "unsupported_vectors": ["-p", "repeated -q", "-S", "-D", "-G"],
+        "effect": "the current parser rejects -p and a second -q occurrence, while its narrow option validator also rejects this fixture's intentional -S/-D/-G vectors; do not remove, rewrite, or weaken those vectors to make validation pass"
+      },
+      {
+        "component": "tools/jmeter-oracle command materialization",
+        "status": "known-gap",
+        "effect": "the current materializer uses an isolated generated output directory and does not consume command.working_directory; a future runner must chdir to <case-root> before resolving fixture-relative inputs"
+      },
+      {
+        "component": "configuration-projection comparator",
+        "status": "not-implemented",
+        "effect": "the custom projection maps and remote-only absence assertions are static contract data, not currently executed comparison input"
+      }
+    ],
+    "harness_gaps": [
+      "No Java vendor/version, target triple, OS image, effective locale, or effective default charset has been recorded because no oracle process was run; the corresponding runtime fields are null.",
+      "The profile requires an empty inherited-environment allowlist; a future harness must resolve <jmeter-home> and Java explicitly without ambient PATH and record the requested versus observed locale/charset values.",
+      "The case root must be resolved and used as the process working directory before any relative input or output path; this static corpus cannot verify a runner's chdir.",
+      "Implicit user.properties and system.properties paths must be read from the initial -p file and resolved from the case working directory, then <jmeter-home>/bin as the declared fallback; ambient files are not valid evidence.",
+      "Linux/Windows/macOS path-separator, launcher, locale, filesystem, and process behavior remain untested.",
+      "-G remote properties require a remote worker run before they can be observed; this corpus stores only a static merge projection."
+    ]
+  },
+  "inputs": {
+    "plan_sha256": "24547caf30acf019d9c26004f74c0928d9dddbd4823d242cbbf4008a63f865b8",
+    "property_sha256": {
+      "primary.properties": "8a5b2d82082d4abc7a158e78e1bfd808307a9817c728fb59eef1cd677205fc1a",
+      "default-jmeter.properties": "885dc2d047050d8cc878eba276152e9641095510389366cc91c8ae11d8bdd43f",
+      "user.properties": "c78aae94e77784588e09d9c8b1ac9758ced74efa37782ae9690e5f22489f0992",
+      "system.properties": "5b7310012ba1e1a985e2f9ac46c934f139b96131d3a1e7b4ebccc75ccd1fc5bc",
+      "additional-first.properties": "efc9cb20cf922ac64f31a576e1f2ecde4abca12c5462a44b9832d7ec13d77946",
+      "additional-second.properties": "002618a8d1c00c75846cad5c87f58ead45adc663b9cad3e9a0cd06edd2035001",
+      "additional-system.properties": "ee91370e68b705cde8b7bf0ac971144e92724750352bcf1a139c578c8684fb1e",
+      "additional-system-second.properties": "fbe22fefaad1d3e4dbd68404a9e0e97470270d6955928321e752c96ec0c017af",
+      "global.properties": "b3fe5f8e0a6fb2e0f49832de14b7c24f599756400b0f09b615a4c6201efad53e"
+    },
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  }
+}

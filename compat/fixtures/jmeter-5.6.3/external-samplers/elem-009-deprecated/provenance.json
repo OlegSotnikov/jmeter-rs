@@ -1,0 +1,73 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-ELEMENTS-EXTERNAL-ELEM-009",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored bounded JMX and property corpus with pinned 5.6.3 wire identities for deprecated BSF elements and MongoDB aliases, plus opaque preservation records for report-plan names absent from 5.6.3 SaveService.",
+    "upstream_plan_copied": false,
+    "source_material": "Clean-room fixture design from the profile, compatibility-surface legacy alias inventory, pinned SaveService/upgrade vocabulary, and upstream-semantics preservation rules; report-plan tags are retained only as opaque deleted-or-unknown diagnostics; no upstream plan, source, script, report, driver, plugin, or service artifact was copied."
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "The pinned Apache JMeter distribution is an external oracle reference only; no upstream plan, result, binary, Java class, plugin, script, report output, driver, or service output is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true,
+    "verification_scope": "Profile provenance only; this static case intentionally performs no oracle execution."
+  },
+  "runtime": {
+    "java": {
+      "vendor": "not invoked",
+      "version": "not invoked",
+      "vm": "not invoked",
+      "major": null
+    },
+    "target_triple": "not asserted; static-only case",
+    "os_image": "not asserted; static-only case",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "not asserted; no process was run",
+    "environment_allowlist": ["LC_ALL=C", "LANG=C", "TZ=UTC"],
+    "plugin_artifacts": [],
+    "driver_artifacts": [],
+    "service_images": [],
+    "script_engines": [],
+    "jmeter_classpath": "profile-pinned distribution not invoked",
+    "classpath_artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076"
+  },
+  "external_requirements": {
+    "script_engine_jvm_versions": "required-but-not-pinned",
+    "report_alias_implementation": "required-but-not-pinned",
+    "mongodb_driver_service_versions": "required-but-not-pinned",
+    "licenses": "required-but-not-recorded",
+    "checksums": "required-but-not-recorded",
+    "fixture_provenance": "required-but-not-recorded",
+    "credentials": "none; placeholders only",
+    "network_used": false
+  },
+  "inputs": {
+    "plan_sha256": "4dcf4935816490a111d9345af6e4b6dfd9fbac05c2dc40a51c6ee4f08fa21a3f",
+    "property_sha256": "02e34a87c4a169903a9943de913aeca9e32a608fd0897d1dff7ca3535ba19827",
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  },
+  "oracle_execution": {
+    "performed": false,
+    "reason": "Static corpus task explicitly forbids Java/JMeter/JVM, external service, network, and subprocess execution.",
+    "raw_artifacts": "none"
+  }
+}

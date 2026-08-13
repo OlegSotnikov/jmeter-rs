@@ -1,0 +1,36 @@
+{
+  "schema_id": "jmeter-rs.harness-normalized-diff",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-HARNESS-REPRODUCIBILITY",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-HARNESS-001",
+  "evidence_status": "not-run-static",
+  "source_only": true,
+  "example_only": true,
+  "status": "example-only",
+  "normalization_policy_refs": ["NORM-ENV-001", "NORM-TIME-001"],
+  "ignored_fields": ["sample.ts"],
+  "ignored_line_patterns": [
+    "START.HMS=.*",
+    "START.MS=.*",
+    "START.YMD=.*",
+    "TESTSTART.HMS=.*",
+    "TESTSTART.MS=.*",
+    "TESTSTART.YMD=.*"
+  ],
+  "differences": [
+    {
+      "path": "/samples/0/attributes/rc",
+      "kind": "changed",
+      "expected": "200",
+      "actual": "500"
+    }
+  ],
+  "difference_count": 1,
+  "retained_outside_git": false,
+  "limitations": [
+    "This is a schema example, not a Rust/JMeter observation; the response-code values are illustrative comparator input.",
+    "The ignored timestamp uses the comparator's canonical sample.ts field; labels, response codes, assertion outcomes, ordering, and tree shape remain observable.",
+    "A real observed record must use status observed, concrete artifact references, a passing SHA-512 and OpenPGP gate, and a retained raw diff outside Git."
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-FUNCTIONS-FILES-RESOURCE",
+  "profile_id": "jmeter-5.6.3",
+  "evidence_status": "not_run",
+  "format": "jmx-semantic",
+  "planned_bounds": {
+    "schema_id": "jmeter-rs.fixture-bounds",
+    "schema_version": 1,
+    "source": "case.bounds",
+    "enforcement": "declared; not runtime-enforced by this static corpus",
+    "comparator_enforced": false,
+    "reason": "The validator does not yet enforce resource-bound schemas; these values describe the finite fixture design only and are not rejection evidence.",
+    "max_threads": 1,
+    "max_iterations": 1,
+    "max_samplers_per_iteration": 1,
+    "max_samples": 1,
+    "max_input_bytes": 1024,
+    "max_input_lines": 16,
+    "max_csv_rows": 1,
+    "max_function_output_files": 0,
+    "max_label_bytes": 1024,
+    "network": "none",
+    "input_root": "<case-root>/inputs",
+    "output_root": "<case-root>/outputs"
+  },
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.by"],
+    "reason": "This planned descriptor records finite input and execution bounds only; no runtime resource rejection behavior is asserted."
+  }
+}

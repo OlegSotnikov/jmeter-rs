@@ -1,0 +1,469 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-PROXY-TLS",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-PROXY-TLS-001",
+  "conformance_ids": ["PROXY-001", "PROXY-002", "PROXY-003", "TLS-001", "TLS-002"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-TIME-001", "NORM-JMX-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001", "NORM-ENV-001"],
+  "external_runtime_boundary_ids": ["EXT-JVM-001", "EXT-SERVICE-001", "EXT-TLS-001"],
+  "source_references": [
+    {
+      "path": "compat/fixtures/jmeter-5.6.3/proxy-tls/scripts/fixture_server.py",
+      "sha256": "d66340c18264afa4ffb90d6e0fa5e9ed4acdf45492acb7a82a246627ee7e8f8b"
+    },
+    {
+      "path": "compat/fixtures/jmeter-5.6.3/recorder-mirror/case.json",
+      "sha256": "45374150ac866d5c7185a972edd39663483ac25cbc471940a662d55236e96346"
+    }
+  ],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "7b8a5f52e932a078cb369c04a5295e7f0ccf3101763d90fd6762d8f77e7af444"
+  },
+  "property_files": [
+    {"path": "oracle.properties", "sha256": "8abcee3e7b0609544669268e70cf0d76d0086e8f1b536c424bf5d45e2ddf641a", "mode": "proxy"},
+    {"path": "oracle-direct-tls.properties", "sha256": "a8d9961bbd19788c040b92aa0af98c71cfbedc54e263bc347213923937e0c588", "mode": "direct-tls"}
+  ],
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/proxy-tls",
+    "mode": "nongui",
+    "argv_templates": [
+      [
+        "<jmeter-home>/bin/jmeter", "-n", "-q", "oracle.properties",
+        "-Jfixture.host=127.0.0.1", "-Jfixture.http.port=<http-port>", "-Jfixture.https.port=<https-port>",
+        "-Jhttp.proxyHost=127.0.0.1", "-Jhttp.proxyPort=<proxy-port>",
+        "-Jhttps.proxyHost=127.0.0.1", "-Jhttps.proxyPort=<proxy-port>",
+        "-t", "plan.jmx", "-l", "<ignored>/proxy.jtl", "-j", "<ignored>/proxy.log"
+      ],
+      [
+        "<jmeter-home>/bin/jmeter",
+        "-Djavax.net.ssl.keyStoreType=JKS", "-Djavax.net.ssl.keyStore=<run-root>/runtime/client.jks",
+        "-Djavax.net.ssl.keyStorePassword=<protected-secret>",
+        "-Djavax.net.ssl.trustStoreType=JKS", "-Djavax.net.ssl.trustStore=<run-root>/runtime/client-truststore.jks",
+        "-Djavax.net.ssl.trustStorePassword=<protected-secret>",
+        "-n", "-q", "oracle-direct-tls.properties",
+        "-Jfixture.host=127.0.0.1", "-Jfixture.http.port=<http-port>", "-Jfixture.https.port=<https-port>",
+        "-t", "plan.jmx", "-l", "<ignored>/direct-tls.jtl", "-j", "<ignored>/direct-tls.log"
+      ]
+    ],
+    "network": "loopback-only",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null,
+    "environment_allowlist": ["LC_ALL=C", "LANG=C", "TZ=UTC", "JAVA_HOME=<java-home>"],
+    "environment_policy": {
+      "inherit": false,
+      "proxy_selection": "explicit JMeter proxy flags or system properties only",
+      "path_lookup": "forbidden; invoke typed absolute tool paths",
+      "forbidden_inherited": [
+        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+        "http_proxy", "https_proxy", "all_proxy",
+        "PATH", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "CLASSPATH", "MAVEN_OPTS", "JVM_ARGS"
+      ],
+      "recorded_keys_only": true
+    },
+    "tool_materialization": {
+      "status": "planned",
+      "jmeter_executable": "<jmeter-home>/bin/jmeter",
+      "python_executable": "<python-home>/bin/python3",
+      "java_home": "<java-home>",
+      "absolute_path_required": true,
+      "path_lookup": "forbidden",
+      "source": "pinned external toolchain metadata; no ambient PATH",
+      "resolved_evidence": "execution.resolved_argv_evidence"
+    },
+    "fixture_server": {
+      "script": "scripts/fixture_server.py",
+      "script_sha256": "d66340c18264afa4ffb90d6e0fa5e9ed4acdf45492acb7a82a246627ee7e8f8b",
+      "working_directory": "compat/fixtures/jmeter-5.6.3/proxy-tls",
+      "network": "loopback-only",
+      "bind_host": "127.0.0.1",
+      "port_policy": "0 or 1024..65535",
+      "port_min": 1024,
+      "port_max": 65535,
+      "limits": {
+        "max_request_line_bytes": 8192,
+        "max_target_bytes": 8192,
+        "max_header_bytes": 65536,
+        "max_header_count": 128,
+        "max_body_bytes": 1048576,
+        "max_response_bytes": 4194304,
+        "max_relay_bytes": 8388608,
+        "max_relay_chunk_bytes": 16384,
+        "max_secret_bytes": 4096,
+        "max_trace_bytes": 2097152,
+        "max_ready_bytes": 16384,
+        "max_workers": 32,
+        "max_session_seconds": 30,
+        "io_timeout_seconds": 10,
+        "shutdown_grace_seconds": 5,
+        "shutdown_join_seconds": 10
+      },
+      "argv_templates": [
+        {
+          "id": "http-https-proxy",
+          "status": "planned",
+          "argv": [
+            "<python-home>/bin/python3", "scripts/fixture_server.py", "--run-root", "<run-root>",
+            "--ready-file", "<ignored>/ready.json", "--trace-file", "<ignored>/trace.jsonl",
+            "--http-port", "0", "--https-port", "0", "--proxy-port", "0",
+            "--server-cert", "runtime/server.crt", "--server-key", "runtime/server.key"
+          ],
+          "runtime_material": ["runtime/server.crt", "runtime/server.key"]
+        },
+        {
+          "id": "tls-proxy",
+          "status": "planned",
+          "argv": [
+            "<python-home>/bin/python3", "scripts/fixture_server.py", "--run-root", "<run-root>",
+            "--ready-file", "<ignored>/ready.json", "--trace-file", "<ignored>/trace.jsonl",
+            "--http-port", "0", "--https-port", "0", "--proxy-tls-port", "0",
+            "--server-cert", "runtime/server.crt", "--server-key", "runtime/server.key",
+            "--proxy-cert", "runtime/proxy.crt", "--proxy-key", "runtime/proxy.key"
+          ],
+          "runtime_material": [
+            "runtime/server.crt", "runtime/server.key",
+            "runtime/proxy.crt", "runtime/proxy.key"
+          ]
+        },
+        {
+          "id": "client-certificate",
+          "status": "planned",
+          "argv": [
+            "<python-home>/bin/python3", "scripts/fixture_server.py", "--run-root", "<run-root>",
+            "--ready-file", "<ignored>/ready.json", "--trace-file", "<ignored>/trace.jsonl",
+            "--http-port", "0", "--https-port", "0", "--server-cert", "runtime/server.crt",
+            "--server-key", "runtime/server.key", "--client-ca", "runtime/ca.crt",
+            "--require-client-cert"
+          ],
+          "runtime_material": [
+            "runtime/server.crt", "runtime/server.key", "runtime/ca.crt",
+            "runtime/client.crt", "runtime/client.key"
+          ]
+        }
+      ],
+      "spawn": {
+        "shell": false,
+        "exact_child": true,
+        "stdin": "null",
+        "stdout": "<ignored>/fixture-server.stdout",
+        "stderr": "<ignored>/fixture-server.stderr",
+        "process_discovery": "forbidden"
+      },
+      "readiness": {
+        "path": "<ignored>/ready.json",
+        "schema_id": "jmeter-rs.proxy-tls-ready",
+        "schema_version": 1,
+        "required_object": "readiness",
+        "atomic_rename": true,
+        "host": "127.0.0.1",
+        "ports_source": "ready.ports",
+        "timeout_ms": 10000,
+        "max_bytes": 16384,
+        "pid_authority": false,
+        "stale_file_policy": "fresh private run root and absent ready path"
+      },
+      "capture": {
+        "trace": "<ignored>/trace.jsonl",
+        "max_trace_bytes": 2097152,
+        "stdout": "<ignored>/fixture-server.stdout",
+        "stderr": "<ignored>/fixture-server.stderr",
+        "max_process_output_bytes": 1048576
+      },
+      "shutdown": {
+        "mode": "owned-child-graceful",
+        "grace_seconds": 5,
+        "join_seconds": 10,
+        "reap_exact_child": true,
+        "on_timeout": "fixture failure after direct-child cleanup"
+      }
+    },
+    "recorder": {
+      "status": "planned",
+      "bind_host": "127.0.0.1",
+      "network": "loopback-only",
+      "port_placeholder": "<recorder-port>",
+      "port_policy": "0 or 1024..65535",
+      "readiness": {
+        "schema_id": "jmeter-rs.proxy-recorder-ready",
+        "schema_version": 1,
+        "required": true,
+        "source": "pinned recorder adapter readiness",
+        "host": "127.0.0.1",
+        "timeout_ms": 10000,
+        "max_bytes": 16384,
+        "fresh_run_root": true,
+        "exact_child": true,
+        "pid_authority": false
+      },
+      "isolation": "same loopback-only run policy; fail closed if recorder readiness or bind validation fails",
+      "resolved_evidence": "execution.resolved_argv_evidence"
+    },
+    "port_materialization": {
+      "status": "planned",
+      "sources": {
+        "fixture_listeners": "ready.json:ports",
+        "recorder_listener": "recorder adapter readiness"
+      },
+      "placeholder_bindings": {
+        "<http-port>": "ports.http",
+        "<https-port>": "ports.https",
+        "<proxy-port>": "ports.proxy",
+        "<proxy-tls-port>": "ports.proxy_tls"
+      },
+      "external_placeholder_bindings": {
+        "<recorder-port>": {
+          "source": "recorder.ready.port",
+          "host": "127.0.0.1",
+          "port_policy": "0 or 1024..65535",
+          "readiness_required": true,
+          "action": "materialize-recorder-port"
+        }
+      },
+      "resolution_order": [
+        "start exact fixture child",
+        "read and validate atomic ready document",
+        "validate numeric ports and loopback host",
+        "start and validate the exact recorder child before recorder-port substitution",
+        "substitute every declared fixture and recorder placeholder",
+        "reject unresolved placeholders before JMeter spawn",
+        "persist redacted resolved argv evidence"
+      ],
+      "integer_policy": "decimal 1024..65535 after ephemeral allocation",
+      "missing_listener_policy": "scenario is invalid if a referenced listener is absent",
+      "resolved_argv_evidence": "execution.resolved_argv_evidence"
+    },
+    "resolved_argv_evidence": {
+      "status": "not-run",
+      "required": true,
+      "runtime_artifact": "oracle-runs/proxy-tls/resolved-argv.json",
+      "sha256": null,
+      "record_schema": "jmeter-rs.proxy-tls-resolved-argv",
+      "required_fields": [
+        "case_id", "template_id", "fixture_ready_sha256", "recorder_ready_sha256",
+        "ports", "recorder_port", "argv", "environment_keys", "working_directory",
+        "jmeter_path", "jmeter_home", "python_path", "python_home", "java_home",
+        "tool_versions", "java_metadata", "materialized_at"
+      ],
+      "argv_requirements": {
+        "no_unresolved_placeholders": true,
+        "absolute_executable_paths": true,
+        "no_ambient_path_lookup": true,
+        "secret_values_redacted": true,
+        "proxy_password_not_persisted": true,
+        "tls_passwords_not_persisted": true,
+        "runtime_paths_below_run_root": true
+      },
+      "raw_evidence_policy": "ignored CI artifact only; no checked-in JTL, log, trace, certificate, key, or credential"
+    },
+    "external_inputs": {
+      "certificate_material": "temporary run root only",
+      "jvm_keystore_options": "runner supplied through protected capability; no password is stored in this manifest",
+      "java_runtime": "exact vendor, version, target, and OS image recorded at external run time",
+      "tls_provider": "exact provider, protocol, keytool, and trust-store metadata recorded at external run time"
+    },
+    "tls_materialization": {
+      "status": "planned",
+      "vector": "client-certificate",
+      "server_material": {
+        "certificate": "<run-root>/runtime/server.crt",
+        "key": "<run-root>/runtime/server.key",
+        "client_ca": "<run-root>/runtime/ca.crt",
+        "require_client_cert": true
+      },
+      "client_material": {
+        "certificate": "<run-root>/runtime/client.crt",
+        "key": "<run-root>/runtime/client.key",
+        "keystore": "<run-root>/runtime/client.jks",
+        "keystore_type": "JKS",
+        "truststore": "<run-root>/runtime/client-truststore.jks",
+        "truststore_type": "JKS"
+      },
+      "jvm_system_properties": [
+        {"name": "javax.net.ssl.keyStoreType", "value": "JKS"},
+        {"name": "javax.net.ssl.keyStore", "value": "<run-root>/runtime/client.jks"},
+        {"name": "javax.net.ssl.keyStorePassword", "value_source": "protected-capability", "persist": false},
+        {"name": "javax.net.ssl.trustStoreType", "value": "JKS"},
+        {"name": "javax.net.ssl.trustStore", "value": "<run-root>/runtime/client-truststore.jks"},
+        {"name": "javax.net.ssl.trustStorePassword", "value_source": "protected-capability", "persist": false}
+      ],
+      "required_evidence": [
+        "certificate and key provenance below the private run root",
+        "JKS type and keystore/truststore paths",
+        "redacted JVM property argv",
+        "JDK/keytool/provider metadata",
+        "client certificate handshake outcome"
+      ],
+      "secret_policy": "password values are supplied only through the protected runner capability and never persisted in argv, manifests, traces, logs, or Git"
+    }
+  },
+  "network_policy": {
+    "scope": "loopback-only",
+    "public_network": false,
+    "bind_host": "127.0.0.1",
+    "allow_upstream": "started origin ports plus explicit numeric loopback --allow-upstream entries",
+    "deny": [
+      "DNS names", "non-loopback addresses", "unlisted loopback ports",
+      "HTTPS absolute-form proxy requests", "ambient HTTP proxy environment"
+    ],
+    "ambient_proxy_environment": "deny",
+    "process_discovery": "forbidden",
+    "mirror_network_isolation": "required; recorder-mirror binds wildcard and must run in a dedicated namespace or firewall policy",
+    "mirror_isolation_contract": "recorder-mirror/case.json#future_driver_actions[isolate-network]",
+    "mirror_isolation_action": "run-recorder-mirror-isolated",
+    "mirror_isolation_status": "planned"
+  },
+  "bounds": {
+    "max_samples": 8,
+    "max_input_bytes": 1048576,
+    "max_result_bytes": 4194304,
+    "max_text_bytes": 4194304,
+    "max_process_output_bytes": 1048576,
+    "max_artifact_bytes": 67108864,
+    "startup_timeout_ms": 10000,
+    "oracle_timeout_seconds": 300,
+    "server_trace_bytes": 2097152,
+    "server_ready_bytes": 16384,
+    "server_workers": 32,
+    "server_session_seconds": 30,
+    "server_request_line_bytes": 8192,
+    "server_target_bytes": 8192,
+    "server_header_bytes": 65536,
+    "server_header_count": 128,
+    "server_body_bytes": 1048576,
+    "server_response_bytes": 4194304,
+    "server_relay_bytes": 8388608,
+    "server_relay_chunk_bytes": 16384,
+    "server_secret_bytes": 4096,
+    "server_io_timeout_seconds": 10,
+    "server_shutdown_grace_seconds": 5,
+    "server_shutdown_join_seconds": 10
+  },
+  "resource_limits": {
+    "max_samples": 8,
+    "max_response_bytes": 4194304
+  },
+  "future_driver_actions": [
+    {
+      "id": "prepare-run-root",
+      "action_type": "private-filesystem-root",
+      "status": "planned",
+      "requirements": ["existing directory", "effective-user-owned", "mode 0700", "no inherited artifacts"]
+    },
+    {
+      "id": "generate-local-tls-material",
+      "action_type": "pinned-cryptographic-toolchain",
+      "status": "planned",
+      "requirements": [
+        "local CA, valid, expired, wrong-name, SNI, and client-certificate material",
+        "record JDK/keytool/provider versions and certificate fingerprints",
+        "write only below run root; never commit generated material"
+      ]
+    },
+    {
+      "id": "materialize-client-keystores",
+      "action_type": "typed-jvm-keystore-materialization",
+      "status": "planned",
+      "contract": "command.tls_materialization",
+      "requirements": [
+        "JKS client keystore and truststore below run root",
+        "client certificate and key linked to the client keystore",
+        "server CA linked to the truststore",
+        "protected passwords never persisted"
+      ]
+    },
+    {
+      "id": "start-fixture-server",
+      "action_type": "owned-child-process",
+      "status": "planned",
+      "contract": "command.fixture_server",
+      "requirements": ["no shell", "exact child handle", "bounded output", "no PID discovery"]
+    },
+    {
+      "id": "await-and-validate-ready",
+      "action_type": "bounded-readiness",
+      "status": "planned",
+      "contract": "command.fixture_server.readiness",
+      "requirements": ["schema and readiness object", "loopback host", "numeric ports", "fresh path"]
+    },
+    {
+      "id": "materialize-port-placeholders",
+      "action_type": "typed-port-substitution",
+      "status": "planned",
+      "contract": "command.port_materialization",
+      "requirements": ["all placeholders resolved", "resolved argv recorded before spawn"]
+    },
+    {
+      "id": "materialize-recorder-port",
+      "action_type": "typed-recorder-readiness",
+      "status": "planned",
+      "contract": "command.recorder",
+      "requirements": ["exact recorder child", "fresh readiness", "loopback host", "numeric port", "recorder-ready digest"]
+    },
+    {
+      "id": "run-recorder-mirror-isolated",
+      "action_type": "network-namespace-or-firewall",
+      "status": "planned",
+      "contract": "recorder-mirror/case.json#future_driver_actions[isolate-network]",
+      "requirements": ["deny public/unrelated interfaces", "allow only selected mirror port and local probe", "fail closed on isolation setup failure"]
+    },
+    {
+      "id": "run-pinned-jmeter-oracle",
+      "action_type": "external-jmeter-process",
+      "status": "planned",
+      "requirements": ["profile-pinned Apache JMeter 5.6.3 artifact (SHA-512 checked; PGP verification required before oracle use)", "Java metadata recorded", "environment cleared and allowlisted"]
+    },
+    {
+      "id": "run-recorder-and-replay",
+      "action_type": "external-browser-recorder",
+      "status": "planned",
+      "requirements": ["CONNECT and HTTPS interception", "filter/header assertions", "generated JMX replay through FX-JMX-001"]
+    },
+    {
+      "id": "compare-and-retain-diagnostics",
+      "action_type": "protocol-differential",
+      "status": "planned",
+      "requirements": ["custom jmx-semantic comparator or JTL projection", "explicit normalization", "raw diff outside Git"]
+    },
+    {
+      "id": "shutdown-and-reap",
+      "action_type": "owned-child-cleanup",
+      "status": "planned",
+      "requirements": ["graceful stop", "bounded join", "exact-child reap on every path", "run-root cleanup after reap"]
+    }
+  ],
+  "execution": {
+    "status": {
+      "kind": "not-run",
+      "reason": "external-oracle-not-executed",
+      "oracle_available": false
+    },
+    "process_exit": null,
+    "oracle_available": false,
+    "sample_count": null,
+    "raw_artifacts": "oracle-runs/proxy-tls/ (ignored; local evidence only)",
+    "expected": [
+      {
+        "path": "expected/semantic.json",
+        "sha256": "1d50e855c777e497b22557ad1463de9c7ec6f1abc2e35c2466ac2c33117ce13c",
+        "bounds_ref": "bounds"
+      }
+    ],
+    "resolved_argv_evidence": {
+      "status": "not-run",
+      "runtime_artifact": "oracle-runs/proxy-tls/resolved-argv.json",
+      "sha256": null,
+      "reason": "no fixture, browser, Java, JMeter, or external TLS process has been executed"
+    }
+  },
+  "limitations": [
+    "Static validation does not start the fixture, a browser recorder, Java/JMeter, keytool, OpenSSL, or a network client.",
+    "The expected JSON is an original protocol case contract, not a fabricated oracle result; pinned JMeter evidence is required before profile promotion.",
+    "Recorder-generated JMX topology is compared through FX-JMX-001 and is intentionally not copied into this fixture family.",
+    "Runtime certificates, client keys, JKS stores, credentials, trace files, resolved argv records, and raw JTL/log output must remain below an ignored temporary run root.",
+    "The generic JTL comparator does not consume format jmx-semantic; a protocol comparator or pinned JTL projection is required before differential comparison.",
+    "All future driver actions, port substitutions, proxy flag mappings, recorder flows, trust modes, certificate matrices, and keytool parameters remain planned and unobserved."
+  ]
+}

@@ -1,0 +1,273 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JMX-NO-DROP-BOUNDARIES",
+  "format": "jmx-semantic",
+  "fixture_family_id": "FX-JMX-001",
+  "evidence_status": "external-unavailable",
+  "source": {
+    "kind": "original-static-descriptor",
+    "oracle_status": "not-run",
+    "note": "Clean-room disabled JMX topology; no Java, JMeter, plugin, script engine, GUI, browser, TLS service, network client, or subprocess was run."
+  },
+  "capability_accounting": {
+    "status": "external-unavailable",
+    "required_boundaries": ["EXT-JVM-001", "EXT-PLUGIN-001", "EXT-OS-001", "EXT-SERVICE-001", "EXT-TLS-001"],
+    "unsupported_error_code": "unsupported-capability",
+    "stable_error_codes": [
+      "jmx.semantic.unknown_element",
+      "plugin.capability.unsupported",
+      "plugin.function.unsupported",
+      "legacy.capability.unsupported"
+    ],
+    "no_silent_success": true,
+    "no_sample_output_claimed": true,
+    "missing_adapter_behavior": "retain exact testclass/guiclass/testname/enabled attributes, typed properties, ordered hashTree companions, duplicate-looking nodes, and raw opaque spans; report typed unavailable-capability diagnostics and never translate or execute a disabled external node"
+  },
+  "comparator_contract": {
+    "format": "jmx-semantic",
+    "comparator_route": "jmx-semantic-static",
+    "generic_jtl_comparator": "reject",
+    "comparator_enforced": false,
+    "status": "not-run-static",
+    "required_assertions": [
+      "root metadata and alternating element/hashTree topology",
+      "exact attribute values and insertion order",
+      "typed property names, decoded values, duplicates, and empty values",
+      "raw opaque subtree byte hashes and typed unavailable diagnostics"
+    ],
+    "raw_diff": "outside Git under an ignored run root when a future comparator exists",
+    "reason": "The repository JTL comparator does not consume jmx-semantic projections. This case is routed to a future static JMX comparator and does not fabricate an oracle result."
+  },
+  "bounds": {
+    "max_plan_bytes": 16384,
+    "max_plan_nodes": 16,
+    "max_plan_depth": 6,
+    "max_property_count_per_element": 16,
+    "max_property_text_bytes": 8192,
+    "max_threads": 1,
+    "max_iterations_per_thread": 1,
+    "max_samples": 0,
+    "max_network_requests": 0,
+    "max_processes": 0,
+    "max_result_bytes": 0
+  },
+  "root": {
+    "element": "jmeterTestPlan",
+    "attributes": {"version": "1.2", "properties": "5.0", "jmeter": "5.6.3"},
+    "ordered_children": ["hashTree"]
+  },
+  "topology": {
+    "alternating_pairs": true,
+    "ordered_pair_count": 11,
+    "disabled_external_or_opaque_pair_count": 9,
+    "duplicate_identity_rule": "PluginSampler[0] and PluginSampler[1] retain distinct ordered identity despite equal tag/class/name; Header.name values also remain duplicated in collection order.",
+    "planned_samples": 0,
+    "executed_samples": null
+  },
+  "ordered_hash_tree_pairs": [
+    {
+      "position": 0,
+      "path": "hashTree/TestPlan",
+      "element": {"tag": "TestPlan", "guiclass": "TestPlanGui", "testclass": "TestPlan", "testname": "JMX no-drop boundary topology", "enabled": "true", "opaque": false},
+      "hash_tree_children": ["ThreadGroup"]
+    },
+    {
+      "position": 1,
+      "path": "hashTree/TestPlan/hashTree/ThreadGroup",
+      "element": {"tag": "ThreadGroup", "guiclass": "ThreadGroupGui", "testclass": "ThreadGroup", "testname": "One disabled-boundary user", "enabled": "true", "opaque": false},
+      "hash_tree_children": ["PluginSampler[0]", "PluginSampler[1]", "BSFSampler", "ReportPlan", "MongoScriptSampler", "HTTPSamplerProxy", "HeaderManager", "DebugSampler"]
+    },
+    {
+      "position": 2,
+      "path": "hashTree/TestPlan/hashTree/ThreadGroup/hashTree/PluginSampler[0]",
+      "element": {"tag": "PluginSampler", "guiclass": "com.example.jmeter.PluginSamplerGui", "testclass": "com.example.jmeter.PluginSampler", "testname": "Repeated opaque plug-in", "enabled": "false", "extra_attributes": {"pluginVersion": "0.1", "custom": "retain-first"}, "opaque": true, "raw_xml_sha256": "be50623b45e5ae7df513f9c9a0e251afe82a9e1f5b29ca7a52cd0f215277f7f6"},
+      "hash_tree_children": ["PluginChild"]
+    },
+    {
+      "position": 3,
+      "path": "hashTree/TestPlan/hashTree/ThreadGroup/hashTree/PluginSampler[0]/hashTree/PluginChild",
+      "element": {"tag": "PluginChild", "guiclass": "com.example.jmeter.PluginChildGui", "testclass": "com.example.jmeter.PluginChild", "testname": "Opaque child", "enabled": "false", "extra_attributes": {"childFlag": "keep"}, "opaque": true, "raw_xml_sha256": "cbe0100b23fb8bda3db4c25da6f74832afb9ec341b2987bceded380ed60b4bd8"},
+      "hash_tree_children": []
+    },
+    {
+      "position": 4,
+      "path": "hashTree/TestPlan/hashTree/ThreadGroup/hashTree/PluginSampler[1]",
+      "element": {"tag": "PluginSampler", "guiclass": "com.example.jmeter.PluginSamplerGui", "testclass": "com.example.jmeter.PluginSampler", "testname": "Repeated opaque plug-in", "enabled": "false", "extra_attributes": {"pluginVersion": "0.1", "custom": "retain-second"}, "opaque": true, "raw_xml_sha256": "55c54a779f0d330d3f366fa5392e48700a0a1d51265dbd7c704780b2a03f65cb"},
+      "hash_tree_children": []
+    },
+    {
+      "position": 5,
+      "path": "hashTree/TestPlan/hashTree/ThreadGroup/hashTree/BSFSampler",
+      "element": {"tag": "BSFSampler", "guiclass": "BSFSamplerGui", "testclass": "BSFSampler", "testname": "Legacy BSF alias", "enabled": "false", "opaque": true},
+      "hash_tree_children": []
+    },
+    {
+      "position": 6,
+      "path": "hashTree/TestPlan/hashTree/ThreadGroup/hashTree/ReportPlan",
+      "element": {"tag": "ReportPlan", "guiclass": "ReportPlanGui", "testclass": "ReportPlan", "testname": "Legacy report alias", "enabled": "false", "extra_attributes": {"legacy": "retain"}, "opaque": true, "raw_xml_sha256": "d914e50eada14dcdc43cd0691a2ecdc570358fbaf27561c34ab4136608ce03a5"},
+      "hash_tree_children": []
+    },
+    {
+      "position": 7,
+      "path": "hashTree/TestPlan/hashTree/ThreadGroup/hashTree/MongoScriptSampler",
+      "element": {"tag": "MongoScriptSampler", "guiclass": "TestBeanGUI", "testclass": "MongoScriptSampler", "testname": "Legacy MongoDB alias", "enabled": "false", "opaque": true, "raw_xml_sha256": "921bea1bfc40990cbf782557c542c2b43c48973276b2e6dba8c34ef33c74518c"},
+      "hash_tree_children": []
+    },
+    {
+      "position": 8,
+      "path": "hashTree/TestPlan/hashTree/ThreadGroup/hashTree/HTTPSamplerProxy",
+      "element": {"tag": "HTTPSamplerProxy", "guiclass": "HttpTestSampleGui", "testclass": "HTTPSamplerProxy", "testname": "Recorder-generated HTTPS request", "enabled": "false", "opaque": false, "raw_xml_sha256": "407d38a49a217ade0f69b20979ec7161d28689f94ca9fac53e77309cf8ef6390"},
+      "hash_tree_children": []
+    },
+    {
+      "position": 9,
+      "path": "hashTree/TestPlan/hashTree/ThreadGroup/hashTree/HeaderManager",
+      "element": {"tag": "HeaderManager", "guiclass": "HeaderPanel", "testclass": "HeaderManager", "testname": "Recorder-generated headers", "enabled": "false", "opaque": false, "raw_xml_sha256": "3ccfb36ebaf47c06c29b5c6144576993db5265496fb86834ce4a88985044acfa"},
+      "hash_tree_children": []
+    },
+    {
+      "position": 10,
+      "path": "hashTree/TestPlan/hashTree/ThreadGroup/hashTree/DebugSampler",
+      "element": {"tag": "DebugSampler", "guiclass": "TestBeanGUI", "testclass": "DebugSampler", "testname": "Known disabled sibling", "enabled": "false", "opaque": false},
+      "hash_tree_children": []
+    }
+  ],
+  "typed_properties": [
+    {"path": "TestPlan/TestPlan.functional_mode", "node": "boolProp", "value": "false"},
+    {"path": "TestPlan/TestPlan.serialize_threadgroups", "node": "boolProp", "value": "false"},
+    {"path": "TestPlan/TestPlan.comments", "node": "stringProp", "value": "Original static boundary fixture: disabled plugin, legacy, GUI, and recorder nodes remain lossless."},
+    {"path": "ThreadGroup/ThreadGroup.on_sample_error", "node": "stringProp", "value": "continue"},
+    {"path": "ThreadGroup/ThreadGroup.main_controller", "node": "elementProp", "element_type": "LoopController", "guiclass": "LoopControlPanel", "testclass": "LoopController", "testname": "One bounded iteration", "enabled": "true"},
+    {"path": "ThreadGroup/LoopController.continue_forever", "node": "boolProp", "value": "false"},
+    {"path": "ThreadGroup/LoopController.loops", "node": "stringProp", "value": "1"},
+    {"path": "ThreadGroup/ThreadGroup.num_threads", "node": "stringProp", "value": "1"},
+    {"path": "ThreadGroup/ThreadGroup.ramp_time", "node": "stringProp", "value": "0"},
+    {"path": "ThreadGroup/ThreadGroup.start_time", "node": "longProp", "value": "0"},
+    {"path": "ThreadGroup/ThreadGroup.end_time", "node": "longProp", "value": "0"},
+    {"path": "ThreadGroup/ThreadGroup.scheduler", "node": "boolProp", "value": "false"},
+    {"path": "ThreadGroup/ThreadGroup.duration", "node": "stringProp", "value": ""},
+    {"path": "ThreadGroup/ThreadGroup.delay", "node": "stringProp", "value": ""},
+    {"path": "PluginSampler[0]/plugin.known", "node": "stringProp", "value": "known & value"},
+    {"path": "PluginSampler[0]/plugin.function.expression", "node": "stringProp", "value": "${__fixturePluginFunction(α,&beta)}", "function_expansion": "preserve-unexpanded"},
+    {"path": "PluginSampler[0]/plugin.opaque", "node": "pluginProperty", "value": "opaque & property <bytes>", "raw_xml_sha256": "1d17609459dc58bfd881d3711836e9891e4b228a28118531325a007e03e1573d", "opaque": true},
+    {"path": "PluginSampler[0]/pluginExtension", "node": "pluginExtension", "raw_xml_sha256": "eb5d9695ca76c9ff5cb78af4ff939c5ac00a3f0f258f8518c1c240933d77a32b", "opaque": true},
+    {"path": "PluginSampler[0]/plugin.object", "node": "objProp", "object_class": "com.example.jmeter.PluginBytes", "value_attributes": {"type": "com.example.jmeter.PluginBytes", "encoding": "utf-8", "extra": "preserve"}, "value": "opaque object & bytes", "raw_xml_sha256": "ce82c49caa825814cea1e948d8fd9e9c6b839093f309f574b2d7270493441c58", "opaque": true},
+    {"path": "PluginChild/child.raw", "node": "pluginChildProperty", "value": "child & raw", "raw_xml_sha256": "a4db81eea5f629deeccd215e4587d7061e70f527b19b45d1b1414bfbccd7617a", "opaque": true},
+    {"path": "PluginSampler[1]/plugin.known", "node": "stringProp", "value": "second value"},
+    {"path": "PluginSampler[1]/plugin.opaque", "node": "pluginProperty", "value": "second opaque payload", "raw_xml_sha256": "d7e7117127ac09fab703c49874d9846463d3b64fd309766804866f2c728140f5", "opaque": true},
+    {"path": "BSFSampler/BSFSampler.filename", "node": "stringProp", "value": "legacy-fixture.bsf", "legacy_wire_name": true},
+    {"path": "BSFSampler/BSFSampler.language", "node": "stringProp", "value": "beanshell", "legacy_wire_name": true},
+    {"path": "BSFSampler/BSFSampler.parameters", "node": "stringProp", "value": "fixture-parameter", "legacy_wire_name": true},
+    {"path": "BSFSampler/BSFSampler.query", "node": "stringProp", "value": "return 'fixture';", "legacy_wire_name": true},
+    {"path": "ReportPlan/ReportPlan.output", "node": "stringProp", "value": "legacy-fixture/report"},
+    {"path": "ReportPlan/ReportPlan.title", "node": "stringProp", "value": "static legacy report descriptor"},
+    {"path": "ReportPlan/reportExtension", "node": "reportExtension", "raw_xml_sha256": "bf36bb9a498b244ee9c2407c3ccbb0288f721d154fc7cc713609e85572858f26", "opaque": true},
+    {"path": "MongoScriptSampler/MongoScriptSampler.source", "node": "stringProp", "value": "legacy-fixture-source"},
+    {"path": "MongoScriptSampler/MongoScriptSampler.database", "node": "stringProp", "value": "fixture"},
+    {"path": "MongoScriptSampler/MongoScriptSampler.script", "node": "stringProp", "value": "return { legacy: true };"},
+    {"path": "HTTPSamplerProxy/HTTPSampler.postBodyRaw", "node": "boolProp", "value": "false"},
+    {"path": "HTTPSamplerProxy/HTTPsampler.Arguments", "node": "elementProp", "element_type": "Arguments", "guiclass": "HTTPArgumentsPanel", "testclass": "Arguments", "testname": "Recorded arguments", "enabled": "true", "raw_xml_sha256": "d9322044d9df0b02f437b37836bcefa5ce3b1e00e67d07e3209e2e0ae7a60465"},
+    {"path": "HTTPSamplerProxy/Arguments.arguments", "node": "collectionProp", "ordered": true},
+    {"path": "HTTPSamplerProxy/Arguments.arguments/recorded-value", "node": "elementProp", "element_type": "HTTPArgument"},
+    {"path": "HTTPSamplerProxy/Arguments.arguments/recorded-value/Argument.name", "node": "stringProp", "value": "fixture"},
+    {"path": "HTTPSamplerProxy/Arguments.arguments/recorded-value/Argument.value", "node": "stringProp", "value": "recorded & value"},
+    {"path": "HTTPSamplerProxy/Arguments.arguments/recorded-value/HTTPArgument.use_equals", "node": "boolProp", "value": "true"},
+    {"path": "HTTPSamplerProxy/Arguments.arguments/recorded-value/HTTPArgument.always_encode", "node": "boolProp", "value": "false"},
+    {"path": "HTTPSamplerProxy/HTTPSampler.domain", "node": "stringProp", "value": "127.0.0.1"},
+    {"path": "HTTPSamplerProxy/HTTPSampler.port", "node": "stringProp", "value": "443"},
+    {"path": "HTTPSamplerProxy/HTTPSampler.protocol", "node": "stringProp", "value": "https"},
+    {"path": "HTTPSamplerProxy/HTTPSampler.path", "node": "stringProp", "value": "/recorded"},
+    {"path": "HTTPSamplerProxy/HTTPSampler.method", "node": "stringProp", "value": "POST"},
+    {"path": "HTTPSamplerProxy/HTTPSampler.contentEncoding", "node": "stringProp", "value": "UTF-8"},
+    {"path": "HTTPSamplerProxy/HTTPSampler.embedded_url_re", "node": "stringProp", "value": "", "present": true},
+    {"path": "HTTPSamplerProxy/recorder.generated.marker", "node": "stringProp", "value": "fixture-recorder-v1"},
+    {"path": "HeaderManager/HeaderManager.headers", "node": "collectionProp", "ordered": true},
+    {"path": "HeaderManager/HeaderManager.headers/recorded-header-one/Header.name", "node": "stringProp", "value": "X-Recorder-Fixture"},
+    {"path": "HeaderManager/HeaderManager.headers/recorded-header-one/Header.value", "node": "stringProp", "value": "one"},
+    {"path": "HeaderManager/HeaderManager.headers/recorded-header-two/Header.name", "node": "stringProp", "value": "X-Recorder-Fixture"},
+    {"path": "HeaderManager/HeaderManager.headers/recorded-header-two/Header.value", "node": "stringProp", "value": "two"},
+    {"path": "DebugSampler/displayJMeterProperties", "node": "boolProp", "value": "false"},
+    {"path": "DebugSampler/displayJMeterVariables", "node": "boolProp", "value": "false"},
+    {"path": "DebugSampler/displaySystemProperties", "node": "boolProp", "value": "false"}
+  ],
+  "opaque_payloads": [
+    {"owner": "PluginSampler[0]", "wire_tag": "PluginSampler", "raw_xml_sha256": "be50623b45e5ae7df513f9c9a0e251afe82a9e1f5b29ca7a52cd0f215277f7f6", "must_preserve_raw_xml": true},
+    {"owner": "PluginSampler[0]", "wire_tag": "pluginProperty", "wire_name": "plugin.opaque", "raw_xml_sha256": "1d17609459dc58bfd881d3711836e9891e4b228a28118531325a007e03e1573d", "must_preserve_raw_xml": true},
+    {"owner": "PluginSampler[0]", "wire_tag": "pluginExtension", "raw_xml_sha256": "eb5d9695ca76c9ff5cb78af4ff939c5ac00a3f0f258f8518c1c240933d77a32b", "contains": ["comment", "CDATA", "opaqueChild"], "must_preserve_raw_xml": true},
+    {"owner": "PluginSampler[0]", "wire_tag": "objProp", "wire_name": "plugin.object", "raw_xml_sha256": "ce82c49caa825814cea1e948d8fd9e9c6b839093f309f574b2d7270493441c58", "must_preserve_raw_xml": true},
+    {"owner": "PluginChild", "wire_tag": "pluginChildProperty", "wire_name": "child.raw", "raw_xml_sha256": "a4db81eea5f629deeccd215e4587d7061e70f527b19b45d1b1414bfbccd7617a", "must_preserve_raw_xml": true},
+    {"owner": "PluginSampler[1]", "wire_tag": "pluginProperty", "wire_name": "plugin.opaque", "raw_xml_sha256": "d7e7117127ac09fab703c49874d9846463d3b64fd309766804866f2c728140f5", "must_preserve_raw_xml": true},
+    {"owner": "ReportPlan", "wire_tag": "ReportPlan", "raw_xml_sha256": "d914e50eada14dcdc43cd0691a2ecdc570358fbaf27561c34ab4136608ce03a5", "must_preserve_raw_xml": true},
+    {"owner": "ReportPlan", "wire_tag": "reportExtension", "raw_xml_sha256": "bf36bb9a498b244ee9c2407c3ccbb0288f721d154fc7cc713609e85572858f26", "contains": ["CDATA"], "must_preserve_raw_xml": true},
+    {"owner": "MongoScriptSampler", "wire_tag": "MongoScriptSampler", "raw_xml_sha256": "921bea1bfc40990cbf782557c542c2b43c48973276b2e6dba8c34ef33c74518c", "must_preserve_raw_xml": true}
+  ],
+  "duplicate_identity_probes": [
+    {"path": "PluginSampler[0]", "same_wire_identity_as": "PluginSampler[1]", "difference": "custom attribute, property values, and child hashTree", "deduplicate": false},
+    {"path": "HeaderManager/HeaderManager.headers/recorded-header-one/Header.name", "same_typed_property_name_as": "HeaderManager/HeaderManager.headers/recorded-header-two/Header.name", "difference": "collection element key and Header.value", "deduplicate": false}
+  ],
+  "legacy_alias_contract": {
+    "nodes": [
+      {"path": "BSFSampler", "testclass": "BSFSampler", "guiclass": "BSFSamplerGui", "family": "BSF", "boundary": "EXT-JVM-001", "status": "external-unavailable", "preserve_wire_properties": true},
+      {"path": "ReportPlan", "testclass": "ReportPlan", "guiclass": "ReportPlanGui", "family": "report-plan", "boundary": "EXT-JVM-001", "status": "opaque-legacy-unknown", "saveservice_alias_present": false},
+      {"path": "MongoScriptSampler", "testclass": "MongoScriptSampler", "guiclass": "TestBeanGUI", "family": "MongoDB", "boundary": "EXT-SERVICE-001", "status": "external-unavailable", "preserve_wire_properties": true}
+    ],
+    "must_not_map_to": ["HTTPSamplerProxy", "DebugSampler", "JSR223Sampler", "SummaryReport"]
+  },
+  "gui_contract": {
+    "source_kind": "GUI-shaped JMX preservation input",
+    "required_attributes": ["guiclass", "testclass", "testname", "enabled"],
+    "nodes": [
+      {"path": "HTTPSamplerProxy", "guiclass": "HttpTestSampleGui", "testclass": "HTTPSamplerProxy", "enabled": "false"},
+      {"path": "HTTPSamplerProxy/HTTPsampler.Arguments", "guiclass": "HTTPArgumentsPanel", "testclass": "Arguments", "enabled": "true"},
+      {"path": "HeaderManager", "guiclass": "HeaderPanel", "testclass": "HeaderManager", "enabled": "false"}
+    ],
+    "headless_round_trip": "retain GUI attributes and typed/opaque properties; do not render or rewrite disabled nodes"
+  },
+  "recorder_contract": {
+    "generated_jmx_status": "static-only; generated artifact not copied",
+    "sampler_path": "HTTPSamplerProxy",
+    "protocol": "https",
+    "request_target": "127.0.0.1:443/recorded",
+    "header_order": ["X-Recorder-Fixture", "X-Recorder-Fixture"],
+    "sensitive_headers_absent": ["Cookie", "Authorization"],
+    "connect_tls_boundary": "EXT-TLS-001",
+    "network_boundary": "EXT-SERVICE-001",
+    "replay_status": "not-run"
+  },
+  "diagnostics": [
+    {"code": "jmx.semantic.unknown_element", "node": "PluginSampler[0]", "severity": "warning", "executable": false},
+    {"code": "plugin.capability.unsupported", "node": "PluginSampler[0]", "capability": "com.example.jmeter.PluginSampler", "severity": "error", "executable": false},
+    {"code": "plugin.function.unsupported", "node": "PluginSampler[0]/plugin.function.expression", "function": "__fixturePluginFunction", "severity": "error", "executable": false},
+    {"code": "jmx.semantic.unknown_element", "node": "PluginChild", "severity": "warning", "executable": false},
+    {"code": "plugin.capability.unsupported", "node": "PluginChild", "capability": "com.example.jmeter.PluginChild", "severity": "error", "executable": false},
+    {"code": "jmx.semantic.unknown_element", "node": "PluginSampler[1]", "severity": "warning", "executable": false},
+    {"code": "plugin.capability.unsupported", "node": "PluginSampler[1]", "capability": "com.example.jmeter.PluginSampler", "severity": "error", "executable": false},
+    {"code": "legacy.capability.unsupported", "node": "BSFSampler", "capability": "BSFSampler", "boundary": "EXT-JVM-001", "severity": "error", "executable": false},
+    {"code": "jmx.semantic.unknown_element", "node": "ReportPlan", "severity": "warning", "executable": false},
+    {"code": "legacy.alias.unavailable", "node": "ReportPlan", "boundary": "EXT-JVM-001", "severity": "error", "executable": false},
+    {"code": "legacy.capability.unsupported", "node": "MongoScriptSampler", "capability": "MongoScriptSampler", "boundary": "EXT-SERVICE-001", "severity": "error", "executable": false},
+    {"code": "proxy.recorder.static_only", "node": "HTTPSamplerProxy", "boundary": "EXT-SERVICE-001", "severity": "info", "executable": false}
+  ],
+  "preservation_invariants": [
+    "Unknown plugin classes, function text, extra attributes, comments, CDATA, unknown property tags, object metadata, and ordered hashTree descendants remain available for semantic round-trip.",
+    "Duplicate-looking PluginSampler siblings and duplicate Header.name values remain separate ordered identities; no node or property is merged by name or class.",
+    "Legacy BSF, report-plan, and MongoDB aliases retain exact wire tags/classes/GUI attributes and typed property order; no unavailable capability is mapped to a modern built-in.",
+    "GUI and recorder-shaped nodes preserve guiclass/testclass/testname/enabled, nested GUI attributes, recorder request properties, header order, and the absence of Cookie/Authorization.",
+    "All external, legacy, plugin, GUI, and recorder nodes are disabled; this case has no executable sample and claims no runtime result."
+  ],
+  "normalization": {
+    "ignored_fields": ["xml_lexical_whitespace", "xml_empty_element_spelling"],
+    "lexical_preserving_regions": ["PluginSampler[0]", "PluginSampler[0]/pluginProperty", "PluginSampler[0]/pluginExtension", "PluginSampler[0]/objProp", "PluginChild", "PluginSampler[1]/pluginProperty", "ReportPlan", "ReportPlan/reportExtension", "MongoScriptSampler"],
+    "reason": "Only indentation and empty-element spelling outside explicitly raw regions may vary. Root metadata, exact attributes, ordered topology, duplicate identities, typed values, GUI metadata, recorder headers, and opaque raw spans remain observable and are not normalized."
+  },
+  "oracle_execution": {
+    "status": "external-unavailable",
+    "oracle_available": false,
+    "process_exit": null,
+    "sample_count": null,
+    "raw_artifacts": "none",
+    "reason": "Static fixture task forbids Java/JMeter/process/network execution; a future pinned comparator must record raw diagnostics outside Git."
+  }
+}

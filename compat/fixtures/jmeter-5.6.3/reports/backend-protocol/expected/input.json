@@ -1,0 +1,49 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-REPORT-BACKEND-PROTOCOL",
+  "format": "jtl-xml",
+  "source": "inputs/backend.xml",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 3,
+  "represented_sample_count": 3,
+  "samples": [
+    {
+      "position": 0,
+      "element": "sample",
+      "wire_attributes": {"ts": "1704067200000", "t": "100", "s": "true", "lb": "backend/login", "rc": "200", "rm": "OK", "tn": "backend-thread-1", "dt": "text", "de": "UTF-8", "by": "100", "sby": "10", "sc": "1", "ec": "0", "ng": "1", "na": "1", "sample_id": "b01"},
+      "semantic": {"timestamp_ms": 1704067200000, "elapsed_millis": 100, "label": "backend/login", "successful": true, "response_code": "200", "response_message": "OK", "thread_name": "backend-thread-1", "received_bytes": 100, "sent_bytes": 10, "sample_count": 1, "error_count": 0, "group_threads": 1, "all_threads": 1},
+      "variables": {"sample_id": "b01"},
+      "sub_result_count": 0
+    },
+    {
+      "position": 1,
+      "element": "sample",
+      "wire_attributes": {"ts": "1704067201000", "t": "250", "s": "true", "lb": "backend/login", "rc": "200", "rm": "OK", "tn": "backend-thread-1", "dt": "text", "de": "UTF-8", "by": "150", "sby": "20", "sc": "1", "ec": "0", "ng": "1", "na": "1", "sample_id": "b02"},
+      "semantic": {"timestamp_ms": 1704067201000, "elapsed_millis": 250, "label": "backend/login", "successful": true, "response_code": "200", "response_message": "OK", "thread_name": "backend-thread-1", "received_bytes": 150, "sent_bytes": 20, "sample_count": 1, "error_count": 0, "group_threads": 1, "all_threads": 1},
+      "variables": {"sample_id": "b02"},
+      "sub_result_count": 0
+    },
+    {
+      "position": 2,
+      "element": "httpSample",
+      "wire_attributes": {"ts": "1704067202000", "t": "700", "s": "false", "lb": "backend/failure", "rc": "500", "rm": "boom", "tn": "backend-thread-1", "dt": "text", "de": "UTF-8", "by": "30", "sby": "5", "sc": "1", "ec": "1", "ng": "1", "na": "1", "sample_id": "b03"},
+      "semantic": {"timestamp_ms": 1704067202000, "elapsed_millis": 700, "label": "backend/failure", "successful": false, "response_code": "500", "response_message": "boom", "thread_name": "backend-thread-1", "received_bytes": 30, "sent_bytes": 5, "sample_count": 1, "error_count": 1, "group_threads": 1, "all_threads": 1},
+      "variables": {"sample_id": "b03"},
+      "sub_result_count": 0
+    }
+  ],
+  "generated_from": {
+    "generator": "jmeter-rs project, hand-authored static corpus",
+    "generator_version": "repository source",
+    "random_seed": null,
+    "oracle_command": null,
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "none; no Java, JMeter, backend service, report generator, or subprocess was invoked"
+  },
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "This is an exact static backend input descriptor. Source order, timestamps, response fields, labels, byte counts, and success/error counts remain observable."
+  }
+}

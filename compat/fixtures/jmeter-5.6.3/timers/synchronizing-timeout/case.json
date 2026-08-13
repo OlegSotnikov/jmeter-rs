@@ -1,0 +1,75 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-TIMER-SYNCHRONIZING-TIMEOUT",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-ELEMENTS-CORE-001",
+  "conformance_ids": [
+    "ELEM-007",
+    "TEST-001"
+  ],
+  "normalization_policy_refs": [
+    "NORM-STRUCTURE-001",
+    "NORM-TIME-001",
+    "NORM-ENV-001"
+  ],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "0deeae4e78ae361685c1ef3e19f2e3170304b352849aad521fdf5df1a628cbe3"
+  },
+  "property_files": [
+    {
+      "path": "oracle.properties",
+      "sha256": "6f85e6b6e39c0e74bedee6a774e8f308084652c54ea2ed5da5f35dcde8ab9555"
+    }
+  ],
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/timers/synchronizing-timeout",
+    "mode": "nongui",
+    "argv_template": [
+      "jmeter",
+      "-n",
+      "-q",
+      "oracle.properties",
+      "-t",
+      "plan.jmx",
+      "-l",
+      "<ignored>/oracle.jtl",
+      "-j",
+      "<ignored>/oracle.log"
+    ],
+    "network": "none",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null
+  },
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations_per_thread": 1,
+    "max_samples": 1,
+    "max_plan_nodes": 64,
+    "max_plan_depth": 8,
+    "max_property_text_bytes": 4096,
+    "max_result_bytes": 65536,
+    "max_jtl_bytes": 65536,
+    "max_log_bytes": 65536,
+    "max_process_output_bytes": 65536,
+    "max_artifact_bytes": 1048576,
+    "max_rss_mb": 512,
+    "max_process_wait_seconds": 30
+  },
+  "execution": {
+    "status": "not-run-static-only",
+    "process_exit": null,
+    "process_exit_asserted": false,
+    "sample_count": null,
+    "sample_count_asserted": false,
+    "raw_artifacts": "oracle-runs/timers/synchronizing-timeout/ (ignored; local evidence only)",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+      "This handoff performs static XML/JSON/hash validation only; no Java/JMeter plan execution or sleep-based timing run was performed.",
+    "The one-user topology cannot fill the two-user barrier in an oracle run, so the configured timeout is the planned release path; timeout duration and emitted sample count remain unobserved."
+  ]
+}

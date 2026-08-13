@@ -1,0 +1,85 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-FUNCTIONS-FILES-NEGATIVE",
+  "profile_id": "jmeter-5.6.3",
+  "evidence_status": "not_run",
+  "format": "jmx-semantic",
+  "bounds_contract": {
+    "schema_id": "jmeter-rs.fixture-bounds",
+    "schema_version": 1,
+    "source": "case.bounds",
+    "comparator_enforced": false,
+    "max_threads": 1,
+    "max_iterations_per_thread": 1,
+    "max_samplers_per_iteration": 2,
+    "max_samples": 1,
+    "max_input_bytes": 512,
+    "max_output_files": 0,
+    "max_label_bytes": 1024
+  },
+  "planned_invariants": {
+    "comparator_enforced": false,
+    "reason": "Negative return-value and process-continuation rules remain planned until the validator supports typed function-error assertions.",
+    "missing_file": "**ERR**",
+    "missing_line": "**ERR**",
+    "missing_csv": "",
+    "empty_file": "",
+    "empty_csv": "",
+    "blank_csv_first": "first",
+    "blank_csv_next": "",
+    "blank_csv_blank": "first",
+    "blank_csv_next_last": "",
+    "blank_csv_last": "first",
+    "eof_csv": "",
+    "ragged_first": "first",
+    "ragged_next": "",
+    "ragged_invalid_column": "",
+    "ragged_third_next": "",
+    "ragged_third_invalid_column": "",
+    "invalid_xpath": "",
+    "invalid_xpath_syntax": "",
+    "process_continuation": "planned",
+    "string_from_file": {
+      "bounded_start": {
+        "expression": "${__StringFromFile(inputs/bounded-lines-#.txt,bounded_line_ref,2,2)}",
+        "start_sequence": 2,
+        "end_sequence": 2,
+        "candidate_value": "bounded-two",
+        "comparator_enforced": false,
+        "reason": "The bounded start/end candidate is retained, but the negative-invariant validator does not yet enforce typed sequence assertions."
+      },
+      "empty_file": {
+        "expression": "${__StringFromFile(inputs/empty.txt,empty_line_ref,,2)}",
+        "outcome": {"kind": "stop_thread", "code": "FUNC_STOP_THREAD"},
+        "comparator_enforced": false,
+        "reason": "The empty-file stop-thread mapping is preserved as a typed future-run contract; this static negative expectation does not assert process control."
+      }
+    },
+    "csv_shape": {
+      "ragged_rows": 3,
+      "blank_line_present": true,
+      "ragged_first_candidate": "first",
+      "ragged_next_candidate": "",
+      "invalid_column_candidate": "",
+      "third_invalid_column_candidate": "",
+      "eof_candidate": "",
+      "comparator_enforced": false
+    }
+  },
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.by"],
+    "reason": "This planned descriptor records local negative inputs and candidate return values; diagnostics, sample count, and continuation are not comparator-enforced."
+  },
+  "disabled_samplers": [
+    {
+      "ordinal": 2,
+      "testclass": "DebugSampler",
+      "testname": "empty-stop=${__StringFromFile(inputs/empty.txt,empty_line_ref,,2)}",
+      "enabled": false,
+      "expected_samples": 0,
+      "preserve_source": true,
+      "comparator_enforced": false
+    }
+  ]
+}

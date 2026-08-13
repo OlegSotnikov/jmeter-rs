@@ -1,0 +1,207 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JMX-ALIASES",
+  "format": "jmx-semantic",
+  "root": {
+    "element": "jmeterTestPlan",
+    "attributes": {"version": "1.2", "properties": "5.0", "jmeter": "5.6.3"},
+    "ordered_children": ["hashTree"]
+  },
+  "ordered_hash_tree_pairs": [
+    {
+      "element": {
+        "tag": "TestPlan",
+        "canonical_wire_tag": "TestPlan",
+        "guiclass": "TestPlanGui",
+        "testclass": "TestPlan",
+        "testname": "Alias and typed-property corpus",
+        "enabled": "true",
+        "opaque": false
+      },
+      "hash_tree_children": ["ThreadGroup"]
+    },
+    {
+      "element": {
+        "tag": "ThreadGroup",
+        "canonical_wire_tag": "ThreadGroup",
+        "guiclass": "ThreadGroupGui",
+        "testclass": "ThreadGroup",
+        "testname": "Alias fixture group",
+        "enabled": "true",
+        "opaque": false
+      },
+      "hash_tree_children": ["HTTPSampler2", "HTTPSampler_", "FloatProperty", "JMSSampler", "SoapSampler"]
+    },
+    {
+      "element": {
+        "tag": "HTTPSampler2",
+        "canonical_wire_tag": "HTTPSamplerProxy",
+        "guiclass": "HttpTestSampleGui",
+        "testclass": "HTTPSamplerProxy",
+        "testname": "Historical HTTP alias",
+        "enabled": "false",
+        "opaque": false,
+        "original_guiclass": "HttpTestSampleGui2",
+        "original_testclass": "HTTPSampler2"
+      },
+      "hash_tree_children": []
+    },
+    {
+      "element": {
+        "tag": "HTTPSampler_",
+        "canonical_wire_tag": "HTTPSampler_",
+        "guiclass": "HttpTestSampleGui",
+        "testclass": "HTTPSampler_",
+        "testname": "Upgraded HTTP class",
+        "enabled": "false",
+        "opaque": false,
+        "original_guiclass": "HttpTestSampleGui",
+        "original_testclass": "org.apache.jmeter.protocol.http.sampler.HTTPSamplerFull"
+      },
+      "hash_tree_children": []
+    },
+    {
+      "element": {
+        "tag": "FloatProperty",
+        "canonical_wire_tag": "FloatProperty",
+        "guiclass": "TestBeanGUI",
+        "testclass": "FloatProperty",
+        "testname": "Float property alias",
+        "enabled": "false",
+        "opaque": false
+      },
+      "hash_tree_children": []
+    },
+    {
+      "element": {
+        "tag": "JMSSampler",
+        "canonical_wire_tag": "JMSSampler",
+        "guiclass": "JMSSamplerGui",
+        "testclass": "JMSSampler",
+        "testname": "Historical JMS GUI alias",
+        "enabled": "false",
+        "opaque": false,
+        "original_guiclass": "JMSConfigGui",
+        "original_testclass": "JMSSampler"
+      },
+      "hash_tree_children": []
+    },
+    {
+      "element": {
+        "tag": "SoapSampler",
+        "canonical_wire_tag": "ConfigTestElement",
+        "guiclass": "ObsoleteGui",
+        "testclass": "ConfigTestElement",
+        "testname": "Deprecated SOAP alias",
+        "enabled": "false",
+        "opaque": false,
+        "original_guiclass": "SoapSamplerGui",
+        "original_testclass": "SoapSampler"
+      },
+      "hash_tree_children": []
+    }
+  ],
+  "typed_properties": [
+    {"path": "TestPlan/TestPlan.functional_mode", "node": "boolProp", "value": "false"},
+    {"path": "TestPlan/TestPlan.serialize_threadgroups", "node": "boolProp", "value": "false"},
+    {"path": "TestPlan/TestPlan.comments", "node": "stringProp", "value": "Original aliases & typed values: <keep> \"quoted\" and 雪."},
+    {"path": "TestPlan/fixture.empty-string", "node": "stringProp", "value": "", "present": true},
+    {"path": "TestPlan/fixture.empty-collection", "node": "collectionProp", "ordered": true, "empty": true},
+    {"path": "TestPlan/fixture.ordered-collection", "node": "collectionProp", "ordered": true, "entries": ["first", "second"]},
+    {"path": "TestPlan/fixture.ordered-collection/first", "node": "stringProp", "value": "one"},
+    {"path": "TestPlan/fixture.ordered-collection/second", "node": "stringProp", "value": "two & 2"},
+    {"path": "TestPlan/fixture.ordered-map", "node": "mapProp", "ordered": true, "entries": ["alpha", "beta"]},
+    {"path": "TestPlan/fixture.ordered-map/alpha", "node": "stringProp", "value": "A"},
+    {"path": "TestPlan/fixture.ordered-map/beta", "node": "intProp", "value": "-7"},
+    {"path": "TestPlan/fixture.nested", "node": "elementProp", "element_type": "FixtureElement", "extra_attributes": {"extra": "retain"}},
+    {"path": "TestPlan/fixture.nested/nested.text", "node": "stringProp", "value": "nested <value> & café"},
+    {"path": "TestPlan/fixture.nested/nested.enabled", "node": "boolProp", "value": "true"},
+    {"path": "TestPlan/fixture.nested/nested.object", "node": "objProp", "object_class": "fixture.NestedBytes", "value_attributes": {"type": "fixture.NestedBytes", "encoding": "utf-8"}, "value": "nested opaque & bytes"},
+    {"path": "TestPlan/fixture.empty-object", "node": "objProp", "null": true},
+    {"path": "TestPlan/fixture.object", "node": "objProp", "object_class": "fixture.Bytes", "value_attributes": {"class": "fixture.Bytes", "encoding": "utf-8"}, "value": "opaque & bytes"},
+    {"path": "TestPlan/fixture.int", "node": "intProp", "value": "-2147483648"},
+    {"path": "TestPlan/fixture.long", "node": "longProp", "value": "9223372036854775807"},
+    {"path": "TestPlan/fixture.float", "node": "floatProp", "value": "-0.125", "oracle_status": "pinned-oracle-question"},
+    {"path": "TestPlan/fixture.double", "node": "doubleProp", "value": "6.25"},
+    {"path": "TestPlan/fixture.escaped", "node": "stringProp", "value": "left & right <tag> \"quote\" 'apostrophe' / café / 雪"},
+    {"path": "TestPlan/fixture.false", "node": "boolProp", "value": "false"},
+    {"path": "ThreadGroup/ThreadGroup.on_sample_error", "node": "stringProp", "value": "continue"},
+    {"path": "ThreadGroup/ThreadGroup.main_controller", "node": "elementProp", "element_type": "LoopController"},
+    {"path": "ThreadGroup/LoopController.continue_forever", "node": "boolProp", "value": "false"},
+    {"path": "ThreadGroup/LoopController.loops", "node": "stringProp", "value": "1"},
+    {"path": "ThreadGroup/ThreadGroup.num_threads", "node": "stringProp", "value": "1"},
+    {"path": "ThreadGroup/ThreadGroup.ramp_time", "node": "stringProp", "value": "0"},
+    {"path": "ThreadGroup/ThreadGroup.start_time", "node": "longProp", "value": "0"},
+    {"path": "ThreadGroup/ThreadGroup.end_time", "node": "longProp", "value": "0"},
+    {"path": "ThreadGroup/ThreadGroup.scheduler", "node": "boolProp", "value": "false"},
+    {"path": "ThreadGroup/ThreadGroup.duration", "node": "stringProp", "value": ""},
+    {"path": "ThreadGroup/ThreadGroup.delay", "node": "stringProp", "value": ""},
+    {"path": "HTTPSampler2/HTTPSampler.domain", "node": "stringProp", "value": "alias.invalid"},
+    {"path": "HTTPSampler2/HTTPSampler.port", "node": "stringProp", "value": "80"},
+    {"path": "HTTPSampler2/HTTPSampler.protocol", "node": "stringProp", "value": "http"},
+    {"path": "HTTPSampler2/HTTPSampler.path", "node": "stringProp", "value": "/historical"},
+    {"path": "HTTPSampler2/HTTPSampler.method", "node": "stringProp", "value": "GET"},
+    {"path": "HTTPSampler_/HTTPSampler.domain", "node": "stringProp", "value": "upgrade.invalid"},
+    {"path": "HTTPSampler_/HTTPSampler.path", "node": "stringProp", "value": "/full"},
+    {"path": "FloatProperty/FloatProperty.value", "node": "floatProp", "value": "1.25", "oracle_status": "pinned-oracle-question"},
+    {"path": "JMSSampler/JMS.destination", "node": "stringProp", "value": "fixture.queue"},
+    {"path": "SoapSampler/SoapSampler.endpoint", "node": "stringProp", "value": "http://deprecated.invalid/"}
+  ],
+  "absent_vs_empty": {
+    "explicit_empty_properties": ["fixture.empty-string", "fixture.empty-collection", "fixture.empty-object", "ThreadGroup/ThreadGroup.duration", "ThreadGroup/ThreadGroup.delay"],
+    "absent_properties": ["fixture.absent-string", "fixture.absent-object"],
+    "rule": "An omitted property is not equivalent to a present empty string, empty collection, or null object."
+  },
+  "alias_resolutions": [
+    {"input": "jmeterTestPlan", "class": "org.apache.jmeter.save.ScriptWrapper", "primary_alias": "jmeterTestPlan"},
+    {"input": "hashTree", "class": "org.apache.jorphan.collections.ListedHashTree", "primary_alias": "hashTree"},
+    {"input": "boolProp", "class": "org.apache.jmeter.testelement.property.BooleanProperty", "primary_alias": "boolProp"},
+    {"input": "collectionProp", "class": "org.apache.jmeter.testelement.property.CollectionProperty", "primary_alias": "collectionProp"},
+    {"input": "doubleProp", "class": "org.apache.jmeter.testelement.property.DoubleProperty", "primary_alias": "doubleProp"},
+    {"input": "elementProp", "class": "org.apache.jmeter.testelement.property.TestElementProperty", "primary_alias": "elementProp"},
+    {"input": "floatProp", "class": null, "primary_alias": null, "decoder": "FloatProperty", "oracle_status": "pinned-oracle-question", "not_an_accepted_alias_claim": true, "note": "The pinned SaveService file keeps FloatProperty as the class alias and comments out a floatProp alias; whether JMeter accepts this structural wire tag requires a pinned oracle run."},
+    {"input": "intProp", "class": "org.apache.jmeter.testelement.property.IntegerProperty", "primary_alias": "intProp"},
+    {"input": "longProp", "class": "org.apache.jmeter.testelement.property.LongProperty", "primary_alias": "longProp"},
+    {"input": "mapProp", "class": "org.apache.jmeter.testelement.property.MapProperty", "primary_alias": "mapProp"},
+    {"input": "objProp", "class": "org.apache.jmeter.testelement.property.ObjectProperty", "primary_alias": "objProp"},
+    {"input": "stringProp", "class": "org.apache.jmeter.testelement.property.StringProperty", "primary_alias": "stringProp"},
+    {"input": "HTTPSampler2", "class": "org.apache.jmeter.protocol.http.sampler.HTTPSamplerProxy", "primary_alias": "HTTPSamplerProxy", "canonical_alias": "HTTPSamplerProxy"},
+    {"input": "HttpTestSampleGui2", "class": "org.apache.jmeter.protocol.http.control.gui.HttpTestSampleGui", "primary_alias": "HttpTestSampleGui"},
+    {"input": "FloatProperty", "class": "org.apache.jmeter.testelement.property.FloatProperty", "primary_alias": "FloatProperty"},
+    {"input": "JMSConfigGui", "class": "org.apache.jmeter.protocol.jms.control.gui.JMSConfigGui", "primary_alias": "JMSConfigGui", "upgrade_to": "JMSSamplerGui"},
+    {"input": "SoapSampler", "class": "org.apache.jmeter.protocol.http.sampler.SoapSampler", "primary_alias": "SoapSampler", "upgrade_to": "ConfigTestElement"},
+    {"input": "SoapSamplerGui", "class": "org.apache.jmeter.protocol.http.control.gui.SoapSamplerGui", "primary_alias": "SoapSamplerGui", "upgrade_to": "ObsoleteGui"}
+  ],
+  "upgrade_rules_exercised": [
+    {"kind": "class", "old": "org.apache.jmeter.protocol.http.sampler.HTTPSamplerFull", "new": "org.apache.jmeter.protocol.http.sampler.HTTPSampler"},
+    {"kind": "class", "old": "org.apache.jmeter.protocol.http.sampler.SoapSampler", "new": "org.apache.jmeter.config.ConfigTestElement"},
+    {"kind": "class", "old": "org.apache.jmeter.protocol.http.control.gui.SoapSamplerGui", "new": "org.apache.jmeter.config.gui.ObsoleteGui"},
+    {"kind": "class", "old": "org.apache.jmeter.protocol.jms.control.gui.JMSConfigGui", "new": "org.apache.jmeter.protocol.jms.control.gui.JMSSamplerGui"}
+  ],
+  "pinned_oracle_questions": [
+    {"id": "JMX-FLOATPROP-001", "subject": "floatProp SaveService alias acceptance", "status": "pinned-oracle-question", "wire_tag": "floatProp", "class_alias": "FloatProperty", "question": "Does the pinned Apache JMeter 5.6.3 SaveService accept structural floatProp nodes when the saved alias table comments out floatProp and retains only FloatProperty?", "accepted_claim": false}
+  ],
+  "registry_inventory": {
+    "saveservice": {
+      "path": "crates/jmx/data/saveservice-5.6.3.properties",
+      "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+      "sha256": "eca06d3b962db3966e91f5670e1d28e9b1b08b4c82cd52f2730a4eb80da838e2",
+      "alias_keys": 293,
+      "primary_classes": 290,
+      "rule": "The pinned registry consumes every non-metadata alias entry; this fixture exercises representative structural, current, historical, and deprecated aliases without copying the upstream table into fixture XML."
+    },
+    "upgrade": {
+      "path": "crates/jmx/data/upgrade-5.6.3.properties",
+      "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+      "sha256": "ca4be70124d06d75425d25e5993a587d7263e4561563395c82d1fb002568b831",
+      "rules": 52,
+      "rule": "The pinned upgrade registry consumes every non-comment rule; this fixture explicitly exercises class, GUI, rename, and deletion categories."
+    }
+  },
+  "normalization": {
+    "ignored_fields": ["xml_lexical_whitespace"],
+    "reason": "Compare decoded root metadata, ordered element/hashTree pairs, alias resolution, typed values, insertion order, explicit empty values, and absent properties. XML indentation and empty-element spelling are not semantic fields."
+  }
+}

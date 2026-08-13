@@ -1,0 +1,580 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-DISTRIBUTED-RMI",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-DIST-001",
+  "conformance_ids": ["DIST-001", "DIST-002", "DIST-003", "DIST-004"],
+  "normalization_policy_refs": [
+    "NORM-STRUCTURE-001",
+    "NORM-JTL-001",
+    "NORM-TIME-001",
+    "NORM-CONFIG-001",
+    "NORM-ENV-001",
+    "NORM-EXTERNAL-001",
+    "NORM-SECURITY-001"
+  ],
+  "external_runtime_boundary_ids": ["EXT-RMI-001", "EXT-TLS-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "2f15a65c891e4db5643284dbe058327cc862db9af4636ab84635dd260f0ea504"
+  },
+  "secondary_plans": [
+    {"path": "stop-plan.jmx", "sha256": "006b55bb93909ac17337e2c69f031e7d7277f8c2b3a77c5da1309841a4b0f569", "role": "bounded stop-control input"}
+  ],
+  "property_files": [
+    {"path": "properties/client.properties", "sha256": "eee5af224495581651c177167281113f5b711a484d7218a9cc8404daf1e6ba9b"},
+    {"path": "properties/client-ssl.properties", "sha256": "9b27fa866b4e3f6d05386bd099254cf18393836e919ad9984ca8a7a5f9d02dab"},
+    {"path": "properties/client-failure.properties", "sha256": "82fd188ed8d0668e17c8e488ee6c68c138317a56c2c36f4b2459fee0925609eb"},
+    {"path": "properties/client-continue.properties", "sha256": "0a7f4253655c2bbe99897d2ab97d6eb8dcca3bcddd01d84bf21a1d3dbe96e41f"},
+    {"path": "properties/senders.properties", "sha256": "882c250fb37fedd2b2014ec1829dc91f23777ab78cd0c4466b5429ed6fb12ce9"},
+    {"path": "properties/stop.properties", "sha256": "76f207c45bc25e5425899bc0526501e0142efdc02fbd71cde085645c030c9504"},
+    {"path": "properties/server.properties", "sha256": "04a49ac0e4693f1a5ac582f7ae105e59425cd7f52a3881b16ef5e96c2bfa89f0"},
+    {"path": "properties/server-ssl.properties", "sha256": "72356cd5ec9871cac0fca1b5de6d972f4467a28294579212589d250c7a24f53c"}
+  ],
+  "static_inputs": [
+    {"path": "inputs/worker-a/worker-local.txt", "sha256": "ef0497762562cfe06883d468636f21c376b717b97b1e06b0ae44796d21c5335d", "kind": "worker-local-data", "worker_id": "worker-a", "transferred": false},
+    {"path": "inputs/worker-b/worker-local.txt", "sha256": "6e48a52a3c5e09659d80c87fdf787a59be97a683528ad6e20693ce748715a3d1", "kind": "worker-local-data", "worker_id": "worker-b", "transferred": false},
+    {"path": "inputs/dependencies/fixture-dependency.marker", "sha256": "e46f5df9a579a90907964c0f6615081ddbc26509b05c9696180fb5d673a897c8", "kind": "worker-local-dependency-marker", "dependency": "fixture-dependency-marker", "transferred": false},
+    {"path": "inputs/dependencies/worker-classpath/fixture-dependency.marker", "sha256": "e46f5df9a579a90907964c0f6615081ddbc26509b05c9696180fb5d673a897c8", "kind": "worker-local-classpath-probe", "dependency": "fixture-dependency-marker", "transferred": false},
+    {"path": "inputs/client/worker-local.txt", "sha256": "8646f5587804ea16ad099c76da4a516c0eaa45a54cc8faaf41016b29c2aaf7cd", "kind": "client-decoy-data", "transferred": false},
+    {"path": "inputs/client/fixture-dependency.marker", "sha256": "17fa149883244d63de1187feb26624b1d3ef73297a9fb09f865b4533a2b4c31a", "kind": "client-decoy-dependency-marker", "transferred": false},
+    {"path": "inputs/ssl/README.md", "sha256": "2447020a6ef056774ac0dc94481bb9e1cb14a44956ae36024b002528f51f64b0", "kind": "ssl-material-reference", "transferred": false}
+  ],
+  "command": {
+    "working_directory": ".",
+    "mode": "nongui",
+    "argv_templates": [
+      ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/client.properties", "-t", "plan.jmx", "-l", "oracle-runs/distributed/basic.jtl", "-j", "oracle-runs/distributed/basic.log"],
+      ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/client-ssl.properties", "-t", "plan.jmx", "-l", "oracle-runs/distributed/ssl.jtl", "-j", "oracle-runs/distributed/ssl.log"],
+      ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/client-failure.properties", "-t", "plan.jmx", "-l", "oracle-runs/distributed/failure.jtl", "-j", "oracle-runs/distributed/failure.log"],
+      ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/client-continue.properties", "-t", "plan.jmx", "-l", "oracle-runs/distributed/continue.jtl", "-j", "oracle-runs/distributed/continue.log"],
+      ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/senders.properties", "-t", "plan.jmx", "-l", "oracle-runs/distributed/senders.jtl", "-j", "oracle-runs/distributed/senders.log"],
+      ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/stop.properties", "-t", "stop-plan.jmx", "-l", "oracle-runs/distributed/stop.jtl", "-j", "oracle-runs/distributed/stop.log"]
+    ],
+    "protected_material": {
+      "secret_channel": {
+        "id": "channel://rmi-tls-secrets",
+        "kind": "protected-secret-reference-channel",
+        "transport": "runner-private-memory",
+        "persist": false,
+        "redaction": "argv-evidence-logs"
+      },
+      "path_channel": {
+        "id": "channel://rmi-tls-material",
+        "kind": "protected-path-reference-channel",
+        "root": "private-temporary-run-root",
+        "persist": false,
+        "redaction": "argv-evidence-logs"
+      },
+      "cleanup": {
+        "secret_channel_ref": "channel://rmi-tls-secrets",
+        "path_channel_ref": "channel://rmi-tls-material",
+        "on_success": ["erase resolved secret bytes", "remove generated keystore and truststore files", "retain only typed references and redacted digests"],
+        "on_error_or_cancel": ["erase resolved secret bytes", "remove generated keystore and truststore files", "retain only typed references and redacted diagnostics"],
+        "persisted_secret_or_path_values": false,
+        "observed": false
+      },
+      "client_ssl_jvm_properties": [
+        {"name": "javax.net.ssl.keyStoreType", "value_type": "literal", "value": "JKS"},
+        {"name": "javax.net.ssl.keyStore", "value_type": "protected-path-reference", "path_ref": "path://rmi/client-keystore.jks", "channel_ref": "channel://rmi-tls-material", "persist": false},
+        {"name": "javax.net.ssl.keyStorePassword", "value_type": "protected-secret-reference", "secret_ref": "secret://rmi/client-keystore", "channel_ref": "channel://rmi-tls-secrets", "persist": false},
+        {"name": "javax.net.ssl.trustStoreType", "value_type": "literal", "value": "JKS"},
+        {"name": "javax.net.ssl.trustStore", "value_type": "protected-path-reference", "path_ref": "path://rmi/client-truststore.jks", "channel_ref": "channel://rmi-tls-material", "persist": false},
+        {"name": "javax.net.ssl.trustStorePassword", "value_type": "protected-secret-reference", "secret_ref": "secret://rmi/client-truststore", "channel_ref": "channel://rmi-tls-secrets", "persist": false},
+        {"name": "java.rmi.server.hostname", "value_type": "literal", "value": "127.0.0.1"}
+      ],
+      "worker_ssl_jvm_properties": {
+        "worker-a": [
+          {"name": "javax.net.ssl.keyStoreType", "value_type": "literal", "value": "JKS"},
+          {"name": "javax.net.ssl.keyStore", "value_type": "protected-path-reference", "path_ref": "path://rmi/worker-a-keystore.jks", "channel_ref": "channel://rmi-tls-material", "persist": false},
+          {"name": "javax.net.ssl.keyStorePassword", "value_type": "protected-secret-reference", "secret_ref": "secret://rmi/worker-a-keystore", "channel_ref": "channel://rmi-tls-secrets", "persist": false},
+          {"name": "javax.net.ssl.trustStoreType", "value_type": "literal", "value": "JKS"},
+          {"name": "javax.net.ssl.trustStore", "value_type": "protected-path-reference", "path_ref": "path://rmi/worker-a-truststore.jks", "channel_ref": "channel://rmi-tls-material", "persist": false},
+          {"name": "javax.net.ssl.trustStorePassword", "value_type": "protected-secret-reference", "secret_ref": "secret://rmi/worker-a-truststore", "channel_ref": "channel://rmi-tls-secrets", "persist": false},
+          {"name": "java.rmi.server.hostname", "value_type": "literal", "value": "127.0.0.1"}
+        ],
+        "worker-b": [
+          {"name": "javax.net.ssl.keyStoreType", "value_type": "literal", "value": "JKS"},
+          {"name": "javax.net.ssl.keyStore", "value_type": "protected-path-reference", "path_ref": "path://rmi/worker-b-keystore.jks", "channel_ref": "channel://rmi-tls-material", "persist": false},
+          {"name": "javax.net.ssl.keyStorePassword", "value_type": "protected-secret-reference", "secret_ref": "secret://rmi/worker-b-keystore", "channel_ref": "channel://rmi-tls-secrets", "persist": false},
+          {"name": "javax.net.ssl.trustStoreType", "value_type": "literal", "value": "JKS"},
+          {"name": "javax.net.ssl.trustStore", "value_type": "protected-path-reference", "path_ref": "path://rmi/worker-b-truststore.jks", "channel_ref": "channel://rmi-tls-material", "persist": false},
+          {"name": "javax.net.ssl.trustStorePassword", "value_type": "protected-secret-reference", "secret_ref": "secret://rmi/worker-b-truststore", "channel_ref": "channel://rmi-tls-secrets", "persist": false},
+          {"name": "java.rmi.server.hostname", "value_type": "literal", "value": "127.0.0.1"}
+        ]
+      }
+    },
+    "network": "loopback-only",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null,
+    "environment_allowlist": ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL=en_US.UTF-8", "LANG=en_US.UTF-8", "TZ=UTC", "RMI_HOST_DEF=127.0.0.1"]
+  },
+  "execution": {
+    "status": "not-run",
+    "status_detail": "external Java/RMI runner not executed",
+    "process_exit": null,
+    "process_exit_asserted": false,
+    "raw_artifacts": "oracle-runs/distributed/ (ignored; local evidence only; no run recorded)",
+    "expected": [
+      "expected/semantic.json",
+      "expected/basic.json",
+      "expected/global-properties.json",
+      "expected/ssl.json",
+      "expected/failure.json",
+      "expected/senders.json",
+      "expected/stop.json",
+      "expected/stop-shutdown.json",
+      "expected/stop-stoptest.json",
+      "expected/stop-remote-exit.json"
+    ]
+  },
+  "limitations": [
+    "This commit contains only original static plans, properties, metadata, worker-local text inputs, and schema-only projections; it contains no JMeter archive, keystore, JTL, log, or runner script.",
+    "The pinned Java/JMeter runtime is not provisioned for this static task, so no RMI worker, SSL, sender, retry, stop, or remote-exit observation is claimed.",
+    "The external runner must allocate the complete base+0..7 loopback block, stage each worker's distinct worker-local.txt and dependency marker, generate temporary JKS material for SSL cases, and record raw evidence outside the repository.",
+    "Static plan configuration (threads, loop iterations, queue bounds, and retry bounds) is input metadata, not an observed sample count or process result.",
+    "For Asynch and StrippedAsynch, TestEnded-before-final-sentinel/processBatch ordering is source observation only; execution is capability-unavailable until a positive SenderDrainProof hook observes sentinel consumption and sender-thread termination.",
+    "DIST-004 is represented by worker-local CSVDataSet probes, a worker-classpath reference, client decoy inputs, and a dynamic iteration marker; transfer behavior remains external and unverified.",
+    "The partial-worker failure cases prescribe withholding worker-b registry/engine before startup and classify the expected java.rmi.ConnectException as a startup-connect failure; no exception was observed in static validation.",
+    "TEST-004 is not included because this standalone case does not cover the recorder half of the distributed/recorder/TLS integration union."
+  ],
+  "distributed_manifest": {
+    "upstream": {
+      "project": "Apache JMeter",
+      "version": "5.6.3",
+      "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+      "artifact": "apache-jmeter-5.6.3.zip",
+      "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076"
+    },
+    "isolation": {
+      "mode": "loopback",
+      "bind_address": "127.0.0.1",
+      "container_compatible": true,
+      "public_network": false,
+      "temporary_run_root": true,
+      "environment": {"LC_ALL": "en_US.UTF-8", "LANG": "en_US.UTF-8", "TZ": "UTC", "RMI_HOST_DEF": "127.0.0.1"}
+    },
+    "startup": {
+      "client": {
+        "executable": "jmeter",
+        "working_directory": "fixture root with an isolated temporary result root",
+        "argv_shape": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/client.properties", "-t", "plan.jmx", "-R", "127.0.0.1:1099,127.0.0.1:1100", "-l", "oracle-runs/distributed/basic.jtl", "-j", "oracle-runs/distributed/basic.log"],
+        "argv_forms": {
+          "remote_all": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/client.properties", "-t", "plan.jmx", "-r", "-l", "oracle-runs/distributed/remote-all.jtl", "-j", "oracle-runs/distributed/remote-all.log"],
+          "remote_explicit": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/client.properties", "-t", "plan.jmx", "-R", "127.0.0.1:1099,127.0.0.1:1100", "-l", "oracle-runs/distributed/remote-explicit.jtl", "-j", "oracle-runs/distributed/remote-explicit.log"],
+          "remote_explicit_global_exit": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/client.properties", "-t", "plan.jmx", "-R", "127.0.0.1:1099,127.0.0.1:1100", "-Goracle.global=sent-to-both-workers", "-X", "-l", "oracle-runs/distributed/remote-explicit-global-exit.jtl", "-j", "oracle-runs/distributed/remote-explicit-global-exit.log"],
+          "ssl_remote_explicit_global_exit": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/client-ssl.properties", "-t", "plan.jmx", "-R", "127.0.0.1:1099,127.0.0.1:1100", "-Goracle.global=sent-to-both-workers", "-X", "-l", "oracle-runs/distributed/ssl-R-G-X.jtl", "-j", "oracle-runs/distributed/ssl-R-G-X.log"]
+        },
+        "environment": {"RMI_HOST_DEF": "127.0.0.1"},
+        "jvm_system_properties": ["-Djava.rmi.server.hostname=127.0.0.1"],
+        "ready_condition": "both worker registries and engines accept the selected profile before the plan is sent",
+        "startup_timeout_ms": 30000,
+        "startup_retry_policy": {"property_tries": "client.tries=3", "property_retry_delay": "client.retries_delay=250", "max_retries": 2, "initial_attempt_included": true, "max_total_attempts": 3, "retry_delay_ms": 250, "retry_disposition": {"type": "RetryDisposition", "closed": true, "variants": [{"name": "PreStartSafe", "fields": ["reason", "next_attempt"]}, {"name": "FinalNonRetryable", "fields": ["phase", "outcome_certainty"]}, {"name": "PoisonedUnknownOutcome", "fields": []}], "derived_by": "Rust state machine only", "worker_failure_authorizes_retry": false, "retry_allowed_only_before": ["configure admission", "start admission", "useful execution"], "retry_forbidden_after": ["configure admission", "start admission", "any callback", "unknown outcome"], "observed": false}}
+      },
+      "worker": {
+        "executable": "jmeter-server",
+        "working_directory": "one temporary root per worker",
+        "argv_shape": ["jmeter-server", "-Djava.rmi.server.hostname=127.0.0.1", "-Dserver_port=1099", "-Dserver.rmi.localport=1101", "-Dserver.rmi.ssl.disable=true"],
+        "argv_forms": {
+          "worker-a": ["jmeter-server", "-Djava.rmi.server.hostname=127.0.0.1", "-Dserver_port=1099", "-Dserver.rmi.localport=1101", "-Dserver.rmi.ssl.disable=true"],
+          "worker-b": ["jmeter-server", "-Djava.rmi.server.hostname=127.0.0.1", "-Dserver_port=1100", "-Dserver.rmi.localport=1102", "-Dserver.rmi.ssl.disable=true"]
+        },
+        "ssl_argv_forms": {
+          "worker-a": ["jmeter-server", "-Djava.rmi.server.hostname=127.0.0.1", "-Dserver_port=1099", "-Dserver.rmi.localport=1101", "-Dserver.rmi.ssl.disable=false"],
+          "worker-b": ["jmeter-server", "-Djava.rmi.server.hostname=127.0.0.1", "-Dserver_port=1100", "-Dserver.rmi.localport=1102", "-Dserver.rmi.ssl.disable=false"]
+        },
+        "environment": {"RMI_HOST_DEF": "127.0.0.1"},
+        "jvm_system_properties": ["-Djava.rmi.server.hostname=127.0.0.1"],
+        "ready_condition": "registry and engine are bound on the declared loopback ports",
+        "startup_timeout_ms": 30000,
+        "shutdown_timeout_ms": 10000,
+        "shutdown_controls": ["Shutdown", "StopTestNow", "-X"]
+      },
+      "ssl_material": {
+        "generation": "external pinned-JDK keytool in an isolated temporary run root; not run here",
+        "store_type": "JKS",
+        "key_alias": "rmi",
+        "certificate_identities": {"client": "client-rmi-127.0.0.1", "worker-a": "worker-a-rmi-127.0.0.1", "worker-b": "worker-b-rmi-127.0.0.1"},
+        "paths": {
+          "client_keystore": {"path_ref": "path://rmi/client-keystore.jks", "channel_ref": "channel://rmi-tls-material", "persist": false},
+          "client_truststore": {"path_ref": "path://rmi/client-truststore.jks", "channel_ref": "channel://rmi-tls-material", "persist": false},
+          "worker_a_keystore": {"path_ref": "path://rmi/worker-a-keystore.jks", "channel_ref": "channel://rmi-tls-material", "persist": false},
+          "worker_a_truststore": {"path_ref": "path://rmi/worker-a-truststore.jks", "channel_ref": "channel://rmi-tls-material", "persist": false},
+          "worker_b_keystore": {"path_ref": "path://rmi/worker-b-keystore.jks", "channel_ref": "channel://rmi-tls-material", "persist": false},
+          "worker_b_truststore": {"path_ref": "path://rmi/worker-b-truststore.jks", "channel_ref": "channel://rmi-tls-material", "persist": false}
+        },
+        "client_jvm_system_properties_ref": "command.protected_material.client_ssl_jvm_properties",
+        "worker_jvm_system_properties_ref": "command.protected_material.worker_ssl_jvm_properties",
+        "jvm_system_property_assignments_ref": "command.protected_material",
+        "jvm_assignment_separator": "=; the protected runner joins typed name/value references into one JVM argument",
+        "jvm_assignment_materialization": {
+          "token_shape": "-D<name>=<value>",
+          "one_token_per_assignment": true,
+          "secret_channel_ref": "channel://rmi-tls-secrets",
+          "path_channel_ref": "channel://rmi-tls-material",
+          "runner_action": "Resolve typed protected path and secret references only inside the isolated runner, materialize one JVM argument per property, and redact the resolved argv before evidence.",
+          "materialized_in_static_corpus": false
+        },
+        "cleanup_ref": "command.protected_material.cleanup",
+        "rmi_host_environment": {"RMI_HOST_DEF": "127.0.0.1"},
+        "observed": false
+      },
+      "executed": false
+    },
+    "bounds": {
+      "workers_minimum": 2,
+      "configured_threads_per_worker": 2,
+      "configured_loops_per_thread": 2,
+      "sender_queue_size": 4,
+      "sender_queue_policy": "asynchronous sender queue only; DiskStore and StrippedDiskStore have no asserted queue capacity",
+      "batch_sample_threshold": 2,
+      "batch_time_threshold_ms": 250,
+      "max_process_wait_seconds": 30,
+      "max_stop_seconds": 10
+    },
+    "ports": {
+      "allocation": "select one free high base port and reserve the complete base+0..7 block before startup; every binding is loopback-only",
+      "required_block_size": 8,
+      "base_port": 1099,
+      "base_port_symbol": "base",
+      "client.rmi.localport": "base+4",
+      "client.rmi.localport_concrete": 1103,
+      "derived_listener_offsets": {"thread_notifications": "client.rmi.localport+1 (base+5)", "sample_results": "client.rmi.localport+2 (base+6)", "observed": false},
+      "controller_udp": {"address": "127.0.0.1", "port": "base+7", "port_concrete": 1106, "commands": ["Shutdown", "StopTestNow"], "wire_format": "UTF-8 command token followed by LF", "selection": "runner reserves base+7 with the same base block", "observed": false},
+      "remote_hosts_override": {
+        "property_value": "127.0.0.1:1099,127.0.0.1:1100",
+        "derived_value": "127.0.0.1:base+0,127.0.0.1:base+1",
+        "cli_form": ["-R", "127.0.0.1:1099,127.0.0.1:1100"],
+        "meaning": "-R overrides remote_hosts for the explicit-worker scenarios"
+      },
+      "base_port_range": {"minimum": 1024, "maximum": 65527, "selection": "free high-port block; base+7 must remain <=65534; not observed in static validation"},
+      "controller_udp_port_range": {"minimum": 1031, "maximum": 65534, "selection": "base+7 from a base in the declared block range; not observed in static validation"},
+      "bindings": [
+        {"role": "worker-a-registry", "offset": 0, "address": "127.0.0.1", "port": "base+0", "transport": "RMI registry"},
+        {"role": "worker-b-registry", "offset": 1, "address": "127.0.0.1", "port": "base+1", "transport": "RMI registry"},
+        {"role": "worker-a-engine", "offset": 2, "address": "127.0.0.1", "port": "base+2", "transport": "RMI engine"},
+        {"role": "worker-b-engine", "offset": 3, "address": "127.0.0.1", "port": "base+3", "transport": "RMI engine"},
+        {"role": "client-rmi-localport", "offset": 4, "address": "127.0.0.1", "port": "base+4", "transport": "client.rmi.localport reverse-result listener"},
+        {"role": "client-thread-listener", "offset": 5, "address": "127.0.0.1", "port": "client.rmi.localport+1 (base+5)", "transport": "derived thread notification listener"},
+        {"role": "client-sample-listener", "offset": 6, "address": "127.0.0.1", "port": "client.rmi.localport+2 (base+6)", "transport": "derived sample-result listener"},
+        {"role": "controller-udp", "offset": 7, "address": "127.0.0.1", "port": "base+7", "transport": "controller UDP commands Shutdown/StopTestNow"}
+      ],
+      "reserved_offsets": [],
+      "reserved_bindings": []
+    },
+    "plans": {"basic": "plan.jmx", "stop": "stop-plan.jmx"},
+    "options": {
+      "remote_all": ["-r"],
+      "remote_explicit": ["-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>"],
+      "global_property": ["-Goracle.global=sent-to-both-workers"],
+      "remote_exit": ["-X"],
+      "ssl_toggle": ["-Dserver.rmi.ssl.disable=true", "-Dserver.rmi.ssl.disable=false"]
+    },
+    "worker_local_inputs": {
+      "data": [
+        {"worker_id": "worker-a", "fixture_path": "inputs/worker-a/worker-local.txt", "fixture_sha256": "ef0497762562cfe06883d468636f21c376b717b97b1e06b0ae44796d21c5335d", "worker_path_template": "worker-local.txt", "transferred": false, "content_identity": "worker-a-static-identity"},
+        {"worker_id": "worker-b", "fixture_path": "inputs/worker-b/worker-local.txt", "fixture_sha256": "6e48a52a3c5e09659d80c87fdf787a59be97a683528ad6e20693ce748715a3d1", "worker_path_template": "worker-local.txt", "transferred": false, "content_identity": "worker-b-static-identity"},
+        {"worker_id": "client-decoy", "fixture_path": "inputs/client/worker-local.txt", "fixture_sha256": "8646f5587804ea16ad099c76da4a516c0eaa45a54cc8faaf41016b29c2aaf7cd", "worker_path_template": "worker-local.txt", "transferred": false, "content_identity": "client-decoy-must-not-be-read", "role": "client-only decoy; not a worker input"}
+      ],
+      "dependencies": [
+        {"name": "fixture-dependency-marker", "version": "1.0", "fixture_path": "inputs/dependencies/worker-classpath/fixture-dependency.marker", "fixture_sha256": "e46f5df9a579a90907964c0f6615081ddbc26509b05c9696180fb5d673a897c8", "source_marker": "inputs/dependencies/fixture-dependency.marker", "worker_path_template": "worker-classpath/fixture-dependency.marker", "classpath_root": "worker-classpath", "transferred": false, "contents_in_plan": false, "sampler_reference": "worker-classpath/fixture-dependency.marker"},
+        {"name": "client-decoy-dependency-marker", "version": "decoy", "fixture_path": "inputs/client/fixture-dependency.marker", "fixture_sha256": "17fa149883244d63de1187feb26624b1d3ef73297a9fb09f865b4533a2b4c31a", "worker_path_template": "worker-classpath/fixture-dependency.marker", "transferred": false, "contents_in_plan": false, "role": "client-only decoy; must not be staged on a worker"}
+      ],
+      "iteration_marker": "${__jm__Two users, two iterations__idx}",
+      "probe_contract": {"data_sampler": "CSVDataSet worker-local.txt -> worker_identity -> DebugSampler", "dependency_sampler": "CSVDataSet worker-classpath/fixture-dependency.marker -> worker_dependency_marker -> DebugSampler", "classpath": "TestPlan.user_define_classpath=worker-classpath", "client_decoys": ["inputs/client/worker-local.txt", "inputs/client/fixture-dependency.marker"]},
+      "transfer_assertion": "JMX and -G properties may be transferred; data/dependency contents must remain worker-local and client decoys must not satisfy a worker lookup."
+    },
+    "sender_configuration": {
+      "mode_key": "mode",
+      "mode_owner": "client JVM",
+      "selection_property": "sample_sender_client_configured=true",
+      "case_insensitive_aliases": true,
+      "client": {
+        "property_file": "properties/senders.properties",
+        "scenario_override": "-Jmode=<canonical-mode>",
+        "selection": "the client resolves mode and constructs the sender before remote execution",
+        "observed": false
+      },
+      "server": {
+        "property_files": ["properties/server.properties", "properties/server-ssl.properties"],
+        "selection": "worker properties provide thresholds/queue/strip settings only when sample_sender_client_configured=false; they never independently select mode",
+        "mode_property": "not set in worker property files",
+        "observed": false
+      },
+      "threshold_property_owner": {"when_sample_sender_client_configured_true": "client JVM properties/senders.properties", "when_sample_sender_client_configured_false": "worker JVM properties/server.properties or properties/server-ssl.properties"},
+      "threshold_properties": ["num_sample_threshold", "time_threshold", "asynch.batch.queue.size"],
+      "callback_domains": {"callback_invocation_events": ["TestStarted", "SampleStarted", "SampleOccurred", "ProcessBatch", "SampleStopped", "TestEnded"], "delivered_event_domain": ["SampleStarted", "SampleOccurred", "SampleStopped", "ProcessBatch items"], "process_batch_rule": "ProcessBatch is one callback invocation with one callback-invocation ordinal and a nonempty contiguous delivered-event range", "observed": false}
+    },
+    "sender_modes": [
+      {"name": "Standard", "response_data": "present", "flush": "per-event", "batch_threshold": null, "time_threshold_ms": null, "queue_capacity": null, "end_flush_assertion": "not applicable"},
+      {"name": "DiskStore", "response_data": "present", "flush": "disk-and-end-of-test", "batch_threshold": null, "time_threshold_ms": null, "queue_capacity": null, "queue_capacity_policy": "not a DiskStore semantic; any runner spool bound is external policy", "end_flush_assertion": "drain disk store before close"},
+      {"name": "StrippedDiskStore", "response_data": "stripped", "flush": "disk-and-end-of-test", "batch_threshold": null, "time_threshold_ms": null, "queue_capacity": null, "queue_capacity_policy": "not a StrippedDiskStore semantic; any runner spool bound is external policy", "end_flush_assertion": "drain stripped disk store before close"},
+      {"name": "Batch", "response_data": "present", "flush": "threshold-or-end-of-test", "batch_threshold": 2, "time_threshold_ms": 250, "queue_capacity": null, "end_flush_assertion": "flush partial batch before close"},
+      {"name": "Statistical", "response_data": "summary", "flush": "threshold-or-end-of-test", "batch_threshold": 2, "time_threshold_ms": 250, "queue_capacity": null, "end_flush_assertion": "flush summary state before close"},
+      {"name": "Stripped", "response_data": "stripped", "flush": "per-event", "batch_threshold": null, "time_threshold_ms": null, "queue_capacity": null, "end_flush_assertion": "not applicable"},
+      {"name": "StrippedBatch", "response_data": "stripped", "flush": "threshold-or-end-of-test", "batch_threshold": 2, "time_threshold_ms": 250, "queue_capacity": null, "end_flush_assertion": "flush partial stripped batch before close"},
+      {"name": "Asynch", "response_data": "present", "flush": "queue-drain-at-end-of-test", "batch_threshold": null, "time_threshold_ms": null, "queue_capacity": 4, "execution_capability": "capability-unavailable", "unavailable_reason": "rmi.sender.drain-proof-unavailable", "source_observation": "TestEnded precedes final-sentinel enqueue/consumption and processBatch delivery; source order is not completion proof", "test_ended_before_sentinel": true, "end_flush_assertion": "source observation only: listener.testEnded(host) is invoked, FINAL_EVENT is enqueued, queued events are drained in FIFO batches through listener.processBatch, the sentinel is consumed, and the sender closes; this ordering is not completion proof", "sender_drain_proof": {"hook": "SenderDrainProof", "required": true, "status": "unavailable", "positive_observation_required": true, "completion_proof": false}, "lifecycle_overload": {"enum": ["NoHost", "HostArgument"], "observed": false}, "delivery_kind": "ProcessBatch first-class callback; not synthetic repeated SampleOccurred", "batch_boundaries": "each processBatch call contains only nonempty events drained from this worker sender queue"},
+      {"name": "StrippedAsynch", "response_data": "stripped", "flush": "queue-drain-at-end-of-test", "batch_threshold": null, "time_threshold_ms": null, "queue_capacity": 4, "execution_capability": "capability-unavailable", "unavailable_reason": "rmi.sender.drain-proof-unavailable", "source_observation": "TestEnded precedes final-sentinel enqueue/consumption and processBatch delivery; source order is not completion proof", "test_ended_before_sentinel": true, "end_flush_assertion": "source observation only: listener.testEnded(host) is invoked, FINAL_EVENT is enqueued, queued stripped events are drained in FIFO batches through listener.processBatch, the sentinel is consumed, and the sender closes; this ordering is not completion proof", "sender_drain_proof": {"hook": "SenderDrainProof", "required": true, "status": "unavailable", "positive_observation_required": true, "completion_proof": false}, "lifecycle_overload": {"enum": ["NoHost", "HostArgument"], "observed": false}, "delivery_kind": "ProcessBatch first-class callback; not synthetic repeated SampleOccurred", "batch_boundaries": "each processBatch call contains only nonempty events drained from this worker sender queue"}
+    ],
+    "sender_ordering": {
+      "scope": "per worker",
+      "within_worker": "accepted events retain FIFO order within each sender queue and each processBatch call after a positive sender proof; this static case does not observe it",
+      "batch_boundaries": "processBatch receives nonempty contiguous events from one worker and one sender generation; batches never mix workers or sender modes",
+      "cross_worker_order": "not asserted; normalize by worker identity before comparison",
+      "lifecycle_overload": {"enum": ["NoHost", "HostArgument"], "NoHost": {"host_presence": "absent"}, "HostArgument": {"host_presence": "absent, null, or present-empty only when the pinned Java call can supply it"}, "host_policy": "do not fill a missing host from worker identity", "observed": false},
+      "callback_invocation_ordinal": {"scope": "all callback invocations", "advances": "one per invocation, including ProcessBatch and lifecycle callbacks", "observed": false},
+      "delivered_event_ordinal": {"scope": "delivered event items", "advances": "one per SampleStarted/SampleOccurred/SampleStopped event item; ProcessBatch advances by event_count", "contiguous": true, "observed": false},
+      "process_batch_delivery": {"delivery_kind": "ProcessBatch", "first_delivered_event_ordinal": "required", "event_count": "required and nonzero", "callback_invocation_ordinal": "one ordinal for the invocation; never synthetic SampleOccurred callbacks", "ordinal_relationship": "callback invocation state advances by one; delivered-event state advances by event_count", "observed": false},
+      "observed": false
+    },
+    "stream_contract": {
+      "status": "not-run",
+      "terminal": {
+        "exactly_one_per_worker_stream": true,
+        "success": {"variant": "Succeeded", "required_fields": ["test_ended_callback", "sender_drain_proof", "last_callback_invocation", "delivered_events", "accepted_events", "acknowledged_events", "delivered_bytes", "accepted_bytes", "acknowledged_bytes", "router_finalization_digest", "remote_exit_state"], "pending_counts": {"pending_bridge_events": 0, "pending_sender_events": 0, "pending_blobs": 0}, "accounting": "delivered_events = accepted_events = acknowledged_events and delivered_bytes = accepted_bytes = acknowledged_bytes; TestEnded and SenderDrainProof identities match the same lifecycle generation", "allowed_without_sender_drain_proof": false},
+        "failure": {"variants": ["Failed", "Cancelled", "TimedOut", "Crashed"], "required_fields": ["test_ended_absence_reason", "sender_proof_absence_reason", "last_frame_sequence", "last_callback_invocation", "last_delivered_event", "delivered/accepted/acknowledged counts and bytes", "pending counts", "primary_error", "bounded_secondary_errors"], "missing_fields_default": "none; no implicit zero or success"},
+        "protocol_errors": ["EOF before terminal", "duplicate terminal", "terminal with unaccounted accepted events", "frame after terminal"],
+        "observed": false
+      },
+      "event_ack": {"message": "EventAck", "ack_unit": "validated router-admitted delivered events, never only a transport frame", "fields": ["worker", "generation", "highest_contiguous_delivered_event_ordinal", "newly_accepted_event_count", "newly_accepted_encoded_bytes", "cumulative_accepted_event_count", "cumulative_accepted_encoded_bytes", "router_admission_digest"], "counts_and_bytes_must_agree": true, "observed": false},
+      "sender_drain_proof": {"message": "SenderDrainProof", "required_for_success": true, "fields": ["sender_identity", "lifecycle_generation", "final_delivered_event_ordinal", "cumulative_emitted_event_count", "cumulative_accepted_event_count", "cumulative_acknowledged_event_count", "cumulative_emitted_bytes", "cumulative_accepted_bytes", "cumulative_acknowledged_bytes", "pending_queue_count", "pending_disk_count", "completion_hook_identity", "proof_digest"], "asynch_status": "unavailable until a positive hook observes sentinel consumption and sender-thread termination", "observed": false}
+    },
+    "scenarios": [
+      {
+        "id": "basic-r",
+        "plan": "plan.jmx",
+        "property_file": "properties/client.properties",
+        "ssl": false,
+        "global_properties": [],
+        "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/client.properties", "-t", "plan.jmx", "-r", "-l", "oracle-runs/distributed/basic-r.jtl", "-j", "oracle-runs/distributed/basic-r.log"],
+        "expected": "expected/basic.json"
+      },
+      {
+        "id": "basic-R",
+        "plan": "plan.jmx",
+        "property_file": "properties/client.properties",
+        "ssl": false,
+        "global_properties": [],
+        "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/client.properties", "-t", "plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-l", "oracle-runs/distributed/basic-R.jtl", "-j", "oracle-runs/distributed/basic-R.log"],
+        "expected": "expected/basic.json"
+      },
+      {
+        "id": "basic-R-G-X",
+        "plan": "plan.jmx",
+        "property_file": "properties/client.properties",
+        "ssl": false,
+        "global_properties": ["oracle.global=sent-to-both-workers"],
+        "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/client.properties", "-t", "plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-Goracle.global=sent-to-both-workers", "-X", "-l", "oracle-runs/distributed/basic-R-G-X.jtl", "-j", "oracle-runs/distributed/basic-R-G-X.log"],
+        "expected": "expected/global-properties.json"
+      },
+      {
+        "id": "ssl-R-G-X",
+        "plan": "plan.jmx",
+        "property_file": "properties/client-ssl.properties",
+        "ssl": true,
+        "global_properties": ["oracle.global=sent-to-both-workers"],
+        "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/client-ssl.properties", "-t", "plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-Goracle.global=sent-to-both-workers", "-X", "-l", "oracle-runs/distributed/ssl-R-G-X.jtl", "-j", "oracle-runs/distributed/ssl-R-G-X.log"],
+        "protected_jvm_properties_ref": "command.protected_material.client_ssl_jvm_properties",
+        "expected": "expected/ssl.json"
+      },
+      {
+        "id": "partial-retry",
+        "plan": "plan.jmx",
+        "property_file": "properties/client-failure.properties",
+        "ssl": false,
+        "global_properties": [],
+        "continue_on_fail": false,
+        "max_retries": 2,
+        "max_total_attempts": 3,
+        "failure_injection": {"type": "startup-connect-exception", "mode": "withhold-worker", "worker_id": "worker-b", "registry": "127.0.0.1:<base+1>", "engine": "127.0.0.1:<base+3>", "server_start": "do-not-start-worker-b-registry-or-engine", "startup_exception_class": "java.rmi.ConnectException", "startup_exception_message": "Connection refused to withheld worker-b registry", "observed": false},
+        "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/client-failure.properties", "-t", "plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-l", "oracle-runs/distributed/partial-retry.jtl", "-j", "oracle-runs/distributed/partial-retry.log"],
+        "expected": "expected/failure.json"
+      },
+      {
+        "id": "partial-continue",
+        "plan": "plan.jmx",
+        "property_file": "properties/client-continue.properties",
+        "ssl": false,
+        "global_properties": [],
+        "continue_on_fail": true,
+        "max_retries": 2,
+        "max_total_attempts": 3,
+        "failure_injection": {"type": "startup-connect-exception", "mode": "withhold-worker", "worker_id": "worker-b", "registry": "127.0.0.1:<base+1>", "engine": "127.0.0.1:<base+3>", "server_start": "do-not-start-worker-b-registry-or-engine", "startup_exception_class": "java.rmi.ConnectException", "startup_exception_message": "Connection refused to withheld worker-b registry", "observed": false},
+        "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/client-continue.properties", "-t", "plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-l", "oracle-runs/distributed/partial-continue.jtl", "-j", "oracle-runs/distributed/partial-continue.log"],
+        "expected": "expected/failure.json"
+      },
+      {
+        "id": "sender-Standard",
+        "plan": "plan.jmx",
+        "property_file": "properties/senders.properties",
+        "sender_mode": "Standard",
+        "property_override": "mode=Standard",
+        "ssl": false,
+        "global_properties": [],
+        "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/senders.properties", "-t", "plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-Jmode=Standard", "-l", "oracle-runs/distributed/sender-Standard.jtl", "-j", "oracle-runs/distributed/sender-Standard.log"],
+        "expected": "expected/senders.json"
+      },
+      {
+        "id": "sender-standard-lowercase",
+        "plan": "plan.jmx",
+        "property_file": "properties/senders.properties",
+        "sender_mode": "standard",
+        "canonical_sender_mode": "Standard",
+        "property_override": "mode=standard",
+        "ssl": false,
+        "global_properties": [],
+        "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/senders.properties", "-t", "plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-Jmode=standard", "-l", "oracle-runs/distributed/sender-standard-lowercase.jtl", "-j", "oracle-runs/distributed/sender-standard-lowercase.log"],
+        "expected": "expected/senders.json"
+      },
+      {
+        "id": "sender-DiskStore",
+        "plan": "plan.jmx",
+        "property_file": "properties/senders.properties",
+        "sender_mode": "DiskStore",
+        "property_override": "mode=DiskStore",
+        "ssl": false,
+        "global_properties": [],
+        "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/senders.properties", "-t", "plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-Jmode=DiskStore", "-l", "oracle-runs/distributed/sender-DiskStore.jtl", "-j", "oracle-runs/distributed/sender-DiskStore.log"],
+        "expected": "expected/senders.json"
+      },
+      {
+        "id": "sender-StrippedDiskStore",
+        "plan": "plan.jmx",
+        "property_file": "properties/senders.properties",
+        "sender_mode": "StrippedDiskStore",
+        "property_override": "mode=StrippedDiskStore",
+        "ssl": false,
+        "global_properties": [],
+        "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/senders.properties", "-t", "plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-Jmode=StrippedDiskStore", "-l", "oracle-runs/distributed/sender-StrippedDiskStore.jtl", "-j", "oracle-runs/distributed/sender-StrippedDiskStore.log"],
+        "expected": "expected/senders.json"
+      },
+      {
+        "id": "sender-Batch",
+        "plan": "plan.jmx",
+        "property_file": "properties/senders.properties",
+        "sender_mode": "Batch",
+        "property_override": "mode=Batch",
+        "ssl": false,
+        "global_properties": [],
+        "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/senders.properties", "-t", "plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-Jmode=Batch", "-l", "oracle-runs/distributed/sender-Batch.jtl", "-j", "oracle-runs/distributed/sender-Batch.log"],
+        "expected": "expected/senders.json"
+      },
+      {
+        "id": "sender-Statistical",
+        "plan": "plan.jmx",
+        "property_file": "properties/senders.properties",
+        "sender_mode": "Statistical",
+        "property_override": "mode=Statistical",
+        "ssl": false,
+        "global_properties": [],
+        "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/senders.properties", "-t", "plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-Jmode=Statistical", "-l", "oracle-runs/distributed/sender-Statistical.jtl", "-j", "oracle-runs/distributed/sender-Statistical.log"],
+        "expected": "expected/senders.json"
+      },
+      {
+        "id": "sender-Stripped",
+        "plan": "plan.jmx",
+        "property_file": "properties/senders.properties",
+        "sender_mode": "Stripped",
+        "property_override": "mode=Stripped",
+        "ssl": false,
+        "global_properties": [],
+        "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/senders.properties", "-t", "plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-Jmode=Stripped", "-l", "oracle-runs/distributed/sender-Stripped.jtl", "-j", "oracle-runs/distributed/sender-Stripped.log"],
+        "expected": "expected/senders.json"
+      },
+      {
+        "id": "sender-StrippedBatch",
+        "plan": "plan.jmx",
+        "property_file": "properties/senders.properties",
+        "sender_mode": "StrippedBatch",
+        "property_override": "mode=StrippedBatch",
+        "ssl": false,
+        "global_properties": [],
+        "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/senders.properties", "-t", "plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-Jmode=StrippedBatch", "-l", "oracle-runs/distributed/sender-StrippedBatch.jtl", "-j", "oracle-runs/distributed/sender-StrippedBatch.log"],
+        "expected": "expected/senders.json"
+      },
+      {
+        "id": "sender-Asynch",
+        "plan": "plan.jmx",
+        "property_file": "properties/senders.properties",
+        "sender_mode": "Asynch",
+        "execution_capability": "capability-unavailable",
+        "unavailable_reason": "rmi.sender.drain-proof-unavailable",
+        "property_override": "mode=Asynch",
+        "ssl": false,
+        "global_properties": [],
+        "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/senders.properties", "-t", "plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-Jmode=Asynch", "-l", "oracle-runs/distributed/sender-Asynch.jtl", "-j", "oracle-runs/distributed/sender-Asynch.log"],
+        "expected": "expected/senders.json"
+      },
+      {
+        "id": "sender-StrippedAsynch",
+        "plan": "plan.jmx",
+        "property_file": "properties/senders.properties",
+        "sender_mode": "StrippedAsynch",
+        "execution_capability": "capability-unavailable",
+        "unavailable_reason": "rmi.sender.drain-proof-unavailable",
+        "property_override": "mode=StrippedAsynch",
+        "ssl": false,
+        "global_properties": [],
+        "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/senders.properties", "-t", "plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-Jmode=StrippedAsynch", "-l", "oracle-runs/distributed/sender-StrippedAsynch.jtl", "-j", "oracle-runs/distributed/sender-StrippedAsynch.log"],
+        "expected": "expected/senders.json"
+      },
+      {
+        "id": "stop-shutdown",
+        "plan": "stop-plan.jmx",
+        "property_file": "properties/stop.properties",
+        "ssl": false,
+        "global_properties": [],
+        "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/stop.properties", "-t", "stop-plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-l", "oracle-runs/distributed/stop-shutdown.jtl", "-j", "oracle-runs/distributed/stop-shutdown.log"],
+        "control": {"protocol": "udp", "host": "127.0.0.1", "port": "base+7", "command": "Shutdown", "wire": "Shutdown\\n", "argv": ["Shutdown"], "mode": "graceful", "expected": "expected/stop-shutdown.json"}
+      },
+      {
+        "id": "stop-stoptest",
+        "plan": "stop-plan.jmx",
+        "property_file": "properties/stop.properties",
+        "ssl": false,
+        "global_properties": [],
+        "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/stop.properties", "-t", "stop-plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-l", "oracle-runs/distributed/stop-stoptest.jtl", "-j", "oracle-runs/distributed/stop-stoptest.log"],
+        "control": {"protocol": "udp", "host": "127.0.0.1", "port": "base+7", "command": "StopTestNow", "wire": "StopTestNow\\n", "argv": ["StopTestNow"], "mode": "immediate", "expected": "expected/stop-stoptest.json"}
+      },
+      {
+        "id": "stop-remote-exit",
+        "plan": "stop-plan.jmx",
+        "property_file": "properties/stop.properties",
+        "ssl": false,
+        "global_properties": [],
+        "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/stop.properties", "-t", "stop-plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-X", "-l", "oracle-runs/distributed/stop-remote-exit.jtl", "-j", "oracle-runs/distributed/stop-remote-exit.log"],
+        "control": {"command": "remote-exit", "argv": ["-X"], "mode": "remote-lifecycle-request", "expected": "expected/stop-remote-exit.json"}
+      }
+    ],
+    "negative_cases": [
+      {"id": "partial-worker-b-withheld", "failure_type": "startup-connect-exception", "category": "worker-startup-connect-exception", "action": "do-not-start worker-b registry or engine", "withheld_worker": "worker-b", "withheld_registry": "127.0.0.1:<base+1>", "withheld_engine": "127.0.0.1:<base+3>", "startup_exception_class": "java.rmi.ConnectException", "startup_exception_message": "Connection refused to withheld worker-b registry", "observed": false, "expected": {"retry_property": "client.tries=3", "retry_delay_property": "client.retries_delay=250", "max_total_attempts": 3, "diagnostic_category": "unavailable-worker", "sample_for_withheld_worker": "not fabricated"}},
+      {"id": "ssl-client-server-toggle-mismatch", "failure_type": "ssl-configuration-mismatch", "category": "ssl-handshake-mismatch", "client": {"server.rmi.ssl.disable": false}, "server": {"server.rmi.ssl.disable": true}, "observed": false, "expected": "worker connection fails closed before plan transfer"},
+      {"id": "ssl-keystore-truststore-mismatch", "failure_type": "ssl-credential-mismatch", "category": "truststore-or-keystore-mismatch", "client": {"truststore": "generated client truststore does not contain worker certificate identity"}, "server": {"keystore": "generated worker identity differs from trusted identity"}, "observed": false, "expected": "RMI SSL connection fails with an external-capability diagnostic"},
+      {"id": "ssl-store-path-mismatch", "failure_type": "ssl-path-mismatch", "category": "keystore-or-truststore-path-mismatch", "client": {"truststore_ref": "path://rmi/missing-client-truststore.jks", "channel_ref": "channel://rmi-tls-material"}, "server": {"keystore_ref": "path://rmi/missing-worker-keystore.jks", "channel_ref": "channel://rmi-tls-material"}, "observed": false, "expected": "SSL setup fails closed before a remote plan is accepted"},
+      {"id": "rmi-registry-port-mismatch", "failure_type": "registry-endpoint-mismatch", "category": "registry-unreachable", "client": {"remote_hosts": "127.0.0.1:<base+2>"}, "server": {"worker_a_registry": "127.0.0.1:<base+0>"}, "observed": false, "expected": "startup fails without contacting an unintended port"},
+      {"id": "rmi-engine-port-mismatch", "failure_type": "worker-engine-endpoint-mismatch", "category": "engine-unreachable", "client": {"worker_b_engine": "127.0.0.1:<base+4>"}, "server": {"worker_b_engine": "127.0.0.1:<base+3>"}, "observed": false, "expected": "reverse connection fails closed and does not fall back to an ambient port"},
+      {"id": "rmi-client-port-mismatch", "failure_type": "client-listener-endpoint-mismatch", "category": "reverse-client-port-mismatch", "client": {"client.rmi.localport": "base+5", "derived_sample_listener": "base+7"}, "server": {"declared_client_endpoint": "base+4"}, "observed": false, "expected": "result channel fails closed without using an ambient port"},
+      {"id": "sender-lowercase-alias", "failure_type": "sender-mode-selection", "category": "case-insensitive-built-in-alias", "sender_mode": "standard", "canonical_mode": "Standard", "observed": false, "expected": "select the Standard sender through the case-insensitive factory alias"},
+      {"id": "sender-unknown-mode", "failure_type": "unsupported-sender-mode", "category": "unknown-mode", "sender_mode": "NotASender", "factory_resolution": "Class.forName(mode)", "observed": false, "expected": "return an explicit unsupported capability diagnostic without silent fallback"},
+      {"id": "sender-empty-mode", "failure_type": "unsupported-sender-mode", "category": "empty-mode", "sender_mode": "", "factory_resolution": "Class.forName(mode)", "observed": false, "expected": "return an explicit unsupported capability diagnostic without silent fallback"},
+      {"id": "sender-Hold-class-load", "failure_type": "unsupported-sender-mode", "category": "built-in-class-not-an-alias", "sender_mode": "Hold", "class_name": "org.apache.jmeter.samplers.HoldSampleSender", "class_load": "class-present", "factory_alias": false, "observed": false, "expected": "class-load evidence identifies Hold as present but the factory rejects the mode as not a selectable alias"},
+      {"id": "sender-Hold-fqcn-public-constructor", "failure_type": "unsupported-sender-mode", "category": "fqcn-public-constructor-unavailable", "sender_mode": "org.apache.jmeter.samplers.HoldSampleSender", "factory_resolution": "Class.forName(mode)", "class_load": "class-present", "constructor_signature": "(org.apache.jmeter.samplers.RemoteSampleListener)", "public_constructor": false, "observed": false, "expected": "FQCN fallback returns an explicit unsupported capability diagnostic because the required RemoteSampleListener constructor is not public"}
+    ],
+    "normalization": {
+      "ignored": ["hostname", "ephemeral_ports", "arrival_order", "temporary_paths", "JVM_object_ids"],
+      "retained": ["worker_identity", "worker_local_file_content", "worker_local_dependency_identity", "global_property", "sample_label", "iteration_marker", "thread_name", "response_code", "success", "elapsed", "latency", "connect_time", "idle_time", "timestamp", "bytes", "sent_bytes", "sender_mode", "flush_boundary", "failure_category", "exit_status"],
+      "timing_tolerances": {
+        "timestamp": {"comparison": "descriptor-only", "allowed_variance": "wall-clock value is recorded but not compared in this static corpus"},
+        "elapsed": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000, "reason": "bounded process wait; no run observed"},
+        "latency": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000, "reason": "RMI setup and result delivery are external and uncontrolled"},
+        "connect_time": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000, "reason": "RMI connection setup is external and uncontrolled"},
+        "idle_time": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000, "reason": "idle-time reporting is runtime-configured and unobserved"}
+      },
+      "byte_policy": {"bytes": "retained; no normalization or dropped-field rule", "sent_bytes": "retained; no normalization or dropped-field rule"},
+      "arrival_order_rule": "Sort by worker identity, thread name, iteration marker, then label; never infer execution order from RMI arrival order."
+    }
+  }
+}

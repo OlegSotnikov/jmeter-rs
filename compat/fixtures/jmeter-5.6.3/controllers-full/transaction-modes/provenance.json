@@ -1,0 +1,48 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-CONTROLLERS-FULL-TRANSACTION",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored bounded JMX exposing TransactionController independent and parent result modes and exact timer-inclusion properties.",
+    "upstream_plan_copied": false
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "The pinned Apache JMeter artifact is a future oracle reference; no upstream plan, result, or binary is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true
+  },
+  "runtime": {
+    "java": {"vendor": "not executed", "version": "not executed", "vm": "not executed", "major": null, "planned_major": 17},
+    "target_triple": "not executed",
+    "os_image": "not executed",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "not asserted; hostname saving disabled",
+    "environment_allowlist": ["LC_ALL=C", "LANG=C", "TZ=UTC"],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "not executed; future run uses the profile-pinned Apache JMeter 5.6.3 distribution (SHA-512 checked; PGP verification required before oracle use)"
+  },
+  "inputs": {
+    "plan_sha256": "2db14209cc712d12e63360fd0c8efbeb8046ea7c707661d92704c402c90a5301",
+    "property_sha256": "b37d21bb8e09d99f9c9f9d17a1e6b5fe9c515561c4f9f0a3455015c2925a8981",
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  }
+}

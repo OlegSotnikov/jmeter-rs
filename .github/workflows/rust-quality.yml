@@ -1,0 +1,536 @@
+# SPDX-License-Identifier: Apache-2.0
+
+name: Rust quality
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Toolchain lanes are deliberately separate: the pinned 1.97.1 developer/
+# release lane, the explicit MSRV check (currently also 1.97.1), the floating
+# latest-stable warning lane, and the nightly-tools-only lane. The TEST-005
+# target jobs below are compile-only; they do not execute process, JVM, or GUI
+# code. Cross-platform runtime evidence remains gated by Decision 0001.
+env:
+  CARGO_NET_RETRY: "3"
+  CARGO_TERM_COLOR: always
+  LANG: C
+  LC_ALL: C
+  RUST_BACKTRACE: short
+  TZ: UTC
+  RUST_PINNED: "1.97.1"
+  RUST_MSRV: "1.97.1"
+  RUST_LATEST: stable
+  RUST_NIGHTLY_TOOLS: nightly
+
+jobs:
+  format:
+    name: rustfmt
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # actions/checkout v7.0.1; tag verified against the official repository.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # actions-rust-lang/setup-rust-toolchain v1.17.0; tag verified against the official repository.
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: 1.97.1
+          components: rustfmt
+          cache: false
+          rustflags: ""
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  rust:
+    name: ${{ matrix.os }} / check-test-clippy
+    # Workspace tests include process-facing integration targets. Keep this
+    # runtime lane behind the fail-closed Decision 0001 gate; static compile
+    # jobs above do not need the gate because they execute no tests.
+    needs: process-safety
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep the host images explicit; this is the current pinned-stable
+        # lane, not a floating latest-stable lane.
+        os:
+          - ubuntu-24.04
+          - windows-2025
+          - macos-15
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      # actions/checkout v7.0.1; tag verified against the official repository.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # actions-rust-lang/setup-rust-toolchain v1.17.0; tag verified against the official repository.
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: 1.97.1
+          components: clippy
+          cache: false
+          rustflags: ""
+      # actions/cache v6.1.0; tag verified against the official repository.
+      # There is no fallback key: a cache is reusable only for this host,
+      # architecture, toolchain, lockfile, and toolchain-file contents.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-1.97.1-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
+      - name: Check workspace
+        run: cargo check --workspace --all-targets --locked
+      - name: Run tests
+        run: cargo test --workspace --all-targets --locked
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+  profile-target-compile:
+    name: TEST-005 / profile target compile / ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # These six targets are the exact Decision 0002 profile lanes. The
+          # ARM64 rows require an actual self-hosted runner with explicit OS
+          # and architecture labels; there is no hosted or cross fallback.
+          - target: x86_64-unknown-linux-gnu
+            runner: '["ubuntu-24.04"]'
+            expected_host: x86_64-unknown-linux-gnu
+            expected_os: Linux
+            execution: native
+          - target: aarch64-unknown-linux-gnu
+            runner: '["self-hosted", "Linux", "ARM64"]'
+            expected_host: aarch64-unknown-linux-gnu
+            expected_os: Linux
+            execution: native
+          - target: x86_64-pc-windows-msvc
+            runner: '["windows-2025"]'
+            expected_host: x86_64-pc-windows-msvc
+            expected_os: Windows
+            execution: native
+          - target: aarch64-pc-windows-msvc
+            runner: '["self-hosted", "Windows", "ARM64"]'
+            expected_host: aarch64-pc-windows-msvc
+            expected_os: Windows
+            execution: native
+          - target: x86_64-apple-darwin
+            runner: '["self-hosted", "macOS", "X64"]'
+            expected_host: x86_64-apple-darwin
+            expected_os: macOS
+            execution: native
+          - target: aarch64-apple-darwin
+            runner: '["self-hosted", "macOS", "ARM64"]'
+            expected_host: aarch64-apple-darwin
+            expected_os: macOS
+            execution: native
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    timeout-minutes: 35
+    env:
+      CARGO_HOME: ${{ runner.temp }}/test-005-cargo-home
+      CARGO_TARGET_DIR: ${{ runner.temp }}/test-005-target
+    steps:
+      # actions/checkout v7.0.1; tag verified against the official repository.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # actions-rust-lang/setup-rust-toolchain v1.17.0; tag verified against the official repository.
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: 1.97.1
+          cache: false
+          rustflags: ""
+      - name: Install exact target standard library
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          TOOLCHAIN: 1.97.1
+        run: |
+          set -euo pipefail
+          rustup target add --toolchain "$TOOLCHAIN" "$TARGET"
+      - name: Verify native runner and record provenance
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          EXPECTED_HOST: ${{ matrix.expected_host }}
+          EXPECTED_OS: ${{ matrix.expected_os }}
+          EXECUTION: ${{ matrix.execution }}
+          TOOLCHAIN: 1.97.1
+          LOCKFILE_SHA256: ${{ hashFiles('**/Cargo.lock') }}
+          TOOLCHAIN_FILE_SHA256: ${{ hashFiles('rust-toolchain.toml') }}
+        run: |
+          set -euo pipefail
+          test "$RUNNER_OS" = "$EXPECTED_OS"
+          actual_host="$(rustc "+$TOOLCHAIN" -vV | sed -n 's/^host: //p')"
+          test -n "$actual_host"
+          if [[ "$EXECUTION" = native ]]; then
+            test "$actual_host" = "$TARGET"
+            test "$actual_host" = "$EXPECTED_HOST"
+          else
+            test "$actual_host" = "$EXPECTED_HOST"
+            test "$actual_host" != "$TARGET"
+          fi
+          {
+            echo "### TEST-005 static compile provenance"
+            echo "- target: $TARGET"
+            echo "- execution: $EXECUTION"
+            echo "- runner: $RUNNER_OS/$RUNNER_ARCH"
+            echo "- host target: $actual_host"
+            echo "- commit: $GITHUB_SHA"
+            echo "- Cargo.lock SHA-256: $LOCKFILE_SHA256"
+            echo "- rust-toolchain.toml SHA-256: $TOOLCHAIN_FILE_SHA256"
+            rustc "+$TOOLCHAIN" -vV
+            cargo "+$TOOLCHAIN" -V
+          } >> "$GITHUB_STEP_SUMMARY"
+      # actions/cache v6.1.0; tag verified against the official repository.
+      # The key is target-, host-, toolchain-, lockfile-, and toolchain-file-
+      # bound. ARM64 rows never fall back to a hosted or x64 cache.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/test-005-cargo-home/registry
+            ${{ runner.temp }}/test-005-cargo-home/git
+            ${{ runner.temp }}/test-005-target
+          key: cargo-test-005-profile-${{ matrix.target }}-${{ runner.os }}-${{ runner.arch }}-1.97.1-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
+      - name: Compile profile target only
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          TOOLCHAIN: 1.97.1
+        run: |
+          set -euo pipefail
+          cargo "+$TOOLCHAIN" check \
+            --workspace \
+            --all-targets \
+            --all-features \
+            --locked \
+            --target "$TARGET"
+
+  musl-compile:
+    name: TEST-005 / musl compile-only / ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            expected_host: x86_64-unknown-linux-gnu
+          - target: aarch64-unknown-linux-musl
+            expected_host: x86_64-unknown-linux-gnu
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      CARGO_HOME: ${{ runner.temp }}/test-005-musl-cargo-home
+      CARGO_TARGET_DIR: ${{ runner.temp }}/test-005-musl-target
+    steps:
+      # actions/checkout v7.0.1; tag verified against the official repository.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # actions-rust-lang/setup-rust-toolchain v1.17.0; tag verified against the official repository.
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: 1.97.1
+          cache: false
+          rustflags: ""
+      - name: Install exact musl target standard library
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          TOOLCHAIN: 1.97.1
+        run: |
+          set -euo pipefail
+          rustup target add --toolchain "$TOOLCHAIN" "$TARGET"
+      - name: Verify cross compiler boundary and record provenance
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          EXPECTED_HOST: ${{ matrix.expected_host }}
+          TOOLCHAIN: 1.97.1
+          LOCKFILE_SHA256: ${{ hashFiles('**/Cargo.lock') }}
+          TOOLCHAIN_FILE_SHA256: ${{ hashFiles('rust-toolchain.toml') }}
+        run: |
+          set -euo pipefail
+          test "$RUNNER_OS" = Linux
+          actual_host="$(rustc "+$TOOLCHAIN" -vV | sed -n 's/^host: //p')"
+          test "$actual_host" = "$EXPECTED_HOST"
+          test "$actual_host" != "$TARGET"
+          {
+            echo "### TEST-005 musl compile-only provenance"
+            echo "- target: $TARGET"
+            echo "- host target: $actual_host"
+            echo "- execution: cross compile only; no runtime evidence"
+            echo "- runner: $RUNNER_OS/$RUNNER_ARCH"
+            echo "- commit: $GITHUB_SHA"
+            echo "- Cargo.lock SHA-256: $LOCKFILE_SHA256"
+            echo "- rust-toolchain.toml SHA-256: $TOOLCHAIN_FILE_SHA256"
+            rustc "+$TOOLCHAIN" -vV
+            cargo "+$TOOLCHAIN" -V
+          } >> "$GITHUB_STEP_SUMMARY"
+      # actions/cache v6.1.0; tag verified against the official repository.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/test-005-musl-cargo-home/registry
+            ${{ runner.temp }}/test-005-musl-cargo-home/git
+            ${{ runner.temp }}/test-005-musl-target
+          key: cargo-test-005-musl-${{ matrix.target }}-${{ runner.os }}-${{ runner.arch }}-1.97.1-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
+      - name: Compile musl target only
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          TOOLCHAIN: 1.97.1
+        run: |
+          set -euo pipefail
+          # This is intentionally cargo check only. It does not run process,
+          # JVM, GUI, or any other target-dependent runtime lane.
+          cargo "+$TOOLCHAIN" check \
+            --workspace \
+            --all-targets \
+            --all-features \
+            --locked \
+            --target "$TARGET"
+
+  msrv:
+    name: MSRV / cargo check / 1.97.1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      CARGO_HOME: ${{ runner.temp }}/msrv-cargo-home
+      CARGO_TARGET_DIR: ${{ runner.temp }}/msrv-target
+      TOOLCHAIN: 1.97.1
+    steps:
+      # actions/checkout v7.0.1; tag verified against the official repository.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # actions-rust-lang/setup-rust-toolchain v1.17.0; tag verified against the official repository.
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: 1.97.1
+          cache: false
+          rustflags: ""
+      - name: Record MSRV provenance
+        shell: bash
+        env:
+          LOCKFILE_SHA256: ${{ hashFiles('**/Cargo.lock') }}
+          TOOLCHAIN_FILE_SHA256: ${{ hashFiles('rust-toolchain.toml') }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### MSRV provenance"
+            echo "- toolchain: $TOOLCHAIN"
+            echo "- target: $(rustc "+$TOOLCHAIN" -vV | sed -n 's/^host: //p')"
+            echo "- Cargo.lock SHA-256: $LOCKFILE_SHA256"
+            echo "- rust-toolchain.toml SHA-256: $TOOLCHAIN_FILE_SHA256"
+            rustc "+$TOOLCHAIN" -vV
+          } >> "$GITHUB_STEP_SUMMARY"
+      # actions/cache v6.1.0; tag verified against the official repository.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/msrv-cargo-home/registry
+            ${{ runner.temp }}/msrv-cargo-home/git
+            ${{ runner.temp }}/msrv-target
+          key: cargo-msrv-${{ runner.os }}-${{ runner.arch }}-1.97.1-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
+      - name: Check workspace at MSRV
+        shell: bash
+        run: cargo "+$TOOLCHAIN" check --workspace --all-targets --all-features --locked
+
+  latest-stable:
+    name: latest stable / compile-only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      CARGO_HOME: ${{ runner.temp }}/latest-stable-cargo-home
+      CARGO_TARGET_DIR: ${{ runner.temp }}/latest-stable-target
+      TOOLCHAIN: stable
+    steps:
+      # actions/checkout v7.0.1; tag verified against the official repository.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # actions-rust-lang/setup-rust-toolchain v1.17.0; tag verified against the official repository.
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          # `stable` is explicit latest-stable detection, not the pinned file.
+          toolchain: stable
+          cache: false
+          rustflags: ""
+      - name: Record latest-stable provenance
+        shell: bash
+        env:
+          LOCKFILE_SHA256: ${{ hashFiles('**/Cargo.lock') }}
+          TOOLCHAIN_FILE_SHA256: ${{ hashFiles('rust-toolchain.toml') }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### latest-stable provenance"
+            echo "- channel: $TOOLCHAIN"
+            echo "- target: $(rustc "+$TOOLCHAIN" -vV | sed -n 's/^host: //p')"
+            echo "- Cargo.lock SHA-256: $LOCKFILE_SHA256"
+            echo "- rust-toolchain.toml SHA-256: $TOOLCHAIN_FILE_SHA256"
+            rustc "+$TOOLCHAIN" -vV
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Check workspace with latest stable compiler
+        shell: bash
+        run: cargo "+$TOOLCHAIN" check --workspace --all-targets --all-features --locked
+
+  nightly-tools:
+    name: nightly tools / static-only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TOOLCHAIN: nightly
+    steps:
+      # actions/checkout v7.0.1; tag verified against the official repository.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # actions-rust-lang/setup-rust-toolchain v1.17.0; tag verified against the official repository.
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          # Nightly is tooling-only; it is not a production compiler lane and
+          # is intentionally uncached so a moving channel cannot reuse stale
+          # artifacts or masquerade as pinned evidence.
+          toolchain: nightly
+          components: rustfmt
+          cache: false
+          rustflags: ""
+      - name: Record nightly toolchain provenance
+        shell: bash
+        env:
+          LOCKFILE_SHA256: ${{ hashFiles('**/Cargo.lock') }}
+          TOOLCHAIN_FILE_SHA256: ${{ hashFiles('rust-toolchain.toml') }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### nightly-tools provenance"
+            echo "- channel: $TOOLCHAIN"
+            echo "- Cargo.lock SHA-256: $LOCKFILE_SHA256"
+            echo "- rust-toolchain.toml SHA-256: $TOOLCHAIN_FILE_SHA256"
+            rustc "+$TOOLCHAIN" -vV
+            cargo "+$TOOLCHAIN" -V
+            rustfmt "+$TOOLCHAIN" --version --verbose
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Validate metadata with nightly tooling only
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo "+$TOOLCHAIN" metadata --locked --format-version 1 --no-deps
+          cargo "+$TOOLCHAIN" fmt --all -- --check
+
+  process-safety:
+    name: process safety / shared supervisor gate (fail-closed)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      # actions/checkout v7.0.1; tag verified against the official repository.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # actions-rust-lang/setup-rust-toolchain v1.17.0; tag verified against the official repository.
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: 1.97.1
+          cache: false
+          rustflags: ""
+      - name: Shared process-supervision acceptance (fail-closed until complete)
+        run: |
+          set -euo pipefail
+          # These are the exact ADR 0001 acceptance commands. There is no
+          # fallback to caller-local supervisors or an unlocked graph: this
+          # gate remains fail-closed until the shared crate and lock entry
+          # exist and pass their dedicated checks.
+          cargo fmt --all -- --check
+          cargo check -p jmeter-rs-process-supervision --all-targets --locked
+          cargo test -p jmeter-rs-process-supervision --all-targets --locked
+          cargo clippy -p jmeter-rs-process-supervision --all-targets --all-features --locked -- -D warnings
+      - name: Require shared supervisor ownership in callers (fail-closed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The recursive audit masks Rust comments and literals before
+          # checking every source file, and walks target-specific Cargo
+          # dependency tables. It must fail closed until ADR-0001 migration is
+          # complete; do not replace it with a caller-local allowlist.
+          python3 .github/scripts/check-process-supervision-migration.py
+      - name: Run ordinary process-safety tests
+        run: |
+          # Group-signalling tests are #[ignore]d in ordinary Cargo runs.
+          # These commands therefore exercise only direct-child and pure
+          # validation paths in the shared safety boundary.
+          cargo test --locked -p jmeter-oracle --lib
+          cargo test --locked -p jmeter-rs-java-bridge --test supervisor
+          cargo test --locked -p jmeter-rs-plugin-host --test supervisor
+      - name: Verify namespace wrappers before any group signal
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This checker proves the documented shell-wrapper contract (no
+          # broad process utility; exact exec cargo test after PID/NSpid
+          # identity checks). A shell is not accepted as a cleanup substitute.
+          python3 .github/scripts/check-pid-namespace-wrappers.py
+      - name: Require a private PID namespace
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v unshare >/dev/null 2>&1; then
+            echo "PID namespace capability is required for process-group tests" >&2
+            exit 78
+          fi
+          if ! unshare --pid --fork --mount-proc true >/dev/null 2>&1; then
+            echo "unshare --pid --fork --mount-proc is unavailable; refusing to substitute a host-namespace run" >&2
+            exit 78
+          fi
+      - name: Run ignored process-group tests only in the namespace
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./tools/jmeter-oracle/tests/pid_namespace.sh
+          ./crates/java-bridge/tests/pid_namespace.sh
+          ./crates/plugin-host/tests/pid_namespace.sh
+          ./crates/process-supervision/tests/pid_namespace.sh
+
+  repository-policy:
+    name: repository validators
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      # actions/checkout v7.0.1; tag verified against the official repository.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # actions-rust-lang/setup-rust-toolchain v1.17.0; tag verified against the official repository.
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: 1.97.1
+          cache: false
+          rustflags: ""
+      - name: Validate locked metadata
+        run: cargo metadata --locked --format-version 1 --no-deps
+      - name: Validate workspace policy
+        run: cargo run --locked --package xtask -- workspace-check
+      - name: Validate compatibility profile
+        run: cargo run --locked --package xtask -- profile-check
+      - name: Validate oracle fixture manifests
+        run: cargo run --locked --package xtask -- fixture-check
+      - name: Validate deterministic policy declarations
+        run: cargo run --locked --package xtask -- policy-check
+      - name: Validate CFG-002 property inventory
+        run: cargo run --locked -p xtask -- property-inventory --check
+      - name: Check locked workspace documentation
+        run: |
+          RUSTDOCFLAGS=-Dwarnings cargo doc --workspace --all-features --locked --no-deps

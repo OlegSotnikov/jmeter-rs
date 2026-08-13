@@ -1,0 +1,60 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-ELEMENTS-EXTERNAL-ELEM-001",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-ELEMENTS-EXTERNAL-001",
+  "conformance_ids": ["ELEM-001", "TEST-002"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-JMX-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001", "NORM-ENV-001"],
+  "external_runtime_boundary_ids": ["EXT-SERVICE-001", "EXT-JVM-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "7582edbeb62131a862053776d9f79d0c670aa976b46410ce60ccde5f97c4f085"
+  },
+  "property_files": [{
+    "path": "oracle.properties",
+    "sha256": "0d522f2bcae5f9077b6fab378ea16b5a7c2028684554d5c382f54753e8372a77"
+  }],
+  "descriptor": {
+    "path": "expected/semantic.json",
+    "sha256": "7e65506d0b1dd1780ebd0578075007107a29542b4e4130b79053f2d2a12cd99f"
+  },
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/external-samplers/elem-001-external",
+    "mode": "nongui-static-only",
+    "argv_template": ["jmeter", "-n", "-q", "oracle.properties", "-t", "plan.jmx", "-l", "<ignored>/oracle.jtl", "-j", "<ignored>/oracle.log"],
+    "network": "none",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null
+  },
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations_per_thread": 1,
+    "max_samples": 0,
+    "max_plan_nodes": 16,
+    "max_plan_depth": 6,
+    "max_property_text_bytes": 8192,
+    "max_result_bytes": 0,
+    "max_log_bytes": 65536,
+    "max_process_output_bytes": 0,
+    "max_process_wait_seconds": 0
+  },
+  "execution": {
+    "status": "external-unavailable",
+    "oracle_available": false,
+    "process_exit": null,
+    "sample_count": null,
+    "raw_artifacts": "oracle-runs/external-samplers/elem-001-external/ (ignored; no external adapter was run)",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "This is a static preservation and capability-accounting case. No Java, Apache JMeter, JVM worker, driver, service, network, or subprocess was executed.",
+    "HTTP is intentionally excluded; HTTP core coverage is owned by FX-ELEMENTS-CORE-001.",
+    "The placeholder service names, driver class, and Java sampler class do not identify available infrastructure and must never be treated as successful endpoint evidence.",
+    "The per-case bounds and namespaced external.fixture bounds are aligned static safety ceilings (16 plan nodes, depth 6, and 8192 property-text bytes); they are not oracle observations.",
+    "Element property inventories are intentionally minimal-authored and ordered rather than exhaustive: optional JMeter properties not authored in this plan are omitted and neither observed nor asserted.",
+    "A future conformance run must pin adapter versions, service/driver artifacts, licenses, checksums, fixture provenance, and bounded local traces before adding any result expectation."
+  ]
+}

@@ -1,0 +1,131 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-CROSS-PLATFORM-CAPABILITY-ERRORS",
+  "format": "jmx-semantic",
+  "evidence_status": "planned",
+  "normalization_policy_refs": ["NORM-CONFIG-001", "NORM-ENV-001", "NORM-TIME-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001"],
+  "projection_schema": "platform-capability-error-contract",
+  "expectation_basis": "Architecture error taxonomy and explicit capability boundaries; no platform error output was measured.",
+  "projection_policy": {
+    "kind": "declarative-static-projection",
+    "jmx_semantic_role": "capability/error contract metadata, not a captured JMX/JTL result",
+    "runtime_observations": false,
+    "comparator_route": "static-descriptor",
+    "status": "planned"
+  },
+  "matrix_status": "future-ci-targets-only",
+  "current_ci": {
+    "status": "not-configured",
+    "targets": [],
+    "runs_recorded": 0,
+    "note": "The six target rows below are future CI lane descriptors, not current capability evidence."
+  },
+  "target_matrix": [
+    {"target_os": "linux", "architecture": "x86_64", "target_triple": "x86_64-unknown-linux-gnu", "status": "planned", "run_status": "not-run"},
+    {"target_os": "linux", "architecture": "arm64", "target_triple": "aarch64-unknown-linux-gnu", "status": "planned", "run_status": "not-run"},
+    {"target_os": "macos", "architecture": "x86_64", "target_triple": "x86_64-apple-darwin", "status": "planned", "run_status": "not-run"},
+    {"target_os": "macos", "architecture": "arm64", "target_triple": "aarch64-apple-darwin", "status": "planned", "run_status": "not-run"},
+    {"target_os": "windows", "architecture": "x86_64", "target_triple": "x86_64-pc-windows-msvc", "status": "planned", "run_status": "not-run"},
+    {"target_os": "windows", "architecture": "arm64", "target_triple": "aarch64-pc-windows-msvc", "status": "planned", "run_status": "not-run"}
+  ],
+  "target_outcomes": [
+    {"target_os": "linux", "architecture": "x86_64", "target_triple": "x86_64-unknown-linux-gnu", "capabilities": ["filesystem.explicit-root", "filesystem.raw-non-unicode-path", "environment.allowlist"], "missing_capability_behavior": "typed-error-and-preserve-input", "status": "planned", "observed": false, "run_status": "not-run"},
+    {"target_os": "linux", "architecture": "arm64", "target_triple": "aarch64-unknown-linux-gnu", "capabilities": ["filesystem.explicit-root", "filesystem.raw-non-unicode-path", "environment.allowlist"], "missing_capability_behavior": "typed-error-and-preserve-input", "status": "planned", "observed": false, "run_status": "not-run"},
+    {"target_os": "macos", "architecture": "x86_64", "target_triple": "x86_64-apple-darwin", "capabilities": ["filesystem.explicit-root", "filesystem.raw-non-unicode-path", "environment.allowlist"], "missing_capability_behavior": "typed-error-and-preserve-input", "status": "planned", "observed": false, "run_status": "not-run"},
+    {"target_os": "macos", "architecture": "arm64", "target_triple": "aarch64-apple-darwin", "capabilities": ["filesystem.explicit-root", "filesystem.raw-non-unicode-path", "environment.allowlist"], "missing_capability_behavior": "typed-error-and-preserve-input", "status": "planned", "observed": false, "run_status": "not-run"},
+    {"target_os": "windows", "architecture": "x86_64", "target_triple": "x86_64-pc-windows-msvc", "capabilities": ["filesystem.explicit-root", "filesystem.raw-non-unicode-path", "gui.display", "environment.allowlist"], "windows_path_errors": ["config.outside-root", "runtime.capability.unsupported"], "missing_capability_behavior": "typed-error-and-preserve-input", "status": "planned", "observed": false, "run_status": "not-run"},
+    {"target_os": "windows", "architecture": "arm64", "target_triple": "aarch64-pc-windows-msvc", "capabilities": ["filesystem.explicit-root", "filesystem.raw-non-unicode-path", "gui.display", "environment.allowlist"], "windows_path_errors": ["config.outside-root", "runtime.capability.unsupported"], "missing_capability_behavior": "typed-error-and-preserve-input", "status": "planned", "observed": false, "run_status": "not-run"}
+  ],
+  "error_contracts": [
+    {
+      "id": "raw-non-unicode-path",
+      "request": "path input supplied as opaque bytes that are not valid UTF-8",
+      "category": "unsupported-capability",
+      "error_code": "unsupported-capability",
+      "unsupported_error_code": "unsupported-capability",
+      "stable_error_code": "runtime.capability.unsupported",
+      "stable_error_code_status": "planned",
+      "cli_exit_class": "capability.unavailable",
+      "capability": "filesystem.raw-non-unicode-path",
+      "capability_id": "filesystem.raw-non-unicode-path",
+      "payload_max_bytes": 64,
+      "payload_hex": "6669787475726573ff2e747874",
+      "payload_length": 13,
+      "configuration_error_code": "config.invalid-utf8",
+      "status": "planned",
+      "preserve_input": true,
+      "required_context": ["profile_id", "operation", "source_path_or_node", "target_triple", "capability", "payload_length"],
+      "error_context_fields": ["profile_id", "operation", "source_path_or_node", "target_triple", "capability", "payload_length"]
+    },
+    {
+      "id": "missing-display",
+      "request": "GUI operation requested with headless=true and no declared display",
+      "category": "unsupported-capability",
+      "error_code": "unsupported-capability",
+      "unsupported_error_code": "unsupported-capability",
+      "stable_error_code": "runtime.capability.unsupported",
+      "stable_error_code_status": "planned",
+      "cli_exit_class": "capability.unavailable",
+      "capability": "gui.display",
+      "capability_id": "gui.display",
+      "status": "planned",
+      "preserve_input": true,
+      "required_context": ["profile_id", "operation", "source_path_or_node", "target_os", "target_triple", "capability", "headless"],
+      "error_context_fields": ["profile_id", "operation", "source_path_or_node", "target_os", "target_triple", "capability", "headless"]
+    },
+    {
+      "id": "undeclared-platform-adapter",
+      "request": "platform-specific launcher or filesystem adapter absent from the declared capability set",
+      "category": "unsupported-capability",
+      "error_code": "unsupported-capability",
+      "unsupported_error_code": "unsupported-capability",
+      "stable_error_code": "runtime.capability.unsupported",
+      "stable_error_code_status": "planned",
+      "cli_exit_class": "capability.unavailable",
+      "capability": "platform.adapter",
+      "capability_id": "platform.adapter",
+      "status": "planned",
+      "preserve_input": true,
+      "required_context": ["profile_id", "operation", "target_triple", "capability"],
+      "error_context_fields": ["profile_id", "operation", "target_triple", "capability"]
+    },
+    {
+      "id": "forbidden-ambient-environment",
+      "request": "case attempts to read an environment variable outside the empty allowlist",
+      "category": "config",
+      "stable_error_code": "config.invalid",
+      "stable_error_code_status": "planned",
+      "cli_exit_class": "config.invalid",
+      "error_code": "config-error",
+      "capability": "environment.allowlist",
+      "capability_id": "environment.allowlist",
+      "status": "planned",
+      "preserve_input": true,
+      "required_context": ["profile_id", "operation", "variable_name", "allowlist", "target_triple"],
+      "error_context_fields": ["profile_id", "operation", "variable_name", "allowlist", "target_triple"]
+    }
+  ],
+  "implementation_code_mapping": {
+    "unsupported-capability": {"runtime_capability_error": "runtime.capability.unsupported", "cli_exit_class": "capability.unavailable", "status": "planned"},
+    "config-error": {"configuration_error_family": "config.*", "invalid_utf8": "config.invalid-utf8", "outside_root": "config.outside-root", "invalid_operation": "config.invalid-operation", "status": "planned"}
+  },
+  "no_silent_fallback_contract": {
+    "unknown_or_unavailable_capability": "retain source plan/input and return a typed stable error",
+    "forbidden_behavior": ["map to another element", "drop the input", "return placeholder success", "fabricate a sample or measurement"],
+    "error_observation_status": "not-run"
+  },
+  "normalization": {
+    "ignored_fields": ["diagnostic.message", "runtime.hostname", "runtime.ephemeral_root"],
+    "reason": "Stable error category/code, capability ID, preservation behavior, target triple, and source identity remain comparable; localized prose and future host roots are not sole oracle fields."
+  },
+  "generated_from": {
+    "generator": "Original jmeter-rs static capability-error contract",
+    "generator_version": "not applicable",
+    "oracle_status": "not-run",
+    "oracle_command": "future Rust/platform capability test recipe only; no process was started",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "ignored; no oracle artifacts collected"
+  }
+}

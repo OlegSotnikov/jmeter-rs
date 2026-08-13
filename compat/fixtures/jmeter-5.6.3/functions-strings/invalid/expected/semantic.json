@@ -1,0 +1,92 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-FUNC-STRINGS-INVALID",
+  "format": "jtl-xml",
+  "evidence_status": "not_run",
+  "expectation_basis": "Hand-authored JTL XML contract for invalid and accepted argument boundaries; no Java, JMeter, or oracle process was executed.",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 6,
+  "samples": [
+    {"position": 0, "element": "sample", "assertions": [], "children": [], "debug_response_projection": {"required_sections": []}},
+    {"position": 1, "element": "sample", "assertions": [], "children": [], "debug_response_projection": {"required_sections": []}},
+    {"position": 2, "element": "sample", "assertions": [], "children": [], "debug_response_projection": {"required_sections": []}},
+    {"position": 3, "element": "sample", "assertions": [], "children": [], "debug_response_projection": {"required_sections": []}},
+    {"position": 4, "element": "sample", "assertions": [], "children": [], "debug_response_projection": {"required_sections": []}},
+    {
+      "position": 5,
+      "element": "sample",
+      "label": "accepted-side-effects|int-output=2|split-empty=one,two|split-empty-prefix=one|stale=${parts_3}",
+      "attributes": {"s": "true", "lb": "accepted-side-effects|int-output=2|split-empty=one,two|split-empty-prefix=one|stale=${parts_3}", "rc": "200", "rm": "OK", "tn": "One negative-case user 1-1", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"},
+      "ignored_attributes": ["t", "it", "lt", "ct", "ts", "by"],
+      "assertions": [],
+      "children": [],
+      "debug_response_projection": {"required_sections": ["JMeterVariables:"], "variables": {"not-a-number": "2", "parts": "one,two", "parts_n": "2", "parts_1": "one", "parts_2": "two", "_n": "1", "_1": "one"}}
+    }
+  ],
+  "generated_from": {
+    "fixture_contract": {
+      "oracle_status": "not-run-static-corpus",
+      "sample_count_asserted": true,
+      "sample_count_basis": "Static enabled topology; the current comparator enforces this count when a future JTL is supplied, but no oracle count was observed.",
+      "bounds_contract": {"source": "case.bounds", "comparator_enforced": false, "max_threads": 1, "max_iterations_per_thread": 1, "max_samplers_per_iteration": 6, "max_samples": 6, "max_input_bytes": 512, "max_output_files": 0, "max_label_bytes": 4096},
+      "comparator_contract": {
+        "format": "jtl-xml",
+        "comparator_enforced": true,
+        "fields": ["root", "sample_count", "accepted_sample.attributes", "accepted_sample.debug_response_projection.variables"],
+        "planned_invalid_runtime_comparator_enforced": false,
+        "reason": "Invalid function diagnostics are represented as not-run category/value descriptors; only the accepted deterministic side-effect sampler is exact-comparator ready."
+      },
+      "enabled_probe_contracts": [
+        {"id": "int-sum-output-variable", "sample_position": 5, "expression": "${__intSum(2,not-a-number)}", "expected": "2", "side_effects": {"not-a-number": "2"}, "comparator_enforced": true},
+        {"id": "split-empty-default-comma", "sample_position": 5, "expression": "${__split(one\\,two,parts,)}", "expected": "one,two", "side_effects": {"parts": "one,two", "parts_n": "2", "parts_1": "one", "parts_2": "two"}, "seeded_variables": {"parts_3": "stale"}, "absent_variable_indirect": "literal ${parts_3} remains in the accepted sampler label after split cleanup", "comparator_enforced": true},
+        {"id": "split-empty-variable-prefix", "sample_position": 5, "expression": "${__split(one,)}", "expected": "one", "side_effects": {"_n": "1", "_1": "one"}, "comparator_enforced": true}
+      ],
+      "planned_constraints": {
+        "schema_id": "jmeter-rs.planned-constraint-contract",
+        "schema_version": 1,
+        "enforcement": "not-comparator-enforced",
+        "status": "not-run",
+        "target": "invalid-runtime",
+        "kind": "category-and-value",
+        "value_policy": "null means no runtime value is asserted; category is a future oracle classification, not observed evidence.",
+        "constraints": [
+          {"id": "undefined-reference", "expression": "${MISSING}", "expected": {"category": "undefined-variable", "value": null, "value_asserted": false}, "comparator_enforced": false},
+          {"id": "unknown-lowercase-function", "expression": "${__v(A1)}", "expected": {"category": "unresolved-function", "value": "${__v(A1)}", "value_asserted": true}, "comparator_enforced": false},
+          {"id": "unknown-uppercase-function", "expression": "${__PROPERTY(fx.prop)}", "expected": {"category": "unresolved-function", "value": "${__PROPERTY(fx.prop)}", "value_asserted": true}, "comparator_enforced": false},
+          {"id": "unknown-plugin-function", "expression": "${__base64Encode(a)}", "expected": {"category": "unresolved-function", "value": "${__base64Encode(a)}", "value_asserted": true}, "comparator_enforced": false},
+          {"id": "undefined-function-case", "expression": "${__BASE64Encode(a)}", "expected": {"category": "unresolved-function", "value": "${__BASE64Encode(a)}", "value_asserted": true}, "comparator_enforced": false},
+          {"id": "missing-known-function-value", "expression": "${__V(MISSING)}", "expected": {"category": "undefined-variable", "value": null, "value_asserted": false}, "comparator_enforced": false},
+          {"id": "empty-known-function-value", "expression": "${__V(MISSING,)}", "expected": {"category": "undefined-variable", "value": null, "value_asserted": false}, "comparator_enforced": false},
+          {"id": "undefined-indirection", "expression": "${__evalVar(MISSING)}", "expected": {"category": "undefined-variable", "value": null, "value_asserted": false}, "comparator_enforced": false},
+          {"id": "invalid-case-mode", "expression": "${__changeCase(MiXeD,INVALID)}", "expected": {"category": "invalid-argument", "value": null, "value_asserted": false}, "comparator_enforced": false},
+          {"id": "invalid-character-argument", "expression": "${__char(not-a-number)}", "expected": {"category": "invalid-value", "value": null, "value_asserted": false}, "comparator_enforced": false},
+          {"id": "invalid-html-arity", "expression": "${__escapeHtml(one,two)}", "expected": {"category": "invalid-arity", "value": null, "value_asserted": false}, "comparator_enforced": false},
+          {"id": "invalid-url-percent", "expression": "${__urldecode(%ZZ)}", "expected": {"category": "invalid-value", "value": null, "value_asserted": false}, "comparator_enforced": false},
+          {"id": "invalid-url-short-percent", "expression": "${__urldecode(%A)}", "expected": {"category": "invalid-value", "value": null, "value_asserted": false}, "comparator_enforced": false},
+          {"id": "invalid-escape", "expression": "${__unescape(\\q)}", "expected": {"category": "invalid-value", "value": null, "value_asserted": false}, "comparator_enforced": false},
+          {"id": "invalid-url-arity", "expression": "${__urlencode()}", "expected": {"category": "invalid-arity", "value": null, "value_asserted": false}, "comparator_enforced": false},
+          {"id": "invalid-long-sum-arity", "expression": "${__longSum()}", "expected": {"category": "invalid-arity", "value": null, "value_asserted": false}, "comparator_enforced": false},
+          {"id": "unresolved-plugin-substring", "expression": "${__substring(abc,4,5)}", "expected": {"category": "unresolved-function", "value": "${__substring(abc,4,5)}", "value_asserted": true}, "comparator_enforced": false},
+          {"id": "unresolved-plugin-strlen", "expression": "${__strLen()}", "expected": {"category": "unresolved-function", "value": "${__strLen()}", "value_asserted": true}, "comparator_enforced": false},
+          {"id": "invalid-random-bounds", "expression": "${__Random(3,2)}", "expected": {"category": "invalid-bounds", "value": null, "value_asserted": false}, "comparator_enforced": false},
+          {"id": "invalid-date", "expression": "${__dateTimeConvert(not-a-date,yyyy-MM-dd,dd/MM/yyyy)}", "expected": {"category": "invalid-value", "value": null, "value_asserted": false}, "comparator_enforced": false}
+        ]
+      },
+      "oracle_execution": {"status": "not-run", "process_exit": null, "reason": "Static authoring only; no Java/JMeter process or JTL output is included."}
+    },
+    "generator": "hand-authored static negative matrix",
+    "generator_version": "repository source and research only",
+    "random_seed": null,
+    "oracle_command_status": "recipe-not-executed",
+    "oracle_command": "env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 TZ=UTC <ignored>/jmeter-oracle-cache/apache-jmeter-5.6.3/bin/jmeter -n -q oracle.properties -t plan.jmx -l <ignored>/oracle.jtl -j <ignored>/oracle.log",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "oracle-runs/functions-strings/invalid/ (ignored; no local evidence captured)",
+    "runtime_executed": false
+  },
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.ts", "sample.by"],
+    "reason": "NORM-JTL-001 retains the exact accepted side-effect sample identity and variable projection; NORM-TIME-001 and JTL byte normalization cover timing and byte counters. Invalid runtime categories and values remain not-run descriptors."
+  }
+}

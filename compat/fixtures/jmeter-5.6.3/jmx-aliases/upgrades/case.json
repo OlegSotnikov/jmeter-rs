@@ -1,0 +1,39 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-JMX-UPGRADES",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-JMX-001",
+  "conformance_ids": ["JMX-002", "JMX-003"],
+  "normalization_policy_refs": ["NORM-JMX-001", "NORM-STRUCTURE-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "68e16576136b3c823e98584855b05e1fdee7630fc2899d224cdd83edc3bf3d14"
+  },
+  "property_files": [{
+    "path": "oracle.properties",
+    "sha256": "ec0d2ce2981d7fd2a9d3362179ca662ca4c483e9ccb8be8ff9592c9157fdc7ae"
+  }],
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/jmx-aliases/upgrades",
+    "mode": "nongui",
+    "argv_template": ["jmeter", "-n", "-q", "oracle.properties", "-t", "plan.jmx", "-l", "<ignored>/oracle.jtl", "-j", "<ignored>/oracle.log"],
+    "network": "none",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null
+  },
+  "execution": {
+    "status": "static-only; oracle not executed",
+    "process_exit": 0,
+    "sample_count": 0,
+    "raw_artifacts": "oracle-runs/jmx-aliases/upgrades/ (ignored; no artifacts committed)",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "The version-1.0 plan is original and deliberately encodes scalar values with URL-style '+' and percent escapes to exercise the pinned legacy decoder.",
+    "No Java, Apache JMeter, JVM, or subprocess was executed; static expected values are derived from the checked-in clean-room upgrade table and parser contract.",
+    "Deleted JDBC upgrade properties may remain as raw opaque spans for diagnostics, but canonical upgraded output omits them; diagnostic retention is not a round-trip-preservation claim."
+  ]
+}

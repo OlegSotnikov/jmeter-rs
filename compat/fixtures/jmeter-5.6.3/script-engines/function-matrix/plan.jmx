@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Original scripting function matrix" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="Sampler-time function seed" enabled="true">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="function_seed" elementType="Argument">
+            <stringProp name="Argument.name">function_seed</stringProp>
+            <stringProp name="Argument.value">seed</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+      <collectionProp name="TestPlan.thread_groups"/>
+      <stringProp name="TestPlan.comments">Function expressions are deliberately evaluated from a sampler-time script; TestPlan UDV contains only the seed variable.</stringProp>
+      <stringProp name="TestPlan.user_define_classpath"></stringProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="One function user" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="One function loop" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">1</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">0</stringProp>
+        <longProp name="ThreadGroup.start_time">0</longProp>
+        <longProp name="ThreadGroup.end_time">0</longProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <stringProp name="ThreadGroup.duration"></stringProp>
+        <stringProp name="ThreadGroup.delay"></stringProp>
+      </ThreadGroup>
+      <hashTree>
+        <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="function expressions at sampler time" enabled="true">
+          <stringProp name="scriptLanguage">groovy</stringProp>
+          <stringProp name="parameters">function-probe</stringProp>
+          <stringProp name="filename"></stringProp>
+          <stringProp name="cacheKey">false</stringProp>
+          <stringProp name="script">vars.put('bsh_result', '${__BeanShell(vars.put("bsh_seen"\,"yes"); "bsh-" + vars.get("function_seed"),bsh_result)}')
+vars.put('groovy_result', '${__groovy(vars.put('groovy_seen'\,'yes'); 'groovy-' + vars.get('function_seed'),groovy_result)}')
+vars.put('jexl2_result', '${__jexl2(1 + 2,jexl2_result)}')
+vars.put('jexl3_result', '${__jexl3(4 + 5,jexl3_result)}')
+vars.put('rhino_result', '${__javaScript('rhino-' + 'value',rhino_result)}')
+vars.put('binding_result', '${__BeanShell(props.put("function_prop"\,"p"); vars.put("function_var"\,"v"); "bound",binding_result)}')
+vars.put('bsh_error', '${__BeanShell(throw new RuntimeException("fixture-function-bsh"),bsh_error)}')
+vars.put('groovy_error', '${__groovy(throw new RuntimeException("fixture-function-groovy"),groovy_error)}')
+vars.put('jexl_error', '${__jexl3(missing_function_name + 1,jexl_error)}')
+vars.put('rhino_error', '${__javaScript(throw "fixture-function-rhino",rhino_error)}')
+return null</stringProp>
+        </JSR223Sampler>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

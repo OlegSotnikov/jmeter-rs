@@ -1,0 +1,497 @@
+{
+  "schema_id": "jmeter-rs.perf-config",
+  "schema_version": 3,
+  "config_id": "macro-offline-runtime",
+  "kind": "macro",
+  "compatibility": {
+    "profile_id": "jmeter-5.6.3",
+    "feature_ids": [
+      "TEST-005",
+      "ELEM-003",
+      "ELEM-004",
+      "ELEM-007"
+    ],
+    "fixture_id": "FX-ELEMENTS-CORE-001",
+    "fixture_ids": [
+      "FX-CROSS-PLATFORM-001",
+      "FX-ELEMENTS-CORE-001",
+      "FX-JTL-001",
+      "FX-REPORT-001"
+    ],
+    "normalization_policy_refs": [
+      "NORM-STRUCTURE-001",
+      "NORM-TIME-001",
+      "NORM-ENV-001",
+      "NORM-JTL-001",
+      "NORM-EXTERNAL-001",
+      "NORM-SECURITY-001"
+    ]
+  },
+  "reproducibility": {
+    "seed": 20260812,
+    "locale": "en-US",
+    "timezone": "UTC",
+    "charset": "UTF-8",
+    "target_os": "linux",
+    "target_arch": "x86_64",
+    "target_triple": "x86_64-unknown-linux-gnu",
+    "os_image_id": "declared-runner-linux-x86_64",
+    "os_image_reference": "registry.invalid/jmeter-rs/runner-linux-x86_64@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "os_image_reference_sha256": "04f8c2a06cdbcb17a516d0a615a41bf27d46f2e69478f28a5c58b463a21176b5",
+    "os_image_artifact_digest_sha256": null,
+    "rust_toolchain": "rust-toolchain.toml",
+    "rust_toolchain_sha256": "a55035e3085a595e4e73637e5f26e0f89f880d61188888da4e7d023f9144ebf3",
+    "cargo_lock_sha256": "ba8d639c1198012cda6bf43db4cbb5f56e2c6da01f7177cfb71a3c96197e3043",
+    "source_date_epoch": 1786492800,
+    "environment_allowlist": [],
+    "working_directory_policy": "ephemeral-run-root",
+    "clock_mode": "controlled-fixture"
+  },
+  "platform_matrix": [
+    {"id": "linux-x86_64", "target_os": "linux", "target_arch": "x86_64", "target_triple": "x86_64-unknown-linux-gnu", "status": "future-planned", "os_image_reference": "registry.invalid/jmeter-rs/runner-linux-x86_64@sha256:1111111111111111111111111111111111111111111111111111111111111111", "os_image_reference_sha256": "04f8c2a06cdbcb17a516d0a615a41bf27d46f2e69478f28a5c58b463a21176b5", "os_image_artifact_digest_sha256": null, "evidence_id": null},
+    {"id": "linux-aarch64", "target_os": "linux", "target_arch": "aarch64", "target_triple": "aarch64-unknown-linux-gnu", "status": "future-planned", "os_image_reference": "registry.invalid/jmeter-rs/runner-linux-aarch64@sha256:2222222222222222222222222222222222222222222222222222222222222222", "os_image_reference_sha256": "be66dd7dacdef0081310ef7d1f1fdef181b04c4fe9af3e5c3e5acb2182c6c435", "os_image_artifact_digest_sha256": null, "evidence_id": null},
+    {"id": "windows-x86_64", "target_os": "windows", "target_arch": "x86_64", "target_triple": "x86_64-pc-windows-msvc", "status": "future-planned", "os_image_reference": "registry.invalid/jmeter-rs/runner-windows-x86_64@sha256:3333333333333333333333333333333333333333333333333333333333333333", "os_image_reference_sha256": "00483b2233c5c6c21d50e91a2220e50488e7988fd8bc5973619ae3d0f1f04197", "os_image_artifact_digest_sha256": null, "evidence_id": null},
+    {"id": "windows-aarch64", "target_os": "windows", "target_arch": "aarch64", "target_triple": "aarch64-pc-windows-msvc", "status": "future-planned", "os_image_reference": "registry.invalid/jmeter-rs/runner-windows-aarch64@sha256:4444444444444444444444444444444444444444444444444444444444444444", "os_image_reference_sha256": "cff49b7173d69fc4995b4b41b5b01420da2debf47291c108b6aec72aadfc4916", "os_image_artifact_digest_sha256": null, "evidence_id": null},
+    {"id": "macos-x86_64", "target_os": "macos", "target_arch": "x86_64", "target_triple": "x86_64-apple-darwin", "status": "future-planned", "os_image_reference": "registry.invalid/jmeter-rs/runner-macos-x86_64@sha256:5555555555555555555555555555555555555555555555555555555555555555", "os_image_reference_sha256": "6db81ffae1aeabfd9f0a327c55e40c6f3c3adeaf275dea8a1cca13bfd407cf34", "os_image_artifact_digest_sha256": null, "evidence_id": null},
+    {"id": "macos-aarch64", "target_os": "macos", "target_arch": "aarch64", "target_triple": "aarch64-apple-darwin", "status": "future-planned", "os_image_reference": "registry.invalid/jmeter-rs/runner-macos-aarch64@sha256:6666666666666666666666666666666666666666666666666666666666666666", "os_image_reference_sha256": "886311ab0caf3072c6f5455c292b067831af3b1c1839aa94938a838b2d1d9a9a", "os_image_artifact_digest_sha256": null, "evidence_id": null}
+  ],
+  "execution": {
+    "mode": "dry-run-only",
+    "subprocess_policy": {
+      "benchmark_processes": "forbidden",
+      "service_processes": "forbidden",
+      "shell": false,
+      "network": "offline",
+      "process_start": "disabled",
+      "group_signalling": "forbidden"
+    },
+    "children": [
+      {
+        "id": "benchmark-child",
+        "role": "benchmark",
+        "enabled": false,
+        "future_only": true,
+        "executable": "/opt/jmeter-rs/future/bin/benchmark",
+        "executable_reference_sha256": "1abc745d6639d7030525c5883de63546f7b3ff55c81aad62aaf627b923dee033",
+        "executable_artifact_digest_sha256": null,
+        "artifact_status": "future-pinned-not-present",
+        "args": [],
+        "max_arg_bytes": 8192,
+        "max_output_bytes": 10000000,
+        "startup_timeout_ms": 1000,
+        "operation_timeout_ms": 86400000,
+        "graceful_shutdown_timeout_ms": 1000,
+        "deadline_policy": "bounded-monotonic",
+        "shell": false,
+        "working_directory": "ephemeral-run-root",
+        "environment": {},
+        "ownership": {
+          "identity": "owned-child-handle",
+          "pre_signal_check": "try_wait-before-signal",
+          "reap": "wait-exact-child-on-all-paths",
+          "termination": "direct-child-only",
+          "pid_validation": "live-child-pgid-greater-than-one"
+        }
+      },
+      {
+        "id": "fixture-service-child",
+        "role": "fixture-service",
+        "enabled": false,
+        "future_only": true,
+        "executable": "/opt/jmeter-rs/future/bin/fixture-service",
+        "executable_reference_sha256": "09256fb5a3b8948bb4d4a49caa8ca3d1eac6448c7de4ff90d0cdff52ed249a0a",
+        "executable_artifact_digest_sha256": null,
+        "artifact_status": "future-pinned-not-present",
+        "args": [],
+        "max_arg_bytes": 8192,
+        "max_output_bytes": 10000000,
+        "startup_timeout_ms": 1000,
+        "operation_timeout_ms": 86400000,
+        "graceful_shutdown_timeout_ms": 1000,
+        "deadline_policy": "bounded-monotonic",
+        "shell": false,
+        "working_directory": "ephemeral-run-root",
+        "environment": {},
+        "ownership": {
+          "identity": "owned-child-handle",
+          "pre_signal_check": "try_wait-before-signal",
+          "reap": "wait-exact-child-on-all-paths",
+          "termination": "direct-child-only",
+          "pid_validation": "live-child-pgid-greater-than-one"
+        }
+      },
+      {
+        "id": "measurement-helper-child",
+        "role": "measurement-helper",
+        "enabled": false,
+        "future_only": true,
+        "executable": "/opt/jmeter-rs/future/bin/measurement-helper",
+        "executable_reference_sha256": "31aec3dbb4efa6cd48d11b42113d259649a0d23b2fc6b5b02da5a21b22a2e082",
+        "executable_artifact_digest_sha256": null,
+        "artifact_status": "future-pinned-not-present",
+        "args": [],
+        "max_arg_bytes": 8192,
+        "max_output_bytes": 10000000,
+        "startup_timeout_ms": 1000,
+        "operation_timeout_ms": 86400000,
+        "graceful_shutdown_timeout_ms": 1000,
+        "deadline_policy": "bounded-monotonic",
+        "shell": false,
+        "working_directory": "ephemeral-run-root",
+        "environment": {},
+        "ownership": {
+          "identity": "owned-child-handle",
+          "pre_signal_check": "try_wait-before-signal",
+          "reap": "wait-exact-child-on-all-paths",
+          "termination": "direct-child-only",
+          "pid_validation": "live-child-pgid-greater-than-one"
+        }
+      }
+    ],
+    "containers": [
+      {
+        "id": "fixture-service-container",
+        "role": "fixture-service",
+        "enabled": false,
+        "future_only": true,
+        "runtime": "/usr/bin/future-container-runtime",
+        "runtime_reference_sha256": "a8eb27dc40ff805844035d8f261e40b65b1518869d6575ac61907e1f2047052e",
+        "runtime_artifact_digest_sha256": null,
+        "image_reference": "registry.invalid/jmeter-rs/fixture@sha256:aaa2c2ff9c02867a5e997223f41a4b27ce1245f54ac756f84c9cba4bb8e35c08",
+        "image_reference_sha256": "52182c3ad88fbc8aa3558762900f248eb43cfffc7a4daa35f88fc4dd624838ff",
+        "image_artifact_digest_sha256": null,
+        "image_status": "future-pinned-not-present",
+        "create_args": [],
+        "max_arg_bytes": 8192,
+        "max_output_bytes": 10000000,
+        "startup_timeout_ms": 1000,
+        "operation_timeout_ms": 86400000,
+        "graceful_shutdown_timeout_ms": 1000,
+        "deadline_policy": "bounded-monotonic",
+        "id_source": "created-by-this-run",
+        "cleanup": "exact-created-id-only",
+        "selectors": []
+      }
+    ]
+  },
+  "workload": {
+    "scenario_id": "offline-controller-scheduler",
+    "case_id": "ORACLE-JMETER-563-CONTROLLERS-FULL-BASIC",
+    "case_manifest_path": "compat/fixtures/jmeter-5.6.3/controllers-full/basic-traversal/case.json",
+    "fixture_family_id": "FX-ELEMENTS-CORE-001",
+    "fixture_path": "compat/fixtures/jmeter-5.6.3/controllers-full/basic-traversal/plan.jmx",
+    "fixture_sha256": "8dfec88574336b7c6d8e36a951b755ef30e9043863a036d4bf6a55a968e94640",
+    "operations": [
+      {
+        "id": "compile-plan",
+        "kind": "compile-plan",
+        "enabled": true,
+        "parameters": {
+          "max_virtual_users": 256,
+          "retain_result_tree": true
+        }
+      },
+      {
+        "id": "execute-offline-fixture",
+        "kind": "execute-offline-fixture",
+        "enabled": true,
+        "parameters": {
+          "transport": "deterministic-offline",
+          "iterations_per_user": 20,
+          "record_replay_log": true
+        }
+      },
+      {
+        "id": "aggregate-results",
+        "kind": "aggregate-results",
+        "enabled": true,
+        "parameters": {
+          "preserve_sample_order": true
+        }
+      }
+    ],
+    "virtual_users": 128,
+    "iterations": 20,
+    "duration_seconds": null,
+    "warmup_seconds": 30,
+    "ramp_up_seconds": 30,
+    "target_rate_per_second": null,
+    "open_loop": false
+  },
+  "metrics": {
+    "sample_interval_seconds": 5,
+    "warmup_samples": 6,
+    "histograms": [
+      {
+        "id": "schedule_delay",
+        "unit": "nanoseconds",
+        "percentiles": [
+          50,
+          95,
+          99
+        ]
+      },
+      {
+        "id": "sample_elapsed",
+        "unit": "nanoseconds",
+        "percentiles": [
+          50,
+          95,
+          99
+        ]
+      },
+      {
+        "id": "result_bytes",
+        "unit": "bytes",
+        "percentiles": [
+          50,
+          95,
+          99
+        ]
+      }
+    ],
+    "counters": [
+      "virtual_users_started",
+      "virtual_users_completed",
+      "samples_started",
+      "samples_completed",
+      "samples_failed",
+      "results_dropped",
+      "queue_overflows"
+    ],
+    "derived_metrics": [
+      {"id": "throughput", "unit": "operations-per-second"},
+      {"id": "sample_count", "unit": "count"},
+      {"id": "sample_elapsed_p95", "unit": "nanoseconds"},
+      {"id": "sample_elapsed_p99", "unit": "nanoseconds"},
+      {"id": "schedule_delay_p95", "unit": "nanoseconds"},
+      {"id": "schedule_delay_p99", "unit": "nanoseconds"}
+    ],
+    "resource_metrics": [
+      {
+        "id": "rss_bytes",
+        "source": "owned-runner",
+        "unit": "bytes",
+        "required": true
+      },
+      {
+        "id": "open_fd_count",
+        "source": "owned-runner",
+        "unit": "count",
+        "required": true
+      },
+      {
+        "id": "thread_count",
+        "source": "owned-runner",
+        "unit": "count",
+        "required": true
+      },
+      {
+        "id": "task_count",
+        "source": "owned-runner",
+        "unit": "count",
+        "required": true
+      },
+      {
+        "id": "result_queue_depth",
+        "source": "owned-runner",
+        "unit": "count",
+        "required": true
+      },
+      {
+        "id": "cpu_time_ns",
+        "source": "owned-runner",
+        "unit": "nanoseconds",
+        "required": true
+      },
+      {
+        "id": "allocation_bytes",
+        "source": "owned-runner",
+        "unit": "bytes",
+        "required": true
+      }
+    ],
+    "queue_policy": "bounded-fail-on-overflow",
+    "max_samples": 1000000
+  },
+  "thresholds": {
+    "baseline_policy": "explicit-values-only",
+    "missing_metric_policy": "fail",
+    "baseline_artifact": null,
+    "baselines": {
+      "minimum_completion_count": 2560,
+      "minimum_sample_count": 2560,
+      "minimum_steady_state_samples": 6,
+      "source": "explicit-config"
+    },
+    "rules": [
+      {
+        "id": "macro-no-dropped-results",
+        "metric": "results_dropped",
+        "operator": "=",
+        "value": 0,
+        "unit": "count",
+        "scope": "run"
+      },
+      {
+        "id": "macro-no-queue-overflows",
+        "metric": "queue_overflows",
+        "operator": "=",
+        "value": 0,
+        "unit": "count",
+        "scope": "run"
+      },
+      {
+        "id": "macro-no-failures",
+        "metric": "samples_failed",
+        "operator": "=",
+        "value": 0,
+        "unit": "count",
+        "scope": "run"
+      },
+      {
+        "id": "macro-minimum-completions",
+        "metric": "samples_completed",
+        "operator": ">=",
+        "value": 2560,
+        "unit": "count",
+        "scope": "run"
+      },
+      {
+        "id": "macro-throughput-floor",
+        "metric": "throughput",
+        "operator": ">=",
+        "value": 1,
+        "unit": "operations-per-second",
+        "scope": "steady-state"
+      },
+      {
+        "id": "macro-sample-count-floor",
+        "metric": "sample_count",
+        "operator": ">=",
+        "value": 2560,
+        "unit": "count",
+        "scope": "run"
+      },
+      {
+        "id": "macro-elapsed-p95-ceiling",
+        "metric": "sample_elapsed_p95",
+        "operator": "<=",
+        "value": 1000000000,
+        "unit": "nanoseconds",
+        "scope": "steady-state"
+      },
+      {
+        "id": "macro-elapsed-p99-ceiling",
+        "metric": "sample_elapsed_p99",
+        "operator": "<=",
+        "value": 1000000000,
+        "unit": "nanoseconds",
+        "scope": "steady-state"
+      },
+      {
+        "id": "macro-schedule-p95-ceiling",
+        "metric": "schedule_delay_p95",
+        "operator": "<=",
+        "value": 1000000000,
+        "unit": "nanoseconds",
+        "scope": "steady-state"
+      },
+      {
+        "id": "macro-schedule-p99-ceiling",
+        "metric": "schedule_delay_p99",
+        "operator": "<=",
+        "value": 1000000000,
+        "unit": "nanoseconds",
+        "scope": "steady-state"
+      }
+    ]
+  },
+  "leak_sampling": {
+    "enabled": true,
+    "interval_seconds": 5,
+    "initial_delay_seconds": 0,
+    "baseline": "first-stable-window",
+    "windows": {
+      "warmup_samples": 6,
+      "steady_state_samples": 6,
+      "final_samples": 6
+    },
+    "metrics": [
+      "rss_bytes",
+      "open_fd_count",
+      "thread_count",
+      "task_count",
+      "result_queue_depth",
+      "cpu_time_ns",
+      "allocation_bytes"
+    ],
+    "growth_rules": [
+      {
+        "id": "macro-rss-growth",
+        "metric": "rss_bytes",
+        "unit": "bytes",
+        "comparison": "final-window-vs-baseline",
+        "max_absolute": 104857600,
+        "max_relative": 0.15
+      },
+      {
+        "id": "macro-fd-growth",
+        "metric": "open_fd_count",
+        "unit": "count",
+        "comparison": "final-window-vs-baseline",
+        "max_absolute": 4,
+        "max_relative": 0.1
+      },
+      {
+        "id": "macro-thread-growth",
+        "metric": "thread_count",
+        "unit": "count",
+        "comparison": "final-window-vs-baseline",
+        "max_absolute": 2,
+        "max_relative": 0.1
+      },
+      {
+        "id": "macro-task-growth",
+        "metric": "task_count",
+        "unit": "count",
+        "comparison": "final-window-vs-baseline",
+        "max_absolute": 2,
+        "max_relative": 0.1
+      },
+      {
+        "id": "macro-queue-drain",
+        "metric": "result_queue_depth",
+        "unit": "count",
+        "comparison": "final-window-vs-baseline",
+        "max_absolute": 0,
+        "max_relative": 0
+      },
+      {
+        "id": "macro-cpu-growth",
+        "metric": "cpu_time_ns",
+        "unit": "nanoseconds",
+        "comparison": "final-window-vs-baseline",
+        "max_absolute": 1000000000,
+        "max_relative": 1
+      },
+      {
+        "id": "macro-allocation-growth",
+        "metric": "allocation_bytes",
+        "unit": "bytes",
+        "comparison": "final-window-vs-baseline",
+        "max_absolute": 104857600,
+        "max_relative": 1
+      }
+    ],
+    "unavailable_policy": "fail",
+    "require_final_sample": true
+  },
+  "artifacts": {
+    "root": "artifacts/perf",
+    "result_filename": "dry-run-result.json",
+    "write_mode": "dry-run-only",
+    "max_bytes": 52428800,
+    "raw_samples": false
+  }
+}

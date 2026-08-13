@@ -1,0 +1,3 @@
+timeStamp,elapsed,label,responseCode,responseMessage,threadName,dataType,success,failureMessage,bytes,sentBytes,grpThreads,allThreads,URL,Filename,Latency,Encoding,SampleCount,ErrorCount,Hostname,IdleTime,Connect,"case_id","comma_value","quote_value","multiline_value"
+1700000000123,37,"label, with comma",200,"OK ""ready""",thread-1,text,true,,123,9,2,3,https://example.invalid/a?x=1&y=2,,4,UTF-8,1,0,host-a,0,2,jtl-fields,"left,right","a ""quoted"" value","line one
+line two"

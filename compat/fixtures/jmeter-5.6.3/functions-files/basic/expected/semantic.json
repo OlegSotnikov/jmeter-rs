@@ -1,0 +1,90 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-FUNCTIONS-FILES-BASIC",
+  "profile_id": "jmeter-5.6.3",
+  "evidence_status": "not_run",
+  "format": "jtl-xml",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 3,
+  "ordered_labels": [
+    "file-first-line-first-line-alpha",
+    "file-second-line-second-line-beta",
+    "file-first-line-first-line-alpha"
+  ],
+  "sample_contract": {
+    "attributes": {
+      "s": "true",
+      "rc": "200",
+      "rm": "OK",
+      "tn": "One deterministic file user 1-1",
+      "dt": "text",
+      "de": "UTF-8",
+      "sby": "0",
+      "sc": "1",
+      "ec": "0",
+      "ng": "1",
+      "na": "1"
+    },
+    "ignored_attributes": ["t", "it", "lt", "ct", "by"],
+    "debug_response_projection": {
+      "required_sections": ["JMeterVariables:"],
+      "variables": {
+        "csv_first": "red",
+        "csv_second": "one",
+        "csv_next_first": "",
+        "csv_next_second": "two",
+        "csv_missing": "",
+        "file_missing": "**ERR**",
+        "string_udv_first": "first-line",
+        "string_udv_second": "first-line",
+        "string_missing": "**ERR**",
+        "xpath_first": "alpha",
+        "xpath_no_match": "",
+        "xpath_missing": "",
+        "write_result": "first-line|second-line",
+        "write_first": "true",
+        "write_second": "true",
+        "write_utf16": "true",
+        "udv_line_first": "first-line",
+        "udv_line_second": "first-line"
+      }
+    }
+  },
+  "samples": [
+    {
+      "position": 0,
+      "label": "file-first-line-first-line-alpha",
+      "debug_response_projection": {
+        "variables": {
+          "sampler_line_first": "first-line",
+          "sampler_line_second": "first-line"
+        }
+      }
+    },
+    {
+      "position": 1,
+      "label": "file-second-line-second-line-beta",
+      "debug_response_projection": {
+        "variables": {
+          "sampler_line_first": "second-line",
+          "sampler_line_second": "second-line"
+        }
+      }
+    },
+    {
+      "position": 2,
+      "label": "file-first-line-first-line-alpha",
+      "debug_response_projection": {
+        "variables": {
+          "sampler_line_first": "first-line",
+          "sampler_line_second": "first-line"
+        }
+      }
+    }
+  ],
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.by"],
+    "reason": "The three-sample topology, labels, and line-valued projections are comparator-enforced from the pinned JMeter 5.6.3 function documentation: an unbounded StringFromFile sequence restarts at the beginning after EOF, so the third iteration recycles the first line. Multiline FileToString/UTF-16 values remain exact input/provenance contracts because the current debug projection parser cannot preserve embedded newlines. Runtime oracle evidence is still not-run; timing, controller iteration timestamp fields, and Debug Sampler byte length vary with the execution environment."
+  }
+}

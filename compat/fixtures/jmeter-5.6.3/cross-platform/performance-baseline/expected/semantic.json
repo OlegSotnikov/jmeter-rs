@@ -1,0 +1,135 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-CROSS-PLATFORM-PERFORMANCE-BASELINE",
+  "format": "jmx-semantic",
+  "evidence_status": "planned",
+  "normalization_policy_refs": ["NORM-ENV-001", "NORM-TIME-001", "NORM-EXTERNAL-001"],
+  "projection_schema": "cross-platform-performance-baseline-envelope",
+  "expectation_basis": "Rust testing strategy performance/capacity requirements expressed as bounded metadata; no measurements were collected.",
+  "projection_policy": {
+    "kind": "declarative-static-projection",
+    "jmx_semantic_role": "performance workload and bounded-result contract metadata, not a captured JMX/JTL result",
+    "runtime_observations": false,
+    "comparator_route": "static-descriptor",
+    "status": "planned"
+  },
+  "matrix_status": "future-ci-targets-only",
+  "current_ci": {
+    "status": "not-configured",
+    "targets": [],
+    "runs_recorded": 0,
+    "note": "The six target rows below are future CI lane descriptors, not current performance evidence."
+  },
+  "target_matrix": [
+    {"target_os": "linux", "architecture": "x86_64", "target_triple": "x86_64-unknown-linux-gnu", "os_image": "future-pinned-linux-x86_64", "status": "planned", "run_status": "not-run"},
+    {"target_os": "linux", "architecture": "arm64", "target_triple": "aarch64-unknown-linux-gnu", "os_image": "future-pinned-linux-arm64", "status": "planned", "run_status": "not-run"},
+    {"target_os": "macos", "architecture": "x86_64", "target_triple": "x86_64-apple-darwin", "os_image": "future-pinned-macos-x86_64", "status": "planned", "run_status": "not-run"},
+    {"target_os": "macos", "architecture": "arm64", "target_triple": "aarch64-apple-darwin", "os_image": "future-pinned-macos-arm64", "status": "planned", "run_status": "not-run"},
+    {"target_os": "windows", "architecture": "x86_64", "target_triple": "x86_64-pc-windows-msvc", "os_image": "future-pinned-windows-x86_64", "status": "planned", "run_status": "not-run"},
+    {"target_os": "windows", "architecture": "arm64", "target_triple": "aarch64-pc-windows-msvc", "os_image": "future-pinned-windows-arm64", "status": "planned", "run_status": "not-run"}
+  ],
+  "target_outcomes": [
+    {"target_os": "linux", "architecture": "x86_64", "target_triple": "x86_64-unknown-linux-gnu", "os_image": "future-pinned-linux-x86_64", "separator": "/", "workload_kinds": ["micro", "macro", "soak"], "soak_durations_seconds": [3600, 28800, 86400], "queue_policy": "bounded-fail-on-overflow", "measurement_status": "not-run", "status": "planned", "observed": false, "run_status": "not-run"},
+    {"target_os": "linux", "architecture": "arm64", "target_triple": "aarch64-unknown-linux-gnu", "os_image": "future-pinned-linux-arm64", "separator": "/", "workload_kinds": ["micro", "macro", "soak"], "soak_durations_seconds": [3600, 28800, 86400], "queue_policy": "bounded-fail-on-overflow", "measurement_status": "not-run", "status": "planned", "observed": false, "run_status": "not-run"},
+    {"target_os": "macos", "architecture": "x86_64", "target_triple": "x86_64-apple-darwin", "os_image": "future-pinned-macos-x86_64", "separator": "/", "workload_kinds": ["micro", "macro", "soak"], "soak_durations_seconds": [3600, 28800, 86400], "queue_policy": "bounded-fail-on-overflow", "measurement_status": "not-run", "status": "planned", "observed": false, "run_status": "not-run"},
+    {"target_os": "macos", "architecture": "arm64", "target_triple": "aarch64-apple-darwin", "os_image": "future-pinned-macos-arm64", "separator": "/", "workload_kinds": ["micro", "macro", "soak"], "soak_durations_seconds": [3600, 28800, 86400], "queue_policy": "bounded-fail-on-overflow", "measurement_status": "not-run", "status": "planned", "observed": false, "run_status": "not-run"},
+    {"target_os": "windows", "architecture": "x86_64", "target_triple": "x86_64-pc-windows-msvc", "os_image": "future-pinned-windows-x86_64", "separator": "\\", "workload_kinds": ["micro", "macro", "soak"], "soak_durations_seconds": [3600, 28800, 86400], "queue_policy": "bounded-fail-on-overflow", "measurement_status": "not-run", "status": "planned", "observed": false, "run_status": "not-run"},
+    {"target_os": "windows", "architecture": "arm64", "target_triple": "aarch64-pc-windows-msvc", "os_image": "future-pinned-windows-arm64", "separator": "\\", "workload_kinds": ["micro", "macro", "soak"], "soak_durations_seconds": [3600, 28800, 86400], "queue_policy": "bounded-fail-on-overflow", "measurement_status": "not-run", "status": "planned", "observed": false, "run_status": "not-run"}
+  ],
+  "reproducibility_metadata": {
+    "profile_id": "jmeter-5.6.3",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "charset": "UTF-8",
+    "environment_allowlist": [],
+    "random_seed": 20260812,
+    "source_date_epoch": "required but not recorded for this static corpus",
+    "rust_toolchain": "required but not recorded for this static corpus",
+    "cargo_lock_sha256": "required but not recorded for this static corpus",
+    "java_runtime": "not executed",
+    "jmeter_artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076"
+  },
+  "planned_workloads": [
+    {
+      "id": "micro-parser-serialization",
+      "kind": "micro",
+      "operation": "bounded JMX/JTL parse and serialization",
+      "max_cases": 256,
+      "clock": "monotonic-only",
+      "fixture": "small repository-owned static inputs",
+      "status": "planned"
+    },
+    {
+      "id": "macro-runtime-offline",
+      "kind": "macro",
+      "operation": "bounded offline scheduler/controller and result-sink path",
+      "virtual_users": 32,
+      "iterations": 128,
+      "queue_policy": "bounded-fail-on-overflow",
+      "network": "offline",
+      "status": "planned"
+    },
+    {
+      "id": "soak-resource-stability",
+      "kind": "soak",
+      "operation": "repeated deterministic start/stop and result rotation",
+      "durations_seconds": [3600, 28800, 86400],
+      "sample_interval_seconds": 60,
+      "status": "planned"
+    }
+  ],
+  "planned_metrics": [
+    {"metric": "operation_elapsed", "unit": "nanoseconds", "summary": ["p50", "p95", "p99"], "status": "not-run"},
+    {"metric": "throughput", "unit": "operations_per_second", "summary": ["median", "p95"], "status": "not-run"},
+    {"metric": "schedule_delay", "unit": "nanoseconds", "summary": ["p50", "p95", "p99"], "status": "not-run"},
+    {"metric": "rss", "unit": "bytes", "summary": ["first-stable", "final-window"], "status": "not-run"},
+    {"metric": "open_file_descriptors", "unit": "count", "summary": ["first-stable", "final-window"], "status": "not-run"},
+    {"metric": "threads", "unit": "count", "summary": ["first-stable", "final-window"], "status": "not-run"},
+    {"metric": "tasks", "unit": "count", "summary": ["first-stable", "final-window"], "status": "not-run"},
+    {"metric": "result_queue_depth", "unit": "count", "summary": ["p50", "p95", "p99", "final-window"], "status": "not-run"},
+    {"metric": "queue_overflows", "unit": "count", "summary": ["run-total", "final-window"], "status": "not-run"},
+    {"metric": "dropped_results", "unit": "count", "summary": ["run-total"], "status": "not-run"}
+  ],
+  "measurements": [],
+  "baseline": {
+    "status": "not-run",
+    "values": {},
+    "source": "no prior pinned result supplied",
+    "comparison": "future result must compare like-for-like target, toolchain, fixture, and workload metadata",
+    "missing_value_policy": "not-evaluated; never infer a baseline"
+  },
+  "thresholds": {
+    "status": "not-evaluated",
+    "evaluated": false,
+    "rules": [
+      {"id": "no-dropped-results", "metric": "dropped_results", "operator": "=", "target": 0, "status": "not-evaluated"},
+      {"id": "no-queue-overflow", "metric": "queue_overflows", "operator": "=", "target": 0, "status": "not-evaluated"},
+      {"id": "resource-growth", "metric": "rss/open_file_descriptors/threads/tasks", "operator": "future-baseline-relative", "target": null, "status": "not-evaluated"},
+      {"id": "performance-regression", "metric": "throughput/operation_elapsed", "operator": "future-baseline-relative", "target": null, "status": "not-evaluated"}
+    ]
+  },
+  "safety_envelope": {
+    "process_start": "disabled in this source corpus",
+    "subprocesses": 0,
+    "containers": 0,
+    "network": "offline",
+    "shell": false,
+    "group_signalling": "forbidden",
+    "bounded_outputs": true,
+    "results_dropped_policy": "fail; never silently discard"
+  },
+  "normalization": {
+    "ignored_fields": ["run.timestamp", "run.hostname", "run.ephemeral_root"],
+    "reason": "No measurements exist. Future comparisons may normalize only manifest-declared host paths/timestamps; target, toolchain, workload, resource, queue, overflow, and result-integrity fields remain required metadata."
+  },
+  "generated_from": {
+    "generator": "Original jmeter-rs static performance baseline envelope",
+    "generator_version": "not applicable",
+    "oracle_status": "not-run",
+    "oracle_command": "future pinned performance runner recipe only; no benchmark or soak was started",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "ignored; no performance artifacts collected"
+  }
+}

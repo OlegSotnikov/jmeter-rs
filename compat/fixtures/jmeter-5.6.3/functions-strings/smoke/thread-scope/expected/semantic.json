@@ -1,0 +1,60 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-FUNC-STRINGS-THREAD-SCOPE",
+  "format": "jtl-xml",
+  "evidence_status": "not_run",
+  "expectation_basis": "Hand-authored bounded two-thread JTL scope contract; no Java, JMeter, or oracle process was executed.",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 2,
+  "sample_contract": {
+    "attributes": {"s": "true", "rc": "200", "rm": "OK", "dt": "text", "de": "US-ASCII", "sc": "1", "ec": "0"},
+    "ignored_attributes": ["t", "it", "lt", "ct", "ts", "by"],
+    "assertions": [],
+    "children": [],
+    "debug_response_projection": {"required_sections": ["JMeterVariables:"]}
+  },
+  "generated_from": {
+    "fixture_contract": {
+      "oracle_status": "not-run-static-corpus",
+      "sample_count_asserted": true,
+      "sample_count_basis": "Static two-thread/one-iteration topology; the current comparator enforces this count when a future JTL is supplied, but no oracle count was observed.",
+      "bounds_contract": {"source": "case.bounds", "comparator_enforced": false, "max_threads": 2, "max_iterations_per_thread": 1, "max_samplers_per_iteration": 1, "max_samples": 2, "max_input_bytes": 512, "max_output_files": 0, "max_label_bytes": 4096},
+      "comparator_contract": {
+        "format": "jtl-xml",
+        "comparator_enforced": true,
+        "fields": ["root", "sample_count", "sample_contract.attributes", "sample_contract.assertions", "sample_contract.children", "sample_contract.debug_response_projection.required_sections"],
+        "ignored_sample_attributes": ["t", "it", "lt", "ct", "ts", "by"],
+        "thread_scope_constraints_comparator_enforced": false,
+        "reason": "The supported XML comparator can enforce count, stable status attributes, and DebugSampler section presence. It does not yet interpret per-thread domain constraints or cross-thread ordering."
+      },
+      "planned_constraints": {
+        "schema_id": "jmeter-rs.planned-constraint-contract",
+        "schema_version": 1,
+        "enforcement": "not-comparator-enforced",
+        "status": "not-run",
+        "target": "thread-scope-and-expansion",
+        "kind": "per-thread-domains",
+        "constraints": [
+          {"id": "thread-local-counter", "target": "sample.label", "kind": "field-domains", "fields": {"thread": {"kind": "allowed-values", "values": ["1", "2"]}, "counter": {"kind": "per-thread-sequence", "values": ["1"]}, "counter-var": {"kind": "per-thread-sequence", "values": ["1"]}}, "count": 2, "status": "planned", "comparator_enforced": false},
+          {"id": "thread-local-split-variables", "target": "debug_response_projection.variables", "kind": "per-thread-variable-isolation", "variables": {"parts": "one|two", "parts_n": "2", "parts_1": "one", "parts_2": "two"}, "count": 2, "status": "planned", "comparator_enforced": false},
+          {"id": "cross-thread-order", "target": "sample.events", "kind": "unordered-interleaving", "expected": "Exactly one scope sample per thread; thread 1/2 ordering is not asserted.", "status": "planned", "comparator_enforced": false}
+        ]
+      },
+      "oracle_execution": {"status": "not-run", "process_exit": null, "reason": "Static authoring only; no Java/JMeter process or JTL output is included."}
+    },
+    "generator": "hand-authored static scope contract",
+    "generator_version": "repository source and research only",
+    "random_seed": null,
+    "oracle_command_status": "recipe-not-executed",
+    "oracle_command": "env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 TZ=UTC <ignored>/jmeter-oracle-cache/apache-jmeter-5.6.3/bin/jmeter -n -q oracle.properties -t plan.jmx -l <ignored>/oracle.jtl -j <ignored>/oracle.log",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "oracle-runs/functions-strings/smoke/thread-scope/ (ignored; no local evidence captured)",
+    "runtime_executed": false
+  },
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.ts", "sample.by"],
+    "reason": "NORM-JTL-001 retains exact XML sample identity and stable status attributes; NORM-TIME-001 covers timing fields. Thread-local domains and interleaving remain planned constraints because no oracle process was run."
+  }
+}

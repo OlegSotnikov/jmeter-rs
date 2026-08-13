@@ -1,0 +1,335 @@
+{
+  "schema_id": "jmeter-rs.harness-manifest",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-HARNESS-REPRODUCIBILITY",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-HARNESS-001",
+  "conformance_ids": ["TEST-001", "TEST-002", "TEST-004"],
+  "coverage_by_conformance_id": {
+    "TEST-001": {
+      "normalization_policy_refs": ["NORM-ENV-001", "NORM-SECURITY-001"],
+      "external_runtime_boundary_ids": []
+    },
+    "TEST-002": {
+      "normalization_policy_refs": ["NORM-EXTERNAL-001", "NORM-ENV-001", "NORM-SECURITY-001"],
+      "external_runtime_boundary_ids": ["EXT-JVM-001", "EXT-SERVICE-001", "EXT-TLS-001", "EXT-PLUGIN-001"]
+    },
+    "TEST-004": {
+      "normalization_policy_refs": ["NORM-EXTERNAL-001", "NORM-SECURITY-001", "NORM-TIME-001"],
+      "external_runtime_boundary_ids": ["EXT-RMI-001", "EXT-TLS-001", "EXT-SERVICE-001"]
+    }
+  },
+  "normalization_policy_refs": ["NORM-ENV-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001", "NORM-TIME-001"],
+  "evidence_status": "static-not-run",
+  "source_only": true,
+  "materialization": {
+    "source_fixture_present": true,
+    "oracle_evidence_materialized": false,
+    "observed_run": false
+  },
+  "profile": {
+    "id": "jmeter-5.6.3",
+    "path": "compat/profiles/jmeter-5.6.3.json",
+    "sha256": "83ad63eb679cc16ffe6fa01f5f77e85203602d4d2cbfc311f74db44b6eac9497",
+    "profile_version": 2,
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3"
+  },
+  "pinned_oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": {
+      "filename": "apache-jmeter-5.6.3.zip",
+      "format": "zip",
+      "url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+      "digest": {
+        "algorithm": "SHA-512",
+        "value": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+        "sidecar_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+        "digest_gate_id": "GATE-ARTIFACT-SHA512-001",
+        "sidecar_ref_id": "jmeter-digest-sidecar"
+      },
+      "signature": {
+        "algorithm": "OpenPGP",
+        "url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.asc",
+        "keys_url": "https://archive.apache.org/dist/jmeter/KEYS",
+        "signing_fingerprint": "C4923F9ABFB2F1A06F08E88BAC214CAA0612B399",
+        "status": "not-verified-static",
+        "required_before_execution": true,
+        "verification_gate_id": "GATE-PGP-SIGNATURE-001"
+      }
+    },
+    "verification": {
+      "digest_status": "profile-recorded-not-run",
+      "signature_status": "not-verified-static",
+      "observed_artifact_sha512": null,
+      "observed_signature_fingerprint": null,
+      "release_claim_eligible": false
+    }
+  },
+  "verification_gates": {
+    "artifact_digest": {
+      "id": "GATE-ARTIFACT-SHA512-001",
+      "required": true,
+      "algorithm": "SHA-512",
+      "expected_digest": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+      "sidecar_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+      "artifact_ref_id": "jmeter-archive",
+      "sidecar_ref_id": "jmeter-digest-sidecar",
+      "command": ["sha512sum", "--check", "--status", "-"],
+      "stdin_format": "<expected_digest>  <artifact>\n",
+      "status": "not-run-static",
+      "observed_digest": null,
+      "failure_action": "fail-closed-before-unpack-or-execution"
+    },
+    "pgp_signature": {
+      "id": "GATE-PGP-SIGNATURE-001",
+      "required": true,
+      "algorithm": "OpenPGP",
+      "signature_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.asc",
+      "keys_url": "https://archive.apache.org/dist/jmeter/KEYS",
+      "required_fingerprint": "C4923F9ABFB2F1A06F08E88BAC214CAA0612B399",
+      "keys_ref_id": "jmeter-keys",
+      "signature_ref_id": "jmeter-signature",
+      "artifact_ref_id": "jmeter-archive",
+      "import_command": ["gpg", "--batch", "--homedir", "<ephemeral-gpg-home>", "--import", "<keys>"],
+      "command": ["gpg", "--batch", "--homedir", "<ephemeral-gpg-home>", "--status-fd", "1", "--verify", "<signature>", "<artifact>"],
+      "required_status_line": "[GNUPG:] VALIDSIG C4923F9ABFB2F1A06F08E88BAC214CAA0612B399",
+      "required_status_line_prefix": "[GNUPG:] VALIDSIG C4923F9ABFB2F1A06F08E88BAC214CAA0612B399 ",
+      "status": "not-run-static",
+      "observed_fingerprint": null,
+      "failure_action": "fail-closed-before-unpack-or-execution"
+    },
+    "execution_gate": {
+      "required_gates": ["GATE-ARTIFACT-SHA512-001", "GATE-PGP-SIGNATURE-001"],
+      "failure_action": "fail-closed-before-unpack-or-execution",
+      "status": "not-run-static"
+    }
+  },
+  "repository_inputs": {
+    "hash_algorithm": "SHA-256",
+    "jmeter_rs_source_commit": null,
+    "source": [
+      {
+        "path": "Cargo.toml",
+        "sha256": "d60d2010e4334e0a71feed6e3c655373c48df61354f245c1d828a393a0a75a0a",
+        "role": "workspace manifest",
+        "observed": false
+      },
+      {
+        "path": "rust-toolchain.toml",
+        "sha256": "a55035e3085a595e4e73637e5f26e0f89f880d61188888da4e7d023f9144ebf3",
+        "role": "pinned Rust toolchain declaration",
+        "observed": false
+      }
+    ],
+    "lock": [
+      {
+        "path": "Cargo.lock",
+        "sha256": "6ebb1e9b519ca29aa93740743acc45d69268f9776a8c34bee2237aa3d6a3680c",
+        "role": "resolved dependency graph",
+        "observed": false
+      }
+    ],
+    "profile": [
+      {
+        "path": "compat/profiles/jmeter-5.6.3.json",
+        "sha256": "83ad63eb679cc16ffe6fa01f5f77e85203602d4d2cbfc311f74db44b6eac9497",
+        "role": "active compatibility profile",
+        "observed": false
+      }
+    ]
+  },
+  "toolchain": {
+    "rust": {
+      "channel": "1.97.1",
+      "manifest_path": "rust-toolchain.toml",
+      "manifest_sha256": "a55035e3085a595e4e73637e5f26e0f89f880d61188888da4e7d023f9144ebf3",
+      "cargo_lock_sha256": "6ebb1e9b519ca29aa93740743acc45d69268f9776a8c34bee2237aa3d6a3680c",
+      "components": ["rustfmt", "clippy"],
+      "targets": ["x86_64-unknown-linux-gnu"],
+      "status": "pinned-not-run"
+    },
+    "java": {
+      "distribution": "temurin",
+      "version": "17.0.20",
+      "architecture": "x64",
+      "source": ".github/workflows/oracle-conformance.yml",
+      "minimum_profile_major": 8,
+      "recommended_profile_major": 17,
+      "status": "declared-not-run"
+    }
+  },
+  "platform": {
+    "release_image": "ubuntu-24.04",
+    "target_triple": "x86_64-unknown-linux-gnu",
+    "declared_targets": ["linux", "windows", "macos"],
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "record but normalize only when a declared policy allows it",
+    "filesystem_policy": "explicit temporary roots for plans, data, plugins, keystores, results, and raw evidence",
+    "network_policy": "none during static validation; future services must be local deterministic loopback fixtures",
+    "process_policy": "none during static validation; future adapters use explicit owned child handles and bounded waits"
+  },
+  "classpath": {
+    "policy": "only the profile-pinned distribution (SHA-512 checked; PGP verification required before oracle use) plus explicitly pinned plugin or script-engine artifacts",
+    "jmeter_distribution": {
+      "filename": "apache-jmeter-5.6.3.zip",
+      "sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+      "path": "<outside-git>/jmeter-oracle-cache/apache-jmeter-5.6.3.zip",
+      "status": "pinned-not-staged"
+    },
+    "plugin_pins": [
+      {
+        "id": "baseline-no-third-party-plugin",
+        "kind": "java-plugin",
+        "version": null,
+        "artifact": null,
+        "sha256": null,
+        "status": "not-required",
+        "reason": "The harness baseline has no plugin dependency; plugin cases must add a separate pinned entry before execution."
+      }
+    ],
+    "script_engine_pins": [
+      {"id": "baseline-no-script-engine", "engine": null, "version": null, "status": "not-required"}
+    ]
+  },
+  "external_pins": {
+    "plugin_pins": [
+      {
+        "id": "declared-plugin-slot",
+        "boundary_id": "EXT-PLUGIN-001",
+        "conformance_ids": ["TEST-002"],
+        "status": "unavailable-static",
+        "artifact": null,
+        "version": null,
+        "sha256": null,
+        "provenance": null,
+        "reason": "No third-party plugin artifact is provisioned for this source-only corpus."
+      }
+    ],
+    "service_pins": [
+      {
+        "id": "distributed-rmi-workers",
+        "boundary_ids": ["EXT-RMI-001"],
+        "conformance_ids": ["TEST-004"],
+        "kind": "JMeter distributed worker pair",
+        "version": null,
+        "image": null,
+        "digest": null,
+        "network": "loopback-only",
+        "status": "unavailable-static",
+        "reason": "TEST-004 declares the worker contract, but this corpus starts no worker, container, or service."
+      },
+      {
+        "id": "recorder-tls-fixtures",
+        "boundary_ids": ["EXT-SERVICE-001", "EXT-TLS-001"],
+        "conformance_ids": ["TEST-002", "TEST-004"],
+        "kind": "local recorder/proxy/TLS fixture",
+        "version": null,
+        "image": null,
+        "digest": null,
+        "network": "loopback-only",
+        "status": "unavailable-static",
+        "reason": "TEST-002 and TEST-004 require a future pinned local adapter; no service or certificate is generated here."
+      }
+    ],
+    "pin_policy": "A null external version or digest is an unavailable capability, never a wildcard or a successful pin."
+  },
+  "environment": {
+    "inherit": false,
+    "profile_allowlist": [],
+    "allowlist": [
+      "LANG=C",
+      "LC_ALL=C",
+      "TZ=UTC",
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    ],
+    "deny_unknown": true,
+    "secret_values_allowed": false,
+    "working_directory": "<ignored>/harness-run/<case-id>/",
+    "source_date_epoch": "required-before-run"
+  },
+  "bounds": {
+    "max_manifest_bytes": 262144,
+    "max_evidence_bytes": 262144,
+    "max_process_output_bytes": 1048576,
+    "max_artifact_bytes": 134217728,
+    "max_raw_artifact_bytes": 134217728,
+    "max_jtl_bytes": 67108864,
+    "max_log_bytes": 1048576,
+    "max_diff_entries": 128,
+    "max_diff_bytes": 1048576,
+    "max_raw_diff_bytes": 1048576,
+    "max_human_diff_bytes": 8192,
+    "max_environment_entries": 32,
+    "max_plugin_pins": 16,
+    "max_service_pins": 16,
+    "max_external_retries": 2,
+    "oracle_timeout_seconds": 300
+  },
+  "raw_artifacts": {
+    "git_tracked": false,
+    "storage": "CI artifact store or ignored oracle-runs directory",
+    "root": "oracle-runs/harness/<case-id>/",
+    "retention_days": 7,
+    "references": [
+      {"id": "jmeter-archive", "kind": "oracle-archive", "path": "oracle-runs/harness/<case-id>/apache-jmeter-5.6.3.zip", "required": true, "bound": "max_artifact_bytes", "max_bytes": 134217728, "sha256": null, "status": "not-produced-static"},
+      {"id": "jmeter-digest-sidecar", "kind": "sha512-sidecar", "path": "oracle-runs/harness/<case-id>/apache-jmeter-5.6.3.zip.sha512", "required": true, "bound": "max_raw_artifact_bytes", "max_bytes": 1048576, "sha256": null, "status": "not-produced-static"},
+      {"id": "jmeter-signature", "kind": "detached-signature", "path": "oracle-runs/harness/<case-id>/apache-jmeter-5.6.3.zip.asc", "required": true, "bound": "max_raw_artifact_bytes", "max_bytes": 1048576, "sha256": null, "status": "not-produced-static"},
+      {"id": "jmeter-keys", "kind": "openpgp-keyring", "path": "oracle-runs/harness/<case-id>/KEYS", "required": true, "bound": "max_raw_artifact_bytes", "max_bytes": 4194304, "sha256": null, "status": "not-produced-static"},
+      {"id": "oracle-jtl", "kind": "jtl", "path": "oracle-runs/harness/<case-id>/oracle.jtl", "required": true, "bound": "max_jtl_bytes", "max_bytes": 67108864, "sha256": null, "status": "not-produced-static"},
+      {"id": "rust-jtl", "kind": "jtl", "path": "oracle-runs/harness/<case-id>/rust.jtl", "required": true, "bound": "max_jtl_bytes", "max_bytes": 67108864, "sha256": null, "status": "not-produced-static"},
+      {"id": "oracle-log", "kind": "log", "path": "oracle-runs/harness/<case-id>/oracle.log", "required": true, "bound": "max_log_bytes", "max_bytes": 1048576, "sha256": null, "status": "not-produced-static"},
+      {"id": "process-output", "kind": "process-output", "path": "oracle-runs/harness/<case-id>/process-output.txt", "required": true, "bound": "max_process_output_bytes", "max_bytes": 1048576, "sha256": null, "status": "not-produced-static"},
+      {"id": "structured-diff", "kind": "normalized-diff", "path": "oracle-runs/harness/<case-id>/structured-diff.json", "required": true, "bound": "max_diff_bytes", "max_bytes": 1048576, "sha256": null, "status": "not-produced-static"},
+      {"id": "raw-diff", "kind": "raw-diff", "path": "oracle-runs/harness/<case-id>/raw-diff.txt", "required": true, "bound": "max_raw_diff_bytes", "max_bytes": 1048576, "sha256": null, "status": "not-produced-static"},
+      {"id": "human-diff", "kind": "human-diff", "path": "oracle-runs/harness/<case-id>/human-diff.txt", "required": true, "bound": "max_human_diff_bytes", "max_bytes": 8192, "sha256": null, "status": "not-produced-static"},
+      {"id": "runner-metadata", "kind": "environment-metadata", "path": "oracle-runs/harness/<case-id>/runner-metadata.json", "required": true, "bound": "max_evidence_bytes", "max_bytes": 262144, "sha256": null, "status": "not-produced-static"}
+    ]
+  },
+  "comparison": {
+    "status": "not-run-static",
+    "normalization_policy_refs": ["NORM-ENV-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001", "NORM-TIME-001"],
+    "allowed_normalizations": [
+      {"field": "sample.ts", "kind": "ignored-field", "policy": "NORM-TIME-001", "conformance_ids": ["TEST-004"], "condition": "only when the fixture cannot seed or control the source timestamp"},
+      {"field": "sample.t", "kind": "ignored-field", "policy": "NORM-TIME-001", "conformance_ids": ["TEST-004"], "condition": "only when the fixture cannot seed or control elapsed timing"},
+      {"field": "sample.host", "kind": "ignored-field", "policy": "NORM-ENV-001", "conformance_ids": ["TEST-001", "TEST-002"], "condition": "only when host identity is not asserted by the case"},
+      {"field": "sample.tls", "kind": "ignored-field", "policy": "NORM-ENV-001", "conformance_ids": ["TEST-002"], "condition": "only when the declared TLS provider and certificate identity are retained in metadata"},
+      {"field": "debug_response.dynamic_lines", "kind": "ignored-line-pattern", "policy": "NORM-ENV-001", "conformance_ids": ["TEST-001", "TEST-002"], "condition": "only for bounded wildcard patterns declared by the expected projection; values and sections remain compared"}
+    ],
+    "forbidden_implicit_normalizations": [
+      "sample order",
+      "sample tree shape",
+      "labels",
+      "response codes or assertion outcomes",
+      "configured variables and properties",
+      "observable request/response bytes",
+      "missing external capabilities",
+      "fields not accepted by tools/jmeter-oracle/src/compare.rs"
+    ],
+    "structured_diff_schema": "schemas/normalized-diff.schema.json",
+    "structured_diff_path": "oracle-runs/harness/<case-id>/structured-diff.json",
+    "raw_diff_path": "oracle-runs/harness/<case-id>/raw-diff.txt",
+    "human_diff_path": "oracle-runs/harness/<case-id>/human-diff.txt",
+    "human_diff_bound": {"bound": "max_human_diff_bytes", "max_bytes": 8192},
+    "diff_status_when_unavailable": "not-produced-with-reason",
+    "comparator_contract": {
+      "implementation": "tools/jmeter-oracle/src/compare.rs",
+      "structured_diff_fields": ["path", "kind", "expected", "actual"],
+      "ignored_field_forms": ["rows[*].elapsed", "rows[*].bytes", "sample.t", "sample.it", "sample.lt", "sample.ct", "sample.ts", "sample.host", "sample.port", "sample.tls"],
+      "ignored_line_pattern_field": "debug_response.dynamic_lines",
+      "implicit_normalization": false
+    }
+  },
+  "unavailable_oracle": {
+    "developer_mode": "skip-with-clear-reason",
+    "release_mode": "fail-closed",
+    "stable_reason_code": "oracle-unavailable",
+    "required_message_fields": ["profile_id", "artifact", "reason", "next_step"],
+    "rust_only_result": "not-a-substitute",
+    "profile_promotion": "ineligible"
+  }
+}

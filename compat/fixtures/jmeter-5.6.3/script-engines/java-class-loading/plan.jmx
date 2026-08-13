@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Original Java class-loading matrix" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="Class-loading variables" enabled="true">
+        <collectionProp name="Arguments.arguments"/>
+      </elementProp>
+      <collectionProp name="TestPlan.thread_groups"/>
+      <stringProp name="TestPlan.comments">Original class descriptors are external and intentionally have no compiled implementation.</stringProp>
+      <stringProp name="TestPlan.user_define_classpath">inputs/classes</stringProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="One class-loading user" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="One class-loading loop" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">1</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">0</stringProp>
+        <longProp name="ThreadGroup.start_time">0</longProp>
+        <longProp name="ThreadGroup.end_time">0</longProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <stringProp name="ThreadGroup.duration"></stringProp>
+        <stringProp name="ThreadGroup.delay"></stringProp>
+      </ThreadGroup>
+      <hashTree>
+        <JavaSampler guiclass="JavaConfigGui" testclass="JavaSampler" testname="Java Sampler descriptor class" enabled="true">
+          <stringProp name="classname">org.jmeter.rs.fixture.StaticJavaSampler</stringProp>
+          <elementProp name="arguments" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="Java Sampler arguments" enabled="true">
+            <collectionProp name="Arguments.arguments">
+              <elementProp name="marker" elementType="Argument">
+                <stringProp name="Argument.name">marker</stringProp>
+                <stringProp name="Argument.value">descriptor-only</stringProp>
+                <stringProp name="Argument.metadata">=</stringProp>
+              </elementProp>
+            </collectionProp>
+          </elementProp>
+        </JavaSampler>
+        <hashTree/>
+        <JavaSampler guiclass="JavaConfigGui" testclass="JavaSampler" testname="Java Sampler missing class" enabled="true">
+          <stringProp name="classname">org.jmeter.rs.fixture.MissingSampler</stringProp>
+          <elementProp name="arguments" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="Missing class arguments" enabled="true">
+            <collectionProp name="Arguments.arguments"/>
+          </elementProp>
+        </JavaSampler>
+        <hashTree/>
+        <JUnitSampler guiclass="JUnitTestSamplerGui" testclass="JUnitSampler" testname="JUnit3 Request descriptor class" enabled="true">
+          <boolProp name="junitsampler.junit4">false</boolProp>
+          <stringProp name="junitSampler.classname">org.jmeter.rs.fixture.StaticJUnit3Case</stringProp>
+          <stringProp name="junitsampler.constructorstring"></stringProp>
+          <stringProp name="junitsampler.method">testFixturePasses</stringProp>
+          <stringProp name="junitsampler.pkg.filter"></stringProp>
+          <stringProp name="junitsampler.success">true</stringProp>
+          <stringProp name="junitsampler.success.code">0</stringProp>
+          <stringProp name="junitsampler.failure">fixture assertion failure</stringProp>
+          <stringProp name="junitsampler.failure.code">1</stringProp>
+          <stringProp name="junitsampler.error">fixture class or invocation error</stringProp>
+          <stringProp name="junitsampler.error.code">2</stringProp>
+          <boolProp name="junitsampler.exec.setup">true</boolProp>
+          <boolProp name="junitsampler.append.error">true</boolProp>
+          <boolProp name="junitsampler.append.exception">true</boolProp>
+        </JUnitSampler>
+        <hashTree/>
+        <JUnitSampler guiclass="JUnitTestSamplerGui" testclass="JUnitSampler" testname="JUnit4 Request annotation class" enabled="true">
+          <boolProp name="junitsampler.junit4">true</boolProp>
+          <stringProp name="junitSampler.classname">org.jmeter.rs.fixture.StaticJUnit4Case</stringProp>
+          <stringProp name="junitsampler.constructorstring"></stringProp>
+          <stringProp name="junitsampler.method">fixturePasses</stringProp>
+          <stringProp name="junitsampler.pkg.filter"></stringProp>
+          <stringProp name="junitsampler.success">true</stringProp>
+          <stringProp name="junitsampler.success.code">0</stringProp>
+          <stringProp name="junitsampler.failure">fixture assertion failure</stringProp>
+          <stringProp name="junitsampler.failure.code">1</stringProp>
+          <stringProp name="junitsampler.error">fixture class or invocation error</stringProp>
+          <stringProp name="junitsampler.error.code">2</stringProp>
+          <boolProp name="junitsampler.exec.setup">true</boolProp>
+          <boolProp name="junitsampler.append.error">true</boolProp>
+          <boolProp name="junitsampler.append.exception">true</boolProp>
+        </JUnitSampler>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

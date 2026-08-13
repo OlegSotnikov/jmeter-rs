@@ -1,0 +1,292 @@
+{
+  "schema_id": "jmeter-rs.http-trace",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-HTTP-STATE-COOKIE",
+  "fixture_family_id": "FX-ELEMENTS-CORE-001",
+  "conformance_ids": [
+    "ELEM-001",
+    "ELEM-005"
+  ],
+  "normalization_policy_refs": [
+    "NORM-STRUCTURE-001",
+    "NORM-TIME-001",
+    "NORM-ENV-001",
+    "NORM-SECURITY-001"
+  ],
+  "format": "http-trace",
+  "evidence_status": "not-run-static",
+  "process_exit": null,
+  "process_exit_asserted": false,
+  "oracle_available": false,
+  "trace_schema": {
+    "schema_id": "jmeter-rs.http-trace",
+    "schema_version": 1,
+    "encoding": "jsonl",
+    "event_type": "request-response",
+    "request_fields": [
+      "sequence",
+      "method",
+      "path",
+      "query",
+      "request_headers",
+      "request_headers_sha256",
+      "body_length",
+      "body_sha256"
+    ],
+    "response_fields": [
+      "status",
+      "headers",
+      "headers_sha256",
+      "body_length",
+      "body_sha256",
+      "wire_body_length"
+    ],
+    "required_event_fields": [
+      "sequence",
+      "method",
+      "path",
+      "query",
+      "request_headers",
+      "request_headers_sha256",
+      "body_length",
+      "body_sha256",
+      "response.status",
+      "response.headers",
+      "response.headers_sha256",
+      "response.body_length",
+      "response.body_sha256",
+      "response.wire_body_length"
+    ],
+    "digest_algorithm": "SHA-256",
+    "body_digest_observable": true,
+    "header_digest_observable": true,
+    "duplicate_header_values": "ordered-list",
+    "authorization_projection": "<scheme> <redacted>",
+    "limits": {
+      "max_events": 64,
+      "max_requests": 64,
+      "max_request_target_bytes": 8192,
+      "max_query_fields": 32,
+      "max_request_header_fields": 128,
+      "max_response_header_fields": 128,
+      "max_request_header_bytes": 65536,
+      "max_response_header_bytes": 65536,
+      "max_request_body_bytes": 1048576,
+      "max_response_body_bytes": 1048576,
+      "max_trace_record_bytes": 131072,
+      "max_trace_bytes": 8388608,
+      "max_ready_bytes": 16384,
+      "max_redirect_hops": 5,
+      "max_auth_challenges": 8,
+      "max_cache_entries": 3,
+      "max_cookie_entries": 64
+    }
+  },
+  "counts": {
+    "planned": true,
+    "sampler_count": 15,
+    "request_count": 30,
+    "response_count": 30,
+    "redirect_hop_count": 0,
+    "auth_challenge_count": 0,
+    "cache_network_request_count": 0,
+    "cache_hit_count": 0,
+    "cache_revalidation_count": 0,
+    "cache_eviction_count": 0,
+    "cookie_set_count": 70,
+    "cookie_sent_count": 23,
+    "cookie_reset_count": 1,
+    "cookie_persist_count": 1,
+    "response_header_count_max": 14
+  },
+  "events": [
+    {
+      "sampler": "retained matrix",
+      "logical_request_count": 20,
+      "iterations": 2,
+      "request_count_per_iteration": 10,
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/cookie/set",
+          "set_cookie_fields": 8
+        },
+        {
+          "method": "GET",
+          "path": "/cookie/domain-set",
+          "set_cookie_fields": 2
+        },
+        {
+          "method": "GET",
+          "path": "/cookie/expiry",
+          "set_cookie_fields": 1
+        },
+        {
+          "method": "GET",
+          "path": "/cookie/echo"
+        },
+        {
+          "method": "GET",
+          "path": "/cookie/domain-echo"
+        },
+        {
+          "method": "GET",
+          "path": "/cookie/path/echo"
+        },
+        {
+          "method": "GET",
+          "path": "/cookie/secure"
+        },
+        {
+          "method": "GET",
+          "path": "/cookie/expire",
+          "set_cookie_fields": 2
+        },
+        {
+          "method": "GET",
+          "path": "/cookie/delete",
+          "set_cookie_fields": 6
+        },
+        {
+          "method": "GET",
+          "path": "/cookie/echo"
+        }
+      ]
+    },
+    {
+      "sampler": "clear-each-iteration reset matrix",
+      "logical_request_count": 4,
+      "iterations": 2,
+      "request_count_per_iteration": 2,
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/cookie/set",
+          "set_cookie_fields": 8
+        },
+        {
+          "method": "GET",
+          "path": "/cookie/echo"
+        }
+      ]
+    },
+    {
+      "sampler": "persistent boundary proof",
+      "logical_request_count": 6,
+      "iterations": 2,
+      "request_count_per_iteration": 3,
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/cookie/echo"
+        },
+        {
+          "method": "GET",
+          "path": "/cookie/set",
+          "set_cookie_fields": 8
+        },
+        {
+          "method": "GET",
+          "path": "/cookie/echo"
+        }
+      ]
+    }
+  ],
+  "state_projection": {
+      "planned": true,
+      "host": "fixture.test",
+      "mapped_address": "127.0.0.1",
+      "static_host_fields": {"name": "fixture.test", "address": "127.0.0.1"},
+      "implementation": "Java",
+    "modes": {
+      "retained_matrix": {
+        "clear_each_iteration": false,
+        "controlled_by_thread_group": false,
+        "same_user_on_next_iteration": true,
+        "iterations": 2,
+        "expected_boundary": "state is eligible to persist; deletion is separately observed inside each iteration"
+      },
+      "reset_matrix": {
+        "clear_each_iteration": true,
+        "controlled_by_thread_group": true,
+        "same_user_on_next_iteration": false,
+        "iterations": 2,
+        "expected_boundary": "new iteration starts with an empty jar after the previous iteration"
+      },
+      "persistent_boundary": {
+        "clear_each_iteration": false,
+        "controlled_by_thread_group": false,
+        "same_user_on_next_iteration": true,
+        "iterations": 2,
+        "expected_boundary": "second iteration's before-set echo includes the first iteration's cookie state"
+      }
+    },
+    "cookie_scope": [
+      "host-only",
+      "Domain=fixture.test",
+      "Domain=127.0.0.1 rejected/isolated",
+      "Path=/",
+      "Path=/cookie",
+      "Path=/cookie/path",
+      "Secure on HTTP not sent"
+    ],
+    "expiry": [
+      "Max-Age=60 + fixed Expires",
+      "Max-Age=0 deletion",
+      "fixed expiration date"
+    ],
+    "duplicate_name_policy": "same name/path/domain replaces prior value; ordered Cookie header remains observable"
+  },
+  "result_projection": {
+    "fields": [
+      "label",
+      "url",
+      "method",
+      "response_code",
+      "response_message",
+      "successful",
+      "requestHeaders",
+      "responseHeaders",
+      "bytes",
+      "sent_bytes",
+      "response_data"
+    ],
+    "response_header_count_bound": 128,
+    "response_header_bytes_bound": 65536
+  },
+  "normalization": {
+    "ignored_fields": [
+      "timestamp",
+      "elapsed",
+      "latency",
+      "connect_time",
+      "idle_time",
+      "ephemeral_port",
+      "JVM_object_id"
+    ],
+    "required_fields": [
+      "sequence",
+      "method",
+      "path",
+      "query",
+      "request_headers",
+      "request_headers_sha256",
+      "body_length",
+      "body_sha256",
+      "response.status",
+      "response.headers",
+      "response.headers_sha256",
+      "response.body_length",
+      "response.body_sha256",
+      "response.wire_body_length"
+    ],
+    "observable_digest_fields": [
+      "body_sha256",
+      "request_headers_sha256",
+      "response.headers_sha256",
+      "response.body_sha256"
+    ],
+    "reason": "Static not-run contract: only explicitly listed timing, identity, and ephemeral endpoint fields are ignored; request and response body/header SHA-256 values remain observable."
+  }
+}

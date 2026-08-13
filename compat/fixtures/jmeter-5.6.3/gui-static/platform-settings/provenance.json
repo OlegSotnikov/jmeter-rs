@@ -1,0 +1,75 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-GUI-STATIC-PLATFORM",
+  "profile_id": "jmeter-5.6.3",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored GUI settings and twelve-row Linux/Windows/macOS target-triple-by-Java matrix descriptors for locale, LAF, toolbar, tree, HiDPI, expand-tree, and undo contracts.",
+    "upstream_plan_copied": false,
+    "source_material": "Clean-room contract design from docs/research/compatibility-surface.md and the profile; no upstream GUI output or source file was copied."
+  },
+  "behavior_references": [
+    "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/src/core/src/main/java/org/apache/jmeter/gui/action/LookAndFeelCommand.java",
+    "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/src/core/src/main/java/org/apache/jmeter/gui/util/JMeterToolBar.java",
+    "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/src/core/src/main/java/org/apache/jmeter/gui/util/IconToolbarBean.java",
+    "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/src/core/src/main/java/org/apache/jmeter/JMeter.java",
+    "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/src/core/src/main/java/org/apache/jmeter/util/JMeterUtils.java",
+    "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/src/core/src/main/java/org/apache/jmeter/gui/UndoHistory.java",
+    "docs/research/compatibility-surface.md"
+  ],
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "The pinned Apache JMeter distribution is an external oracle reference only; no upstream plan, result, binary, or source is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true,
+    "verification_scope": "The active profile records artifact digest verification; this static case intentionally performs no oracle execution."
+  },
+  "runtime": {
+    "java": {
+      "vendor": "not invoked",
+      "version": "not invoked",
+      "vm": "not invoked",
+      "major": null
+    },
+    "target_triple": "not invoked; matrix contains planned Linux/Windows/macOS rows",
+    "os_image": "not invoked",
+    "locale": "en-US (planned baseline)",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "not asserted; no process was run",
+    "environment_allowlist": [],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "profile-pinned Apache JMeter 5.6.3 distribution (not invoked)",
+    "classpath_artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076"
+  },
+  "inputs": {
+    "plan_sha256": "c3a83e0ea161a541e5def081cda82721f1dbab57ed4239b1c42efe6b0038e62f",
+    "property_sha256": "cc1da032eef43136f9e7d9f3197180d58f662b1ff990753fbc1c8f0f2196fd6c",
+    "matrix_sha256": "aa3c1dde689ec1ae54af2378f531dbb1daabd4dd6ee0252370936604644e525e",
+    "expected_sha256": "884fcdf70c721511aae06db2acbf876be073c96c8652995d4c912e3ba50b457b",
+    "public_network_used": false,
+    "secrets_or_credentials": false,
+    "static_corpus_mutated": false
+  },
+  "oracle_execution": {
+    "performed": false,
+    "status": "planned; not-run",
+    "reason": "The static corpus task explicitly forbids GUI/display and Java/JMeter/subprocess execution.",
+    "raw_artifacts": "none"
+  }
+}

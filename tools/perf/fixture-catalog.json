@@ -1,0 +1,51 @@
+{
+  "schema_id": "jmeter-rs.perf-fixture-catalog",
+  "schema_version": 1,
+  "fixtures": [
+    {
+      "id": "FX-CROSS-PLATFORM-001",
+      "profile_id": "jmeter-5.6.3",
+      "fixture_family_id": "FX-CROSS-PLATFORM-001",
+      "source_path": "compat/fixtures/jmeter-5.6.3/cross-platform/performance-baseline/case.json",
+      "source_sha256": "9e946baef092e63460f4d318f01e921fe8633f53965161d3498ccf901bfe7b45",
+      "case_manifest_path": "compat/fixtures/jmeter-5.6.3/cross-platform/performance-baseline/case.json",
+      "case_id": "ORACLE-JMETER-563-CROSS-PLATFORM-PERFORMANCE-BASELINE"
+    },
+    {
+      "id": "FX-ELEMENTS-CORE-001",
+      "profile_id": "jmeter-5.6.3",
+      "fixture_family_id": "FX-ELEMENTS-CORE-001",
+      "source_path": "compat/fixtures/jmeter-5.6.3/controllers-full/basic-traversal/plan.jmx",
+      "source_sha256": "8dfec88574336b7c6d8e36a951b755ef30e9043863a036d4bf6a55a968e94640",
+      "case_manifest_path": "compat/fixtures/jmeter-5.6.3/controllers-full/basic-traversal/case.json",
+      "case_id": "ORACLE-JMETER-563-CONTROLLERS-FULL-BASIC"
+    },
+    {
+      "id": "FX-JMX-001",
+      "profile_id": "jmeter-5.6.3",
+      "fixture_family_id": "FX-JMX-001",
+      "source_path": "compat/fixtures/jmeter-5.6.3/jmx-topology/plan.jmx",
+      "source_sha256": "3ca94d67d013176d36a78ff39fd10899f27e0c014b223285473313a1f1230fd9",
+      "case_manifest_path": "compat/fixtures/jmeter-5.6.3/jmx-topology/case.json",
+      "case_id": "ORACLE-JMETER-563-JMX-TOPOLOGY"
+    },
+    {
+      "id": "FX-JTL-001",
+      "profile_id": "jmeter-5.6.3",
+      "fixture_family_id": "FX-JTL-001",
+      "source_path": "compat/fixtures/jmeter-5.6.3/jtl-fields/plan.jmx",
+      "source_sha256": "b6445c4d1f5457eac7be32fb3b8b250efa17a8efc251ee585942062c7d645511",
+      "case_manifest_path": "compat/fixtures/jmeter-5.6.3/jtl-fields/case.json",
+      "case_id": "ORACLE-JMETER-563-JTL-FIELDS"
+    },
+    {
+      "id": "FX-REPORT-001",
+      "profile_id": "jmeter-5.6.3",
+      "fixture_family_id": "FX-REPORT-001",
+      "source_path": "compat/fixtures/jmeter-5.6.3/reports/aggregate-dashboard/plan.jmx",
+      "source_sha256": "f66df4807aee9daf2c7211df80f820da9553bd81dc1b34d5bc42063f3992efd2",
+      "case_manifest_path": "compat/fixtures/jmeter-5.6.3/reports/aggregate-dashboard/case.json",
+      "case_id": "ORACLE-JMETER-563-REPORT-AGGREGATE-DASHBOARD"
+    }
+  ]
+}

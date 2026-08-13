@@ -1,0 +1,93 @@
+{
+  "schema_id": "jmeter-rs.planned-constraint-contract",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-PLUGIN-001",
+  "case_id": "ORACLE-JMETER-563-PLUGIN-DISCOVERY-ORDERING",
+  "conformance_ids": ["PLUG-001"],
+  "normalization_policy_refs": ["NORM-EXTERNAL-001", "NORM-ENV-001"],
+  "external_runtime_boundary_ids": ["EXT-JVM-001", "EXT-PLUGIN-001"],
+  "expectation_basis": "original static classpath descriptor; no runtime observation",
+  "descriptor_kind": "classpath-ordering",
+  "status": "declarative-static-only",
+  "oracle_status": "not-run",
+  "artifacts_present": false,
+  "plugin_artifacts": [],
+  "roots_in_discovery_order": [
+    {
+      "ordinal": 0,
+      "root": "lib/ext",
+      "role": "component-plugin-jars",
+      "source": "profile/JMeter home",
+      "materialized": false
+    },
+    {
+      "ordinal": 1,
+      "root": "search_paths",
+      "role": "additional-component-roots",
+      "source": "explicit property",
+      "materialized": false
+    },
+    {
+      "ordinal": 2,
+      "root": "lib",
+      "role": "utility-and-dependency-jars",
+      "source": "profile/JMeter home",
+      "materialized": false
+    },
+    {
+      "ordinal": 3,
+      "root": "user.classpath",
+      "role": "user-classpath",
+      "source": "explicit property",
+      "materialized": false
+    },
+    {
+      "ordinal": 4,
+      "root": "plugin_dependency_paths",
+      "role": "plugin-dependency-roots",
+      "source": "explicit property",
+      "materialized": false
+    }
+  ],
+  "ordering_contract": {
+    "status": "planned-oracle-observation",
+    "accepted_claim": false,
+    "source_order_is_input_only": true,
+    "preserve_declared_order": true,
+    "duplicate_alias_policy": "retain every declaration with ordinal and source path",
+    "tie_breaker": "lexical path only within one root; never sort roots globally",
+    "ambient_classpath": "rejected",
+    "missing_root": {
+      "category": "classpath-unavailable",
+      "stable_error_code": "plugin.classpath.unavailable",
+      "execution": "typed unavailable capability; preserve requested root"
+    }
+  },
+  "capability_matrix": [
+    {
+      "wire_alias": "com.example.plugin.OrderedSampler",
+      "gui_alias": "com.example.plugin.OrderedSamplerGui",
+      "capability": "element",
+      "required_root": "lib/ext",
+      "status": "unavailable-static"
+    },
+    {
+      "wire_alias": "com.example.plugin.OrderedSampler",
+      "gui_alias": "com.example.plugin.OrderedSamplerGui",
+      "capability": "duplicate-element-declaration",
+      "required_root": "search_paths",
+      "status": "unavailable-static"
+    }
+  ],
+  "bounds": {
+    "max_roots": 5,
+    "max_plugin_artifacts": 0,
+    "max_aliases": 2,
+    "max_descriptor_bytes": 8192
+  },
+  "invariants": [
+    "Root order and duplicate alias declarations remain ordered and explicit.",
+    "An absent root or artifact yields a typed unavailable diagnostic and no ambient classpath fallback."
+  ]
+}

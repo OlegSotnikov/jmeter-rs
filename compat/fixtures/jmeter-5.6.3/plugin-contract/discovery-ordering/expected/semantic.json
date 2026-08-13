@@ -1,0 +1,116 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-PLUGIN-001",
+  "case_id": "ORACLE-JMETER-563-PLUGIN-DISCOVERY-ORDERING",
+  "conformance_ids": ["PLUG-001"],
+  "normalization_policy_refs": ["NORM-EXTERNAL-001", "NORM-ENV-001"],
+  "format": "jmx-semantic",
+  "evidence_status": "external-unavailable",
+  "source": {
+    "kind": "original-static-declarative-descriptor",
+    "oracle_status": "not-run",
+    "runtime_executed": false,
+    "note": "No Java, JMeter, JVM worker, plugin artifact, classloader, subprocess, or network was run; this file declares required observations only."
+  },
+  "capability_accounting": {
+    "status": "external-unavailable",
+    "required_boundaries": ["EXT-JVM-001", "EXT-PLUGIN-001"],
+    "capability": "plugin classpath discovery and ordering",
+    "unsupported_error_code": "unsupported-capability",
+    "stable_error_codes": ["plugin.classpath.unavailable", "plugin.alias.ambiguous"],
+    "no_silent_success": true,
+    "no_sample_output_claimed": true,
+    "missing_adapter_behavior": "retain the explicit roots, ordinal order, duplicate aliases, and requested classes; return typed unavailable/ambiguous diagnostics without resolving an ambient or missing classpath"
+  },
+  "root": {
+    "element": "jmeterTestPlan",
+    "attributes": {"version": "1.2", "properties": "5.0", "jmeter": "5.6.3"},
+    "ordered_children": ["hashTree"]
+  },
+  "ordered_hash_tree_pairs": [
+    {
+      "position": 0,
+      "element": {
+        "tag": "TestPlan",
+        "guiclass": "TestPlanGui",
+        "testclass": "TestPlan",
+        "testname": "Static plugin discovery ordering",
+        "enabled": "true"
+      },
+      "hash_tree_children": ["ThreadGroup"]
+    },
+    {
+      "position": 1,
+      "element": {
+        "tag": "ThreadGroup",
+        "guiclass": "ThreadGroupGui",
+        "testclass": "ThreadGroup",
+        "testname": "Disabled discovery probe",
+        "enabled": "false"
+      },
+      "hash_tree_children": ["OrderedPluginSampler", "OrderedPluginSampler", "DebugSampler"]
+    },
+    {
+      "position": 2,
+      "element": {
+        "tag": "OrderedPluginSampler",
+        "guiclass": "com.example.plugin.OrderedSamplerGui",
+        "testclass": "com.example.plugin.OrderedSampler",
+        "testname": "Missing ordered plugin",
+        "enabled": "false",
+        "extra_attributes": {"pluginVersion": "0.1"}
+      },
+      "hash_tree_children": []
+    },
+    {
+      "position": 3,
+      "element": {
+        "tag": "OrderedPluginSampler",
+        "guiclass": "com.example.plugin.OrderedSamplerGui",
+        "testclass": "com.example.plugin.OrderedSampler",
+        "testname": "Duplicate ordered plugin",
+        "enabled": "false",
+        "extra_attributes": {"pluginVersion": "0.1", "duplicateAlias": "retain-second"}
+      },
+      "hash_tree_children": []
+    },
+    {
+      "position": 4,
+      "element": {
+        "tag": "DebugSampler",
+        "guiclass": "TestBeanGUI",
+        "testclass": "DebugSampler",
+        "testname": "Disabled known sibling",
+        "enabled": "false"
+      },
+      "hash_tree_children": []
+    }
+  ],
+  "classpath_discovery": {
+    "descriptor": "inputs/classpath-order.json",
+    "status": "declarative-static-only",
+    "upstream_order_status": "pinned-oracle-question",
+    "accepted_claim": false,
+    "declared_roots_in_fixture_order": ["lib/ext", "search_paths", "lib", "user.classpath", "plugin_dependency_paths"],
+    "plugin_artifacts": [],
+    "ambient_classpath": "rejected",
+    "duplicate_aliases": "retain source order and report plugin.alias.ambiguous",
+    "missing_root": "plugin.classpath.unavailable"
+  },
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations": 1,
+    "max_samples": 0,
+    "max_plugin_artifacts": 0,
+    "max_plan_nodes": 8,
+    "max_property_text_bytes": 12288,
+    "max_network_requests": 0,
+    "max_processes": 0
+  },
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "Classpath root order, duplicate declarations, alias strings, disabled state, and ordered JMX nodes are declarative observable targets. No runtime values exist to normalize."
+  }
+}

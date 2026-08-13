@@ -1,0 +1,76 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-GUI-STATIC-PERSISTENCE",
+  "profile_id": "jmeter-5.6.3",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored descriptors for GUI JMX backup, autosave preference precedence, LAST/template/WorkBench behavior, and allowlisted workspace/output filesystem contracts.",
+    "upstream_plan_copied": false,
+    "source_material": "Clean-room contract design from docs/research/compatibility-surface.md and the profile; no upstream GUI output, plugin artifact, or source file was copied."
+  },
+  "behavior_references": [
+    "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/src/core/src/main/java/org/apache/jmeter/gui/action/Save.java",
+    "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/src/core/src/main/java/org/apache/jmeter/gui/GuiPackage.java",
+    "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/src/core/src/main/java/org/apache/jmeter/gui/action/LoadRecentProject.java",
+    "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/src/core/src/main/java/org/apache/jmeter/gui/action/template/TemplateManager.java",
+    "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/src/core/src/main/java/org/apache/jmeter/gui/tree/JMeterTreeModel.java",
+    "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/src/core/src/main/java/org/apache/jmeter/JMeter.java",
+    "https://github.com/apache/jmeter/blob/34a2785748e9e0b14702595e8682c387869deda3/src/launcher/src/main/java/org/apache/jmeter/NewDriver.java",
+    "docs/research/compatibility-surface.md"
+  ],
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "The pinned Apache JMeter distribution is an external oracle reference only; no upstream plan, result, binary, or source is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true,
+    "verification_scope": "The active profile records artifact digest verification; this static case intentionally performs no oracle execution."
+  },
+  "runtime": {
+    "java": {
+      "vendor": "not invoked",
+      "version": "not invoked",
+      "vm": "not invoked",
+      "major": null
+    },
+    "target_triple": "not invoked; platform matrix is a separate static case",
+    "os_image": "not invoked",
+    "locale": "en-US (planned baseline)",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "not asserted; no process was run",
+    "environment_allowlist": [],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "profile-pinned Apache JMeter 5.6.3 distribution (not invoked)",
+    "classpath_artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076"
+  },
+  "inputs": {
+    "plan_sha256": "c3a83e0ea161a541e5def081cda82721f1dbab57ed4239b1c42efe6b0038e62f",
+    "property_sha256": "ecece2c7a2309492657a6ce1d9629b895f1c7a83c07c35d006659a165217cab9",
+    "layout_sha256": "366bed36ccb5a118a0efc11610c7749c4652fb6ac623c79544fedd69f95f17bb",
+    "expected_sha256": "ef4a1a3076168b680fd11375fa7e27455a72e5885410a142be56bea0738b9d72",
+    "public_network_used": false,
+    "secrets_or_credentials": false,
+    "static_corpus_mutated": false
+  },
+  "oracle_execution": {
+    "performed": false,
+    "status": "planned; not-run",
+    "reason": "The static corpus task explicitly forbids GUI/filesystem mutation and Java/JMeter/subprocess execution.",
+    "raw_artifacts": "none"
+  }
+}

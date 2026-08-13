@@ -1,0 +1,100 @@
+{
+  "schema_id": "jmeter-rs.planned-constraint-contract",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-CONTROLLERS-FULL-NEGATIVE",
+  "fixture_family_id": "FX-ELEMENTS-CORE-001",
+  "conformance_ids": ["ELEM-003", "JMX-001", "JMX-002", "TEST-001"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-JMX-001", "NORM-SECURITY-001", "NORM-ENV-001"],
+  "evidence_status": "static-only-forbidden-oracle",
+  "source_only": true,
+  "raw_artifacts": null,
+  "expectation_basis": "Original hand-authored wire-preservation contract; the isolated invalid-loop plan is never passed to a JMeter or nongui harness.",
+  "comparator_contract": {
+    "mode": "static-wire",
+    "enforcement": "not-comparator-enforced",
+    "comparator_enforced": false,
+    "reason": "The static validator can inspect preserved wire values; no runtime comparator or JMeter harness is permitted.",
+    "execution_forbidden": true,
+    "sample_count": null,
+    "wire_comparison": "exact; every retained wire name, node kind, and value is compared without normalization"
+  },
+  "invariants": {
+    "execution_forbidden": true,
+    "static_wire_only": true,
+    "forever_loop_is_never_entered": true,
+    "forever_loop_disabled": true,
+    "preserved_wire_value_count": 5
+  },
+  "save_service_contract": {
+    "jmeter.save.saveservice.filename": "false",
+    "responseFile": "absent if an independent serializer inspects the properties; no JTL is produced by this case"
+  },
+  "assertion_results": {
+    "configured": true,
+    "mode": "all",
+    "node": "assertionResult",
+    "child_order": ["name", "failure", "error", "failureMessage"],
+    "failure_message_property": "jmeter.save.saveservice.assertion_results_failure_message",
+    "execution_forbidden": true,
+    "expected_count": null,
+    "absence": "not applicable; this syntax-only plan must not produce a JTL",
+    "retained_fields": ["name", "failure", "error", "failureMessage"]
+  },
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations_per_thread": 1,
+    "max_samplers_per_iteration": 0,
+    "max_controller_visits_per_iteration": 0,
+    "max_samples": 0,
+    "max_process_wait_seconds": 0,
+    "max_plan_nodes": 48,
+    "max_plan_depth": 7
+  },
+  "preserved_wire_values": [
+    {"path": "ThreadGroup/ThreadGroup.main_controller/LoopController.loops", "node": "stringProp", "name": "LoopController.loops", "value": "-2"},
+    {"path": "ThreadGroup/Forever loop static boundary/LoopController", "node": "LoopController", "enabled": false, "name": "LoopController.loops", "value": "-1"},
+    {"path": "ThreadGroup/RunTime", "node": "stringProp", "name": "RunTime.seconds", "value": "-1"},
+    {"path": "ThreadGroup/IfController", "node": "missing", "name": "IfController.condition", "value": null},
+    {"path": "ThreadGroup/RandomController", "node": "RandomController", "guiclass": "RandomControlGui", "testclass": "RandomController"}
+  ],
+  "negative_cases": [
+    {
+      "id": "invalid-loop-below-forever",
+      "wire_name": "LoopController.loops",
+      "wire_value": "-2",
+      "upstream_semantics": "not executed; this syntax-only input must never be promoted to an executable oracle plan",
+      "rust_policy_boundary": "typed invalid-loop-count diagnostic; never reinterpret as forever or zero",
+      "stable_error_code": "runtime.controller.invalid-loop-count"
+    },
+    {
+      "id": "forever-loop-static",
+      "wire_name": "LoopController.loops",
+      "wire_value": "-1",
+      "upstream_semantics": "-1 selects forever; this static-only input is never executed",
+      "rust_policy_boundary": "preserve the wire value as a static constraint and require an explicit bounded execution policy before accepting it"
+    },
+    {
+      "id": "negative-runtime",
+      "wire_name": "RunTime.seconds",
+      "wire_value": "-1",
+      "upstream_semantics": "deadline is already expired, so the child is not selected",
+      "rust_policy_boundary": "an implementation may reject negative seconds explicitly, but must preserve the original wire value and must not call rejection an upstream execution result"
+    },
+    {
+      "id": "missing-if-condition",
+      "wire_name": "IfController.condition",
+      "wire_value": null,
+      "upstream_semantics": "missing condition resolves to the empty/false condition and selects no child",
+      "rust_policy_boundary": "an implementation may report a typed missing-property diagnostic while retaining the absent property"
+    },
+    {
+      "id": "random-controller-built-in",
+      "wire_name": "RandomController",
+      "wire_value": "well-formed element",
+      "upstream_semantics": "built-in RandomController selects one child from its child set on each iteration; no fixed random choice or seed is claimed",
+      "rust_policy_boundary": "the Rust subset may return runtime.controller.unsupported until RandomController is implemented; this is not an Apache JMeter unsupported-element result",
+      "stable_error_code": "runtime.controller.unsupported"
+    }
+  ]
+}

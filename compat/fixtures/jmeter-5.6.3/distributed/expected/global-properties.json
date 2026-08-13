@@ -1,0 +1,45 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-DISTRIBUTED-RMI",
+  "format": "jmx-semantic",
+  "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+  "intended_result_format": "jtl-xml",
+  "projection": {
+    "status": "partial",
+    "complete": false,
+    "scenario": "basic-R-G-X",
+    "scope": ["-R explicit worker selection", "-G property propagation", "-X remote exit request"],
+    "omitted": ["observed event count", "remote process exit result", "RMI arrival sequence"]
+  },
+  "distributed_contract": {
+    "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/client.properties", "-t", "plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-Goracle.global=sent-to-both-workers", "-X", "-l", "oracle-runs/distributed/basic-R-G-X.jtl", "-j", "oracle-runs/distributed/basic-R-G-X.log"],
+    "global_property": {"name": "oracle.global", "value": "sent-to-both-workers", "target": "both selected workers", "asserted": false, "reason": "requires external run"},
+    "remote_exit": {"requested": true, "observed": false},
+    "worker_data_and_dependency_transfer": "unchanged from expected/basic.json: worker-local references are not copied"
+  },
+  "result_field_policy": {
+    "retained": ["global_property", "worker_identity", "bytes", "sent_bytes", "success", "response_code", "response_message", "elapsed", "latency", "connect_time", "idle_time", "timestamp"],
+    "byte_fields": "retained and compared when a pinned run exists; never normalized away"
+  },
+  "generated_from": {
+    "generator": "original static fixture authoring",
+    "generator_version": "not applicable",
+    "oracle_execution": "not run; this is a partial contract projection",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "none; no oracle output is committed"
+  },
+  "normalization": {
+    "ignored_fields": ["sample.hn", "ephemeral_ports", "arrival_order", "temporary_paths"],
+    "timing_tolerances": {
+      "timestamp": {"comparison": "descriptor-only", "allowed_variance": "remote startup and exit timing are not measured in this static corpus"},
+      "elapsed": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000},
+      "latency": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000},
+      "connect_time": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000},
+      "idle_time": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000}
+    },
+    "byte_policy": {"bytes": "retained; no normalization", "sent_bytes": "retained; no normalization"},
+    "reason": "This projection isolates -G/-X metadata. The global property is not asserted in the basic-r/basic-R projection."
+  }
+}

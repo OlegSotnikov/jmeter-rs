@@ -1,0 +1,97 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-REPORT-AGGREGATE-DASHBOARD",
+  "format": "jtl-xml",
+  "source": "inputs/aggregate.xml",
+  "sample_count": 7,
+  "input_row_count": 7,
+  "represented_sample_count": 8,
+  "report_surface": "html-json-dashboard",
+  "shape_variant": "nonempty_report_surface",
+  "algorithm": {
+    "percentile": "LEGACY",
+    "estimator": "commons_math_legacy_p_times_n_plus_one_clamped_linear",
+    "estimator_property": "report_static.dashboard.percentile_estimator=LEGACY",
+    "percentile_window_limit": 5,
+    "window_observations_final_in_fifo_order": [600, 1500, 1501, 0, 2500],
+    "window_observations_are_dashboard_rows": true,
+    "overall_granularity_millis": 10000,
+    "apdex_satisfied_millis": 500,
+    "apdex_tolerated_millis": 1500,
+    "interval_start_ms": 1704067200000,
+    "interval_end_ms": 1704067210000,
+    "interval_timezone": "UTC"
+  },
+  "listener_dashboard_percentile_difference": {
+    "p50_millis": {"listener_math_round_weighted": 300, "dashboard_legacy": 1500},
+    "p90_millis": {"listener_math_round_weighted": 1501, "dashboard_legacy": 2500},
+    "p99_millis": {"listener_math_round_weighted": 2500, "dashboard_legacy": 2500}
+  },
+  "total": {
+    "sample_count": 7,
+    "success_count": 5,
+    "error_count": 2,
+    "elapsed_count": 7,
+    "elapsed_min_millis": 0,
+    "elapsed_max_millis": 2500,
+    "elapsed_mean_millis": 957.2857142857143,
+    "elapsed_variance_population_millis2": 708318.4897959183,
+    "elapsed_stddev_millis": 841.6165931087138,
+    "received_bytes": 9100,
+    "sent_bytes": 970,
+    "throughput_per_second": 0.7,
+    "error_throughput_per_second": 0.2,
+    "apdex": {"satisfied": 3, "tolerated": 1, "frustrated": 3, "score": 0.5},
+    "error_counts": [
+      {"response_code": "409", "message": "conflict", "count": 1},
+      {"response_code": "503", "message": "overload", "count": 1}
+    ],
+    "percentile_sample_count": 5,
+    "percentiles": {
+      "0": 0.0, "25": 300.0, "50": 1500.0, "75": 2000.5,
+      "90": 2500.0, "95": 2500.0, "99": 2500.0, "100": 2500.0
+    },
+    "percentiles_millis_rounded": {"0": 0, "25": 300, "50": 1500, "75": 2001, "90": 2500, "95": 2500, "99": 2500, "100": 2500}
+  },
+  "label_order": ["api/cache", "api/health", "api/login", "api/search", "api/write"],
+  "labels": [
+    {"label": "api/cache", "summary": {"sample_count": 1, "success_count": 1, "error_count": 0, "elapsed_count": 1, "elapsed_min_millis": 2500, "elapsed_max_millis": 2500, "elapsed_mean_millis": 2500.0, "received_bytes": 500, "sent_bytes": 50, "apdex": {"satisfied": 0, "tolerated": 0, "frustrated": 1, "score": 0.0}, "error_counts": []}, "percentile_sample_count": 1, "window_observations": [2500], "percentiles_millis_rounded": {"50": 2500, "90": 2500}},
+    {"label": "api/health", "summary": {"sample_count": 1, "success_count": 1, "error_count": 0, "elapsed_count": 1, "elapsed_min_millis": 0, "elapsed_max_millis": 0, "elapsed_mean_millis": 0.0, "received_bytes": 0, "sent_bytes": 0, "apdex": {"satisfied": 1, "tolerated": 0, "frustrated": 0, "score": 1.0}, "error_counts": []}, "percentile_sample_count": 1, "window_observations": [0], "percentiles_millis_rounded": {"50": 0, "90": 0}},
+    {"label": "api/login", "summary": {"sample_count": 1, "success_count": 1, "error_count": 0, "elapsed_count": 1, "elapsed_min_millis": 100, "elapsed_max_millis": 100, "elapsed_mean_millis": 100.0, "received_bytes": 1000, "sent_bytes": 120, "apdex": {"satisfied": 1, "tolerated": 0, "frustrated": 0, "score": 1.0}, "error_counts": []}, "percentile_sample_count": 1, "window_observations": [100], "percentiles_millis_rounded": {"50": 100, "90": 100}},
+    {"label": "api/search", "summary": {"sample_count": 2, "success_count": 1, "error_count": 1, "elapsed_count": 2, "elapsed_min_millis": 500, "elapsed_max_millis": 600, "elapsed_mean_millis": 550.0, "received_bytes": 4200, "sent_bytes": 420, "apdex": {"satisfied": 1, "tolerated": 0, "frustrated": 1, "score": 0.25}, "error_counts": [{"response_code": "503", "message": "overload", "count": 1}]}, "percentile_sample_count": 2, "window_observations": [500, 600], "percentiles": {"25": 500.0, "50": 550.0, "90": 600.0}, "percentiles_millis_rounded": {"25": 500, "50": 550, "90": 600}},
+    {"label": "api/write", "summary": {"sample_count": 2, "success_count": 1, "error_count": 1, "elapsed_count": 2, "elapsed_min_millis": 1500, "elapsed_max_millis": 1501, "elapsed_mean_millis": 1500.5, "received_bytes": 3400, "sent_bytes": 380, "apdex": {"satisfied": 0, "tolerated": 1, "frustrated": 1, "score": 0.25}, "error_counts": [{"response_code": "409", "message": "conflict", "count": 1}]}, "percentile_sample_count": 2, "window_observations": [1500, 1501], "percentiles": {"50": 1500.5, "90": 1500.9}, "percentiles_millis_rounded": {"50": 1501, "90": 1501}}
+  ],
+  "dashboard_sections": ["apdex", "request_summary", "statistics", "errors", "top_errors", "time_series", "response_time_distribution"],
+  "planned_graph_inventory": [
+    {"id": "responseTimePercentiles", "title": "Response Time Percentiles", "source_fields": ["elapsed"], "status": "planned_not_materialized", "points": []},
+    {"id": "responseTimeDistribution", "title": "Response Time Distribution", "source_fields": ["elapsed"], "status": "planned_not_materialized", "points": []},
+    {"id": "activeThreadsOverTime", "title": "Active Threads Over Time", "source_fields": ["grpThreads", "allThreads"], "status": "planned_not_materialized", "points": []},
+    {"id": "timeVsThreads", "title": "Time VS Threads", "source_fields": ["timeStamp", "allThreads"], "status": "planned_not_materialized", "points": []},
+    {"id": "bytesThroughputOverTime", "title": "Bytes Throughput Over Time", "source_fields": ["bytes", "sentBytes"], "status": "planned_not_materialized", "points": []},
+    {"id": "responseTimesOverTime", "title": "Response Time Over Time", "source_fields": ["elapsed"], "status": "planned_not_materialized", "points": []},
+    {"id": "responseTimePercentilesOverTime", "title": "Response Time Percentiles Over Time", "source_fields": ["elapsed", "success"], "status": "planned_not_materialized", "points": []},
+    {"id": "syntheticResponseTimeDistribution", "title": "Synthetic Response Times Distribution", "source_fields": ["elapsed", "apdex_satisfied_threshold", "apdex_tolerated_threshold"], "status": "planned_not_materialized", "points": []},
+    {"id": "latenciesOverTime", "title": "Latencies Over Time", "source_fields": ["Latency"], "status": "planned_not_materialized", "points": []},
+    {"id": "connectTimeOverTime", "title": "Connect Time Over Time", "source_fields": ["Connect"], "status": "planned_not_materialized", "points": []},
+    {"id": "responseTimeVsRequest", "title": "Response Time Vs Request", "source_fields": ["elapsed", "timeStamp"], "status": "planned_not_materialized", "points": []},
+    {"id": "latencyVsRequest", "title": "Latencies Vs Request", "source_fields": ["Latency", "timeStamp"], "status": "planned_not_materialized", "points": []},
+    {"id": "hitsPerSecond", "title": "Hits Per Second", "source_fields": ["SampleCount", "timeStamp"], "status": "planned_not_materialized", "points": []},
+    {"id": "codesPerSecond", "title": "Codes Per Second", "source_fields": ["responseCode", "timeStamp"], "status": "planned_not_materialized", "points": []},
+    {"id": "totalTPS", "title": "Total Transactions Per Second", "source_fields": ["SampleCount", "timeStamp"], "status": "planned_not_materialized", "points": []},
+    {"id": "transactionsPerSecond", "title": "Transactions Per Second", "source_fields": ["label", "SampleCount", "timeStamp"], "status": "planned_not_materialized", "points": []}
+  ],
+  "generated_from": {
+    "generator": "jmeter-rs project, hand-authored static corpus",
+    "generator_version": "repository source",
+    "random_seed": null,
+    "oracle_command": null,
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "none; no Java, JMeter, report generator, or subprocess was invoked"
+  },
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "Dashboard descriptors preserve complete-stream row/counter metrics separately from the bounded FIFO row window. The explicit LEGACY estimator, rounded projections, label order, APDEX, errors, and UTC bucket settings are exact; planned graph points are intentionally empty because no report generator ran."
+  }
+}

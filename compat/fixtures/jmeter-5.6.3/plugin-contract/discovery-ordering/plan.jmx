@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Static plugin discovery ordering" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <stringProp name="TestPlan.user_define_classpath">inputs/classes</stringProp>
+      <stringProp name="TestPlan.comments">Original disabled plugin discovery descriptors; no class or JAR is supplied.</stringProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Disabled discovery probe" enabled="false">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <stringProp name="ThreadGroup.num_threads">1</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">0</stringProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="One disabled iteration" enabled="false">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">1</stringProp>
+        </elementProp>
+      </ThreadGroup>
+      <hashTree>
+        <OrderedPluginSampler guiclass="com.example.plugin.OrderedSamplerGui" testclass="com.example.plugin.OrderedSampler" testname="Missing ordered plugin" enabled="false" pluginVersion="0.1">
+          <stringProp name="plugin.classpath.slot">component-00</stringProp>
+          <stringProp name="plugin.discovery.marker">first-declaration</stringProp>
+        </OrderedPluginSampler>
+        <hashTree/>
+        <OrderedPluginSampler guiclass="com.example.plugin.OrderedSamplerGui" testclass="com.example.plugin.OrderedSampler" testname="Duplicate ordered plugin" enabled="false" pluginVersion="0.1" duplicateAlias="retain-second">
+          <stringProp name="plugin.classpath.slot">component-01</stringProp>
+          <stringProp name="plugin.discovery.marker">second-declaration</stringProp>
+        </OrderedPluginSampler>
+        <hashTree/>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="Disabled known sibling" enabled="false">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">false</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

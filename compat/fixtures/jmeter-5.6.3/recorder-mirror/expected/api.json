@@ -1,0 +1,164 @@
+{
+  "schema_id": "jmeter-rs.proxy-mirror-api-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-PROXY-003-MIRROR",
+  "source": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "source_files": [
+      "src/protocol/http/src/main/java/org/apache/jmeter/protocol/http/control/HttpMirrorControl.java",
+      "src/protocol/http/src/main/java/org/apache/jmeter/protocol/http/control/HttpMirrorServer.java",
+      "src/protocol/http/src/main/java/org/apache/jmeter/protocol/http/control/HttpMirrorThread.java"
+    ],
+    "source_copy_in_fixture": false
+  },
+  "control": {
+    "class": "org.apache.jmeter.protocol.http.control.HttpMirrorControl",
+    "constants": {
+      "DEFAULT_PORT": 8081,
+      "DEFAULT_PORT_S": "8081",
+      "DEFAULT_MAX_POOL_SIZE": 0,
+      "DEFAULT_MAX_QUEUE_SIZE": 25,
+      "PORT_PROPERTY": "HttpMirrorControlGui.port",
+      "MAX_POOL_SIZE_PROPERTY": "HttpMirrorControlGui.maxPoolSize",
+      "MAX_QUEUE_SIZE_PROPERTY": "HttpMirrorControlGui.maxQueueSize"
+    },
+    "declared_constant_fields": [
+      {
+        "name": "DEFAULT_PORT",
+        "type": "int",
+        "modifiers": "public static final",
+        "value": 8081
+      },
+      {
+        "name": "DEFAULT_PORT_S",
+        "type": "String",
+        "modifiers": "public static final",
+        "value": "8081"
+      },
+      {
+        "name": "PORT",
+        "type": "String",
+        "modifiers": "public static final",
+        "value": "HttpMirrorControlGui.port"
+      },
+      {
+        "name": "MAX_POOL_SIZE",
+        "type": "String",
+        "modifiers": "public static final",
+        "value": "HttpMirrorControlGui.maxPoolSize"
+      },
+      {
+        "name": "MAX_QUEUE_SIZE",
+        "type": "String",
+        "modifiers": "public static final",
+        "value": "HttpMirrorControlGui.maxQueueSize"
+      },
+      {
+        "name": "DEFAULT_MAX_POOL_SIZE",
+        "type": "int",
+        "modifiers": "public static final",
+        "value": 0
+      },
+      {
+        "name": "DEFAULT_MAX_QUEUE_SIZE",
+        "type": "int",
+        "modifiers": "public static final",
+        "value": 25
+      }
+    ],
+    "constructors": [
+      "HttpMirrorControl()",
+      "HttpMirrorControl(int port)"
+    ],
+    "public_methods": [
+      "setPort(int)",
+      "setPort(String)",
+      "getPort()",
+      "getPortString()",
+      "getMaxPoolSizeAsString()",
+      "setMaxPoolSize(String)",
+      "getMaxQueueSizeAsString()",
+      "setMaxQueueSize(String)",
+      "getDefaultPort()",
+      "startHttpMirror()",
+      "stopHttpMirror()",
+      "canRemove()",
+      "isServerAlive()"
+    ],
+    "lifecycle": [
+      "new control -> canRemove=true -> isServerAlive=false",
+      "startHttpMirror -> canRemove=false while the owned server is live",
+      "stopHttpMirror -> join owned server for at most 1000ms -> canRemove=true"
+    ]
+  },
+  "server": {
+    "class": "org.apache.jmeter.protocol.http.control.HttpMirrorServer",
+    "constructors": [
+      "HttpMirrorServer(int port)",
+      "HttpMirrorServer(int port, int maxThreadPoolSize, int maxQueueSize)"
+    ],
+    "public_methods": [
+      "run()",
+      "getException()",
+      "stopServer()",
+      "main(String[])"
+    ],
+    "cli_options": [
+      "? (no argument)",
+      "--port <port>",
+      "--loglevel [category=]level"
+    ],
+    "defaults": {
+      "accept_timeout_ms": 1000,
+      "keep_alive_seconds": 10,
+      "response_protocol": "HTTP/1.0",
+      "response_content_type": "text/plain",
+      "connection_policy": "close-after-response"
+    },
+    "declared_constant_fields": [
+      {
+        "name": "HELP_OPT_ID",
+        "type": "int",
+        "modifiers": "private static final",
+        "value": 63
+      },
+      {
+        "name": "PORT_OPT_ID",
+        "type": "int",
+        "modifiers": "private static final",
+        "value": 80
+      },
+      {
+        "name": "LOGLEVEL_OPT_ID",
+        "type": "int",
+        "modifiers": "private static final",
+        "value": 76
+      },
+      {
+        "name": "ACCEPT_TIMEOUT",
+        "type": "int",
+        "modifiers": "private static final",
+        "value": 1000
+      },
+      {
+        "name": "KEEP_ALIVE_TIME",
+        "type": "long",
+        "modifiers": "private static final",
+        "value": 10
+      }
+    ],
+    "fixture_override": {
+      "max_thread_pool_size": 2,
+      "max_queue_size": 4,
+      "port_policy": "explicit unprivileged port; upstream bind address remains platform wildcard"
+    }
+  },
+  "limitations": [
+    "Inherited Thread and AbstractTestElement methods are not part of this descriptor.",
+    "The descriptors are static source-derived expectations; ApiProbe.java is the later runtime check.",
+    "No Java class loading or server lifecycle was executed while creating this corpus."
+  ]
+}

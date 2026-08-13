@@ -1,0 +1,112 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-GUI-STATIC-PLUGIN-EDITOR",
+  "evidence_status": "not-run",
+  "normalization_policy_refs": ["NORM-JMX-001", "NORM-STRUCTURE-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001"],
+  "source": {
+    "kind": "original-static-descriptor",
+    "oracle_status": "not-run",
+    "runtime_observations": false,
+    "note": "No Java, JMeter, JVM, plugin artifact, GUI, display server, or subprocess was run while creating this corpus."
+  },
+  "validation_contract": {
+    "contract_version": 1,
+    "comparator_enforced": false,
+    "comparator_id": null,
+    "comparator_route": "static-descriptor",
+    "validator_scope": "static schema, profile-reference, XML topology, plugin-contract, disabled-content, and input-hash checks only",
+    "comparator_scope": "Plugin-editor GUI comparison is not implemented; this descriptor is a declarative positive/unavailable/no-drop contract, not captured GUI evidence",
+    "activation": "Enable comparison only after a dedicated GUI plugin-editor comparator, pinned plugin artifact, and JVM/OS evidence are recorded."
+  },
+  "status": "planned; static expectation only",
+  "format": "jmx-semantic",
+  "root": {
+    "element": "jmeterTestPlan",
+    "attributes": {"version": "1.2", "properties": "5.0", "jmeter": "5.6.3"},
+    "ordered_children": ["hashTree"]
+  },
+  "ordered_hash_tree_pairs": [
+    {
+      "path": "hashTree/TestPlan",
+      "tag": "TestPlan",
+      "guiclass": "TestPlanGui",
+      "testclass": "TestPlan",
+      "testname": "GUI plugin editor contract",
+      "enabled": "true",
+      "child_pairs": ["org.example.jmeter.rs.GuiEditorProbe"]
+    },
+    {
+      "path": "hashTree/TestPlan/hashTree/org.example.jmeter.rs.GuiEditorProbe",
+      "tag": "org.example.jmeter.rs.GuiEditorProbe",
+      "guiclass": "org.example.jmeter.rs.GuiEditorProbeGui",
+      "testclass": "org.example.jmeter.rs.GuiEditorProbe",
+      "testname": "Opaque plugin editor probe",
+      "enabled": "false",
+      "child_pairs": []
+    }
+  ],
+  "plugin_editor_contract": {
+    "artifact_status": "not bundled; exact positive artifact is a future external pin",
+    "positive": {
+      "scenario_id": "positive_plugin_editor",
+      "capability": "gui.plugin.editor",
+      "required_boundaries": ["EXT-JVM-001", "EXT-PLUGIN-001", "EXT-OS-001"],
+      "identity": "strict equality for plugin class/gui-class, source/version/license, ordered classpath and artifact hashes",
+      "outcome": "planned editor load/save observation; no fallback"
+    },
+    "unavailable": {
+      "scenario_id": "unavailable_plugin_editor",
+      "capability": "gui.plugin.editor",
+      "error_code": "runtime.capability.unsupported",
+      "exit_class": "capability.unavailable",
+      "outcome": "typed unavailable result; no native plugin-host fallback; source remains opaque"
+    }
+  },
+  "opaque_plugin_subtree": {
+    "element_path": "hashTree/TestPlan/hashTree/org.example.jmeter.rs.GuiEditorProbe",
+    "class_name": "org.example.jmeter.rs.GuiEditorProbe",
+    "gui_class_name": "org.example.jmeter.rs.GuiEditorProbeGui",
+    "properties": [
+      {"name": "org.example.jmeter.rs.editor.state", "type": "stringProp", "value": "original & opaque <state> café 雪"},
+      {"name": "org.example.jmeter.rs.editor.unknown", "type": "stringProp", "value": "preserve-this-plugin-property"}
+    ],
+    "enabled": "false",
+    "no_drop_requirement": "Both class attributes and both XML-decoded property values remain exact through unavailable load/save and headless preservation."
+  },
+  "headless_contract": {
+    "parser_mode": "-n",
+    "display_required": false,
+    "source_gui_metadata": "retain plugin testclass/guiclass/testname/enabled and unknown properties",
+    "plugin_execution": "forbidden when the plugin capability is unavailable",
+    "status": "planned; no headless process was run"
+  },
+  "bounds": {
+    "max_plan_bytes": 65536,
+    "max_plan_nodes": 8,
+    "max_plan_depth": 4,
+    "max_property_text_bytes": 8192,
+    "max_property_count_per_element": 16,
+    "max_backup_files": 0,
+    "max_template_files": 4,
+    "max_toolbar_entries": 16,
+    "max_output_bytes": 65536,
+    "max_log_bytes": 65536,
+    "max_gui_wait_seconds": 30
+  },
+  "preservation_rules": [
+    "The positive route may only use the exact declared plugin editor identity and cannot fall through to native or unrelated plugin-host behavior.",
+    "The unavailable route returns runtime.capability.unsupported with no source guessing or partial editor substitution.",
+    "The opaque plugin element, guiclass/testclass attributes, property insertion order, XML-decoded Unicode, and disabled state are never silently dropped."
+  ],
+  "normalization": {
+    "ignored_fields": ["xml_lexical_whitespace", "xml_empty_element_spelling"],
+    "required_fields": ["guiclass", "testclass", "testname", "enabled", "ordered_hash_tree_pairs", "opaque_plugin_subtree", "plugin_editor_contract"]
+  },
+  "oracle_observation": {
+    "performed": false,
+    "status": "planned; not observed",
+    "required_before_promotion": "Pinned plugin-editor positive and missing-capability runs on each declared GUI platform/Java lane"
+  }
+}

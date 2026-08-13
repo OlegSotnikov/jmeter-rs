@@ -1,0 +1,210 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-ASSERTIONS-FULL-INVALID",
+  "format": "jtl-xml",
+  "evidence_status": "planned",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 6,
+  "sample_count_asserted": false,
+  "observed_sample_count": null,
+  "candidate_status": "duration-and-exception-values-candidate-unobserved-until-oracle",
+  "ordered_labels": ["invalid-response-regex", "invalid-response-field", "invalid-size-number", "invalid-size-operator", "invalid-size-negative", "invalid-duration-value"],
+  "assertion_result_encoding": {
+    "node": "assertionResult",
+    "children": [
+      {"name": "name", "kind": "text", "required": true},
+      {"name": "failure", "kind": "text", "required": true, "values": ["true", "false"]},
+      {"name": "error", "kind": "text", "required": true, "values": ["true", "false"]},
+      {"name": "failureMessage", "kind": "text", "required": false}
+    ],
+    "child_order": ["name", "failure", "error", "failureMessage"],
+    "all_results_saved": true,
+    "child_order_status": "comparator-supported",
+    "child_order_note": "Each sample carries wire_children.assertion_child_elements; the comparator checks the pinned ordered prefix, with optional failureMessage as the fourth child."
+  },
+  "save_service_contract": {
+    "jmeter.save.saveservice.filename": "false",
+    "responseFile": "absent"
+  },
+  "wire_contract": {
+    "response_file": {"enabled": false, "expected": false}
+  },
+  "invalid_inputs": [
+    {
+      "sample": "invalid-response-regex",
+      "input_assertion_name": "Malformed contains pattern is an error",
+      "result_name": "Malformed contains pattern is an error",
+      "failure": "false",
+      "error": "true",
+      "failure_message": "Bad test configuration org.apache.oro.text.MalformedCachePatternException: Invalid expression: [ Unmatched [] in expression."
+    },
+    {
+      "sample": "invalid-response-field",
+      "input_assertion_name": "Unknown response field falls back to empty URL",
+      "result_name": "Unknown response field falls back to empty URL",
+      "failure": "true",
+      "error": "false",
+      "failure_message": "Response was null"
+    },
+    {
+      "sample": "invalid-size-number",
+      "input_assertion_name": "Non-numeric size remains an error",
+      "result_name": "Assertion failed! See log file.",
+      "failure": "false",
+      "error": "true",
+      "failure_message": "java.lang.NumberFormatException: For input string: \"not-a-number\""
+    },
+    {
+      "sample": "invalid-size-operator",
+      "input_assertion_name": "Unknown size comparator is a failure",
+      "result_name": "Unknown size comparator is a failure",
+      "failure": "true",
+      "error": "false",
+      "failure_message": "The result was the wrong size: It was 3 bytes, but should have ERROR - invalid condition 1 bytes."
+    },
+    {
+      "sample": "invalid-size-negative",
+      "input_assertion_name": "Negative size threshold fails explicitly",
+      "result_name": "Negative size threshold fails explicitly",
+      "failure": "true",
+      "error": "false",
+      "failure_message": "The result was the wrong size: It was 3 bytes, but should have been equal to -1 bytes."
+    },
+    {
+      "sample": "invalid-duration-value",
+      "input_assertion_name": "Non-numeric duration remains explicit",
+      "result_name": "Assertion failed! See log file.",
+      "failure": "false",
+      "error": "true",
+      "failure_message": "java.lang.NumberFormatException: For input string: \"not-a-duration\""
+    }
+  ],
+  "samples": [
+    {
+      "position": 0,
+      "element": "sample",
+      "label": "invalid-response-regex",
+      "attributes": {
+        "s": "false", "lb": "invalid-response-regex", "rc": "200", "rm": "OK",
+        "tn": "One assertion user 1-1", "dt": "text", "de": "US-ASCII",
+        "by": "0", "sby": "0", "sc": "1", "ec": "1", "ng": "1", "na": "1"
+      },
+      "ignored_attributes": ["t", "it", "lt", "ct", "ts"],
+      "empty_children": ["responseData"],
+      "absent_children": ["responseFile"],
+      "wire_children": {"assertion_child_elements": ["name", "failure", "error", "failureMessage"]},
+      "assertions": [
+        {"name": "Malformed contains pattern is an error", "failure": "false", "error": "true", "failure_message": "Bad test configuration org.apache.oro.text.MalformedCachePatternException: Invalid expression: [ Unmatched [] in expression."}
+      ]
+    },
+    {
+      "position": 1,
+      "element": "sample",
+      "label": "invalid-response-field",
+      "attributes": {
+        "s": "false", "lb": "invalid-response-field", "rc": "200", "rm": "OK",
+        "tn": "One assertion user 1-1", "dt": "text", "de": "US-ASCII",
+        "by": "0", "sby": "0", "sc": "1", "ec": "1", "ng": "1", "na": "1"
+      },
+      "ignored_attributes": ["t", "it", "lt", "ct", "ts"],
+      "empty_children": ["responseData"],
+      "absent_children": ["responseFile"],
+      "wire_children": {"assertion_child_elements": ["name", "failure", "error", "failureMessage"]},
+      "assertions": [
+        {"name": "Unknown response field falls back to empty URL", "failure": "true", "error": "false", "failure_message": "Response was null"}
+      ]
+    },
+    {
+      "position": 2,
+      "element": "sample",
+      "label": "invalid-size-number",
+      "attributes": {
+        "s": "false", "lb": "invalid-size-number", "rc": "200", "rm": "OK",
+        "tn": "One assertion user 1-1", "dt": "text", "de": "US-ASCII",
+        "by": "0", "sby": "0", "sc": "1", "ec": "1", "ng": "1", "na": "1"
+      },
+      "ignored_attributes": ["t", "it", "lt", "ct", "ts"],
+      "empty_children": ["responseData"],
+      "absent_children": ["responseFile"],
+      "wire_children": {"assertion_child_elements": ["name", "failure", "error", "failureMessage"]},
+      "assertions": [
+        {"name": "Assertion failed! See log file.", "failure": "false", "error": "true", "failure_message": "java.lang.NumberFormatException: For input string: \"not-a-number\""}
+      ]
+    },
+    {
+      "position": 3,
+      "element": "sample",
+      "label": "invalid-size-operator",
+      "attributes": {
+        "s": "false", "lb": "invalid-size-operator", "rc": "200", "rm": "OK",
+        "tn": "One assertion user 1-1", "dt": "text", "de": "US-ASCII",
+        "by": "0", "sby": "0", "sc": "1", "ec": "1", "ng": "1", "na": "1"
+      },
+      "ignored_attributes": ["t", "it", "lt", "ct", "ts"],
+      "empty_children": ["responseData"],
+      "absent_children": ["responseFile"],
+      "wire_children": {"assertion_child_elements": ["name", "failure", "error", "failureMessage"]},
+      "assertions": [
+        {"name": "Unknown size comparator is a failure", "failure": "true", "error": "false", "failure_message": "The result was the wrong size: It was 3 bytes, but should have ERROR - invalid condition 1 bytes."}
+      ]
+    },
+    {
+      "position": 4,
+      "element": "sample",
+      "label": "invalid-size-negative",
+      "attributes": {
+        "s": "false", "lb": "invalid-size-negative", "rc": "200", "rm": "OK",
+        "tn": "One assertion user 1-1", "dt": "text", "de": "US-ASCII",
+        "by": "0", "sby": "0", "sc": "1", "ec": "1", "ng": "1", "na": "1"
+      },
+      "ignored_attributes": ["t", "it", "lt", "ct", "ts"],
+      "empty_children": ["responseData"],
+      "absent_children": ["responseFile"],
+      "wire_children": {"assertion_child_elements": ["name", "failure", "error", "failureMessage"]},
+      "assertions": [
+        {"name": "Negative size threshold fails explicitly", "failure": "true", "error": "false", "failure_message": "The result was the wrong size: It was 3 bytes, but should have been equal to -1 bytes."}
+      ]
+    },
+    {
+      "position": 5,
+      "element": "sample",
+      "label": "invalid-duration-value",
+      "attributes": {
+        "s": "false", "lb": "invalid-duration-value", "rc": "200", "rm": "OK",
+        "tn": "One assertion user 1-1", "dt": "text", "de": "US-ASCII",
+        "by": "0", "sby": "0", "sc": "1", "ec": "1", "ng": "1", "na": "1"
+      },
+      "ignored_attributes": ["t", "it", "lt", "ct", "ts"],
+      "empty_children": ["responseData"],
+      "absent_children": ["responseFile"],
+      "wire_children": {"assertion_child_elements": ["name", "failure", "error", "failureMessage"]},
+      "assertions": [
+        {"name": "Assertion failed! See log file.", "failure": "false", "error": "true", "failure_message": "java.lang.NumberFormatException: For input string: \"not-a-duration\""}
+      ]
+    }
+  ],
+  "resource_bounds": {
+    "max_threads": 1,
+    "max_iterations": 1,
+    "max_samples": 6,
+    "max_response_bytes": 65536,
+    "max_assertion_results": 6,
+    "network": "none"
+  },
+  "generated_from": {
+    "status": "not-run",
+    "reason": "The fixture authoring task forbids Java/JMeter execution; run the pinned oracle command during conformance.",
+    "generator": "Apache JMeter",
+    "generator_version": "5.6.3",
+    "random_seed": null,
+    "oracle_command": "env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C LANG=C TZ=UTC jmeter-oracle-cache/apache-jmeter-5.6.3/bin/jmeter -n -q compat/fixtures/jmeter-5.6.3/assertions-full/invalid/oracle.properties -t compat/fixtures/jmeter-5.6.3/assertions-full/invalid/plan.jmx -l oracle-runs/assertions-full/invalid/oracle.jtl -j oracle-runs/assertions-full/invalid/oracle.log",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "oracle-runs/assertions-full/invalid/ (ignored; no oracle evidence captured)"
+  },
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.ts"],
+    "reason": "Invalid assertion flags, result names/messages, response code/message, and zero-byte responses remain exact. All six Debug Sampler responses have variable display disabled, so byte counts are exact; only elapsed and timestamp counters are normalized."
+  }
+}

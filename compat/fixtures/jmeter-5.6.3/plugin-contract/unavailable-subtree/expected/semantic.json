@@ -1,0 +1,204 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-PLUGIN-001",
+  "case_id": "ORACLE-JMETER-563-PLUGIN-UNAVAILABLE-SUBTREE",
+  "conformance_ids": ["PLUG-003", "JMX-004", "SCRIPT-002"],
+  "normalization_policy_refs": ["NORM-JMX-001", "NORM-STRUCTURE-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001"],
+  "format": "jmx-semantic",
+  "evidence_status": "external-unavailable",
+  "source": {
+    "kind": "original-static-declarative-descriptor",
+    "oracle_status": "not-run",
+    "runtime_executed": false,
+    "note": "No Java, JMeter, JVM worker, classloader, plugin artifact, subprocess, or network was run; missing-class and raw-byte rows are required behavior contracts only."
+  },
+  "capability_accounting": {
+    "status": "external-unavailable",
+    "required_boundaries": ["EXT-JVM-001", "EXT-PLUGIN-001"],
+    "unsupported_error_code": "unsupported-capability",
+    "stable_error_codes": ["plugin.class.unavailable", "script.class.unavailable"],
+    "no_silent_success": true,
+    "no_sample_output_claimed": true,
+    "execution_outcome": "unavailable-capability",
+    "missing_adapter_behavior": "retain exact Java Sampler/JUnit/plugin class names, aliases, properties, unknown fields, comments, CDATA, duplicate order, raw opaque subtrees, and hashTree companions; return typed unavailable errors without mapping or dropping"
+  },
+  "root": {
+    "element": "jmeterTestPlan",
+    "attributes": {"version": "1.2", "properties": "5.0", "jmeter": "5.6.3"},
+    "ordered_children": ["hashTree"]
+  },
+  "ordered_hash_tree_pairs": [
+    {
+      "position": 0,
+      "element": {
+        "tag": "TestPlan",
+        "guiclass": "TestPlanGui",
+        "testclass": "TestPlan",
+        "testname": "Static unavailable plugin subtree",
+        "enabled": "true"
+      },
+      "hash_tree_children": ["ThreadGroup"]
+    },
+    {
+      "position": 1,
+      "element": {
+        "tag": "ThreadGroup",
+        "guiclass": "ThreadGroupGui",
+        "testclass": "ThreadGroup",
+        "testname": "Disabled unavailable probe",
+        "enabled": "false"
+      },
+      "hash_tree_children": ["JavaSampler", "JUnitSampler", "OpaqueSampler", "OpaqueSamplerSecond", "DebugSampler"]
+    },
+    {
+      "position": 2,
+      "element": {
+        "tag": "JavaSampler",
+        "guiclass": "JavaTestSamplerGui",
+        "testclass": "JavaSampler",
+        "testname": "Missing Java sampler class",
+        "enabled": "false",
+        "property_order": ["classname", "arguments"],
+        "class_name": "com.example.plugin.MissingJavaSampler"
+      },
+      "hash_tree_children": []
+    },
+    {
+      "position": 3,
+      "element": {
+        "tag": "JUnitSampler",
+        "guiclass": "JUnitTestSamplerGui",
+        "testclass": "JUnitSampler",
+        "testname": "Missing JUnit class",
+        "enabled": "false",
+        "property_order": ["junitSampler.classname", "junitsampler.junit4", "junitSampler.method", "junitSampler.success"],
+        "class_name": "com.example.plugin.MissingJUnitCase"
+      },
+      "hash_tree_children": []
+    },
+    {
+      "position": 4,
+      "element": {
+        "tag": "OpaqueSampler",
+        "guiclass": "com.example.plugin.OpaqueSamplerGui",
+        "testclass": "com.example.plugin.OpaqueSampler",
+        "testname": "Duplicate opaque plugin",
+        "enabled": "false",
+        "extra_attributes": {"pluginVersion": "0.1", "unknownA": "first"},
+        "property_order": ["plugin.order.0", "plugin.raw.0", "pluginExtension"],
+        "opaque": true
+      },
+      "hash_tree_children": ["PluginChild", "PluginChildSecond"]
+    },
+    {
+      "position": 5,
+      "element": {
+        "tag": "PluginChild",
+        "guiclass": "com.example.plugin.PluginChildGui",
+        "testclass": "com.example.plugin.PluginChild",
+        "testname": "Duplicate opaque child",
+        "enabled": "false",
+        "extra_attributes": {"childOrder": "0"},
+        "property_order": ["child.raw.0"],
+        "opaque": true
+      },
+      "hash_tree_children": []
+    },
+    {
+      "position": 6,
+      "element": {
+        "tag": "PluginChildSecond",
+        "guiclass": "com.example.plugin.PluginChildGui",
+        "testclass": "com.example.plugin.PluginChild",
+        "testname": "Duplicate opaque child",
+        "enabled": "false",
+        "extra_attributes": {"childOrder": "1"},
+        "property_order": ["child.raw.1"],
+        "opaque": true
+      },
+      "hash_tree_children": []
+    },
+    {
+      "position": 7,
+      "element": {
+        "tag": "OpaqueSamplerSecond",
+        "guiclass": "com.example.plugin.OpaqueSamplerGui",
+        "testclass": "com.example.plugin.OpaqueSampler",
+        "testname": "Duplicate opaque plugin",
+        "enabled": "false",
+        "extra_attributes": {"pluginVersion": "0.1", "unknownA": "second", "unknownB": "retain"},
+        "property_order": ["plugin.order.1", "plugin.raw.1", "pluginExtension"],
+        "opaque": true
+      },
+      "hash_tree_children": []
+    },
+    {
+      "position": 8,
+      "element": {
+        "tag": "DebugSampler",
+        "guiclass": "TestBeanGUI",
+        "testclass": "DebugSampler",
+        "testname": "Known sibling after opaque nodes",
+        "enabled": "false"
+      },
+      "hash_tree_children": []
+    }
+  ],
+  "missing_class_diagnostics": [
+    {
+      "element": "JavaSampler",
+      "class_name": "com.example.plugin.MissingJavaSampler",
+      "category": "class-unavailable",
+      "stable_error_code": "script.class.unavailable",
+      "executable": false,
+      "preserve_source_path": true
+    },
+    {
+      "element": "JUnitSampler",
+      "class_name": "com.example.plugin.MissingJUnitCase",
+      "category": "class-unavailable",
+      "stable_error_code": "script.class.unavailable",
+      "executable": false,
+      "preserve_source_path": true
+    },
+    {
+      "element": "OpaqueSampler",
+      "class_name": "com.example.plugin.OpaqueSampler",
+      "category": "plugin-unavailable",
+      "stable_error_code": "plugin.class.unavailable",
+      "executable": false,
+      "preserve_source_path": true
+    }
+  ],
+  "opaque_subtree_sha256": {
+    "OpaqueSampler": "a6b95bfd4fd5695f08ff24fb194933bd7330dfbeb9b523a6904befff8319581e",
+    "PluginChild": "bb50fda35d3bc21575587a225e95756a842a68b8e80c1c16aa7188ecbc292906",
+    "PluginChildSecond": "8af713b11e01bf24958a0845469704a0ddc85bfe99d16b11ec26a53018279dd1",
+    "OpaqueSamplerSecond": "d4cd400298a05b151ff483551dc8bc24472aa84637b35dcdc53c0f5c4d28a66a"
+  },
+  "preservation_invariants": [
+    "Unknown test-element bytes, special attributes, unknown attributes, comments, CDATA, unknown property tags, and ordered hashTree companions remain available for semantic round-trip.",
+    "The two OpaqueSampler nodes and two PluginChild nodes remain distinct ordered identities despite equal testclass and testname values.",
+    "Java Sampler and JUnit class/method properties remain available when classes are absent; unavailable capability is an explicit typed error, never a dropped node or successful placeholder.",
+    "No result, process exit, classpath measurement, or runtime observation is asserted."
+  ],
+  "normalization": {
+    "ignored_fields": ["xml_lexical_indentation_outside_opaque_subtrees"],
+    "lexical_preserving_regions": ["OpaqueSampler", "PluginChild", "PluginChildSecond", "OpaqueSamplerSecond"],
+    "reason": "Opaque regions are compared by exact authored-byte SHA-256 when untouched; ordered semantic structure and all missing-class fields are compared separately. No timing, process, or result fields exist to normalize."
+  },
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations": 1,
+    "max_samples": 0,
+    "max_class_requests": 3,
+    "max_plugin_artifacts": 0,
+    "max_plan_nodes": 12,
+    "max_opaque_subtree_bytes": 8192,
+    "max_property_text_bytes": 12288,
+    "max_network_requests": 0,
+    "max_processes": 0
+  }
+}

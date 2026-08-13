@@ -1,0 +1,272 @@
+{
+  "schema_id": "jmeter-rs.proxy-mirror-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-PROXY-003-MIRROR",
+  "fixture_family_id": "FX-PROXY-TLS-001",
+  "conformance_ids": [
+    "PROXY-003"
+  ],
+  "normalization_policy_refs": [
+    "NORM-STRUCTURE-001",
+    "NORM-TIME-001"
+  ],
+  "server": {
+    "control_class": "org.apache.jmeter.protocol.http.control.HttpMirrorControl",
+    "server_class": "org.apache.jmeter.protocol.http.control.HttpMirrorServer",
+    "default_port": 8081,
+    "bind_address": "platform wildcard; no loopback-only claim",
+    "response_protocol": "HTTP/1.0",
+    "default_response_headers": [
+      ["Content-Type", "text/plain"]
+    ],
+    "body_semantics": "response body is the reflected request wire bytes unless X-ResponseLength supplies a non-negative prefix length",
+    "connection_semantics": "one request per connection; response and connection close are observable",
+    "request_header_matching": "case-insensitive line match with at least one space after the colon",
+    "query_decoding": "URI query decoding occurs before redirect/status parameter lookup"
+  },
+  "cases": [
+    {
+      "id": "basic-get",
+      "response": {
+        "status": [200, "OK"],
+        "headers": [["Content-Type", "text/plain"]],
+        "body": {
+          "mode": "echo-request",
+          "source": "inputs/requests.json#/cases/0/request/wire_base64",
+          "bytes": 71,
+          "sha256": "04b0373c737209cda47f972cb90f9b80fb2a59ff9e601377bc3ece3ac6ff6464"
+        }
+      },
+      "observable_fields": [
+        "status.code",
+        "status.reason",
+        "response.protocol",
+        "response.headers.order",
+        "response.body.bytes",
+        "connection.close"
+      ]
+    },
+    {
+      "id": "post-text",
+      "response": {
+        "status": [200, "OK"],
+        "headers": [["Content-Type", "text/plain"]],
+        "body": {
+          "mode": "echo-request",
+          "source": "inputs/requests.json#/cases/1/request/wire_base64",
+          "bytes": 130,
+          "sha256": "0de4fd13b7bb03032b8fd3b99b81972e1f5d6639ea3f723234c8e34cac01a276"
+        }
+      },
+      "observable_fields": [
+        "status.code",
+        "response.body.exact-octets",
+        "request.content-length=13"
+      ]
+    },
+    {
+      "id": "binary-body",
+      "response": {
+        "status": [200, "OK"],
+        "headers": [["Content-Type", "text/plain"]],
+        "body": {
+          "mode": "echo-request",
+          "source": "inputs/requests.json#/cases/2/request/wire_base64",
+          "bytes": 145,
+          "sha256": "49078d9ee6cddc0500b01b9ed029f45e3b739cd719594d99500c3b1e854f67b7"
+        }
+      },
+      "observable_fields": [
+        "status.code",
+        "response.body.exact-octets",
+        "request.body.application/octet-stream",
+        "request.body.byte-values-including-00-and-ff"
+      ]
+    },
+    {
+      "id": "redirect-query",
+      "response": {
+        "status": [302, "Temporary Redirect"],
+        "headers": [
+          ["Content-Type", "text/plain"],
+          ["Location", "/mirror/final"]
+        ],
+        "body": {
+          "mode": "echo-request",
+          "source": "inputs/requests.json#/cases/3/request/wire_base64",
+          "bytes": 101,
+          "sha256": "7db2c9a222784bcdf419ecbfd0ce54e59134a0623ebf0d5d7da83bc654dbb2da"
+        }
+      },
+      "observable_fields": [
+        "status.code",
+        "status.reason",
+        "response.headers.location",
+        "response.body.bytes"
+      ]
+    },
+    {
+      "id": "status-header",
+      "response": {
+        "status": [204, "No Content"],
+        "headers": [["Content-Type", "text/plain"]],
+        "body": {
+          "mode": "echo-request",
+          "source": "inputs/requests.json#/cases/4/request/wire_base64",
+          "bytes": 113,
+          "sha256": "8fa9d633a876cbf7f24caf6b3cc2bc40b0c6d12c31ba64b48f506f685099231a"
+        }
+      },
+      "observable_fields": [
+        "status.code",
+        "status.reason",
+        "header.status.decoding"
+      ]
+    },
+    {
+      "id": "response-headers",
+      "response": {
+        "status": [200, "OK"],
+        "headers": [
+          ["Content-Type", "text/plain"],
+          ["X-Mirror-Trace", "header-value"],
+          ["Cache-Control", "no-store"],
+          ["Set-Cookie", "mirror=seen; Path=/"]
+        ],
+        "body": {
+          "mode": "echo-request",
+          "source": "inputs/requests.json#/cases/5/request/wire_base64",
+          "bytes": 175,
+          "sha256": "1dbb28d73a6e2cb40d6d93356f321866c238e1061834a76ad1b9ad2c777749bc"
+        }
+      },
+      "observable_fields": [
+        "response.headers.order",
+        "response.headers.custom",
+        "response.headers.set-cookie",
+        "response.body.bytes"
+      ]
+    },
+    {
+      "id": "response-truncate",
+      "response": {
+        "status": [200, "OK"],
+        "headers": [["Content-Type", "text/plain"]],
+        "body": {
+          "mode": "echo-prefix",
+          "source": "inputs/requests.json#/cases/6/request/wire_base64",
+          "bytes": 12,
+          "sha256": "2949c5e7f6eb0baabfe43ef57a1fa94388280b0ddaf3464052cd6b2f363c2c63",
+          "base64": "R0VUIC9taXJyb3Iv"
+        }
+      },
+      "observable_fields": [
+        "response.body.prefix-length=12",
+        "response.body.exact-octets"
+      ]
+    },
+    {
+      "id": "query-status-overrides-header",
+      "response": {
+        "status": [201, "Created"],
+        "headers": [["Content-Type", "text/plain"]],
+        "body": {
+          "mode": "echo-request",
+          "source": "inputs/requests.json#/cases/7/request/wire_base64",
+          "bytes": 127,
+          "sha256": "0c9c1ae5c6d632934b972d0c5a119c8bce1c545f8292c39413afda246e87f5ac"
+        }
+      },
+      "observable_fields": [
+        "status.code=201",
+        "status.reason=Created",
+        "query.status.precedes.X-ResponseStatus"
+      ]
+    }
+  ],
+  "planned_cases": [
+    {
+      "id": "saturation",
+      "status": "planned",
+      "source": "inputs/requests.json#/planned_cases/0",
+      "server": {
+        "max_pool_size": 2,
+        "max_queue_size": 4
+      },
+      "driver": {
+        "concurrent_clients": 7,
+        "max_wait_ms": 2000
+      },
+      "assertions": [
+        "record every accepted connection and response outcome",
+        "compare executor rejection/discard behavior without assuming a stable arrival order",
+        "fail on an unbounded wait, process hang, or silent result loss in the driver trace"
+      ],
+      "promotion_rule": "requires a pinned JMeter 5.6.3 run; no result is asserted by this static descriptor"
+    },
+    {
+      "id": "lowercase-header",
+      "status": "planned",
+      "source": "inputs/requests.json#/planned_cases/1",
+      "request": {
+        "wire_bytes": 218,
+        "wire_sha256": "91166defc9abd4e846187df5c80a50542dd33117d6a4d98a17aa3666abf69fbb"
+      },
+      "planned_response": {
+        "status": [202, "Accepted"],
+        "headers": [
+          ["Content-Type", "text/plain"],
+          ["X-Lowercase", "seen"],
+          ["Cache-Control", "no-store"],
+          ["Set-Cookie", "lower=seen; Path=/"]
+        ],
+        "body": {
+          "mode": "echo-prefix",
+          "bytes": 8,
+          "base64": "R0VUIC9taXI=",
+          "sha256": "62d95e25faaf35dd5682cc062601d4b54532ef1528f4742b50d602ac818e6c41"
+        }
+      },
+      "promotion_rule": "status/header/body fields remain planned until the pinned oracle confirms case-insensitive helper lookup"
+    },
+    {
+      "id": "eof-half-close",
+      "status": "planned",
+      "source": "inputs/requests.json#/planned_cases/2",
+      "request": {
+        "wire_bytes": 48,
+        "wire_sha256": "544705be89f8b10573c8355a68d5b74bdb29c6c4f90b112d978e3845855206e7",
+        "termination": "shutdownOutput immediately after the final Host line; no blank-line delimiter"
+      },
+      "planned_observation": [
+        "record whether a bounded response is emitted or the connection closes without a response",
+        "fail on a hang, uncaught process failure, or response read beyond 1024 bytes or 2000ms"
+      ],
+      "promotion_rule": "requires a pinned JMeter 5.6.3 run because malformed/half-closed input handling is not inferred as a compatibility claim"
+    }
+  ],
+  "normalization": {
+    "exact_fields": [
+      "response protocol",
+      "status code and reason",
+      "response header order and values",
+      "reflected body bytes and length",
+      "connection-close behavior"
+    ],
+    "ignored_fields": [
+      "ephemeral selected port",
+      "elapsed time",
+      "thread scheduling order when requests are sent concurrently"
+    ],
+    "reason": "The corpus uses a local service with a controlled byte stream; only transport timing, scheduling, and the selected port are nondeterministic."
+  },
+  "generated_from": {
+    "generator": "hand-authored original descriptor",
+    "generator_version": "1",
+    "oracle_command": null,
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": null,
+    "execution_status": "not-run-static-handoff"
+  }
+}

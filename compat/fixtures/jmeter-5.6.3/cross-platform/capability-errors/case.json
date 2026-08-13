@@ -1,0 +1,71 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-CROSS-PLATFORM-CAPABILITY-ERRORS",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-CROSS-PLATFORM-001",
+  "conformance_ids": ["CFG-003", "GUI-003", "TEST-005"],
+  "normalization_policy_refs": ["NORM-CONFIG-001", "NORM-ENV-001", "NORM-TIME-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001"],
+  "external_runtime_boundary_ids": ["EXT-OS-001"],
+  "inputs": {
+    "contract_kind": "static-platform-capability-errors",
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  },
+  "descriptor": {
+    "path": "expected/semantic.json",
+    "sha256": "9a2843842a5935eaee96fa8118580a846bd8f90d9c6f80ad814600cd64cbceb9",
+    "kind": "static-semantic-projection"
+  },
+  "static_descriptor_routing": {
+    "kind": "declarative-only",
+    "plan_required": false,
+    "descriptor_ref": "expected/semantic.json#/projection_policy",
+    "oracle_route": "future-platform-capability-validator",
+    "runtime_observations": false,
+    "status": "planned"
+  },
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/cross-platform/capability-errors",
+    "mode": "descriptor-only",
+    "argv_templates": [
+      ["<materialize:rust-cli:platform-capability-validator>", "validate-platform-capabilities", "--manifest", "expected/semantic.json"]
+    ],
+    "network": "none",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null,
+    "environment_allowlist": []
+  },
+  "execution": {
+    "status": "not-run-static-corpus",
+    "process_exit": null,
+    "process_exit_asserted": false,
+    "sample_count_asserted": false,
+    "raw_artifacts": "ignored; no capability probe, process, GUI, Java/JMeter, or oracle artifact was collected",
+    "expected": "expected/semantic.json"
+  },
+  "matrix_axes": {
+    "operating_systems": ["linux", "macos", "windows"],
+    "architectures": ["x86_64", "arm64"],
+    "target_matrix": [
+      {"target_os": "linux", "architecture": "x86_64", "target_triple": "x86_64-unknown-linux-gnu"},
+      {"target_os": "linux", "architecture": "arm64", "target_triple": "aarch64-unknown-linux-gnu"},
+      {"target_os": "macos", "architecture": "x86_64", "target_triple": "x86_64-apple-darwin"},
+      {"target_os": "macos", "architecture": "arm64", "target_triple": "aarch64-apple-darwin"},
+      {"target_os": "windows", "architecture": "x86_64", "target_triple": "x86_64-pc-windows-msvc"},
+      {"target_os": "windows", "architecture": "arm64", "target_triple": "aarch64-pc-windows-msvc"}
+    ],
+    "matrix_status": "future-ci-targets-only",
+    "current_ci": {"status": "not-configured", "targets": [], "runs_recorded": 0},
+    "target_outcomes_ref": "expected/semantic.json#/target_outcomes",
+    "error_contracts": ["raw-non-unicode-path", "missing-display", "undeclared-platform-adapter", "forbidden-ambient-environment"]
+  },
+  "limitations": [
+    "This case defines stable diagnostic categories and preservation requirements only; no error was observed on a target platform.",
+    "The expected error and capability codes are contract targets, not fabricated runtime results. Future implementation evidence must record the exact target, adapter version, stable implementation code, and all required context fields.",
+    "The six target rows describe future CI lanes. No current CI target, target availability, capability probe, or cross-platform run is recorded by this case.",
+    "No subprocess, OS mutation, GUI display, filesystem probe, environment read, network request, Java/JMeter invocation, process exit, or measurement occurred."
+  ]
+}

@@ -1,0 +1,229 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-ELEMENTS-EXTERNAL-ELEM-002",
+  "format": "jmx-semantic",
+  "evidence_status": "external-unavailable",
+  "source": {
+    "kind": "original-static-descriptor",
+    "oracle_status": "not-run",
+    "note": "No Java, JMeter, JVM worker, external service, network client, OS process, or subprocess was run while creating this corpus."
+  },
+  "capability_accounting": {
+    "status": "external-unavailable",
+    "required_boundaries": ["EXT-SERVICE-001", "EXT-JVM-001", "EXT-OS-001"],
+    "unsupported_error_code": "unsupported-capability",
+    "no_silent_success": true,
+    "no_sample_output_claimed": true,
+    "missing_adapter_behavior": "retain complete disabled JMX nodes and exact wire properties, then report the service, driver, JVM, or OS capability as unavailable; never synthesize a sample or silently skip the node"
+  },
+  "topology": {
+    "root": "jmeterTestPlan",
+    "alternating_pairs": true,
+    "thread_groups": 1,
+    "threads": 1,
+    "iterations": 1,
+    "planned_sampler_nodes": 13,
+    "planned_external_nodes": 12,
+    "planned_opaque_nodes": 1,
+    "planned_samples": 0,
+    "executed_samples": null
+  },
+  "elements": [
+    {
+      "position": 0,
+      "tag": "PublisherSampler",
+      "testclass": "PublisherSampler",
+      "guiclass": "JMSPublisherGui",
+      "name": "JMS publisher requires provider",
+      "enabled": false,
+      "property_names": ["jms.jndi_properties", "jms.initial_context_factory", "jms.provider_url", "jms.connection_factory", "jms.topic", "jms.security_principle", "jms.security_credentials", "jms.iterations", "jms.authenticate", "jms.read_response", "jms.destination_static", "jms_error_reconnect_on_codes", "jms.input_file", "jms.random_path", "jms.text_message", "jms.config_choice", "jms.config_msg_type", "jms.non_persistent", "jms.priority", "jms.expiration", "jms.file_encoding", "jms.jmsProperties"],
+      "nested_property_names": ["JMSProperties.properties", "fixture-property", "JMSProperty.name", "JMSProperty.value", "JMSProperty.type"],
+      "capability": "JMS publisher/provider client",
+      "boundary": "EXT-SERVICE-001",
+      "status": "external-unavailable"
+    },
+    {
+      "position": 1,
+      "tag": "SubscriberSampler",
+      "testclass": "SubscriberSampler",
+      "guiclass": "JMSSubscriberGui",
+      "name": "JMS subscriber requires provider",
+      "enabled": false,
+      "property_names": ["jms.jndi_properties", "jms.initial_context_factory", "jms.provider_url", "jms.connection_factory", "jms.topic", "jms.security_principle", "jms.security_credentials", "jms.iterations", "jms.authenticate", "jms.read_response", "jms.destination_static", "jms_error_reconnect_on_codes", "jms.client_choice", "jms.timeout", "jms.durableSubscriptionId", "jms.clientId", "jms.selector", "jms.stop_between_samples", "jms.separator", "jms_error_pause_between"],
+      "capability": "JMS subscriber/provider client",
+      "boundary": "EXT-SERVICE-001",
+      "status": "external-unavailable"
+    },
+    {
+      "position": 2,
+      "tag": "JMSSampler",
+      "testclass": "JMSSampler",
+      "guiclass": "JMSSamplerGui",
+      "name": "JMS point-to-point requires provider",
+      "enabled": false,
+      "property_names": ["JMSSampler.initialContextFactory", "JMSSampler.contextProviderUrl", "JMSSampler.jndiProperties", "JMSSampler.timeout", "JMSSampler.priority", "JMSSampler.expiration", "JMSSampler.jmsSelector", "JMSSampler.jmsNumberOfSamplesToAggregate", "JMSSampler.communicationStyle", "JMSSampler.ReceiveQueue", "HTTPSamper.xml_data", "JMSSampler.SendQueue", "JMSSampler.queueconnectionfactory", "JMSSampler.isNonPersistent", "JMSSampler.useReqMsgIdAsCorrelId", "JMSSampler.useResMsgIdAsCorrelId", "arguments"],
+      "nested_property_names": ["Arguments.arguments", "JMSProperties.properties", "fixture-property", "JMSProperty.name", "JMSProperty.value", "JMSProperty.type"],
+      "capability": "JMS point-to-point/provider client",
+      "boundary": "EXT-SERVICE-001",
+      "status": "external-unavailable"
+    },
+    {
+      "position": 3,
+      "tag": "MailReaderSampler",
+      "testclass": "MailReaderSampler",
+      "guiclass": "MailReaderSamplerGui",
+      "name": "Mail reader requires JavaMail server",
+      "enabled": false,
+      "property_names": ["host_type", "host", "port", "username", "password", "folder", "delete", "num_messages", "storeMimeMessage", "headerOnly"],
+      "capability": "mail server/JavaMail",
+      "boundary": "EXT-SERVICE-001",
+      "status": "external-unavailable"
+    },
+    {
+      "position": 4,
+      "tag": "SmtpSampler",
+      "testclass": "SmtpSampler",
+      "guiclass": "SmtpSamplerGui",
+      "name": "SMTP sampler requires JavaMail server",
+      "enabled": false,
+      "property_names": ["SMTPSampler.server", "SMTPSampler.serverPort", "SMTPSampler.serverTimeout", "SMTPSampler.serverConnectionTimeout", "SMTPSampler.useAuth", "SMTPSampler.username", "SMTPSampler.password", "SMTPSampler.mailFrom", "SMTPSampler.replyTo", "SMTPSampler.receiverTo", "SMTPSampler.receiverCC", "SMTPSampler.receiverBCC", "SMTPSampler.subject", "SMTPSampler.suppressSubject", "SMTPSampler.message", "SMTPSampler.plainBody", "SMTPSampler.include_timestamp", "SMTPSampler.attachFile", "SMTPSampler.messageSizeStatistics", "SMTPSampler.headerFields", "SMTPSampler.use_eml", "SMTPSampler.emlMessageToSend", "SMTPSampler.enableDebug", "SMTPSampler.useSSL", "SMTPSampler.useStartTLS", "SMTPSampler.trustAllCerts", "SMTPSampler.enforceStartTLS", "SMTPSampler.tlsProtocols", "SMTPSampler.useLocalTrustStore", "SMTPSampler.trustStoreToUse"],
+      "capability": "SMTP server/JavaMail",
+      "boundary": "EXT-SERVICE-001",
+      "status": "external-unavailable"
+    },
+    {
+      "position": 5,
+      "tag": "MongoSourceElement",
+      "testclass": "MongoSourceElement",
+      "guiclass": "TestBeanGUI",
+      "name": "MongoDB source requires driver",
+      "enabled": false,
+      "property_names": ["connection", "source"],
+      "capability": "MongoDB Java driver and server",
+      "boundary": "EXT-SERVICE-001",
+      "status": "external-unavailable"
+    },
+    {
+      "position": 6,
+      "tag": "MongoScriptSampler",
+      "testclass": "MongoScriptSampler",
+      "guiclass": "TestBeanGUI",
+      "name": "MongoDB script requires driver",
+      "enabled": false,
+      "property_names": ["MongoScriptSampler.source", "MongoScriptSampler.database", "MongoScriptSampler.username", "MongoScriptSampler.password", "MongoScriptSampler.script"],
+      "capability": "MongoDB Java driver and server",
+      "boundary": "EXT-SERVICE-001",
+      "status": "external-unavailable"
+    },
+    {
+      "position": 7,
+      "tag": "BoltConnectionElement",
+      "testclass": "BoltConnectionElement",
+      "guiclass": "TestBeanGUI",
+      "name": "Bolt connection requires Neo4j driver",
+      "enabled": false,
+      "property_names": ["boltUri", "username", "password", "maxConnectionPoolSize"],
+      "capability": "Neo4j Bolt driver and server",
+      "boundary": "EXT-SERVICE-001",
+      "status": "external-unavailable"
+    },
+    {
+      "position": 8,
+      "tag": "BoltSampler",
+      "testclass": "BoltSampler",
+      "guiclass": "TestBeanGUI",
+      "name": "Bolt request requires Neo4j service",
+      "enabled": false,
+      "property_names": ["cypher", "params", "recordQueryResults", "accessMode", "database", "txTimeout"],
+      "capability": "Neo4j Bolt driver and server",
+      "boundary": "EXT-SERVICE-001",
+      "status": "external-unavailable"
+    },
+    {
+      "position": 9,
+      "tag": "JUnitSampler",
+      "testclass": "JUnitSampler",
+      "guiclass": "JUnitTestSamplerGui",
+      "name": "JUnit request requires user test class",
+      "enabled": false,
+      "property_names": ["junitSampler.classname", "junitSampler.constructorString", "junitSampler.method", "junitSampler.success", "junitSampler.successCode", "junitSampler.failureCode", "junitSampler.failureMessage", "junitSampler.errorCode", "junitSampler.errorMessage", "junitSampler.execTime", "junitSampler.appendError", "junitSampler.appendException"],
+      "capability": "JVM worker and JUnit/user test class",
+      "boundary": "EXT-JVM-001",
+      "status": "external-unavailable"
+    },
+    {
+      "position": 10,
+      "tag": "SystemSampler",
+      "testclass": "SystemSampler",
+      "guiclass": "SystemSamplerGui",
+      "name": "OS process requires platform adapter",
+      "enabled": false,
+      "property_names": ["SystemSampler.command", "SystemSampler.directory", "SystemSampler.arguments", "SystemSampler.environment", "SystemSampler.checkReturnCode", "SystemSampler.expectedReturnCode"],
+      "nested_property_names": ["Arguments.arguments", "arg0", "Argument.name", "Argument.value", "Argument.metadata", "Arguments.arguments", "env0", "Argument.name", "Argument.value", "Argument.metadata"],
+      "capability": "OS process and filesystem",
+      "boundary": "EXT-OS-001",
+      "status": "external-unavailable"
+    },
+    {
+      "position": 11,
+      "tag": "AccessLogSampler",
+      "testclass": "AccessLogSampler",
+      "guiclass": "TestBeanGUI",
+      "name": "Access log sampler requires file and parser",
+      "enabled": false,
+      "property_names": ["logFile", "parserClassName", "filterClassName", "protocol", "domain", "portString", "imageParsing"],
+      "capability": "access-log file/parser and HTTP target",
+      "boundary": "EXT-OS-001",
+      "status": "external-unavailable"
+    }
+  ],
+  "opaque_legacy": [
+    {
+      "position": 12,
+      "tag": "AccessLogSampler",
+      "testclass": "AccessLogSampler",
+      "guiclass": "org.apache.jmeter.protocol.http.control.gui.AccessLogSamplerGui",
+      "name": "Access log legacy upgrade input",
+      "enabled": false,
+      "executable": false,
+      "status": "opaque-legacy-preserved",
+      "property_names": ["AccessLogSampler.log_file", "HTTPSampler.port", "HTTPSampler.domain", "AccessLogSampler.parser_class_name", "HTTPSampler.image_parser"],
+      "upgrade_output": {
+        "guiclass": "TestBeanGUI",
+        "AccessLogSampler.log_file": "logFile",
+        "HTTPSampler.port": "portString",
+        "HTTPSampler.domain": "domain",
+        "AccessLogSampler.parser_class_name": "parserClassName",
+        "HTTPSampler.image_parser": "imageParsing"
+      },
+      "diagnostic": "Preserve the legacy input and emit the profile upgrade mapping; do not execute this node or treat old names as canonical 5.6.3 properties."
+    }
+  ],
+  "requirements": [
+    {"element": "PublisherSampler", "adapter": "versioned JMS client/provider plus local broker fixture", "service": "JMS provider", "version_pin": "required-but-not-pinned", "driver": "JMS client required-but-not-supplied", "driver_version": "required-but-not-pinned", "license": "required-but-not-recorded", "provenance": "required-but-not-recorded", "artifact_sha256": "required-but-not-recorded", "fixture_source_revision": "required-but-not-recorded", "status": "external-unavailable"},
+    {"element": "SubscriberSampler", "adapter": "versioned JMS client/provider plus local broker fixture", "service": "JMS provider", "version_pin": "required-but-not-pinned", "driver": "JMS client required-but-not-supplied", "driver_version": "required-but-not-pinned", "license": "required-but-not-recorded", "provenance": "required-but-not-recorded", "artifact_sha256": "required-but-not-recorded", "fixture_source_revision": "required-but-not-recorded", "status": "external-unavailable"},
+    {"element": "JMSSampler", "adapter": "versioned JMS client/provider plus local broker fixture", "service": "JMS provider", "version_pin": "required-but-not-pinned", "driver": "JMS client required-but-not-supplied", "driver_version": "required-but-not-pinned", "license": "required-but-not-recorded", "provenance": "required-but-not-recorded", "artifact_sha256": "required-but-not-recorded", "fixture_source_revision": "required-but-not-recorded", "status": "external-unavailable"},
+    {"element": "MailReaderSampler", "adapter": "versioned JavaMail client plus local IMAP/POP fixture", "service": "mail server", "version_pin": "required-but-not-pinned", "driver": "JavaMail required-but-not-supplied", "driver_version": "required-but-not-pinned", "license": "required-but-not-recorded", "provenance": "required-but-not-recorded", "artifact_sha256": "required-but-not-recorded", "fixture_source_revision": "required-but-not-recorded", "status": "external-unavailable"},
+    {"element": "SmtpSampler", "adapter": "versioned JavaMail client plus local SMTP fixture", "service": "SMTP server", "version_pin": "required-but-not-pinned", "driver": "JavaMail required-but-not-supplied", "driver_version": "required-but-not-pinned", "license": "required-but-not-recorded", "provenance": "required-but-not-recorded", "artifact_sha256": "required-but-not-recorded", "fixture_source_revision": "required-but-not-recorded", "status": "external-unavailable"},
+    {"element": "MongoSourceElement/MongoScriptSampler", "adapter": "versioned MongoDB Java driver plus local MongoDB fixture", "service": "MongoDB", "version_pin": "required-but-not-pinned", "driver": "MongoDB Java driver required-but-not-supplied", "driver_version": "required-but-not-pinned", "license": "required-but-not-recorded", "provenance": "required-but-not-recorded", "artifact_sha256": "required-but-not-recorded", "fixture_source_revision": "required-but-not-recorded", "status": "external-unavailable"},
+    {"element": "BoltConnectionElement/BoltSampler", "adapter": "versioned Neo4j Bolt driver plus local Neo4j fixture", "service": "Neo4j/Bolt", "version_pin": "required-but-not-pinned", "driver": "Neo4j Java driver required-but-not-supplied", "driver_version": "required-but-not-pinned", "license": "required-but-not-recorded", "provenance": "required-but-not-recorded", "artifact_sha256": "required-but-not-recorded", "fixture_source_revision": "required-but-not-recorded", "status": "external-unavailable"},
+    {"element": "JUnitSampler", "adapter": "versioned JVM worker plus user JUnit classpath", "service": "none", "version_pin": "required-but-not-pinned", "driver": "com.example.junit.ExternalFixtureTest placeholder only", "driver_version": "required-but-not-pinned", "license": "required-but-not-recorded", "provenance": "required-but-not-recorded", "artifact_sha256": "required-but-not-recorded", "fixture_source_revision": "required-but-not-recorded", "status": "external-unavailable"},
+    {"element": "SystemSampler", "adapter": "allowlisted OS-process runner", "service": "host OS", "version_pin": "required-but-not-pinned", "driver": "not-applicable", "driver_version": "not-applicable", "license": "required-but-not-recorded", "provenance": "required-but-not-recorded", "artifact_sha256": "required-but-not-recorded", "fixture_source_revision": "required-but-not-recorded", "status": "external-unavailable"},
+    {"element": "AccessLogSampler", "adapter": "allowlisted access-log file plus parser class and target fixture", "service": "filesystem/HTTP target", "version_pin": "required-but-not-pinned", "driver": "com.example.accesslog.Parser placeholder only", "driver_version": "required-but-not-pinned", "license": "required-but-not-recorded", "provenance": "required-but-not-recorded", "artifact_sha256": "required-but-not-recorded", "fixture_source_revision": "required-but-not-recorded", "status": "external-unavailable"}
+  ],
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations": 1,
+    "max_samples": 0,
+    "max_response_bytes": 0,
+    "max_network_requests": 0,
+    "max_processes": 0,
+    "max_process_output_bytes": 0
+  },
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.ts", "sample.by", "sample.sby", "sample.hn"],
+    "reason": "There is no oracle result to normalize. Element order, class/GUI identities, exact wire property names, nested JMS/Arguments structures, placeholders, disabled state, missing-input behavior, and external-unavailable accounting remain observable; no timing or result value is fabricated."
+  }
+}

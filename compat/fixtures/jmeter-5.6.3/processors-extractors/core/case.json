@@ -1,0 +1,139 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-ELEM-008-PROCESSORS-EXTRACTORS-CORE",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-ELEMENTS-CORE-001",
+  "conformance_ids": ["ELEM-008"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-JTL-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "902b05bb151d94e7a91fe6d71fff7cbc8587e60989a93bb6699728a84759083e"
+  },
+  "property_files": [
+    {
+      "path": "property.properties",
+      "sha256": "bfa52bab0f19bed828efb154bba1abb14bef624efef126698b7b5615ca053d63"
+    }
+  ],
+  "inputs": {
+    "plan_path": "plan.jmx",
+    "plan_sha256": "902b05bb151d94e7a91fe6d71fff7cbc8587e60989a93bb6699728a84759083e",
+    "property_path": "property.properties",
+    "property_sha256": "bfa52bab0f19bed828efb154bba1abb14bef624efef126698b7b5615ca053d63",
+    "response_corpus": [
+      {"path": "inputs/response-html.html", "sha256": "79877a1e8895dc8b667d71c9e9229ab38c7c6d76a7821580e68bc2dec892f4e4", "role": "HTML/CSS selector response"},
+      {"path": "inputs/response-json.payload", "sha256": "458c174a725103bdb76bce97afabc55bbc71326580b6dc2a7c4adf5fc67e586e", "role": "JSONPath/JMESPath response"},
+      {"path": "inputs/response-xml.xml", "sha256": "8dfa6fffba08276f19e93b41e66cbfe71d1ea10803cb9721da76b9c2f342c5d7", "role": "XPath/XPath2 response"},
+      {"path": "inputs/response-text.txt", "sha256": "32970d50e154e338af6ed9d38f0c290f34dbddf8dd9211fb9fd0c65011fd9e4e", "role": "regex/boundary response"},
+      {"path": "inputs/response-headers.txt", "sha256": "6222af8439c395ab23b88bb55ea39f21986e99428f26ffbe6a508bb00eb79430", "role": "header matching response"},
+      {"path": "inputs/response-malformed.payload", "sha256": "7aa774e640a6916e1be48d360a8f9953fdee3079bb5c52276b584acc70f6ccda", "role": "malformed JSON negative input"},
+      {"path": "inputs/response-empty.txt", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "role": "empty response negative input"}
+    ],
+    "variable_snapshot_source": {
+      "path": "inputs/variables.properties",
+      "sha256": "afda47718ef4a8f5ef17e73ca780d0738abe1390f527f6627d5798706e0415f4",
+      "role": "initial variable snapshot input"
+    },
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  },
+  "materialization": {
+    "status": "planned",
+    "runner": "future pinned JMeter-oracle invocation from command.argv_template",
+    "response_selection": "run each response_corpus entry in an isolated carrier-sampler run; bind body and response headers according to the extractor's input_binding",
+    "variable_selection": "load variable_snapshot_source before configuration, then capture thread-local snapshots after configuration, preprocessors, and postprocessors",
+    "capture_policy": "write raw JTL/log/variable snapshots below ignored oracle-runs/processors-extractors/core and never promote candidate values into this expectation",
+    "response_bindings": [
+      {"response_id": "text", "input_binding": "response_data", "processor_ids": ["regex-all", "regex-first", "regex-empty-default", "boundary-all"]},
+      {"response_id": "headers", "input_binding": "response_headers", "processor_ids": ["regex-headers"]},
+      {"response_id": "html", "input_binding": "response_data", "processor_ids": ["css-selector"]},
+      {"response_id": "xml", "input_binding": "response_data", "processor_ids": ["xpath-1", "xpath-2"]},
+      {"response_id": "json", "input_binding": "response_data", "processor_ids": ["jsonpath", "jmespath"]},
+      {"response_id": "empty", "input_binding": "response_data", "processor_ids": ["regex-empty-default", "boundary-all", "css-selector", "xpath-1", "xpath-2", "jsonpath", "jmespath"]},
+      {"response_id": "malformed", "input_binding": "response_data", "processor_ids": ["jsonpath", "jmespath"]}
+    ]
+  },
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/processors-extractors/core",
+    "mode": "nongui-static-only",
+    "argv_template": [
+      "<pinned-jmeter-5.6.3>/bin/jmeter",
+      "-n",
+      "-q",
+      "property.properties",
+      "-t",
+      "plan.jmx",
+      "-l",
+      "<ignored>/oracle.jtl",
+      "-j",
+      "<ignored>/oracle.log"
+    ],
+    "network": "none",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null
+  },
+  "determinism": {
+    "environment_allowlist": ["LC_ALL=C", "LANG=C", "TZ=UTC"],
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null,
+    "randomness": "not-used-by-source-contract",
+    "clock_mode": "not-applicable-static-only",
+    "clock_controlled": false,
+    "network": "none",
+    "normalized_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.ts", "sample.by", "candidate_unobserved_values"]
+  },
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations_per_thread": 1,
+    "max_samples": 1,
+    "max_plan_nodes": 80,
+    "max_plan_depth": 8,
+    "max_property_text_bytes": 8192,
+    "max_response_bytes": 4096,
+    "max_variable_count": 64,
+    "max_variable_value_bytes": 4096,
+    "max_extractor_matches": 32,
+    "max_json_path_expressions": 8,
+    "max_regex_input_bytes": 4096,
+    "max_regex_steps": 4096,
+    "max_regex_capture_groups": 8,
+    "max_process_output_bytes": 65536,
+    "max_process_wait_seconds": 30
+  },
+  "resource_limits": {
+    "max_threads": 1,
+    "max_iterations": 1,
+    "max_samples": 1,
+    "max_response_bytes": 4096,
+    "max_variable_count": 64,
+    "max_extractor_matches": 32,
+    "max_json_path_expressions": 8,
+    "max_regex_input_bytes": 4096,
+    "max_regex_steps": 4096,
+    "max_regex_capture_groups": 8,
+    "network": "none"
+  },
+  "execution": {
+    "status": "not-run-static",
+    "process_exit": null,
+    "process_exit_asserted": false,
+    "sample_count_asserted": false,
+    "raw_artifacts": "none; oracle-runs/processors-extractors/core/ is ignored and was not materialized",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "No Java/JMeter process, HTTP server, script engine, JDBC driver, or plug-in was invoked while authoring this source-only corpus.",
+    "The response files are bounded local candidate inputs. Their bytes, media types, parser choice, extractor ordering, match selection, defaults, and generated variable values require a future pinned oracle observation; values are not fabricated.",
+    "The Debug Sampler is a topology carrier only. A future harness must inject one local response corpus member per isolated run without contacting a public service.",
+    "The materialization route is explicit in materialization.response_bindings: response data and response headers are injected separately, and inputs/variables.properties is loaded before the phase snapshots are captured.",
+    "inputs/variables.properties is an unchanged UTF-8, LF-terminated three-entry seed (fixture.initial, fixture.iteration, fixture.property); its SHA-256 is cross-linked as a variable snapshot, not as the JMeter property file.",
+    "BeanShell, JSR223, JDBC, and legacy BSF nodes are disabled and remain preserved inputs. Enabling them requires a declared capability boundary and must return an explicit unsupported error when unavailable.",
+    "Unknown plug-in descendants and attributes are intentionally opaque and must not be dropped, reordered, or converted to a known built-in.",
+    "Exact same-category runtime tie-breaking and parser diagnostic prose are candidate-unobserved; serialized source order is the only static contract."
+  ]
+}

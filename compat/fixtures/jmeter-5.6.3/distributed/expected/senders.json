@@ -1,0 +1,215 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-DISTRIBUTED-RMI",
+  "format": "jmx-semantic",
+  "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+  "intended_result_format": "jtl-xml",
+  "projection": {
+    "status": "partial",
+    "complete": false,
+    "scope": ["sender mode selection", "response-data reduction", "batch thresholds", "queue and end-of-test flush obligations", "client/server property ownership", "per-worker ordering and batch boundaries", "callback and delivered-event ordinal domains", "terminal accounting and EventAck shape"],
+    "omitted": ["observed event multiplicity", "arrival order", "runtime timing", "JTL payload values", "positive SenderDrainProof"]
+  },
+  "sender_contract": {
+    "scenario_ids": ["sender-Standard", "sender-standard-lowercase", "sender-DiskStore", "sender-StrippedDiskStore", "sender-Batch", "sender-Statistical", "sender-Stripped", "sender-StrippedBatch", "sender-Asynch", "sender-StrippedAsynch"],
+    "builtin_aliases": ["Standard", "DiskStore", "StrippedDiskStore", "Batch", "Statistical", "Stripped", "StrippedBatch", "Asynch", "StrippedAsynch"],
+    "unsupported_negative_modes": [
+      {"mode": "Hold", "class_name": "org.apache.jmeter.samplers.HoldSampleSender", "category": "built-in-class-not-an-alias", "class_load": "class-present", "factory_alias": false, "passing_builtin_matrix": false, "expected": "explicit unsupported capability diagnostic"},
+      {"mode": "org.apache.jmeter.samplers.HoldSampleSender", "category": "fqcn-public-constructor-unavailable", "class_load": "class-present", "constructor_signature": "(org.apache.jmeter.samplers.RemoteSampleListener)", "public_constructor": false, "passing_builtin_matrix": false, "expected": "explicit unsupported capability diagnostic"},
+      {"mode": "NotASender", "category": "unknown-mode", "factory_fallback": "Class.forName", "expected": "explicit unsupported capability diagnostic without silent fallback"},
+      {"mode": "", "category": "empty-mode", "factory_fallback": "Class.forName", "expected": "explicit unsupported capability diagnostic without silent fallback"}
+    ],
+    "alias_selection": {"input": "standard", "canonical": "Standard", "comparison": "case-insensitive without trimming", "observed": false},
+    "callback_domains": {"callback_invocation_events": ["TestStarted", "SampleStarted", "SampleOccurred", "ProcessBatch", "SampleStopped", "TestEnded"], "delivered_event_domain": ["SampleStarted", "SampleOccurred", "SampleStopped", "ProcessBatch items"], "process_batch_rule": "ProcessBatch is one callback invocation with one callback-invocation ordinal and a nonempty contiguous delivered-event range", "observed": false},
+    "property_inputs": {
+      "mode": "one mode per isolated invocation",
+      "client_selection": {"property_file": "properties/senders.properties", "property": "mode", "override_form": "-Jmode=<mode>", "sample_sender_client_configured": true},
+      "server_selection": {"property_files": ["properties/server.properties", "properties/server-ssl.properties"], "mode_property": "absent", "role": "threshold/queue/strip settings only when sample_sender_client_configured=false; mode remains client-resolved"},
+      "threshold_property_owner": {"when_sample_sender_client_configured_true": "client JVM properties/senders.properties", "when_sample_sender_client_configured_false": "worker JVM properties/server.properties or properties/server-ssl.properties"},
+      "num_sample_threshold": 2,
+      "time_threshold_ms": 250,
+      "asynch_batch_queue_size": 4,
+      "asynch_queue_scope": "Asynch and StrippedAsynch only; not a DiskStore capacity"
+    },
+    "mode_contracts": [
+      {
+        "mode": "Standard",
+        "mode_property": "mode=Standard",
+        "response_data": "present",
+        "delivery": "synchronous per accepted event",
+        "flush": "per-event",
+        "batch_threshold": null,
+        "time_threshold_ms": null,
+        "queue_capacity": null,
+        "event_multiplicity": "not asserted"
+      },
+      {
+        "mode": "DiskStore",
+        "mode_property": "mode=DiskStore",
+        "response_data": "present",
+        "delivery": "disk-backed sender",
+        "flush": "disk drain and end-of-test close",
+        "batch_threshold": null,
+        "time_threshold_ms": null,
+        "queue_capacity": null,
+        "queue_capacity_policy": "not a DiskStore semantic; any runner spool bound is external policy",
+        "event_multiplicity": "not asserted"
+      },
+      {
+        "mode": "StrippedDiskStore",
+        "mode_property": "mode=StrippedDiskStore",
+        "response_data": "stripped",
+        "delivery": "disk-backed sender with response payload reduction",
+        "flush": "disk drain and end-of-test close",
+        "batch_threshold": null,
+        "time_threshold_ms": null,
+        "queue_capacity": null,
+        "queue_capacity_policy": "not a StrippedDiskStore semantic; any runner spool bound is external policy",
+        "event_multiplicity": "not asserted"
+      },
+      {
+        "mode": "Batch",
+        "mode_property": "mode=Batch",
+        "response_data": "present",
+        "delivery": "batched accepted events",
+        "flush": "threshold, time threshold, or end-of-test",
+        "batch_threshold": 2,
+        "time_threshold_ms": 250,
+        "queue_capacity": null,
+        "event_multiplicity": "not asserted"
+      },
+      {
+        "mode": "Statistical",
+        "mode_property": "mode=Statistical",
+        "response_data": "summary; exact fields are oracle-gated",
+        "delivery": "statistical aggregation rather than raw event projection",
+        "flush": "threshold, time threshold, or end-of-test",
+        "batch_threshold": 2,
+        "time_threshold_ms": 250,
+        "queue_capacity": null,
+        "event_multiplicity": "not asserted; summary cardinality is not fabricated"
+      },
+      {
+        "mode": "Stripped",
+        "mode_property": "mode=Stripped",
+        "response_data": "stripped",
+        "delivery": "synchronous per accepted event with payload reduction",
+        "flush": "per-event",
+        "batch_threshold": null,
+        "time_threshold_ms": null,
+        "queue_capacity": null,
+        "event_multiplicity": "not asserted"
+      },
+      {
+        "mode": "StrippedBatch",
+        "mode_property": "mode=StrippedBatch",
+        "response_data": "stripped",
+        "delivery": "batched accepted events with payload reduction",
+        "flush": "threshold, time threshold, or end-of-test",
+        "batch_threshold": 2,
+        "time_threshold_ms": 250,
+        "queue_capacity": null,
+        "event_multiplicity": "not asserted"
+      },
+      {
+        "mode": "Asynch",
+        "mode_property": "mode=Asynch",
+        "response_data": "present",
+        "delivery": "asynchronous bounded queue",
+        "flush": "queue drain and end-of-test close is a source observation only; it is not completion proof",
+        "batch_threshold": null,
+        "time_threshold_ms": null,
+        "queue_capacity": 4,
+        "execution_capability": "capability-unavailable",
+        "unavailable_reason": "rmi.sender.drain-proof-unavailable",
+        "source_observation": "TestEnded precedes final-sentinel enqueue/consumption and processBatch delivery; source order is not completion proof",
+        "end_marker_order": ["invoke listener.testEnded(host)", "enqueue FINAL_EVENT sentinel", "FIFO-drain queued events", "invoke listener.processBatch(nonempty FIFO batch)", "consume sentinel", "close sender/stream"],
+        "end_marker_order_source_observation": ["invoke listener.testEnded(host)", "enqueue FINAL_EVENT sentinel", "FIFO-drain queued events", "invoke listener.processBatch(nonempty FIFO batch)", "consume sentinel", "close sender/stream"],
+        "end_marker_order_kind": "source_observation",
+        "end_marker_order_is_completion_proof": false,
+        "test_ended_before_sentinel": true,
+        "completion_proof": {"hook": "SenderDrainProof", "required": true, "status": "unavailable", "positive_observation_required": true, "source_order_is_proof": false},
+        "lifecycle_overload": {"enum": ["NoHost", "HostArgument"], "observed": false},
+        "delivery_kind": "ProcessBatch first-class callback; not synthetic repeated SampleOccurred",
+        "delivery_callback": "processBatch",
+        "batch_boundary": "one worker sender queue; no cross-worker or cross-sender merge",
+        "event_multiplicity": "not asserted"
+      },
+      {
+        "mode": "StrippedAsynch",
+        "mode_property": "mode=StrippedAsynch",
+        "response_data": "stripped",
+        "delivery": "asynchronous bounded queue with payload reduction",
+        "flush": "queue drain and end-of-test close is a source observation only; it is not completion proof",
+        "batch_threshold": null,
+        "time_threshold_ms": null,
+        "queue_capacity": 4,
+        "execution_capability": "capability-unavailable",
+        "unavailable_reason": "rmi.sender.drain-proof-unavailable",
+        "source_observation": "TestEnded precedes final-sentinel enqueue/consumption and processBatch delivery; source order is not completion proof",
+        "end_marker_order": ["invoke listener.testEnded(host)", "enqueue FINAL_EVENT sentinel", "FIFO-drain queued stripped events", "invoke listener.processBatch(nonempty FIFO batch)", "consume sentinel", "close sender/stream"],
+        "end_marker_order_source_observation": ["invoke listener.testEnded(host)", "enqueue FINAL_EVENT sentinel", "FIFO-drain queued stripped events", "invoke listener.processBatch(nonempty FIFO batch)", "consume sentinel", "close sender/stream"],
+        "end_marker_order_kind": "source_observation",
+        "end_marker_order_is_completion_proof": false,
+        "test_ended_before_sentinel": true,
+        "completion_proof": {"hook": "SenderDrainProof", "required": true, "status": "unavailable", "positive_observation_required": true, "source_order_is_proof": false},
+        "lifecycle_overload": {"enum": ["NoHost", "HostArgument"], "observed": false},
+        "delivery_kind": "ProcessBatch first-class callback; not synthetic repeated SampleOccurred",
+        "delivery_callback": "processBatch",
+        "batch_boundary": "one worker sender queue; no cross-worker or cross-sender merge",
+        "event_multiplicity": "not asserted"
+      }
+    ],
+    "loss_policy": "queue exhaustion or a failed end flush is an explicit diagnostic; no silent loss is accepted",
+    "ordering_contract": {
+      "scope": "per worker",
+      "within_worker": "accepted events retain FIFO order within each sender queue and each processBatch call after a positive sender proof; this static case does not observe it",
+      "batch_boundaries": "processBatch receives nonempty contiguous events from one worker and one sender generation; batches never mix workers or sender modes",
+      "cross_worker_order": "not asserted; normalize by worker identity before comparison",
+      "lifecycle_overload": {"enum": ["NoHost", "HostArgument"], "NoHost": {"host_presence": "absent"}, "HostArgument": {"host_presence": "absent, null, or present-empty only when the pinned Java call can supply it"}, "host_policy": "do not fill a missing host from worker identity", "observed": false},
+      "callback_invocation_ordinal": {"scope": "all callback invocations", "advances": "one per invocation, including ProcessBatch and lifecycle callbacks", "observed": false},
+      "delivered_event_ordinal": {"scope": "delivered event items", "advances": "one per SampleStarted/SampleOccurred/SampleStopped event item; ProcessBatch advances by event_count", "contiguous": true, "observed": false},
+      "process_batch_delivery": {"delivery_kind": "ProcessBatch", "first_delivered_event_ordinal": "required", "event_count": "required and nonzero", "callback_invocation_ordinal": "one ordinal for the invocation; never synthetic SampleOccurred callbacks", "ordinal_relationship": "callback invocation state advances by one; delivered-event state advances by event_count", "observed": false},
+      "observed": false
+    },
+    "end_flush_obligation": "the external runner must obtain a positive SenderDrainProof before treating accepted sender work as drained or closing the result stream",
+    "stream_contract": {
+      "status": "not-run",
+      "terminal": {
+        "exactly_one_per_worker_stream": true,
+        "success": {"variant": "Succeeded", "required_fields": ["test_ended_callback", "sender_drain_proof", "last_callback_invocation", "delivered_events", "accepted_events", "acknowledged_events", "delivered_bytes", "accepted_bytes", "acknowledged_bytes", "router_finalization_digest", "remote_exit_state"], "pending_counts": {"pending_bridge_events": 0, "pending_sender_events": 0, "pending_blobs": 0}, "accounting": "delivered_events = accepted_events = acknowledged_events and delivered_bytes = accepted_bytes = acknowledged_bytes; TestEnded and SenderDrainProof identities match the same lifecycle generation", "allowed_without_sender_drain_proof": false},
+        "failure": {"variants": ["Failed", "Cancelled", "TimedOut", "Crashed"], "required_fields": ["test_ended_absence_reason", "sender_proof_absence_reason", "last_frame_sequence", "last_callback_invocation", "last_delivered_event", "delivered/accepted/acknowledged counts and bytes", "pending counts", "primary_error", "bounded_secondary_errors"], "missing_fields_default": "none; no implicit zero or success"},
+        "protocol_errors": ["EOF before terminal", "duplicate terminal", "terminal with unaccounted accepted events", "frame after terminal"],
+        "observed": false
+      },
+      "event_ack": {"message": "EventAck", "ack_unit": "validated router-admitted delivered events, never only a transport frame", "fields": ["worker", "generation", "highest_contiguous_delivered_event_ordinal", "newly_accepted_event_count", "newly_accepted_encoded_bytes", "cumulative_accepted_event_count", "cumulative_accepted_encoded_bytes", "router_admission_digest"], "counts_and_bytes_must_agree": true, "observed": false},
+      "sender_drain_proof": {"message": "SenderDrainProof", "required_for_success": true, "fields": ["sender_identity", "lifecycle_generation", "final_delivered_event_ordinal", "cumulative_emitted_event_count", "cumulative_accepted_event_count", "cumulative_acknowledged_event_count", "cumulative_emitted_bytes", "cumulative_accepted_bytes", "cumulative_acknowledged_bytes", "pending_queue_count", "pending_disk_count", "completion_hook_identity", "proof_digest"], "asynch_status": "unavailable until a positive hook observes sentinel consumption and sender-thread termination", "observed": false}
+    }
+  },
+  "result_field_policy": {
+    "retained": ["success", "response_code", "response_message", "thread_name", "worker_identity", "iteration_marker", "sender_mode", "bytes", "sent_bytes", "elapsed", "latency", "connect_time", "idle_time", "timestamp"],
+    "byte_fields": "retained and compared when a pinned run exists; never normalized away",
+    "timing": "see normalization.timing_tolerances; no runtime value is supplied"
+  },
+  "generated_from": {
+    "generator": "original static fixture authoring",
+    "generator_version": "not applicable",
+    "oracle_execution": "not run; this is a partial contract projection",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "none; no oracle output is committed"
+  },
+  "normalization": {
+    "ignored_fields": ["sample.hn", "ephemeral_ports", "temporary_paths", "arrival_order", "JVM_object_ids"],
+    "timing_tolerances": {
+      "timestamp": {"comparison": "descriptor-only", "allowed_variance": "wall-clock value is recorded by a future run but not asserted"},
+      "elapsed": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000, "reason": "sender scheduling and final drain are external"},
+      "latency": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000, "reason": "remote result delivery is external"},
+      "connect_time": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000, "reason": "RMI connection setup is external"},
+      "idle_time": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000, "reason": "idle-time reporting is external"}
+    },
+    "byte_policy": {"bytes": "retained; no normalization", "sent_bytes": "retained; no normalization"},
+    "reason": "This partial projection is mode-specific about sender reduction and flush boundaries while deliberately omitting unobserved event counts and runtime values."
+  }
+}

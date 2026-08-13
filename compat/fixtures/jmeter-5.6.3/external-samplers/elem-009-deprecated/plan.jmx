@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="ELEM-009 deprecated alias inventory" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="External placeholders" enabled="true">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="EXTERNAL_FIXTURE_STATUS" elementType="Argument">
+            <stringProp name="Argument.name">EXTERNAL_FIXTURE_STATUS</stringProp>
+            <stringProp name="Argument.value">external-unavailable</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="EXTERNAL_PLACEHOLDER" elementType="Argument">
+            <stringProp name="Argument.name">EXTERNAL_PLACEHOLDER</stringProp>
+            <stringProp name="Argument.value">not-configured</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+      <collectionProp name="TestPlan.thread_groups"/>
+      <stringProp name="TestPlan.comments">Original legacy aliases for BSF, the old report-plan family, and deprecated MongoDB. Preserve these nodes and report unavailable capability rather than silently dropping or remapping them.</stringProp>
+      <stringProp name="TestPlan.user_define_classpath"></stringProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="One legacy inventory user" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="One bounded iteration" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">1</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">0</stringProp>
+        <longProp name="ThreadGroup.start_time">0</longProp>
+        <longProp name="ThreadGroup.end_time">0</longProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <stringProp name="ThreadGroup.duration"></stringProp>
+        <stringProp name="ThreadGroup.delay"></stringProp>
+      </ThreadGroup>
+      <hashTree>
+        <BSFSampler guiclass="TestBeanGUI" testclass="BSFSampler" testname="Deprecated BSF sampler" enabled="false">
+          <stringProp name="filename">external-fixture/script.bsf</stringProp>
+          <stringProp name="scriptLanguage">beanshell</stringProp>
+          <stringProp name="parameters">fixture-parameter</stringProp>
+          <stringProp name="script">return 'fixture';</stringProp>
+        </BSFSampler>
+        <hashTree/>
+
+        <BSFAssertion guiclass="AssertionGui" testclass="BSFAssertion" testname="Deprecated BSF assertion" enabled="false">
+          <stringProp name="filename">external-fixture/assertion.bsf</stringProp>
+          <stringProp name="scriptLanguage">beanshell</stringProp>
+          <stringProp name="parameters">fixture-parameter</stringProp>
+          <stringProp name="script">return true;</stringProp>
+        </BSFAssertion>
+        <hashTree/>
+
+        <BSFPreProcessor guiclass="TestBeanGUI" testclass="BSFPreProcessor" testname="Deprecated BSF pre-processor" enabled="false">
+          <stringProp name="filename">external-fixture/pre.bsf</stringProp>
+          <stringProp name="scriptLanguage">beanshell</stringProp>
+          <stringProp name="parameters">fixture-parameter</stringProp>
+          <stringProp name="script">vars.put('fixture', 'value');</stringProp>
+        </BSFPreProcessor>
+        <hashTree/>
+
+        <BSFPostProcessor guiclass="TestBeanGUI" testclass="BSFPostProcessor" testname="Deprecated BSF post-processor" enabled="false">
+          <stringProp name="filename">external-fixture/post.bsf</stringProp>
+          <stringProp name="scriptLanguage">beanshell</stringProp>
+          <stringProp name="parameters">fixture-parameter</stringProp>
+          <stringProp name="script">vars.put('post', 'value');</stringProp>
+        </BSFPostProcessor>
+        <hashTree/>
+
+        <BSFTimer guiclass="TestBeanGUI" testclass="BSFTimer" testname="Deprecated BSF timer" enabled="false">
+          <stringProp name="filename">external-fixture/timer.bsf</stringProp>
+          <stringProp name="scriptLanguage">beanshell</stringProp>
+          <stringProp name="parameters">fixture-parameter</stringProp>
+          <stringProp name="script">return 0;</stringProp>
+        </BSFTimer>
+        <hashTree/>
+
+        <BSFListener guiclass="TestBeanGUI" testclass="BSFListener" testname="Deprecated BSF listener" enabled="false">
+          <stringProp name="filename">external-fixture/listener.bsf</stringProp>
+          <stringProp name="scriptLanguage">beanshell</stringProp>
+          <stringProp name="parameters">fixture-parameter</stringProp>
+          <stringProp name="script">return;</stringProp>
+        </BSFListener>
+        <hashTree/>
+
+        <!-- These report-plan names are absent from pinned 5.6.3 SaveService aliases.
+             They are opaque preservation records, never executable capabilities. -->
+        <ReportPlan guiclass="ReportPlanGui" testclass="ReportPlan" testname="Legacy Report Plan alias" enabled="false">
+          <stringProp name="ReportPlan.output">external-fixture/report</stringProp>
+          <stringProp name="ReportPlan.title">static legacy report descriptor</stringProp>
+        </ReportPlan>
+        <hashTree/>
+
+        <ReportTable guiclass="ReportTableGui" testclass="ReportTable" testname="Legacy Report Table alias" enabled="false">
+          <stringProp name="ReportTable.columns">label,elapsed,success</stringProp>
+        </ReportTable>
+        <hashTree/>
+
+        <HTMLReportWriter guiclass="HTMLReportWriterGui" testclass="HTMLReportWriter" testname="Legacy HTML Report Writer alias" enabled="false">
+          <stringProp name="HTMLReportWriter.output">external-fixture/report.html</stringProp>
+        </HTMLReportWriter>
+        <hashTree/>
+
+        <ReportPage guiclass="ReportPageGui" testclass="ReportPage" testname="Legacy Report Page alias" enabled="false">
+          <stringProp name="ReportPage.name">fixture-page</stringProp>
+        </ReportPage>
+        <hashTree/>
+
+        <LineGraph guiclass="LineGraphGui" testclass="LineGraph" testname="Legacy Line Graph alias" enabled="false">
+          <stringProp name="LineGraph.metric">elapsed</stringProp>
+        </LineGraph>
+        <hashTree/>
+
+        <BarChart guiclass="BarChartGui" testclass="BarChart" testname="Legacy Bar Chart alias" enabled="false">
+          <stringProp name="BarChart.metric">success</stringProp>
+        </BarChart>
+        <hashTree/>
+
+        <MongoSourceElement guiclass="TestBeanGUI" testclass="MongoSourceElement" testname="Deprecated MongoDB source alias" enabled="false">
+          <stringProp name="connection">mongodb://db.external.invalid:27017</stringProp>
+          <stringProp name="source">external-mongo-source</stringProp>
+        </MongoSourceElement>
+        <hashTree/>
+
+        <MongoScriptSampler guiclass="TestBeanGUI" testclass="MongoScriptSampler" testname="Deprecated MongoDB script alias" enabled="false">
+          <stringProp name="MongoScriptSampler.source">external-mongo-source</stringProp>
+          <stringProp name="MongoScriptSampler.database">fixture</stringProp>
+          <stringProp name="MongoScriptSampler.username">${EXTERNAL_PLACEHOLDER}</stringProp>
+          <stringProp name="MongoScriptSampler.password">${EXTERNAL_PLACEHOLDER}</stringProp>
+          <stringProp name="MongoScriptSampler.script">return { legacy: true };</stringProp>
+        </MongoScriptSampler>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

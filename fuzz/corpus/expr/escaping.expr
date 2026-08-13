@@ -1,0 +1,1 @@
+${__changeCase(he\\,llo,UPPER)} literal \\${not-a-reference} ${__urlencode(a b&c)}

@@ -1,0 +1,25 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JTL-FIELDS",
+  "format": "jtl-csv",
+  "contract_kind": "invalid-input-contract",
+  "projection_schema": "error-contract-v1",
+  "comparator_ready": false,
+  "evidence_status": "planned",
+  "expectation_basis": "Stable parser-error categories are planned static non-comparator targets; no invalid-input oracle run was measured.",
+  "header": [],
+  "rows": [],
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "Invalid CSV contracts contain no successful projection; each listed input must return its declared typed parse error."
+  },
+  "contracts": [
+    {"id": "CSV-DUPLICATE-HEADER-001", "path": "inputs/csv/invalid-duplicate-header.csv", "expected_error_code": "jtl-parse", "expected_error_detail": "CSV JTL header repeats a column"},
+    {"id": "CSV-EMPTY-HEADER-001", "path": "inputs/csv/invalid-empty-header.csv", "expected_error_code": "jtl-parse", "expected_error_detail": "CSV JTL header contains an empty column"},
+    {"id": "CSV-RAGGED-ROW-001", "path": "inputs/csv/invalid-ragged-row.csv", "expected_error_code": "jtl-parse", "expected_error_detail": "CSV row field count differs from header"},
+    {"id": "CSV-UNCLOSED-QUOTE-001", "path": "inputs/csv/invalid-unclosed-quote.csv", "expected_error_code": "jtl-parse", "expected_error_detail": "CSV has an unterminated quoted field"},
+    {"id": "CSV-AFTER-QUOTE-001", "path": "inputs/csv/invalid-after-quote.csv", "expected_error_code": "jtl-parse", "expected_error_detail": "CSV has characters after a closing quote"}
+  ]
+}

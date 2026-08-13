@@ -1,0 +1,191 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-CROSS-PLATFORM-HEADLESS-GUI",
+  "format": "jmx-semantic",
+  "evidence_status": "planned",
+  "normalization_policy_refs": ["NORM-CONFIG-001", "NORM-ENV-001", "NORM-EXTERNAL-001"],
+  "projection_schema": "headless-gui-settings-matrix",
+  "expectation_basis": "Original GUI metadata and explicit environment axes; no GUI or oracle output was measured.",
+  "projection_policy": {
+    "kind": "declarative-static-projection",
+    "jmx_semantic_role": "GUI topology/settings and environment contract metadata, not a captured JMX/JTL result",
+    "runtime_observations": false,
+    "comparator_route": "static-descriptor",
+    "status": "planned"
+  },
+  "matrix_status": "future-ci-targets-only",
+  "current_ci": {
+    "status": "not-configured",
+    "targets": [],
+    "runs_recorded": 0,
+    "note": "The six target rows below are future CI lane descriptors, not current GUI or environment evidence."
+  },
+  "target_matrix": [
+    {"target_os": "linux", "architecture": "x86_64", "target_triple": "x86_64-unknown-linux-gnu", "status": "planned", "run_status": "not-run"},
+    {"target_os": "linux", "architecture": "arm64", "target_triple": "aarch64-unknown-linux-gnu", "status": "planned", "run_status": "not-run"},
+    {"target_os": "macos", "architecture": "x86_64", "target_triple": "x86_64-apple-darwin", "status": "planned", "run_status": "not-run"},
+    {"target_os": "macos", "architecture": "arm64", "target_triple": "aarch64-apple-darwin", "status": "planned", "run_status": "not-run"},
+    {"target_os": "windows", "architecture": "x86_64", "target_triple": "x86_64-pc-windows-msvc", "status": "planned", "run_status": "not-run"},
+    {"target_os": "windows", "architecture": "arm64", "target_triple": "aarch64-pc-windows-msvc", "status": "planned", "run_status": "not-run"}
+  ],
+  "target_outcomes": [
+    {"target_os": "linux", "architecture": "x86_64", "target_triple": "x86_64-unknown-linux-gnu", "launcher": "bin/jmeter", "separator": "/", "environment_rows_ref": "#/environment_cases", "display_policy": "nongui-no-display;gui-declared-display", "unicode_policy": "preserve-source-spelling-and-record-result", "status": "planned", "observed": false, "run_status": "not-run"},
+    {"target_os": "linux", "architecture": "arm64", "target_triple": "aarch64-unknown-linux-gnu", "launcher": "bin/jmeter", "separator": "/", "environment_rows_ref": "#/environment_cases", "display_policy": "nongui-no-display;gui-declared-display", "unicode_policy": "preserve-source-spelling-and-record-result", "status": "planned", "observed": false, "run_status": "not-run"},
+    {"target_os": "macos", "architecture": "x86_64", "target_triple": "x86_64-apple-darwin", "launcher": "bin/jmeter", "separator": "/", "environment_rows_ref": "#/environment_cases", "display_policy": "nongui-no-display;gui-declared-display", "unicode_policy": "preserve-source-spelling-and-record-result", "status": "planned", "observed": false, "run_status": "not-run"},
+    {"target_os": "macos", "architecture": "arm64", "target_triple": "aarch64-apple-darwin", "launcher": "bin/jmeter", "separator": "/", "environment_rows_ref": "#/environment_cases", "display_policy": "nongui-no-display;gui-declared-display", "unicode_policy": "preserve-source-spelling-and-record-result", "status": "planned", "observed": false, "run_status": "not-run"},
+    {"target_os": "windows", "architecture": "x86_64", "target_triple": "x86_64-pc-windows-msvc", "launcher": "bin/jmeter.bat", "separator": "\\", "environment_rows_ref": "#/environment_cases", "display_policy": "nongui-no-display;gui-declared-display", "unicode_policy": "preserve-source-spelling-and-record-result", "status": "planned", "observed": false, "run_status": "not-run"},
+    {"target_os": "windows", "architecture": "arm64", "target_triple": "aarch64-pc-windows-msvc", "launcher": "bin/jmeter.bat", "separator": "\\", "environment_rows_ref": "#/environment_cases", "display_policy": "nongui-no-display;gui-declared-display", "unicode_policy": "preserve-source-spelling-and-record-result", "status": "planned", "observed": false, "run_status": "not-run"}
+  ],
+  "environment_cases": [
+    {
+      "id": "profile-baseline-headless",
+      "locale": "en-US",
+      "timezone": "UTC",
+      "charset": "UTF-8",
+      "headless": true,
+      "display": {"mode": "none", "required": false, "status": "planned"},
+      "environment_allowlist": [],
+      "jvm_system_properties": {"user.language": "en", "user.region": "US", "user.timezone": "UTC", "file.encoding": "UTF-8", "java.awt.headless": "true"},
+      "launcher_environment": {},
+      "status": "planned",
+      "observed": false,
+      "run_status": "not-run",
+      "expected_observables": {"effective_locale": "en-US", "effective_timezone": "UTC", "effective_charset": "UTF-8", "display_access": "must-not-access"}
+    },
+    {
+      "id": "explicit-locale-headless",
+      "locale": "fr-FR",
+      "timezone": "UTC",
+      "charset": "UTF-8",
+      "headless": true,
+      "display": {"mode": "none", "required": false, "status": "planned"},
+      "environment_allowlist": [],
+      "jvm_system_properties": {"user.language": "fr", "user.region": "FR", "user.timezone": "UTC", "file.encoding": "UTF-8", "java.awt.headless": "true"},
+      "launcher_environment": {},
+      "status": "planned",
+      "observed": false,
+      "run_status": "not-run",
+      "expected_observables": {"effective_locale": "fr-FR", "effective_timezone": "UTC", "effective_charset": "UTF-8", "display_access": "must-not-access"}
+    },
+    {
+      "id": "explicit-timezone-headless",
+      "locale": "en-US",
+      "timezone": "America/Los_Angeles",
+      "charset": "UTF-8",
+      "headless": true,
+      "display": {"mode": "none", "required": false, "status": "planned"},
+      "environment_allowlist": [],
+      "jvm_system_properties": {"user.language": "en", "user.region": "US", "user.timezone": "America/Los_Angeles", "file.encoding": "UTF-8", "java.awt.headless": "true"},
+      "launcher_environment": {},
+      "status": "planned",
+      "observed": false,
+      "run_status": "not-run",
+      "expected_observables": {"effective_locale": "en-US", "effective_timezone": "America/Los_Angeles", "effective_charset": "UTF-8", "display_access": "must-not-access"}
+    },
+    {
+      "id": "explicit-charset-headless",
+      "locale": "en-US",
+      "timezone": "UTC",
+      "charset": "ISO-8859-1",
+      "headless": true,
+      "display": {"mode": "none", "required": false, "status": "planned"},
+      "environment_allowlist": [],
+      "jvm_system_properties": {"user.language": "en", "user.region": "US", "user.timezone": "UTC", "file.encoding": "ISO-8859-1", "java.awt.headless": "true"},
+      "launcher_environment": {},
+      "status": "planned",
+      "observed": false,
+      "run_status": "not-run",
+      "expected_observables": {"effective_locale": "en-US", "effective_timezone": "UTC", "effective_charset": "ISO-8859-1", "display_access": "must-not-access"}
+    },
+    {
+      "id": "gui-display-declared",
+      "locale": "en-US",
+      "timezone": "UTC",
+      "charset": "UTF-8",
+      "headless": false,
+      "display": {"mode": "declared", "id": "future-ci-display", "required": true, "status": "planned"},
+      "environment_allowlist": [],
+      "jvm_system_properties": {"user.language": "en", "user.region": "US", "user.timezone": "UTC", "file.encoding": "UTF-8", "java.awt.headless": "false"},
+      "launcher_environment": {},
+      "status": "planned",
+      "observed": false,
+      "run_status": "not-run",
+      "expected_observables": {"effective_locale": "en-US", "effective_timezone": "UTC", "effective_charset": "UTF-8", "display_access": "declared-only"}
+    }
+  ],
+  "source_topology_contract": {
+    "root": {"tag": "jmeterTestPlan", "version": "1.2", "properties": "5.0", "jmeter": "5.6.3"},
+    "ordered_nodes": ["TestPlan", "PlatformSettings", "ThreadGroup", "DebugSampler"],
+    "gui_classes": ["TestPlanGui", "com.example.jmeter.PlatformSettingsGui", "ThreadGroupGui", "TestBeanGUI"],
+    "unknown_extension_policy": "retain PlatformSettings and every property in headless load/edit/save; execution requires explicit capability",
+    "headless_persistence": "GUI classes and settings remain source metadata in nongui operations",
+    "source_encoding": "UTF-8",
+    "literal_non_ascii_values": ["café", "雪"],
+    "observable_identity_fields": ["source_path", "node_id", "testclass", "guiclass", "testname", "enabled", "ordered_position"],
+    "plan_probe_variables": {
+      "display_mode": "headless",
+      "locale_probe": "en-US",
+      "timezone_probe": "UTC",
+      "charset_probe": "UTF-8",
+      "headless_probe": "true",
+      "display_probe": "none"
+    }
+  },
+  "settings_contract": [
+    {"name": "look_and_feel", "wire_property": "PlatformSettings.look_and_feel", "source_value": "system", "status": "planned"},
+    {"name": "toolbar", "wire_property": "PlatformSettings.toolbar", "source_value": "visible", "status": "planned"},
+    {"name": "tree", "wire_property": "PlatformSettings.tree_state", "source_value": "expanded:TestPlan,collapsed:WorkBench", "status": "planned"},
+    {"name": "undo", "wire_property": "PlatformSettings.undo_history", "source_value": "5", "status": "planned"},
+    {"name": "locale", "wire_property": "PlatformSettings.locale", "source_value": "en-US", "status": "planned"},
+    {"name": "timezone", "wire_property": "PlatformSettings.timezone", "source_value": "UTC", "status": "planned"},
+    {"name": "charset", "wire_property": "PlatformSettings.charset", "source_value": "UTF-8", "status": "planned"},
+    {"name": "headless", "wire_property": "PlatformSettings.headless", "source_value": "true", "status": "planned"},
+    {"name": "display", "wire_property": "PlatformSettings.display", "source_value": "none", "status": "planned"}
+  ],
+  "capability_error_contract": {
+    "gui_requested_without_declared_display": {
+      "status": "planned",
+      "unsupported_error_code": "unsupported-capability",
+      "stable_error_code": "runtime.capability.unsupported",
+      "stable_error_code_status": "planned",
+      "cli_exit_class": "capability.unavailable",
+      "capability_id": "gui.display",
+      "preserve_source_document": true,
+      "error_context_fields": ["profile_id", "capability", "operation", "mode", "headless", "target_os", "target_triple", "source_path", "node_id"]
+    },
+    "unknown_platform_settings_execution": {
+      "status": "planned",
+      "unsupported_error_code": "unsupported-capability",
+      "stable_error_code": "runtime.capability.unsupported",
+      "stable_error_code_status": "planned",
+      "cli_exit_class": "capability.unavailable",
+      "capability_id": "platform.gui-settings",
+      "preserve_source_document": true,
+      "error_context_fields": ["profile_id", "capability", "operation", "testclass", "guiclass", "source_path", "node_id"]
+    }
+  },
+  "observable_environment_contract": {
+    "status": "planned",
+    "materialization_fields": ["environment_allowlist", "jvm_system_properties", "display", "launcher_environment"],
+    "row_status_fields": ["status", "observed", "run_status"],
+    "locale": {"input_field": "command.locale", "expected_field": "effective_locale", "source_field": "PlatformSettings.locale", "must_record": true},
+    "timezone": {"input_field": "command.timezone", "expected_field": "effective_timezone", "source_field": "PlatformSettings.timezone", "must_record": true},
+    "charset": {"input_field": "command.default_charset", "expected_field": "effective_charset", "source_field": "PlatformSettings.charset", "must_record": true},
+    "headless": {"input_field": "environment_cases[].headless", "expected_field": "headless", "display_field": "display_access", "must_record": true},
+    "no_ambient_fallback": "A missing or unavailable locale, timezone, charset, or display must produce a typed diagnostic; it must not be replaced by a host default without recording the source and capability context."
+  },
+  "normalization": {
+    "ignored_fields": ["runtime.hostname", "runtime.display_id", "runtime.ephemeral_root"],
+    "reason": "GUI settings, guiclass/testclass names, ordered source topology, environment axis values, and capability categories remain observable; no host display or runtime measurement exists to compare."
+  },
+  "generated_from": {
+    "generator": "Original jmeter-rs static headless GUI matrix",
+    "generator_version": "not applicable",
+    "oracle_status": "not-run",
+    "oracle_command": "future pinned JMeter 5.6.3 headless/GUI recipe only; no process was started",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "ignored; no oracle artifacts collected"
+  }
+}

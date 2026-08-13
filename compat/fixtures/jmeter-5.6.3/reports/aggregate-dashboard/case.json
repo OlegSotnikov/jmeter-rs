@@ -1,0 +1,62 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-REPORT-AGGREGATE-DASHBOARD",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-REPORT-001",
+  "conformance_ids": ["REPORT-001", "REPORT-002"],
+  "normalization_policy_refs": ["NORM-REPORT-001", "NORM-JTL-001", "NORM-TIME-001", "NORM-ENV-001"],
+  "plan": {"path": "plan.jmx", "sha256": "f66df4807aee9daf2c7211df80f820da9553bd81dc1b34d5bc42063f3992efd2"},
+  "property_files": [{"path": "report.properties", "sha256": "a9ebe901bfd2b5a6aecc11edea96e7ee09dc5bf497a9ed43036ff923a850b6c9", "format": "report-static"}],
+  "input_files": [
+    {"path": "inputs/aggregate.xml", "sha256": "fe4dbf2171c156484e92ebd9fa9d05ada7ec2bfbb4cc8c5764cfd148a2e2b05d", "format": "jtl-xml"},
+    {"path": "inputs/aggregate.csv", "sha256": "0883f847cd0d1a1240a64c7de7b30c0fa57551cfd40d897f4ef746ca05362104", "format": "jtl-csv"},
+    {"path": "inputs/empty.xml", "sha256": "aa45b8267d95fa0e433e37fa29cc9372a10f7156196849e2909a2c51c43b1f00", "format": "jtl-xml"}
+  ],
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/reports/aggregate-dashboard",
+    "mode": "nongui",
+    "argv_templates": [
+      ["jmeter", "-n", "-q", "report.properties", "-t", "plan.jmx", "-l", "<ignored>/listener.xml", "-j", "<ignored>/listener.log"]
+    ],
+    "dashboard_command_templates": [
+      ["jmeter", "-g", "inputs/aggregate.xml", "-q", "report.properties", "-o", "<ignored>/dashboard"],
+      ["jmeter", "-g", "inputs/empty.xml", "-q", "report.properties", "-o", "<ignored>/empty-dashboard"]
+    ],
+    "network": "none",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null
+  },
+  "bounds": {
+    "schema_id": "jmeter-rs.fixture-bounds",
+    "max_manifest_bytes": 262144,
+    "max_input_bytes": 65536,
+    "max_samples": 128,
+    "max_property_text_bytes": 8192,
+    "max_result_bytes": 1048576,
+    "max_artifact_bytes": 1048576,
+    "max_log_bytes": 65536,
+    "max_process_output_bytes": 65536,
+    "max_process_wait_seconds": 30
+  },
+  "execution": {
+    "status": "not_run",
+    "process_exit": null,
+    "sample_count": 7,
+    "sample_count_semantics": "input_rows; weighted listener represented_sample_count is 8",
+    "input_row_count": 7,
+    "represented_sample_count": 8,
+    "raw_artifacts": "oracle-runs/reports/aggregate-dashboard/ (ignored; no artifact exists for this static-only case)",
+    "expected": ["expected/input-xml.json", "expected/input-csv.json", "expected/listener.json", "expected/dashboard.json", "expected/empty.json"]
+  },
+  "limitations": [
+    "The bounded plan and command templates are retained for a future pinned differential run; this corpus was not executed through Java, JMeter, a report generator, or a subprocess, so no process exit is asserted.",
+    "The XML and CSV files are original JTL-shaped inputs. Their descriptors are exact static expectations, not promoted oracle evidence.",
+    "The listener treats SampleCount=2/ErrorCount=1 as a StatisticalSampleResult aggregate: t=600 is a 600 ms total over two represented samples, so its effective elapsed value is 300 ms per sample; bytes remain per-row totals.",
+    "The dashboard consumes rows, not StatisticalSampleResult weights: the seven input rows remain seven dashboard observations, and the absent elapsed field is the deterministic zero value used by the report reader.",
+    "The listener uses Math.round(count * percentile) weighted rank and weighted APDEX S=4/T=1/F=3; the dashboard uses the explicit LEGACY p*(n+1) estimator over its bounded FIFO window and row APDEX S=3/T=1/F=3. Their expected values remain separate.",
+    "The empty input uses the declared empty_combined_report_surface shape variant; non-empty listener and dashboard descriptors use separate nonempty_report_surface documents."
+  ]
+}

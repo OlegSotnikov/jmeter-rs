@@ -1,0 +1,138 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-HARNESS-REPRODUCIBILITY",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored bounded manifest and evidence projections for pinned JMeter oracle reproducibility, external dependency accounting, and fail-closed not-run outcomes.",
+    "upstream_plan_copied": false,
+    "upstream_source_copied": false,
+    "source_material": "Clean-room data design from docs/architecture.md, docs/research/rust-testing-strategy.md, and the active compatibility profile; no JMeter plan, Java source, binary, plugin, service, or raw result is redistributed."
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter 5.6.3 is a pinned external oracle reference only; no archive, signature, key, Java class, plugin, service image, certificate, or result artifact is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "source_commit_role": "upstream JMeter release pin; not a jmeter-rs run identity",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_digest_role": "profile-declared SHA-512; not observed in this static corpus",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "signature_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.asc",
+    "keys_url": "https://archive.apache.org/dist/jmeter/KEYS",
+    "signing_fingerprint": "C4923F9ABFB2F1A06F08E88BAC214CAA0612B399",
+    "signing_fingerprint_role": "required OpenPGP signer pin; not observed in this static corpus",
+    "declared_at": "2026-08-12",
+    "retrieved_at": null,
+    "sha512_verified_before_execution": false,
+    "signature_verified_before_execution": false,
+    "verification_status": "not-run-static",
+    "verification_scope": "The digest and signer are profile pins only; this static corpus did not fetch the archive, verify its digest, or authenticate its OpenPGP signature. A future runner must pass both named gates before unpacking or execution."
+  },
+  "runtime": {
+    "java": {
+      "vendor": null,
+      "version": null,
+      "vm": null,
+      "major": null,
+      "declared_vendor": "temurin",
+      "declared_version": "17.0.20",
+      "declared_architecture": "x64",
+      "observed_vendor": null,
+      "observed_version": null,
+      "observed_vm": null,
+      "status": "declared-not-run"
+    },
+    "declared_target_triple": "x86_64-unknown-linux-gnu",
+    "declared_os_image": "ubuntu-24.04",
+    "observed_target_triple": null,
+    "observed_os_image": null,
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "record but normalize only when a declared policy allows it; no hostname was observed",
+    "environment_allowlist": ["LANG=C", "LC_ALL=C", "TZ=UTC", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "not-run; a future oracle run may contain only the profile-pinned distribution (SHA-512 checked; PGP verification required before oracle use) plus manifest-declared artifacts",
+    "classpath_declared_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "classpath_observed_sha512": null,
+    "source_date_epoch": null
+  },
+  "inputs": {
+    "public_network_used": false,
+    "secrets_or_credentials": false,
+    "jmeter_rs_source_commit": null,
+    "jmeter_rs_source_commit_status": "not-observed-static",
+    "source_hashes": {
+      "Cargo.toml": {"sha256": "d60d2010e4334e0a71feed6e3c655373c48df61354f245c1d828a393a0a75a0a", "status": "source-pinned-not-run"},
+      "Cargo.lock": {"sha256": "ba8d639c1198012cda6bf43db4cbb5f56e2c6da01f7177cfb71a3c96197e3043", "status": "source-pinned-not-run"},
+      "rust-toolchain.toml": {"sha256": "a55035e3085a595e4e73637e5f26e0f89f880d61188888da4e7d023f9144ebf3", "status": "source-pinned-not-run"}
+    },
+    "profile_sha256": "83ad63eb679cc16ffe6fa01f5f77e85203602d4d2cbfc311f74db44b6eac9497",
+    "raw_artifacts": "none; references in the evidence projection point outside Git only",
+    "execution_performed": false
+  },
+  "harness_provenance": {
+    "fixture_family_id": "FX-HARNESS-001",
+    "compatibility_ids": ["TEST-001", "TEST-002", "TEST-004"],
+    "normalization_policy_refs": ["NORM-ENV-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001", "NORM-TIME-001"],
+    "coverage_by_conformance_id": {
+      "TEST-001": {
+        "normalization_policy_refs": ["NORM-ENV-001", "NORM-SECURITY-001"],
+        "external_runtime_boundary_ids": []
+      },
+      "TEST-002": {
+        "normalization_policy_refs": ["NORM-EXTERNAL-001", "NORM-ENV-001", "NORM-SECURITY-001"],
+        "external_runtime_boundary_ids": ["EXT-JVM-001", "EXT-SERVICE-001", "EXT-TLS-001", "EXT-PLUGIN-001"]
+      },
+      "TEST-004": {
+        "normalization_policy_refs": ["NORM-EXTERNAL-001", "NORM-SECURITY-001", "NORM-TIME-001"],
+        "external_runtime_boundary_ids": ["EXT-RMI-001", "EXT-TLS-001", "EXT-SERVICE-001"]
+      }
+    },
+    "schema_owner": "tools/xtask owns the common case/provenance validation contract; harness-specific documents are data projections",
+    "source_fixture_present": true,
+    "oracle_evidence_materialized": false,
+    "execution_evidence": false
+  },
+  "bounds": {
+    "max_manifest_bytes": 262144,
+    "max_evidence_bytes": 262144,
+    "max_process_output_bytes": 1048576,
+    "max_artifact_bytes": 134217728,
+    "max_raw_artifact_bytes": 134217728,
+    "max_jtl_bytes": 67108864,
+    "max_log_bytes": 1048576,
+    "max_diff_entries": 128,
+    "max_diff_bytes": 1048576,
+    "max_raw_diff_bytes": 1048576,
+    "max_human_diff_bytes": 8192,
+    "max_environment_entries": 32,
+    "max_plugin_pins": 16,
+    "max_service_pins": 16,
+    "max_external_retries": 2,
+    "oracle_timeout_seconds": 300
+  },
+  "oracle_execution": {
+    "status": "not-run-static",
+    "performed": false,
+    "reason": "The task is restricted to static JSON/schema/hash/provenance inputs; no Java, JMeter, subprocess, container, service, or network execution is permitted.",
+    "raw_artifacts": "none",
+    "expected_projections": "source-only contracts; no measured values or conformance claim"
+  },
+  "materialization": {
+    "source_fixture_present": true,
+    "oracle_evidence_materialized": false,
+    "observed_run": false
+  }
+}

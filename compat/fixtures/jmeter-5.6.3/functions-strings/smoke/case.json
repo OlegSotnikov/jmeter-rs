@@ -1,0 +1,73 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-FUNC-STRINGS-SMOKE",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-FUNCTIONS-001",
+  "conformance_ids": ["FUNC-001", "FUNC-002"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-JTL-001", "NORM-TIME-001", "NORM-ENV-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "04e5bfd5429a30451fa854bb1c532159c860a431018af6c56065069c17d9ea51"
+  },
+  "property_files": [
+    {
+      "path": "oracle.properties",
+      "sha256": "017f05c9923ba6e7abea0baa02e26249937c81b00bbc8ee12237ab4ba6727b3c"
+    }
+  ],
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/functions-strings/smoke",
+    "mode": "nongui",
+    "argv_template": [
+      "../../../../../jmeter-oracle-cache/apache-jmeter-5.6.3/bin/jmeter",
+      "-n",
+      "-q",
+      "oracle.properties",
+      "-t",
+      "plan.jmx",
+      "-l",
+      "<ignored>/oracle.jtl",
+      "-j",
+      "<ignored>/oracle.log"
+    ],
+    "network": "none",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "environment_allowlist": ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL=en_US.UTF-8", "LANG=en_US.UTF-8", "TZ=UTC"],
+    "jvm_requirements": {
+      "file_encoding": "UTF-8",
+      "required": true,
+      "verification": "A future oracle runner must verify JVM file.encoding=UTF-8 before execution; this static corpus does not infer it from the process locale."
+    },
+    "random_seed": null
+  },
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations_per_thread": 1,
+    "max_samplers_per_iteration": 7,
+    "max_samples": 7,
+    "max_plan_nodes": 128,
+    "max_plan_depth": 6,
+    "max_property_text_bytes": 16384,
+    "max_label_bytes": 4096,
+    "max_result_bytes": 65536,
+    "max_log_bytes": 65536,
+    "max_process_output_bytes": 65536,
+    "max_process_wait_seconds": 30
+  },
+  "execution": {
+    "status": "not-run-static-corpus",
+    "process_exit": null,
+    "process_exit_asserted": false,
+    "sample_count_asserted": true,
+    "raw_artifacts": "oracle-runs/functions-strings/smoke/ (ignored; no local evidence captured)",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "The expectation is a hand-authored semantic matrix for deterministic inputs; it is not a claim that a pinned JMeter process has run.",
+    "Disabled inventory rows cover capability-dependent built-ins without asserting random, clock, host, file, response, logging, or JVM output.",
+    "The required process_exit field is the null schema sentinel for this not-run static case and is not an observed exit status."
+  ]
+}

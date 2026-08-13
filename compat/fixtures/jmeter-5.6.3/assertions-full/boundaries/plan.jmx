@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Assertion boundary corpus" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="Original variables" enabled="true">
+        <collectionProp name="Arguments.arguments"/>
+      </elementProp>
+      <collectionProp name="TestPlan.thread_groups"/>
+      <stringProp name="TestPlan.comments">Original core-only boundary matrix for response, duration, and size assertions.</stringProp>
+      <stringProp name="TestPlan.user_define_classpath"></stringProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="One assertion user" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="One iteration" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">1</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">0</stringProp>
+        <longProp name="ThreadGroup.start_time">0</longProp>
+        <longProp name="ThreadGroup.end_time">0</longProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <stringProp name="ThreadGroup.duration"></stringProp>
+        <stringProp name="ThreadGroup.delay"></stringProp>
+      </ThreadGroup>
+      <hashTree>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="response-empty" enabled="true">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">false</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Empty response accepts negated contains" enabled="true">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp name="-1000000000">anything</stringProp>
+            </collectionProp>
+            <intProp name="Assertion.test_type">6</intProp>
+            <stringProp name="Assertion.test_field">Assertion.response_data</stringProp>
+            <stringProp name="Assertion.assume_success">false</stringProp>
+          </ResponseAssertion>
+          <hashTree/>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Empty response reports null for equals" enabled="true">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp name="-1000000001"></stringProp>
+            </collectionProp>
+            <intProp name="Assertion.test_type">8</intProp>
+            <stringProp name="Assertion.test_field">Assertion.response_data</stringProp>
+            <stringProp name="Assertion.assume_success">false</stringProp>
+          </ResponseAssertion>
+          <hashTree/>
+          <SizeAssertion guiclass="SizeAssertionGui" testclass="SizeAssertion" testname="Empty body has zero bytes" enabled="true">
+            <stringProp name="SizeAssertion.size">0</stringProp>
+            <intProp name="SizeAssertion.operator">1</intProp>
+            <stringProp name="Assertion.test_field">SizeAssertion.response_data</stringProp>
+          </SizeAssertion>
+          <hashTree/>
+        </hashTree>
+
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="response-code-boundary" enabled="true">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">false</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="Response code exact boundary" enabled="true">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp name="-1000000002">200</stringProp>
+            </collectionProp>
+            <intProp name="Assertion.test_type">8</intProp>
+            <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
+            <stringProp name="Assertion.assume_success">false</stringProp>
+          </ResponseAssertion>
+          <hashTree/>
+          <SizeAssertion guiclass="SizeAssertionGui" testclass="SizeAssertion" testname="Response code has three bytes" enabled="true">
+            <stringProp name="SizeAssertion.size">3</stringProp>
+            <intProp name="SizeAssertion.operator">1</intProp>
+            <stringProp name="Assertion.test_field">SizeAssertion.response_code</stringProp>
+          </SizeAssertion>
+          <hashTree/>
+          <SizeAssertion guiclass="SizeAssertionGui" testclass="SizeAssertion" testname="Response message has two bytes" enabled="true">
+            <stringProp name="SizeAssertion.size">2</stringProp>
+            <intProp name="SizeAssertion.operator">1</intProp>
+            <stringProp name="Assertion.test_field">SizeAssertion.response_message</stringProp>
+          </SizeAssertion>
+          <hashTree/>
+          <SizeAssertion guiclass="SizeAssertionGui" testclass="SizeAssertion" testname="Response code off by one fails" enabled="true">
+            <stringProp name="SizeAssertion.size">2</stringProp>
+            <intProp name="SizeAssertion.operator">1</intProp>
+            <stringProp name="Assertion.test_field">SizeAssertion.response_code</stringProp>
+          </SizeAssertion>
+          <hashTree/>
+        </hashTree>
+
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="duration-boundary" enabled="true">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">false</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree>
+          <DurationAssertion guiclass="DurationAssertionGui" testclass="DurationAssertion" testname="Zero duration disables assertion" enabled="true">
+            <stringProp name="DurationAssertion.duration">0</stringProp>
+          </DurationAssertion>
+          <hashTree/>
+          <DurationAssertion guiclass="DurationAssertionGui" testclass="DurationAssertion" testname="Negative duration disables assertion" enabled="true">
+            <stringProp name="DurationAssertion.duration">-1</stringProp>
+          </DurationAssertion>
+          <hashTree/>
+          <DurationAssertion guiclass="DurationAssertionGui" testclass="DurationAssertion" testname="Large duration accepts local work" enabled="true">
+            <stringProp name="DurationAssertion.duration">60000</stringProp>
+          </DurationAssertion>
+          <hashTree/>
+        </hashTree>
+
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="size-boundary" enabled="true">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">false</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree>
+          <SizeAssertion guiclass="SizeAssertionGui" testclass="SizeAssertion" testname="Size equals boundary" enabled="true">
+            <stringProp name="SizeAssertion.size">3</stringProp>
+            <intProp name="SizeAssertion.operator">1</intProp>
+            <stringProp name="Assertion.test_field">SizeAssertion.response_code</stringProp>
+          </SizeAssertion>
+          <hashTree/>
+          <SizeAssertion guiclass="SizeAssertionGui" testclass="SizeAssertion" testname="Size not-equal below boundary" enabled="true">
+            <stringProp name="SizeAssertion.size">2</stringProp>
+            <intProp name="SizeAssertion.operator">2</intProp>
+            <stringProp name="Assertion.test_field">SizeAssertion.response_code</stringProp>
+          </SizeAssertion>
+          <hashTree/>
+          <SizeAssertion guiclass="SizeAssertionGui" testclass="SizeAssertion" testname="Size greater-than below boundary" enabled="true">
+            <stringProp name="SizeAssertion.size">2</stringProp>
+            <intProp name="SizeAssertion.operator">3</intProp>
+            <stringProp name="Assertion.test_field">SizeAssertion.response_code</stringProp>
+          </SizeAssertion>
+          <hashTree/>
+          <SizeAssertion guiclass="SizeAssertionGui" testclass="SizeAssertion" testname="Size less-than above boundary" enabled="true">
+            <stringProp name="SizeAssertion.size">4</stringProp>
+            <intProp name="SizeAssertion.operator">4</intProp>
+            <stringProp name="Assertion.test_field">SizeAssertion.response_code</stringProp>
+          </SizeAssertion>
+          <hashTree/>
+          <SizeAssertion guiclass="SizeAssertionGui" testclass="SizeAssertion" testname="Size greater-or-equal exact boundary" enabled="true">
+            <stringProp name="SizeAssertion.size">3</stringProp>
+            <intProp name="SizeAssertion.operator">5</intProp>
+            <stringProp name="Assertion.test_field">SizeAssertion.response_code</stringProp>
+          </SizeAssertion>
+          <hashTree/>
+          <SizeAssertion guiclass="SizeAssertionGui" testclass="SizeAssertion" testname="Size less-or-equal exact boundary" enabled="true">
+            <stringProp name="SizeAssertion.size">3</stringProp>
+            <intProp name="SizeAssertion.operator">6</intProp>
+            <stringProp name="Assertion.test_field">SizeAssertion.response_code</stringProp>
+          </SizeAssertion>
+          <hashTree/>
+        </hashTree>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

@@ -1,0 +1,50 @@
+{
+  "schema_id": "jmeter-rs.planned-constraint-contract",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-CONTROLLERS-FULL-CRITICAL-MULTI",
+  "fixture_family_id": "FX-ELEMENTS-CORE-001",
+  "conformance_ids": ["ELEM-003", "JTL-001", "TEST-001"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-JTL-001", "NORM-ENV-001"],
+  "evidence_status": "static-only",
+  "source_only": true,
+  "raw_artifacts": null,
+  "expectation_basis": "Original bounded two-thread CriticalSectionController invariant; no Apache JMeter output was measured.",
+  "comparator_contract": {"mode": "planned-invariant", "enforcement": "not-comparator-enforced", "comparator_enforced": false, "reason": "The repository comparator accepts this static lock contract but does not enforce scheduler interleaving.", "unasserted_runtime_fields": ["scheduler interleaving", "elapsed time", "timestamps", "received bytes", "DebugSampler response text"]},
+  "save_service_contract": {"jmeter.save.saveservice.filename": "false", "responseFile": "absent"},
+  "bounds": {"max_threads": 2, "max_iterations_per_thread": 1, "max_samples": 6, "max_process_wait_seconds": 30},
+  "sample_contract": {
+    "attributes": {"s": "true", "rc": "200", "rm": "OK", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"},
+    "tn_by_thread": {
+      "Critical-section users 1-1": ["critical-before", "critical-child", "critical-after"],
+      "Critical-section users 2-1": ["critical-before", "critical-child", "critical-after"]
+    },
+    "retained_attributes": ["s", "tn", "sby", "rm", "ec"],
+    "absent_attributes": ["responseFile"]
+  },
+  "assertion_results": {
+    "configured": true,
+    "mode": "all",
+    "node": "assertionResult",
+    "child_order": ["name", "failure", "error", "failureMessage"],
+    "failure_message_property": "jmeter.save.saveservice.assertion_results_failure_message",
+    "expected_count": 0,
+    "absence": "no assertionResult nodes; this plan contains no assertion elements",
+    "retained_fields": ["name", "failure", "error", "failureMessage"]
+  },
+  "controller_contract": {
+    "testclass": "CriticalSectionController",
+    "guiclass": "CriticalSectionControllerGui",
+    "wire_properties": {"CriticalSectionController.lockName": "controllers-full-multi-thread-lock"},
+    "threads": 2,
+    "child_label": "critical-child",
+    "lock_scope": "named lock held through the child and released before critical-after"
+  },
+  "invariants": {
+    "per_thread_sequence": ["critical-before", "critical-child", "critical-after"],
+    "per_thread_count": 1,
+    "critical_child_total": 2,
+    "interleaving": "any scheduler order subject to each thread's sequence",
+    "no_duplicate_lock_entry": true
+  }
+}

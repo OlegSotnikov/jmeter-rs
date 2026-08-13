@@ -1,0 +1,52 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-TIMER-FACTOR",
+  "format": "jmx-semantic",
+  "evidence_status": "planned",
+  "source": {
+    "kind": "original-static-contract",
+    "oracle_status": "not-run",
+    "note": "No JMeter or Java process was run while creating this corpus."
+  },
+  "timer_contract": {
+    "kind": "timer-factor",
+    "property": "timer.factor",
+    "factor": 2,
+    "testclass": "UniformRandomTimer",
+    "properties": {
+      "ConstantTimer.delay": "10",
+      "RandomTimer.range": "3.0"
+    },
+    "unscaled_delay_bounds_ms": [
+      10,
+      12
+    ],
+    "scaled_delay_bounds_ms": [
+      20,
+      24
+    ],
+    "bound_semantics": "inclusive integer endpoints; configured random range has an exclusive upper boundary",
+    "labels": [
+      "factor-sample"
+    ],
+    "planned_sample_count": 12,
+    "observed_sample_count": null,
+    "sample_count_asserted": false
+  },
+  "normalization": {
+    "ignored_fields": [],
+    "timing_tolerances": {
+      "enforcement": "descriptor-only",
+      "comparator_enforced": false,
+      "sample.t": {"comparison": "descriptor-only", "allowed_variance": "oracle-pending"},
+      "sample.it": {"comparison": "descriptor-only", "allowed_variance": "oracle-pending"},
+      "sample.lt": {"comparison": "descriptor-only", "allowed_variance": "oracle-pending"},
+      "sample.ct": {"comparison": "descriptor-only", "allowed_variance": "oracle-pending"},
+      "sample.ts": {"comparison": "descriptor-only", "allowed_variance": "oracle-pending"}
+    },
+    "byte_policy": {"bytes": "retained; no normalization", "sent_bytes": "retained; no normalization"},
+    "reason": "Static JMX contract only; factor bounds are declared, while runtime delay and result timing require a future controlled-clock oracle run."
+  }
+}

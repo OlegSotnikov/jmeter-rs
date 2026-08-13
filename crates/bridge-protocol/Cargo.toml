@@ -1,0 +1,20 @@
+[package]
+name = "jmeter-rs-bridge-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# sha2 0.11.0 (MIT OR Apache-2.0, MSRV 1.85) provides the canonical
+# SHA-256 digest required by the data-only JVC2 body, identity, snapshot, and
+# sequence-chain contracts. The bridge protocol performs no I/O or runtime
+# work; the dependency is used only as a pure digest primitive.
+sha2 = { version = "=0.11.0", default-features = false }

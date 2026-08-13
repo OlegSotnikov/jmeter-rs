@@ -1,0 +1,62 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-FUNCTIONS-FILES-CONCURRENCY",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-FUNCTIONS-001",
+  "conformance_ids": ["FUNC-001", "FUNC-002", "JTL-001", "TEST-001"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-JTL-001", "NORM-TIME-001", "NORM-ENV-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "e86026ad93b14d02d21283c5902f40cfc785f19075719a31d1620603f9c2c844"
+  },
+  "property_files": [{
+    "path": "oracle.properties",
+    "sha256": "095c5d583b2401ae530bb74eaf070be96d2bf1490a53eb5b21d5bd9f21f0f981"
+  }],
+  "command": {
+    "working_directory": "<case-root>",
+    "working_directory_scope": "runner resolves <case-root> to this case directory before chdir; every relative plan, property, input, and output path is resolved below it",
+    "input_paths_relative_to": "working_directory",
+    "output_paths_relative_to": "working_directory",
+    "mode": "nongui",
+    "argv_template": ["jmeter", "-n", "-q", "oracle.properties", "-t", "plan.jmx", "-l", "<ignored>/oracle.jtl", "-j", "<ignored>/oracle.log"],
+    "network": "none",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "jvm_requirements": {
+      "file_encoding": "UTF-8",
+      "required": true,
+      "verification": "A future oracle runner must verify JVM file.encoding=UTF-8 before execution; this static corpus does not infer it from the process locale."
+    },
+    "random_seed": null
+  },
+  "bounds": {
+    "schema_id": "jmeter-rs.fixture-bounds",
+    "schema_version": 1,
+    "enforcement": "declared; not runtime-enforced by this static corpus",
+    "max_threads": 2,
+    "max_iterations_per_thread": 1,
+    "max_samplers_per_iteration": 1,
+    "max_samples": 2,
+    "max_input_bytes": 128,
+    "max_output_files": 0,
+    "max_label_bytes": 1024
+  },
+  "execution": {
+    "status": "not_run",
+    "process_exit": null,
+    "process_exit_asserted": false,
+    "sample_count": null,
+    "sample_count_status": "planned-from-topology",
+    "sample_count_asserted": false,
+    "raw_artifacts": "oracle-runs/functions-files/concurrency/ (ignored; not generated in this task)",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "This manifest is a static corpus declaration; this task does not launch Java, JMeter, or a subprocess.",
+    "Two virtual users intentionally share function-definition file state; concurrent arrival order is not asserted as a semantic order.",
+    "The bounded two-row CSV and two-line text inputs make EOF and cursor sharing finite; no ambient file or network is used."
+  ]
+}

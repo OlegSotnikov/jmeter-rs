@@ -1,0 +1,93 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JMX-TOPOLOGY",
+  "format": "jmx-semantic",
+  "evidence_status": "static-projection-pending-round-trip",
+  "rust_conformance_claim": false,
+  "expectation_basis": "Static projection of the committed JMX plan; load/save round-trip evidence is pending, and the recorded XML JTL is external raw observation only.",
+  "root": {
+    "element": "jmeterTestPlan",
+    "attributes": {"version": "1.2", "properties": "5.0", "jmeter": "5.6.3"},
+    "ordered_children": ["hashTree"]
+  },
+  "ordered_hash_tree_pairs": [
+    {
+      "element": {"tag": "TestPlan", "guiclass": "TestPlanGui", "testclass": "TestPlan", "testname": "JMX topology and typed values", "enabled": "true"},
+      "hash_tree_children": ["ThreadGroup"]
+    },
+    {
+      "element": {"tag": "ThreadGroup", "guiclass": "ThreadGroupGui", "testclass": "ThreadGroup", "testname": "One deterministic user", "enabled": "true"},
+      "hash_tree_children": ["DebugSampler"]
+    },
+    {
+      "element": {"tag": "DebugSampler", "guiclass": "TestBeanGUI", "testclass": "DebugSampler", "testname": "jmx-topology-sample", "enabled": "true"},
+      "hash_tree_children": []
+    }
+  ],
+  "typed_properties": [
+    {"path": "TestPlan/TestPlan.functional_mode", "node": "boolProp", "value": "false"},
+    {"path": "TestPlan/TestPlan.serialize_threadgroups", "node": "boolProp", "value": "false"},
+    {"path": "TestPlan/TestPlan.user_defined_variables", "node": "elementProp", "element_type": "Arguments"},
+    {"path": "TestPlan/Arguments.arguments", "node": "collectionProp", "ordered": true},
+    {"path": "TestPlan/Arguments.arguments/fixture_value", "node": "elementProp", "element_type": "Argument"},
+    {"path": "TestPlan/Arguments.arguments/fixture_value/Argument.name", "node": "stringProp", "value": "fixture_value"},
+    {"path": "TestPlan/Arguments.arguments/fixture_value/Argument.value", "node": "stringProp", "value": "left & right <value>"},
+    {"path": "TestPlan/TestPlan.thread_groups", "node": "collectionProp", "ordered": true, "empty": true},
+    {"path": "TestPlan/TestPlan.comments", "node": "stringProp", "value": "Original root metadata and alternating hashTree fixture."},
+    {"path": "TestPlan/TestPlan.user_define_classpath", "node": "stringProp", "value": ""},
+    {"path": "ThreadGroup/ThreadGroup.on_sample_error", "node": "stringProp", "value": "continue"},
+    {"path": "ThreadGroup/ThreadGroup.main_controller", "node": "elementProp", "element_type": "LoopController"},
+    {"path": "ThreadGroup/LoopController.continue_forever", "node": "boolProp", "value": "false"},
+    {"path": "ThreadGroup/LoopController.loops", "node": "stringProp", "value": "1"},
+    {"path": "ThreadGroup/ThreadGroup.num_threads", "node": "stringProp", "value": "1"},
+    {"path": "ThreadGroup/ThreadGroup.ramp_time", "node": "stringProp", "value": "0"},
+    {"path": "ThreadGroup/ThreadGroup.start_time", "node": "longProp", "value": "0"},
+    {"path": "ThreadGroup/ThreadGroup.end_time", "node": "longProp", "value": "0"},
+    {"path": "ThreadGroup/ThreadGroup.scheduler", "node": "boolProp", "value": "false"},
+    {"path": "ThreadGroup/ThreadGroup.duration", "node": "stringProp", "value": ""},
+    {"path": "ThreadGroup/ThreadGroup.delay", "node": "stringProp", "value": ""},
+    {"path": "DebugSampler/displayJMeterProperties", "node": "boolProp", "value": "false"},
+    {"path": "DebugSampler/displayJMeterVariables", "node": "boolProp", "value": "false"},
+    {"path": "DebugSampler/displaySystemProperties", "node": "boolProp", "value": "false"}
+  ],
+  "oracle_execution": {
+    "status": "external-raw-observation",
+    "comparator_ready": false,
+    "rust_conformance_claim": false,
+    "process_exit": 0,
+    "sample_count": 1,
+    "result_root": {"element": "testResults", "version": "1.2"},
+    "sample": {
+      "lb": "jmx-topology-sample",
+      "s": "true",
+      "rc": "200",
+      "rm": "OK",
+      "tn": "One deterministic user 1-1",
+      "dt": "text",
+      "de": "US-ASCII",
+      "sby": "0",
+      "sc": "1",
+      "ec": "0",
+      "ng": "1",
+      "na": "1",
+      "ignored_attributes": ["t", "it", "lt", "ct", "ts", "by"]
+    }
+  },
+  "generated_from": {
+    "status": "external-raw-observation",
+    "rust_conformance_claim": false,
+    "comparator_ready": false,
+    "generator": "Apache JMeter",
+    "generator_version": "5.6.3",
+    "random_seed": null,
+    "oracle_command": "env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C LANG=C TZ=UTC jmeter-oracle-cache/apache-jmeter-5.6.3/bin/jmeter -n -q compat/fixtures/jmeter-5.6.3/jmx-topology/oracle.properties -t compat/fixtures/jmeter-5.6.3/jmx-topology/plan.jmx -l oracle-runs/jmx-topology/oracle.jtl -j oracle-runs/jmx-topology/oracle.log",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "oracle-runs/jmx-topology/ (ignored; local evidence only)"
+  },
+  "normalization": {
+    "ignored_fields": ["oracle_execution.sample.t", "oracle_execution.sample.it", "oracle_execution.sample.lt", "oracle_execution.sample.ct", "oracle_execution.sample.ts", "oracle_execution.sample.by", "xml_lexical_whitespace"],
+    "reason": "JMX semantics preserve ordered structure, attributes, typed values, and XML-decoded content. The smoke JTL sample's timing and Debug Sampler byte fields are wall-clock/runtime dependent."
+  }
+}

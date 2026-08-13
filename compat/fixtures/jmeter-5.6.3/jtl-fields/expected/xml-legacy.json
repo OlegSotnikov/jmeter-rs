@@ -1,0 +1,23 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JTL-FIELDS",
+  "format": "jtl-xml",
+  "contract_kind": "jmeter-reader-compat",
+  "comparator_ready": false,
+  "reader_semantics": "The legacy rs response-code attribute is accepted on read; this is not a JMeter writer-wire projection.",
+  "evidence_status": "planned",
+  "expectation_basis": "Hand-authored static non-comparator reader projection of inputs/xml/legacy-rs.xml; no Apache JMeter output was measured.",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 1,
+  "samples": [{
+    "position": 0,
+    "element": "sample",
+    "attributes": {"rs": "201", "s": "true", "lb": "legacy-rs", "rm": "Created"}
+  }],
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "The legacy rs response-code attribute is retained as an input compatibility target; a future decoder may expose it as responseCode without changing the raw diagnostic."
+  }
+}

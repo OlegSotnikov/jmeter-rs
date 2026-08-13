@@ -1,0 +1,27 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-DISTRIBUTED-RMI",
+  "format": "jmx-semantic",
+  "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+  "intended_result_format": "jtl-xml",
+  "projection": {"status": "partial", "complete": false, "scenario": "stop-stoptest", "scope": ["immediate worker test stop", "bounded scheduler plan"], "omitted": ["observed exit outcome", "event count", "stop timing"]},
+  "scenario_contract": {
+    "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/stop.properties", "-t", "stop-plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-l", "oracle-runs/distributed/stop-stoptest.jtl", "-j", "oracle-runs/distributed/stop-stoptest.log"],
+    "control_protocol": "udp",
+    "controller_host": "127.0.0.1",
+    "controller_port": "base+7",
+    "control_argv": ["StopTestNow"],
+    "wire_command": "StopTestNow\\n",
+    "control_mode": "immediate",
+    "plan": "stop-plan.jmx",
+    "bounded_scheduler_seconds": 30,
+    "control_wait_seconds": 10,
+    "flush_obligation": "runner records which accepted sender work is covered by positive SenderDrainProof before immediate stop; not observed in static validation",
+    "exit_status": "not asserted"
+  },
+  "result_field_policy": {"retained": ["success", "response_code", "response_message", "thread_name", "worker_identity", "iteration_marker", "bytes", "sent_bytes", "elapsed", "latency", "connect_time", "idle_time", "timestamp", "exit_status"], "byte_fields": "retained; no normalization"},
+  "generated_from": {"generator": "original static fixture authoring", "generator_version": "not applicable", "oracle_execution": "not run; this is a partial lifecycle contract projection", "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076", "raw_artifacts": "none; no oracle output is committed"},
+  "normalization": {"ignored_fields": ["sample.hn", "ephemeral_ports", "temporary_paths", "arrival_order", "JVM_object_ids"], "timing_tolerances": {"timestamp": {"comparison": "descriptor-only", "allowed_variance": "not asserted"}, "elapsed": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000}, "latency": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000}, "connect_time": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000}, "idle_time": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000}}, "byte_policy": {"bytes": "retained; no normalization", "sent_bytes": "retained; no normalization"}, "reason": "Static immediate-stop contract only; no process or result observation is claimed."}
+}

@@ -1,0 +1,351 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-PROXY-TLS",
+  "format": "jmx-semantic",
+  "fixture_family_id": "FX-PROXY-TLS-001",
+  "conformance_ids": ["PROXY-001", "PROXY-002", "PROXY-003", "TLS-001", "TLS-002"],
+  "external_runtime_boundary_ids": ["EXT-JVM-001", "EXT-SERVICE-001", "EXT-TLS-001"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-TIME-001", "NORM-JMX-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001", "NORM-ENV-001"],
+  "status": "contract-only-external",
+  "evidence_status": "not-run",
+  "oracle_execution": {
+    "status": "not-run",
+    "oracle_available": false,
+    "wire_trace_sha256": null,
+    "resolved_argv_sha256": null,
+    "raw_artifacts": "oracle-runs/proxy-tls/ (ignored; local evidence only)"
+  },
+  "comparator_contract": {
+    "format": "jmx-semantic",
+    "status": "declarative-only",
+    "generic_jtl_comparator": "unsupported until a protocol comparator or pinned JTL projection is supplied",
+    "required_before_promotion": [
+      "materialize exact JMeter 5.6.3 and Java runtime",
+      "record resolved listener ports and redacted argv",
+      "compare protocol wire traces and JTL projections",
+      "retain raw diagnostic diff outside Git"
+    ]
+  },
+  "normalization": {
+    "ignored_fields": [
+      "timestamps",
+      "elapsed",
+      "latency",
+      "connect_time",
+      "idle_time",
+      "ephemeral_ports",
+      "temporary_paths",
+      "runtime_certificate_fingerprints",
+      "runtime_tls_cipher_provider"
+    ],
+    "reason": "The external proxy, browser recorder, JDK keytool, and TLS provider are not run by static fixture validation. This declarative contract does not fabricate a JMeter result; a later protocol comparator must apply only profile-approved normalization."
+  },
+  "routes": [
+    {
+      "id": "redirect",
+      "path": "/redirect",
+      "method": "GET",
+      "status": 302,
+      "location": "/final",
+      "body": "redirect\n",
+      "status_observation": "unobserved"
+    },
+    {
+      "id": "binary",
+      "path": "/binary",
+      "method": "GET",
+      "status": 200,
+      "content_type": "application/octet-stream",
+      "body_hex": "0066697874757265ff0a",
+      "status_observation": "unobserved"
+    },
+    {
+      "id": "headers",
+      "path": "/headers",
+      "method": "GET",
+      "status": 200,
+      "header": ["X-Fixture-Header", "stable"],
+      "body": "headers\n",
+      "status_observation": "unobserved"
+    }
+  ],
+  "proxy_vectors": {
+    "cli_flags": [
+      {
+        "id": "proxy-scheme",
+        "short": "-E",
+        "long": "--proxyScheme",
+        "value": "http",
+        "expected_system_properties": ["http.proxyScheme"],
+        "status": "unobserved"
+      },
+      {
+        "id": "proxy-host",
+        "short": "-H",
+        "long": "--proxyHost",
+        "value": "127.0.0.1",
+        "expected_system_properties": ["http.proxyHost", "https.proxyHost"],
+        "status": "unobserved"
+      },
+      {
+        "id": "proxy-port",
+        "short": "-P",
+        "long": "--proxyPort",
+        "value": "<proxy-port>",
+        "expected_system_properties": ["http.proxyPort", "https.proxyPort"],
+        "status": "unobserved"
+      },
+      {
+        "id": "non-proxy-hosts",
+        "short": "-N",
+        "long": "--nonProxyHosts",
+        "value": "127.*|localhost",
+        "expected_system_properties": ["http.nonProxyHosts", "https.nonProxyHosts"],
+        "status": "unobserved"
+      },
+      {
+        "id": "proxy-username",
+        "short": "-u",
+        "long": "--username",
+        "value": "fixture",
+        "expected_system_properties": ["http.proxyUser"],
+        "status": "unobserved"
+      },
+      {
+        "id": "proxy-password",
+        "short": "-a",
+        "long": "--password",
+        "value": "protected-secret-capability",
+        "expected_system_properties": ["http.proxyPass"],
+        "secret_policy": "never place a password value in a checked-in argv, trace, log, or expectation",
+        "status": "unobserved"
+      }
+    ],
+    "system_property_probe": {
+      "status": "unobserved",
+      "required_assertions": [
+        "proxy flags are applied during startup after property-file loading",
+        "http.proxyHost and https.proxyHost receive the loopback proxy host",
+        "http.proxyPort and https.proxyPort receive the materialized decimal port",
+        "http.nonProxyHosts and https.nonProxyHosts receive the pipe-separated patterns",
+        "proxy credentials are not forwarded to the origin"
+      ]
+    },
+    "absolute_http": {
+      "request_target": "absolute-form",
+      "forwarded_target": "origin-form",
+      "forwarded_host": "origin authority",
+      "proxy_authorization_forwarded": false,
+      "origin_trace_required": true,
+      "status": "unobserved"
+    },
+    "connect_tls": {
+      "request_target": "loopback-origin:ephemeral-port",
+      "success_status": 200,
+      "tunnel_protocol": "opaque TLS bytes after CONNECT",
+      "https_absolute_form_status": 400,
+      "https_absolute_form_reason": "CONNECT required",
+      "status": "unobserved"
+    },
+    "no_proxy": {
+      "patterns": ["127.*", "localhost"],
+      "bypass_expected": true,
+      "proxy_connection_count": 0,
+      "origin_connection_count": 1,
+      "status": "unobserved"
+    },
+    "proxy_authentication": {
+      "scheme": "Basic",
+      "missing": {"status": 407, "proxy_authenticate": true},
+      "invalid": {"status": 407, "proxy_authenticate": true},
+      "valid": {"status": 200, "origin_forwarded": true},
+      "authorization_forwarded_to_origin": false,
+      "secret_source": "protected runtime file or explicitly named environment capability",
+      "status": "unobserved"
+    },
+    "failure_and_timeout": [
+      {
+        "id": "unlisted-upstream",
+        "input": "numeric loopback port not in allowlist",
+        "expected": "fail closed before connect",
+        "status": "unobserved"
+      },
+      {
+        "id": "non-loopback-upstream",
+        "input": "numeric non-loopback destination",
+        "expected": "reject without network access",
+        "status": "unobserved"
+      },
+      {
+        "id": "dns-upstream",
+        "input": "DNS hostname authority",
+        "expected": "reject without name resolution",
+        "status": "unobserved"
+      },
+      {
+        "id": "proxy-unavailable",
+        "input": "no listener at selected proxy port",
+        "expected": "bounded connection failure",
+        "status": "unobserved"
+      },
+      {
+        "id": "upstream-timeout",
+        "input": "allowlisted origin that does not complete within the session deadline",
+        "expected": "bounded timeout and owned-child cleanup",
+        "status": "unobserved"
+      }
+    ],
+    "allowlist": {
+      "permitted": "started loopback origins and explicit loopback --allow-upstream entries",
+      "rejected": ["DNS names", "non-loopback addresses", "unlisted loopback ports"],
+      "network_scope": "loopback-only",
+      "status": "unobserved"
+    }
+  },
+  "recorder_vectors": {
+    "status": "unobserved",
+    "startup": {
+      "component": "HTTP(S) Test Script Recorder",
+      "bind_host": "127.0.0.1",
+      "bind_port": "<recorder-port>",
+      "port_materialization": "command.port_materialization.external_placeholder_bindings.<recorder-port>",
+      "readiness_required": true,
+      "readiness_timeout_ms": 10000,
+      "readiness_max_bytes": 16384,
+      "proxy_connect": true,
+      "https_interception": true,
+      "browser_driver": "pinned local browser adapter required",
+      "status_observation": "unobserved"
+    },
+    "filters": {
+      "include_url_regex": "^https?://127\\.0\\.0\\.1/",
+      "exclude_url_property": "proxy.excludes.suggested",
+      "exclude_url_regex": ".*\\.(bmp|css|js|gif|ico|jpe?g|png|swf|woff|woff2)",
+      "include_content_type_regex": "text/html|text/plain|text/xml|application/json|application/xml",
+      "exclude_content_type_regex": "image/.*|text/css|application/(?:octet-stream|x-amf|x-java-serialized-object)",
+      "removed_headers": ["Cookie", "Authorization"],
+      "pause_ms": 5000
+    },
+    "capture_vectors": [
+      {"id": "redirect", "request": "/redirect", "generated_sampler": "HTTP sampler with redirect policy", "status": "unobserved"},
+      {"id": "binary", "request": "/binary", "generated_sampler": "HTTP sampler with runtime request-file body", "status": "unobserved"},
+      {"id": "headers", "request": "/headers", "generated_sampler": "Cookie and Authorization removed", "status": "unobserved"},
+      {"id": "connect-tls", "request": "HTTPS through CONNECT", "generated_sampler": "HTTPS sampler with runtime certificate settings", "status": "unobserved"}
+    ],
+    "generated_jmx": {
+      "status": "unobserved",
+      "artifact": "runtime-only generated JMX",
+      "comparison_fixture": "FX-JMX-001",
+      "required_assertions": [
+        "alternating hashTree topology is preserved",
+        "grouping and sampler naming are recorded",
+        "recorded request headers and bodies obey filter policy",
+        "generated JMX replays through the same local origin and proxy"
+      ],
+      "repository_policy": "never commit browser capture, generated JMX, request body, certificate, or credential"
+    },
+    "negative_vectors": [
+      {"id": "excluded-url", "expected": "no sampler emitted", "status": "unobserved"},
+      {"id": "excluded-content-type", "expected": "no sampler emitted", "status": "unobserved"},
+      {"id": "removed-sensitive-headers", "expected": "Cookie and Authorization absent from generated JMX", "status": "unobserved"}
+    ]
+  },
+  "mirror_contract": {
+    "case_id": "ORACLE-JMETER-563-PROXY-003-MIRROR",
+    "fixture_case": "../recorder-mirror/case.json",
+    "status": "unobserved",
+    "network_isolation": "required because pinned mirror binds platform wildcard",
+    "isolation_action": "run-recorder-mirror-isolated",
+    "isolation_contract": "recorder-mirror/case.json#future_driver_actions[isolate-network]",
+    "required_replay": ["HTTP/1.0 response", "binary echo", "redirect", "status/header/cookie overrides", "bounded shutdown"]
+  },
+  "tls_vectors": {
+    "status": "unobserved",
+    "server_protocol": {
+      "minimum": "TLSv1.2",
+      "allowed": ["TLSv1.2", "TLSv1.3"],
+      "rejected": ["TLSv1.0", "TLSv1.1"],
+      "alpn": ["http/1.1"],
+      "sni": "record requested server name and selected certificate",
+      "provider": "record exact JDK provider at external run time"
+    },
+    "certificate_matrix": [
+      {"id": "valid-local-ca", "name": "127.0.0.1", "validity": "runtime local CA", "expected": "handshake succeeds under explicit local trust", "status": "unobserved"},
+      {"id": "expired", "name": "127.0.0.1", "validity": "expired runtime certificate", "expected": "trust behavior is recorded, not assumed", "status": "unobserved"},
+      {"id": "wrong-name", "name": "not-127.0.0.1", "validity": "currently valid", "expected": "hostname verification outcome recorded", "status": "unobserved"},
+      {"id": "sni-mismatch", "name": "alternate local name", "validity": "currently valid", "expected": "SNI and selected certificate recorded", "status": "unobserved"}
+    ],
+    "trust_modes": [
+      {"id": "default", "configuration": "JMeter/Java default trust behavior", "status": "unobserved"},
+      {"id": "explicit-local", "configuration": "runtime trust store containing local CA", "status": "unobserved"},
+      {"id": "trust-all-negative", "configuration": "explicit trust-all test-only mode", "status": "unobserved"}
+    ],
+    "client_certificate": [
+      {"id": "valid-client", "server": "require client certificate", "expected": "client CA accepted", "status": "unobserved"},
+      {"id": "missing-client", "server": "require client certificate", "expected": "handshake rejected", "status": "unobserved"},
+      {"id": "wrong-client-ca", "server": "require client certificate", "expected": "handshake rejected", "status": "unobserved"}
+    ],
+    "jmeter_ssl_controls": {
+      "status": "unobserved",
+      "required_components": ["SSL Manager", "Keystore Configuration"],
+      "runtime_options": [
+        "javax.net.ssl.keyStore",
+        "javax.net.ssl.keyStorePassword",
+        "javax.net.ssl.trustStore",
+        "javax.net.ssl.trustStorePassword",
+        "https.default.protocol"
+      ],
+      "secret_policy": "passwords supplied through protected capability and omitted from argv, manifests, traces, and logs"
+    },
+    "recorder_jks": {
+      "status": "unobserved",
+      "properties": {
+        "proxy.cert.directory": "runtime run-root directory",
+        "proxy.cert.file": "proxyserver.jks",
+        "proxy.cert.type": "JKS",
+        "proxy.cert.alias": "runtime selected alias",
+        "proxy.cert.dynamic_keys": "record exact upstream setting",
+        "proxy.cert.validity_days": 7,
+        "proxy.cert.protocol": "record exact upstream setting"
+      },
+      "keytool": {
+        "executable": "pinned JDK keytool",
+        "status": "unobserved",
+        "argv_template": [
+          "<pinned-keytool>", "-genkeypair", "-alias", "fixture",
+          "-keyalg", "RSA", "-keysize", "2048", "-sigalg", "SHA256withRSA",
+          "-keystore", "<run-root>/runtime/proxyserver.jks", "-storetype", "JKS",
+          "-validity", "7", "-dname", "CN=127.0.0.1",
+          "-ext", "SAN=ip:127.0.0.1", "-storepass", "<protected-secret>",
+          "-keypass", "<protected-secret>"
+        ],
+        "required_record": ["JDK vendor/version", "keytool version", "provider", "argv with secret values redacted", "keystore SHA-256 outside Git"],
+        "password_policy": "upstream default behavior is an external oracle assertion; never place a password value in this repository"
+      }
+    }
+  },
+  "security_contract": {
+    "status": "unobserved",
+    "bind_host": "127.0.0.1",
+    "public_network": false,
+    "ambient_proxy_environment": "deny",
+    "denied_upstream_classes": ["DNS", "non-loopback IP", "unlisted loopback port"],
+    "trace_redactions": ["request body", "Proxy-Authorization", "Cookie", "certificate path", "private key", "PID"],
+    "runtime_material": "temporary run root only",
+    "process_lifecycle": "exact owned child, bounded shutdown, reap before cleanup"
+  },
+  "evidence_requirements": {
+    "status": "unobserved",
+    "required_artifacts": [
+      "resolved redacted argv JSON and SHA-256",
+      "ready JSON and SHA-256",
+      "bounded protocol trace and SHA-256",
+      "JMeter JTL/log metadata and SHA-256",
+      "Java/JMeter/JDK/provider/environment metadata",
+      "raw diagnostic diff outside Git"
+    ],
+    "promotion_rule": "no feature row is verified from this static contract"
+  }
+}

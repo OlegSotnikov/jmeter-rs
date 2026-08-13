@@ -1,0 +1,142 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-REPORT-BACKEND-PROTOCOL",
+  "format": "jtl-xml",
+  "source": "inputs/backend.xml",
+  "sample_count": 3,
+  "report_surface": "jmeter-graphite-influxdb-backend-listeners",
+  "capability_status": "external-unavailable",
+  "descriptor_status": "planned_vocabulary_only",
+  "percentile_estimator": "LEGACY",
+  "percentile_estimator_property": "backend_metrics_percentile_estimator=LEGACY",
+  "external_service": {
+    "required": true,
+    "service_scope": "local-only",
+    "network_used": false,
+    "credentials": "none",
+    "graphite": {
+      "host": "127.0.0.1",
+      "port": 2003,
+      "protocol": "plaintext",
+      "root_metrics_prefix": "jmeter.",
+      "timestamp_precision": "seconds"
+    },
+    "influxdb": {
+      "url": "http://127.0.0.1:8086/write?db=jmeter",
+      "measurement": "jmeter",
+      "timestamp_precision": "milliseconds"
+    },
+    "missing_service_behavior": "report the external capability as unavailable; do not silently drop backend descriptors or claim delivery"
+  },
+  "input_projection": {
+    "interval_start_ms": 1704067200000,
+    "interval_end_ms": 1704067203000,
+    "interval_duration_millis": 3000,
+    "timezone": "UTC",
+    "sample_count": 3,
+    "input_row_count": 3,
+    "success_count": 2,
+    "error_count": 1,
+    "elapsed_count": 3,
+    "elapsed_observations_in_source_order": [100, 250, 700],
+    "received_bytes": 280,
+    "sent_bytes": 35,
+    "throughput_per_second": 1.0,
+    "error_throughput_per_second": 0.3333333333333333,
+    "apdex": {"satisfied": 2, "tolerated": 0, "frustrated": 1, "score": 0.6666666666666666},
+    "error_counts": [{"response_code": "500", "message": "boom", "count": 1}],
+    "listener_math_round_weighted_percentiles_millis": {"0": 100, "50": 250, "90": 700, "99": 700, "100": 700},
+    "dashboard_row_fifo_window": [100, 250, 700],
+    "dashboard_legacy_percentiles": {"0": 100.0, "50": 250.0, "90": 700.0, "99": 700.0, "100": 700.0},
+    "dashboard_legacy_percentiles_millis_rounded": {"0": 100, "50": 250, "90": 700, "99": 700, "100": 700}
+  },
+  "graphite": {
+    "implementation": "org.apache.jmeter.visualizers.backend.graphite.GraphiteBackendListenerClient",
+    "sender": "org.apache.jmeter.visualizers.backend.graphite.TextGraphiteMetricsSender",
+    "configuration": {
+      "summaryOnly": false,
+      "samplersList": ["backend/login", "backend/failure"],
+      "useRegexpForSamplersList": false,
+      "percentiles": [90, 95, 99]
+    },
+    "metric_path_template": "jmeter.{context}.{metric}",
+    "sanitization": "JMeter replaces backslash and space with '-' and dot with '_' in sampler context names; slash is retained",
+    "timestamp": {"value": null, "source": "backend scheduled send epoch seconds; unavailable without an external run"},
+    "ordering": "descriptor order is context lexicographic, then metric vocabulary order; JMeter's concurrent sampler map is not used as evidence",
+    "metric_inventory": [
+      {"context": "all", "metrics": ["ok.count", "ko.count", "a.count", "h.count", "sb.bytes", "rb.bytes", "ok.min", "ok.max", "ok.avg", "ok.pct90", "ok.pct95", "ok.pct99", "ko.min", "ko.max", "ko.avg", "ko.pct90", "ko.pct95", "ko.pct99", "a.min", "a.max", "a.avg", "a.pct90", "a.pct95", "a.pct99"], "status": "planned_not_materialized", "values": []},
+      {"context": "backend/failure", "metrics": ["ok.count", "ko.count", "a.count", "h.count", "sb.bytes", "rb.bytes", "ko.min", "ko.max", "ko.avg", "ko.pct90", "ko.pct95", "ko.pct99", "a.min", "a.max", "a.avg", "a.pct90", "a.pct95", "a.pct99"], "status": "planned_not_materialized", "values": []},
+      {"context": "backend/login", "metrics": ["ok.count", "ko.count", "a.count", "h.count", "sb.bytes", "rb.bytes", "ok.min", "ok.max", "ok.avg", "ok.pct90", "ok.pct95", "ok.pct99", "a.min", "a.max", "a.avg", "a.pct90", "a.pct95", "a.pct99"], "status": "planned_not_materialized", "values": []},
+      {"context": "test", "metrics": ["minAT", "maxAT", "meanAT", "startedT", "endedT"], "status": "planned_not_materialized", "values": []}
+    ],
+    "metric_vocabulary": {
+      "ok": "successful response count/statistics",
+      "ko": "failed response count/statistics",
+      "a": "all response count/statistics",
+      "h.count": "hits",
+      "sb.bytes": "sent bytes",
+      "rb.bytes": "received bytes",
+      "pct": "configured response-time percentile suffix"
+    },
+    "wire_lines": [],
+    "wire_lines_status": "not captured; no Graphite service or sender was run"
+  },
+  "influxdb": {
+    "implementation": "org.apache.jmeter.visualizers.backend.influxdb.InfluxdbBackendListenerClient",
+    "sender": "org.apache.jmeter.visualizers.backend.influxdb.HttpMetricsSender",
+    "measurement": "jmeter",
+    "configuration": {
+      "summaryOnly": false,
+      "samplersRegex": "backend/(login|failure)",
+      "percentiles": [99, 95, 90],
+      "application": "report-fixture",
+      "timestamp_precision": "milliseconds"
+    },
+    "timestamp": {"value": null, "source": "HTTP sender wall-clock epoch milliseconds; unavailable without an external run"},
+    "ordering": "descriptor order is transaction lexicographic; within each transaction, all then configured status then response-code descriptors in source event order; internal and event descriptors follow; no HTTP request was emitted",
+    "tag_templates": [
+      ",application=report-fixture,transaction={transaction},statut={status}",
+      ",application=report-fixture,transaction={transaction},responseCode={responseCode},responseMessage={responseMessage}",
+      ",application=report-fixture,transaction=internal"
+    ],
+    "field_templates": {
+      "sampler_status": ["count", "avg", "min", "max", "hit", "sb", "rb", "pct99.0", "pct95.0", "pct90.0"],
+      "cumulated_all": ["count", "countError", "avg", "min", "max", "hit", "sb", "rb", "pct99.0", "pct95.0", "pct90.0"],
+      "error": ["count"],
+      "internal_threads": ["minAT", "maxAT", "meanAT", "startedT", "endedT"],
+      "annotation": ["text"]
+    },
+    "metric_inventory": [
+      {"transaction": "all", "status": "all", "fields": ["count", "countError", "avg", "min", "max", "hit", "sb", "rb", "pct99.0", "pct95.0", "pct90.0"], "status_value": "planned_not_materialized", "values": []},
+      {"transaction": "backend/failure", "status": "all", "fields": ["count", "avg", "min", "max", "hit", "sb", "rb", "pct99.0", "pct95.0", "pct90.0"], "status_value": "planned_not_materialized", "values": []},
+      {"transaction": "backend/failure", "status": "ko", "fields": ["count", "avg", "min", "max", "hit", "sb", "rb", "pct99.0", "pct95.0", "pct90.0"], "status_value": "planned_not_materialized", "values": []},
+      {"transaction": "backend/failure", "responseCode": "500", "responseMessage": "boom", "fields": ["count"], "status_value": "planned_not_materialized", "values": []},
+      {"transaction": "backend/login", "status": "all", "fields": ["count", "avg", "min", "max", "hit", "sb", "rb", "pct99.0", "pct95.0", "pct90.0"], "status_value": "planned_not_materialized", "values": []},
+      {"transaction": "backend/login", "status": "ok", "fields": ["count", "avg", "min", "max", "hit", "sb", "rb", "pct99.0", "pct95.0", "pct90.0"], "status_value": "planned_not_materialized", "values": []},
+      {"transaction": "internal", "fields": ["minAT", "maxAT", "meanAT", "startedT", "endedT"], "status_value": "planned_not_materialized", "values": []},
+      {"measurement": "events", "tags": ["application", "title"], "fields": ["text"], "status_value": "planned_not_materialized", "values": []}
+    ],
+    "line_protocol": [],
+    "line_protocol_status": "not captured; no InfluxDB service or HTTP sender was run"
+  },
+  "ordering": {
+    "input_events": "source order",
+    "graphite_descriptors": "context lexicographic then JMeter metric vocabulary",
+    "influx_descriptors": "transaction lexicographic; within each transaction, all then configured status then response-code descriptors in source event order; internal and event descriptors follow",
+    "timestamps": "null in static descriptors; future adapter must inject one bounded UTC send timestamp"
+  },
+  "generated_from": {
+    "generator": "jmeter-rs project, hand-authored static corpus",
+    "generator_version": "repository source and pinned Apache JMeter 5.6.3 source vocabulary",
+    "random_seed": null,
+    "oracle_command": null,
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "none; no Java, JMeter, backend service, report generator, HTTP request, or subprocess was invoked"
+  },
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "The static descriptor preserves JMeter implementation names, metric/tag/field vocabulary, configured percentile order, sampler filtering, source ordering, and external-unavailable status. Values and timestamps are intentionally absent because no backend sender or service ran."
+  }
+}

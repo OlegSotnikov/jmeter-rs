@@ -1,0 +1,249 @@
+{
+  "schema_id": "jmeter-rs.proxy-mirror-inputs",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-PROXY-003-MIRROR",
+  "encoding": "base64-wire-bytes",
+  "limits": {
+    "observed_case_count": 8,
+    "planned_case_count": 3,
+    "max_total_cases": 11,
+    "max_wire_bytes": 1024,
+    "max_body_bytes": 256,
+    "max_request_headers": 16,
+    "max_response_headers": 16,
+    "max_redirect_hops": 1,
+    "server_pool_size": 2,
+    "server_queue_size": 4,
+    "max_saturation_clients": 7,
+    "forbidden_request_features": [
+      "chunked transfer encoding",
+      "X-Sleep",
+      "credentials",
+      "absolute-form request target",
+      "public or unrelated destination"
+    ]
+  },
+  "cases": [
+    {
+      "id": "basic-get",
+      "purpose": "default status, content type, connection close, and request reflection",
+      "request": {
+        "method": "GET",
+        "target": "/mirror/basic",
+        "version": "HTTP/1.1",
+        "headers": [
+          ["Host", "mirror.invalid"],
+          ["Connection", "close"]
+        ],
+        "body_base64": "",
+        "wire_base64": "R0VUIC9taXJyb3IvYmFzaWMgSFRUUC8xLjENCkhvc3Q6IG1pcnJvci5pbnZhbGlkDQpDb25uZWN0aW9uOiBjbG9zZQ0KDQo=",
+        "wire_bytes": 71,
+        "wire_sha256": "04b0373c737209cda47f972cb90f9b80fb2a59ff9e601377bc3ece3ac6ff6464"
+      }
+    },
+    {
+      "id": "post-text",
+      "purpose": "content length and text request-body reflection",
+      "request": {
+        "method": "POST",
+        "target": "/mirror/post",
+        "version": "HTTP/1.1",
+        "headers": [
+          ["Host", "mirror.invalid"],
+          ["Content-Type", "text/plain"],
+          ["Content-Length", "13"],
+          ["Connection", "close"]
+        ],
+        "body_base64": "aGVsbG89bWlycm9yCg==",
+        "body_bytes": 13,
+        "body_sha256": "da101241fffb67c459fd59e653892483ebd541d0256a0d5217811d3eb786880e",
+        "wire_base64": "UE9TVCAvbWlycm9yL3Bvc3QgSFRUUC8xLjENCkhvc3Q6IG1pcnJvci5pbnZhbGlkDQpDb250ZW50LVR5cGU6IHRleHQvcGxhaW4NCkNvbnRlbnQtTGVuZ3RoOiAxMw0KQ29ubmVjdGlvbjogY2xvc2UNCg0KaGVsbG89bWlycm9yCg==",
+        "wire_bytes": 130,
+        "wire_sha256": "0de4fd13b7bb03032b8fd3b99b81972e1f5d6639ea3f723234c8e34cac01a276"
+      }
+    },
+    {
+      "id": "binary-body",
+      "purpose": "binary request bytes are reflected without character decoding",
+      "request": {
+        "method": "POST",
+        "target": "/mirror/binary",
+        "version": "HTTP/1.1",
+        "headers": [
+          ["Host", "mirror.invalid"],
+          ["Content-Type", "application/octet-stream"],
+          ["Content-Length", "12"],
+          ["Connection", "close"]
+        ],
+        "body_base64": "AAECA3+AyP9BQkNE",
+        "body_bytes": 12,
+        "body_sha256": "e65406caf45644da406115a4c435cef698f1a5c2e7232ae857fe0ff1292e2858",
+        "wire_base64": "UE9TVCAvbWlycm9yL2JpbmFyeSBIVFRQLzEuMQ0KSG9zdDogbWlycm9yLmludmFsaWQNCkNvbnRlbnQtVHlwZTogYXBwbGljYXRpb24vb2N0ZXQtc3RyZWFtDQpDb250ZW50LUxlbmd0aDogMTINCkNvbm5lY3Rpb246IGNsb3NlDQoNCgABAgN/gMj/QUJDRA==",
+        "wire_bytes": 145,
+        "wire_sha256": "49078d9ee6cddc0500b01b9ed029f45e3b739cd719594d99500c3b1e854f67b7"
+      }
+    },
+    {
+      "id": "redirect-query",
+      "purpose": "redirect query decoding and Location response header",
+      "request": {
+        "method": "GET",
+        "target": "/mirror/redirect?redirect=%2Fmirror%2Ffinal",
+        "version": "HTTP/1.1",
+        "headers": [
+          ["Host", "mirror.invalid"],
+          ["Connection", "close"]
+        ],
+        "body_base64": "",
+        "wire_base64": "R0VUIC9taXJyb3IvcmVkaXJlY3Q/cmVkaXJlY3Q9JTJGbWlycm9yJTJGZmluYWwgSFRUUC8xLjENCkhvc3Q6IG1pcnJvci5pbnZhbGlkDQpDb25uZWN0aW9uOiBjbG9zZQ0KDQo=",
+        "wire_bytes": 101,
+        "wire_sha256": "7db2c9a222784bcdf419ecbfd0ce54e59134a0623ebf0d5d7da83bc654dbb2da"
+      }
+    },
+    {
+      "id": "status-header",
+      "purpose": "arbitrary status code and reason phrase from X-ResponseStatus",
+      "request": {
+        "method": "GET",
+        "target": "/mirror/status-header",
+        "version": "HTTP/1.1",
+        "headers": [
+          ["Host", "mirror.invalid"],
+          ["X-ResponseStatus", "204 No Content"],
+          ["Connection", "close"]
+        ],
+        "body_base64": "",
+        "wire_base64": "R0VUIC9taXJyb3Ivc3RhdHVzLWhlYWRlciBIVFRQLzEuMQ0KSG9zdDogbWlycm9yLmludmFsaWQNClgtUmVzcG9uc2VTdGF0dXM6IDIwNCBObyBDb250ZW50DQpDb25uZWN0aW9uOiBjbG9zZQ0KDQo=",
+        "wire_bytes": 113,
+        "wire_sha256": "8fa9d633a876cbf7f24caf6b3cc2bc40b0c6d12c31ba64b48f506f685099231a"
+      }
+    },
+    {
+      "id": "response-headers",
+      "purpose": "pipe-separated response headers and Set-Cookie helper",
+      "request": {
+        "method": "GET",
+        "target": "/mirror/headers",
+        "version": "HTTP/1.1",
+        "headers": [
+          ["Host", "mirror.invalid"],
+          ["X-SetHeaders", "X-Mirror-Trace: header-value|Cache-Control: no-store"],
+          ["X-SetCookie", "mirror=seen; Path=/"],
+          ["Connection", "close"]
+        ],
+        "body_base64": "",
+        "wire_base64": "R0VUIC9taXJyb3IvaGVhZGVycyBIVFRQLzEuMQ0KSG9zdDogbWlycm9yLmludmFsaWQNClgtU2V0SGVhZGVyczogWC1NaXJyb3ItVHJhY2U6IGhlYWRlci12YWx1ZXxDYWNoZS1Db250cm9sOiBuby1zdG9yZQ0KWC1TZXRDb29raWU6IG1pcnJvcj1zZWVuOyBQYXRoPS8NCkNvbm5lY3Rpb246IGNsb3NlDQoNCg==",
+        "wire_bytes": 175,
+        "wire_sha256": "1dbb28d73a6e2cb40d6d93356f321866c238e1061834a76ad1b9ad2c777749bc"
+      }
+    },
+    {
+      "id": "response-truncate",
+      "purpose": "bounded reflected response prefix",
+      "request": {
+        "method": "GET",
+        "target": "/mirror/truncate",
+        "version": "HTTP/1.1",
+        "headers": [
+          ["Host", "mirror.invalid"],
+          ["X-ResponseLength", "12"],
+          ["Connection", "close"]
+        ],
+        "body_base64": "",
+        "wire_base64": "R0VUIC9taXJyb3IvdHJ1bmNhdGUgSFRUUC8xLjENCkhvc3Q6IG1pcnJvci5pbnZhbGlkDQpYLVJlc3BvbnNlTGVuZ3RoOiAxMg0KQ29ubmVjdGlvbjogY2xvc2UNCg0K",
+        "wire_bytes": 96,
+        "wire_sha256": "b37362fbaf182d186dd86a8f6205f8d401dbd2647d839a11e599710060c055c7"
+      }
+    },
+    {
+      "id": "query-status-overrides-header",
+      "purpose": "query status takes precedence over X-ResponseStatus",
+      "request": {
+        "method": "GET",
+        "target": "/mirror/precedence?status=201%20Created",
+        "version": "HTTP/1.1",
+        "headers": [
+          ["Host", "mirror.invalid"],
+          ["X-ResponseStatus", "418 Teapot"],
+          ["Connection", "close"]
+        ],
+        "body_base64": "",
+        "wire_base64": "R0VUIC9taXJyb3IvcHJlY2VkZW5jZT9zdGF0dXM9MjAxJTIwQ3JlYXRlZCBIVFRQLzEuMQ0KSG9zdDogbWlycm9yLmludmFsaWQNClgtUmVzcG9uc2VTdGF0dXM6IDQxOCBUZWFwb3QNCkNvbm5lY3Rpb246IGNsb3NlDQoNCg==",
+        "wire_bytes": 127,
+        "wire_sha256": "0c9c1ae5c6d632934b972d0c5a119c8bce1c545f8292c39413afda246e87f5ac"
+      }
+    }
+  ],
+  "planned_cases": [
+    {
+      "id": "saturation",
+      "status": "planned",
+      "purpose": "bounded executor saturation with the exact manifest pool and queue limits",
+      "server": {
+        "max_pool_size": 2,
+        "max_queue_size": 4
+      },
+      "driver": {
+        "concurrent_clients": 7,
+        "request_ref": "#/cases/0/request/wire_base64",
+        "connection_policy": "one owned connection per client; close after bounded response or timeout",
+        "max_wait_ms": 2000
+      },
+      "observation": [
+        "record every accepted connection and response outcome",
+        "compare executor rejection/discard behavior without assuming a stable arrival order",
+        "fail on an unbounded wait, process hang, or silent result loss in the driver trace"
+      ]
+    },
+    {
+      "id": "lowercase-header",
+      "status": "planned",
+      "purpose": "case-insensitive helper-header matching for status, custom headers, cookie, and truncation",
+      "request": {
+        "method": "GET",
+        "target": "/mirror/lowercase",
+        "version": "HTTP/1.1",
+        "headers": [
+          ["host", "mirror.invalid"],
+          ["x-responsestatus", "202 Accepted"],
+          ["x-setheaders", "X-Lowercase: seen|Cache-Control: no-store"],
+          ["x-setcookie", "lower=seen; Path=/"],
+          ["x-responselength", "8"],
+          ["connection", "close"]
+        ],
+        "body_base64": "",
+        "wire_base64": "R0VUIC9taXJyb3IvbG93ZXJjYXNlIEhUVFAvMS4xDQpob3N0OiBtaXJyb3IuaW52YWxpZA0KeC1yZXNwb25zZXN0YXR1czogMjAyIEFjY2VwdGVkDQp4LXNldGhlYWRlcnM6IFgtTG93ZXJjYXNlOiBzZWVufENhY2hlLUNvbnRyb2w6IG5vLXN0b3JlDQp4LXNldGNvb2tpZTogbG93ZXI9c2VlbjsgUGF0aD0vDQp4LXJlc3BvbnNlbGVuZ3RoOiA4DQpjb25uZWN0aW9uOiBjbG9zZQ0KDQo=",
+        "wire_bytes": 218,
+        "wire_sha256": "91166defc9abd4e846187df5c80a50542dd33117d6a4d98a17aa3666abf69fbb"
+      },
+      "observation": [
+        "status should be 202 Accepted if all helper lookups remain case-insensitive",
+        "custom X-Lowercase, Cache-Control, Set-Cookie, and an eight-byte reflected prefix are compared in emitted order"
+      ]
+    },
+    {
+      "id": "eof-half-close",
+      "status": "planned",
+      "purpose": "bounded client write-half close before the HTTP header delimiter",
+      "request": {
+        "method": "GET",
+        "target": "/mirror/eof",
+        "version": "HTTP/1.1",
+        "headers": [
+          ["Host", "mirror.invalid"]
+        ],
+        "body_base64": "",
+        "wire_base64": "R0VUIC9taXJyb3IvZW9mIEhUVFAvMS4xDQpIb3N0OiBtaXJyb3IuaW52YWxpZA0K",
+        "wire_bytes": 48,
+        "wire_sha256": "544705be89f8b10573c8355a68d5b74bdb29c6c4f90b112d978e3845855206e7",
+        "termination": "driver writes exactly wire_base64, calls shutdownOutput, then reads at most 1024 response bytes for at most 2000ms"
+      },
+      "observation": [
+        "record whether the mirror emits a bounded response or closes without a response",
+        "fail on a hang, uncaught process failure, or response read beyond the bound",
+        "do not promote an observed behavior until the pinned 5.6.3 run records it"
+      ]
+    }
+  ]
+}

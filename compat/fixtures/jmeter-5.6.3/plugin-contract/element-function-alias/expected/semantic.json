@@ -1,0 +1,133 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-PLUGIN-001",
+  "case_id": "ORACLE-JMETER-563-PLUGIN-ELEMENT-FUNCTION-ALIAS",
+  "conformance_ids": ["PLUG-002", "JMX-004"],
+  "normalization_policy_refs": ["NORM-JMX-001", "NORM-EXTERNAL-001"],
+  "format": "jmx-semantic",
+  "evidence_status": "external-unavailable",
+  "source": {
+    "kind": "original-static-declarative-descriptor",
+    "oracle_status": "not-run",
+    "runtime_executed": false,
+    "note": "No plugin artifact, Java classloader, function engine, JMeter process, or network was run; alias and function rows are source contracts only."
+  },
+  "capability_accounting": {
+    "status": "external-unavailable",
+    "required_boundaries": ["EXT-JVM-001", "EXT-PLUGIN-001"],
+    "capabilities": ["plugin element", "plugin function", "plugin JMX alias"],
+    "unsupported_error_code": "unsupported-capability",
+    "stable_error_codes": ["plugin.element.unavailable", "plugin.function.unavailable"],
+    "no_silent_success": true,
+    "no_sample_output_claimed": true,
+    "missing_adapter_behavior": "preserve exact element tag, class/GUI aliases, duplicate order, direct property order, unknown attributes, unknown property tags, nested payloads, and literal function text; return typed unavailable capability errors"
+  },
+  "root": {
+    "element": "jmeterTestPlan",
+    "attributes": {"version": "1.2", "properties": "5.0", "jmeter": "5.6.3"},
+    "ordered_children": ["hashTree"]
+  },
+  "ordered_hash_tree_pairs": [
+    {
+      "position": 0,
+      "element": {
+        "tag": "TestPlan",
+        "guiclass": "TestPlanGui",
+        "testclass": "TestPlan",
+        "testname": "Static plugin alias contract",
+        "enabled": "true"
+      },
+      "hash_tree_children": ["ThreadGroup"]
+    },
+    {
+      "position": 1,
+      "element": {
+        "tag": "ThreadGroup",
+        "guiclass": "ThreadGroupGui",
+        "testclass": "ThreadGroup",
+        "testname": "Disabled alias probe",
+        "enabled": "false"
+      },
+      "hash_tree_children": ["AliasSampler", "AliasSampler", "LegacyAliasSampler"]
+    },
+    {
+      "position": 2,
+      "element": {
+        "tag": "AliasSampler",
+        "guiclass": "com.example.plugin.AliasSamplerGui",
+        "testclass": "com.example.plugin.AliasSampler",
+        "testname": "Duplicate alias node",
+        "enabled": "false",
+        "extra_attributes": {"pluginAlias": "primary", "sourceOrder": "0"},
+        "property_order": ["plugin.order.0", "plugin.unknown", "plugin.config"],
+        "unknown_payload": ["pluginProperty", "opaquePluginChild"]
+      },
+      "hash_tree_children": []
+    },
+    {
+      "position": 3,
+      "element": {
+        "tag": "AliasSampler",
+        "guiclass": "com.example.plugin.AliasSamplerGui",
+        "testclass": "com.example.plugin.AliasSampler",
+        "testname": "Duplicate alias node",
+        "enabled": "false",
+        "extra_attributes": {"pluginAlias": "historical", "sourceOrder": "1"},
+        "property_order": ["plugin.order.1", "plugin.unknown", "plugin.config"],
+        "unknown_payload": ["pluginProperty", "opaquePluginChild"]
+      },
+      "hash_tree_children": []
+    },
+    {
+      "position": 4,
+      "element": {
+        "tag": "LegacyAliasSampler",
+        "guiclass": "com.example.plugin.LegacySamplerGui",
+        "testclass": "com.example.plugin.LegacySampler",
+        "testname": "Historical plugin alias",
+        "enabled": "false",
+        "extra_attributes": {"pluginAlias": "legacy-v0"},
+        "property_order": ["plugin.legacy.property", "plugin.function.expression"]
+      },
+      "hash_tree_children": []
+    }
+  ],
+  "alias_contract": {
+    "descriptor": "inputs/alias-contract.json",
+    "primary_aliases": ["AliasSampler", "LegacyAliasSampler"],
+    "historical_aliases": ["AliasSampler", "LegacyAliasSampler"],
+    "preserve_wire_class_and_gui": true,
+    "preserve_unknown_attributes": true,
+    "preserve_unknown_properties": true,
+    "preserve_duplicate_identity": true,
+    "registry_status": "unavailable-static"
+  },
+  "function_contract": {
+    "property_path": "LegacyAliasSampler/plugin.function.expression",
+    "literal": "${__fixturePluginFunction(alpha\\,beta)}",
+    "expanded": false,
+    "required_class": "com.example.plugin.FixtureFunction",
+    "missing_error_code": "plugin.function.unavailable"
+  },
+  "preservation_invariants": [
+    "The two AliasSampler nodes remain distinct despite equal tag, class, GUI, and test name; sourceOrder and direct-property order remain observable.",
+    "Unknown attributes, pluginProperty, opaquePluginChild, CDATA, and nested elementProp payloads remain available for semantic round-trip.",
+    "A disabled plugin function expression remains literal and is never substituted with a built-in function or a successful result."
+  ],
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations": 1,
+    "max_samples": 0,
+    "max_plugin_artifacts": 0,
+    "max_plan_nodes": 8,
+    "max_property_text_bytes": 12288,
+    "max_network_requests": 0,
+    "max_processes": 0
+  },
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "Alias strings, direct and nested property order, duplicate node identity, unknown payloads, disabled state, and literal function text are declarative observable targets. No runtime values exist to normalize."
+  }
+}

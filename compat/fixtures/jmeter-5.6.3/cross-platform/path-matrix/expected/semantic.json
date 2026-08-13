@@ -1,0 +1,289 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-CROSS-PLATFORM-PATHS",
+  "format": "jmx-semantic",
+  "evidence_status": "planned",
+  "normalization_policy_refs": ["NORM-CONFIG-001", "NORM-ENV-001", "NORM-TIME-001", "NORM-EXTERNAL-001"],
+  "projection_schema": "cross-platform-path-capability-matrix",
+  "expectation_basis": "Original path inputs and a bounded future target matrix; no oracle output was measured.",
+  "projection_policy": {
+    "kind": "declarative-static-projection",
+    "jmx_semantic_role": "wire and capability contract metadata, not a captured JMX/JTL result",
+    "runtime_observations": false,
+    "comparator_route": "static-descriptor",
+    "status": "planned"
+  },
+  "matrix_status": "future-ci-targets-only",
+  "current_ci": {
+    "status": "not-configured",
+    "targets": [],
+    "runs_recorded": 0,
+    "note": "The six target rows below are future CI lane descriptors, not current platform evidence."
+  },
+  "plan_open_probe_variables": {
+    "opened_ascii": "fixtures/data/input.txt",
+    "opened_space": "fixtures/data with space/input.txt",
+    "opened_unicode": "fixtures/données/雪.txt",
+    "opened_case": "fixtures/case-probe/CaseProbe.txt",
+    "explicit_root": "fixtures",
+    "explicit_root_relative_path": "explicit-root/input.txt",
+    "explicit_root_expression": "${__FileToString(fixtures/explicit-root/input.txt,,)}",
+    "opened_explicit_root": "fixtures/explicit-root/input.txt",
+    "windows_separator": "\\",
+    "windows_drive_absolute": "C:\\fixture-root\\data\\input.txt",
+    "windows_drive_relative": "C:fixture-root\\data\\input.txt",
+    "windows_unc": "\\\\server\\share\\fixture-root\\data\\input.txt",
+    "windows_relative_escape": "..\\outside.txt",
+    "posix_relative_escape": "../outside.txt",
+    "windows_drive_escape": "C:\\outside.txt",
+    "unicode_path_nfd": "fixtures/données/雪.txt"
+  },
+  "target_matrix": [
+    {"target_os": "linux", "architecture": "x86_64", "target_triple": "x86_64-unknown-linux-gnu", "status": "planned", "run_status": "not-run"},
+    {"target_os": "linux", "architecture": "arm64", "target_triple": "aarch64-unknown-linux-gnu", "status": "planned", "run_status": "not-run"},
+    {"target_os": "macos", "architecture": "x86_64", "target_triple": "x86_64-apple-darwin", "status": "planned", "run_status": "not-run"},
+    {"target_os": "macos", "architecture": "arm64", "target_triple": "aarch64-apple-darwin", "status": "planned", "run_status": "not-run"},
+    {"target_os": "windows", "architecture": "x86_64", "target_triple": "x86_64-pc-windows-msvc", "status": "planned", "run_status": "not-run"},
+    {"target_os": "windows", "architecture": "arm64", "target_triple": "aarch64-pc-windows-msvc", "status": "planned", "run_status": "not-run"}
+  ],
+  "target_outcomes": [
+    {
+      "target_os": "linux",
+      "architecture": "x86_64",
+      "target_triple": "x86_64-unknown-linux-gnu",
+      "status": "planned",
+      "observed": false,
+      "run_status": "not-run",
+      "separator": {"wire_value": "/", "decoded_length": 1, "status": "planned"},
+      "case_outcome": {"canonical_lookup": "must-record", "alternate_lookup": "must-record", "status": "planned"},
+      "unicode_outcome": {"source_form": "NFC", "alternate_form": "NFD", "lookup": "preserve-source-spelling-and-record-result", "status": "planned"},
+      "windows_drive_and_unc": {"status": "not-applicable", "preserve_as_opaque": true},
+      "root_escape": {"relative_parent": "reject", "stable_error_code": "config.outside-root", "status": "planned"}
+    },
+    {
+      "target_os": "linux",
+      "architecture": "arm64",
+      "target_triple": "aarch64-unknown-linux-gnu",
+      "status": "planned",
+      "observed": false,
+      "run_status": "not-run",
+      "separator": {"wire_value": "/", "decoded_length": 1, "status": "planned"},
+      "case_outcome": {"canonical_lookup": "must-record", "alternate_lookup": "must-record", "status": "planned"},
+      "unicode_outcome": {"source_form": "NFC", "alternate_form": "NFD", "lookup": "preserve-source-spelling-and-record-result", "status": "planned"},
+      "windows_drive_and_unc": {"status": "not-applicable", "preserve_as_opaque": true},
+      "root_escape": {"relative_parent": "reject", "stable_error_code": "config.outside-root", "status": "planned"}
+    },
+    {
+      "target_os": "macos",
+      "architecture": "x86_64",
+      "target_triple": "x86_64-apple-darwin",
+      "status": "planned",
+      "observed": false,
+      "run_status": "not-run",
+      "separator": {"wire_value": "/", "decoded_length": 1, "status": "planned"},
+      "case_outcome": {"canonical_lookup": "must-record", "alternate_lookup": "must-record", "status": "planned"},
+      "unicode_outcome": {"source_form": "NFC", "alternate_form": "NFD", "lookup": "observe-filesystem-normalization-without-source-rewrite", "returned_form": "must-record", "status": "planned"},
+      "windows_drive_and_unc": {"status": "not-applicable", "preserve_as_opaque": true},
+      "root_escape": {"relative_parent": "reject", "stable_error_code": "config.outside-root", "status": "planned"}
+    },
+    {
+      "target_os": "macos",
+      "architecture": "arm64",
+      "target_triple": "aarch64-apple-darwin",
+      "status": "planned",
+      "observed": false,
+      "run_status": "not-run",
+      "separator": {"wire_value": "/", "decoded_length": 1, "status": "planned"},
+      "case_outcome": {"canonical_lookup": "must-record", "alternate_lookup": "must-record", "status": "planned"},
+      "unicode_outcome": {"source_form": "NFC", "alternate_form": "NFD", "lookup": "observe-filesystem-normalization-without-source-rewrite", "returned_form": "must-record", "status": "planned"},
+      "windows_drive_and_unc": {"status": "not-applicable", "preserve_as_opaque": true},
+      "root_escape": {"relative_parent": "reject", "stable_error_code": "config.outside-root", "status": "planned"}
+    },
+    {
+      "target_os": "windows",
+      "architecture": "x86_64",
+      "target_triple": "x86_64-pc-windows-msvc",
+      "status": "planned",
+      "observed": false,
+      "run_status": "not-run",
+      "separator": {"wire_value": "\\", "decoded_length": 1, "status": "planned"},
+      "case_outcome": {"canonical_lookup": "must-record", "alternate_lookup": "must-record", "status": "planned"},
+      "unicode_outcome": {"source_form": "NFC", "alternate_form": "NFD", "lookup": "preserve-source-spelling-and-record-result", "status": "planned"},
+      "windows_drive_and_unc": {"drive_absolute": "reject-with-config.outside-root", "drive_relative": "reject-with-config.outside-root", "unc": "reject-with-config.outside-root", "status": "planned"},
+      "root_escape": {"relative_parent": "reject", "drive_absolute": "reject", "unc": "reject", "stable_error_code": "config.outside-root", "status": "planned"}
+    },
+    {
+      "target_os": "windows",
+      "architecture": "arm64",
+      "target_triple": "aarch64-pc-windows-msvc",
+      "status": "planned",
+      "observed": false,
+      "run_status": "not-run",
+      "separator": {"wire_value": "\\", "decoded_length": 1, "status": "planned"},
+      "case_outcome": {"canonical_lookup": "must-record", "alternate_lookup": "must-record", "status": "planned"},
+      "unicode_outcome": {"source_form": "NFC", "alternate_form": "NFD", "lookup": "preserve-source-spelling-and-record-result", "status": "planned"},
+      "windows_drive_and_unc": {"drive_absolute": "reject-with-config.outside-root", "drive_relative": "reject-with-config.outside-root", "unc": "reject-with-config.outside-root", "status": "planned"},
+      "root_escape": {"relative_parent": "reject", "drive_absolute": "reject", "unc": "reject", "stable_error_code": "config.outside-root", "status": "planned"}
+    }
+  ],
+  "path_cases": [
+    {
+      "id": "relative-ascii",
+      "source_value": "fixtures/data/input.txt",
+      "path_encoding": "UTF-8",
+      "contains_space": false,
+      "contains_non_ascii": false,
+      "probe_kind": "open-read",
+      "probe_file": "fixtures/data/input.txt",
+      "probe_file_sha256": "086cb5cf2d6a81adf6006747a49235c99ab2cd7b2497886768f7d4a7b3afd1a9",
+      "expected_contract": "preserve relative path and resolve below the explicit fixture root",
+      "status": "planned"
+    },
+    {
+      "id": "relative-space",
+      "source_value": "fixtures/data with space/input.txt",
+      "path_encoding": "UTF-8",
+      "contains_space": true,
+      "contains_non_ascii": false,
+      "probe_kind": "open-read",
+      "probe_file": "fixtures/data with space/input.txt",
+      "probe_file_sha256": "cc53837b6212d212f4ee75fae2dc07121ed620a67d57458a9371d9bab99e6485",
+      "expected_contract": "preserve spaces without shell splitting or normalization",
+      "status": "planned"
+    },
+    {
+      "id": "relative-unicode",
+      "source_value": "fixtures/données/雪.txt",
+      "path_encoding": "UTF-8",
+      "contains_space": false,
+      "contains_non_ascii": true,
+      "probe_kind": "open-read",
+      "probe_file": "fixtures/données/雪.txt",
+      "probe_file_sha256": "140a236dbd9bc459a4f1f6183c755ea167f269634a95b45b9268b3d06bf2f2c3",
+      "expected_contract": "preserve Unicode scalar values and the original source spelling",
+      "status": "planned"
+    },
+    {
+      "id": "raw-non-unicode-bytes",
+      "source_value": "not representable in this UTF-8 JSON source; supplied only by a future byte-path adapter",
+      "path_encoding": "opaque-non-unicode-bytes",
+      "contains_space": false,
+      "contains_non_ascii": true,
+      "probe_kind": "open-request",
+      "expected_contract": "return unsupported-capability with source context; never lossy UTF-8 replacement",
+      "status": "planned",
+      "unsupported_error_code": "unsupported-capability",
+      "stable_error_code": "runtime.capability.unsupported",
+      "stable_error_code_status": "planned",
+      "cli_exit_class": "capability.unavailable",
+      "configuration_error_code": "config.invalid-utf8",
+      "error_context_fields": ["profile_id", "capability", "operation", "payload_length", "target_triple", "source_path"]
+    },
+    {
+      "id": "case-spelling",
+      "source_value": "fixtures/case-probe/CaseProbe.txt",
+      "alternate_source_value": "fixtures/case-probe/caseprobe.txt",
+      "path_encoding": "UTF-8",
+      "contains_space": false,
+      "contains_non_ascii": false,
+      "probe_kind": "open-read",
+      "probe_file": "fixtures/case-probe/CaseProbe.txt",
+      "probe_file_sha256": "9d95eb53ae2b7384d145ed393ee314e15baa0ffd342794f96d797cd42c4cbfd5",
+      "expected_contract": "preserve canonical spelling; alternate-case resolution is determined by the declared filesystem case policy",
+      "status": "planned"
+    },
+    {
+      "id": "explicit-root",
+      "source_value": "explicit-root/input.txt",
+      "root": "fixtures",
+      "path_encoding": "UTF-8",
+      "contains_space": false,
+      "contains_non_ascii": false,
+      "probe_kind": "open-read",
+      "source_path": "explicit-root/input.txt",
+      "resolved_path": "fixtures/explicit-root/input.txt",
+      "probe_file": "fixtures/explicit-root/input.txt",
+      "probe_file_sha256": "17210213f49c08f26939500d5c998c6866d01ef7f078fde5462525942d77bcec",
+      "expected_contract": "resolve only below the explicit allowlisted root and retain root-relative spelling",
+      "status": "planned"
+    }
+  ],
+  "wire_probe_contract": [
+    {"id": "windows-separator", "plan_variable": "windows_separator", "wire_property": "Argument.value", "wire_value": "\\", "decoded_length": 1, "target_os": "windows", "status": "planned"},
+    {"id": "windows-drive-absolute", "plan_variable": "windows_drive_absolute", "wire_property": "Argument.value", "wire_value": "C:\\fixture-root\\data\\input.txt", "path_kind": "windows-drive-absolute", "resolution": "reject outside explicit fixture root", "stable_error_code": "config.outside-root", "status": "planned"},
+    {"id": "windows-drive-relative", "plan_variable": "windows_drive_relative", "wire_property": "Argument.value", "wire_value": "C:fixture-root\\data\\input.txt", "path_kind": "windows-drive-relative", "resolution": "reject because drive-relative current-directory semantics are not an allowlisted root", "stable_error_code": "config.outside-root", "status": "planned"},
+    {"id": "windows-unc", "plan_variable": "windows_unc", "wire_property": "Argument.value", "wire_value": "\\\\server\\share\\fixture-root\\data\\input.txt", "path_kind": "windows-unc", "resolution": "reject outside explicit fixture root", "stable_error_code": "config.outside-root", "status": "planned"},
+    {"id": "windows-relative-escape", "plan_variable": "windows_relative_escape", "wire_property": "Argument.value", "wire_value": "..\\outside.txt", "path_kind": "windows-relative-parent", "resolution": "reject before root join", "stable_error_code": "config.outside-root", "status": "planned"},
+    {"id": "posix-relative-escape", "plan_variable": "posix_relative_escape", "wire_property": "Argument.value", "wire_value": "../outside.txt", "path_kind": "posix-relative-parent", "resolution": "reject before root join", "stable_error_code": "config.outside-root", "status": "planned"},
+    {"id": "windows-drive-escape", "plan_variable": "windows_drive_escape", "wire_property": "Argument.value", "wire_value": "C:\\outside.txt", "path_kind": "windows-drive-absolute", "resolution": "reject outside explicit fixture root", "stable_error_code": "config.outside-root", "status": "planned"},
+    {"id": "unicode-nfd", "plan_variable": "unicode_path_nfd", "wire_property": "Argument.value", "wire_value": "fixtures/données/雪.txt", "unicode_form": "NFD", "resolution": "preserve scalar sequence and record target filesystem lookup separately", "status": "planned"}
+  ],
+  "root_escape_cases": [
+    {"id": "posix-relative-parent", "target_os": ["linux", "macos"], "wire_value": "../outside.txt", "root": "fixtures", "expected_error_code": "config.outside-root", "preserve_input": true, "status": "planned"},
+    {"id": "windows-relative-parent", "target_os": ["windows"], "wire_value": "..\\outside.txt", "root": "fixtures", "expected_error_code": "config.outside-root", "preserve_input": true, "status": "planned"},
+    {"id": "windows-drive-absolute", "target_os": ["windows"], "wire_value": "C:\\outside.txt", "root": "fixtures", "expected_error_code": "config.outside-root", "preserve_input": true, "status": "planned"},
+    {"id": "windows-unc", "target_os": ["windows"], "wire_value": "\\\\server\\share\\outside.txt", "root": "fixtures", "expected_error_code": "config.outside-root", "preserve_input": true, "status": "planned"}
+  ],
+  "unicode_normalization_contract": {
+    "status": "planned",
+    "observed": false,
+    "source_nfc": "fixtures/données/雪.txt",
+    "source_nfd": "fixtures/données/雪.txt",
+    "source_encoding": "UTF-8",
+    "macos_policy": "Do not normalize either source spelling in the semantic document; run both forms in a declared filesystem lane and record lookup equivalence and returned spelling.",
+    "nfc_lookup": "must-record",
+    "nfd_lookup": "must-record",
+    "returned_path_form": "must-record",
+    "forbidden_behavior": ["silently rewrite NFC to NFD", "silently rewrite NFD to NFC", "drop the original scalar sequence"]
+  },
+  "separator_cases": [
+    {"target_os": "linux", "target_separator": "/", "decoded_length": 1, "source_form": "forward-slash", "status": "planned"},
+    {"target_os": "macos", "target_separator": "/", "decoded_length": 1, "source_form": "forward-slash", "status": "planned"},
+    {"target_os": "windows", "target_separator": "\\", "decoded_length": 1, "source_form": "platform-native separator", "status": "planned"}
+  ],
+  "capability_boundaries": [
+    {"capability": "filesystem.explicit-root", "capability_id": "filesystem.explicit-root", "required": true, "status": "planned", "required_context": ["profile_id", "operation", "root", "source_path", "target_triple"], "outside_root_error_code": "config.outside-root"},
+    {"capability": "filesystem.path-with-spaces", "capability_id": "filesystem.path-with-spaces", "required": true, "status": "planned", "required_context": ["profile_id", "operation", "source_path", "target_triple"]},
+    {"capability": "filesystem.unicode-path", "capability_id": "filesystem.unicode-path", "required": true, "status": "planned", "required_context": ["profile_id", "operation", "source_path", "target_triple"]},
+    {"capability": "filesystem.case-preserving-open", "capability_id": "filesystem.case-preserving-open", "required": true, "status": "planned", "status_detail": "target filesystem policy decides alternate-case lookup", "missing_source_error_code": "config.missing-source", "required_context": ["profile_id", "operation", "source_path", "target_triple", "case_policy"]},
+    {"capability": "filesystem.raw-non-unicode-path", "capability_id": "filesystem.raw-non-unicode-path", "required": false, "status": "planned", "missing_behavior": "unsupported-capability", "unsupported_error_code": "unsupported-capability", "stable_error_code": "runtime.capability.unsupported", "cli_exit_class": "capability.unavailable", "configuration_error_code": "config.invalid-utf8", "required_context": ["profile_id", "capability", "operation", "payload_length", "target_triple", "source_path"]}
+  ],
+  "path_open_probes": [
+    {"id": "open-relative-ascii", "plan_variable": "opened_ascii", "root": "fixtures", "relative_path": "data/input.txt", "source_file": "fixtures/data/input.txt", "source_file_sha256": "086cb5cf2d6a81adf6006747a49235c99ab2cd7b2497886768f7d4a7b3afd1a9", "expected_read_value": "ASCII path probe\n", "max_read_bytes": 64, "expected_status": "planned"},
+    {"id": "open-space-path", "plan_variable": "opened_space", "root": "fixtures", "relative_path": "data with space/input.txt", "source_file": "fixtures/data with space/input.txt", "source_file_sha256": "cc53837b6212d212f4ee75fae2dc07121ed620a67d57458a9371d9bab99e6485", "expected_read_value": "Space-containing path probe\n", "max_read_bytes": 64, "expected_status": "planned"},
+    {"id": "open-unicode-path", "plan_variable": "opened_unicode", "root": "fixtures", "relative_path": "données/雪.txt", "source_file": "fixtures/données/雪.txt", "source_file_sha256": "140a236dbd9bc459a4f1f6183c755ea167f269634a95b45b9268b3d06bf2f2c3", "expected_read_value": "Unicode path probe ☃\n", "read_charset": "UTF-8", "max_read_bytes": 64, "expected_status": "planned"},
+    {"id": "open-case-canonical", "plan_variable": "opened_case", "root": "fixtures", "relative_path": "case-probe/CaseProbe.txt", "source_file": "fixtures/case-probe/CaseProbe.txt", "source_file_sha256": "9d95eb53ae2b7384d145ed393ee314e15baa0ffd342794f96d797cd42c4cbfd5", "expected_read_value": "Case-sensitive path probe\n", "max_read_bytes": 64, "expected_status": "planned"},
+    {"id": "open-case-alternate", "root": "fixtures", "relative_path": "case-probe/caseprobe.txt", "source_file": "fixtures/case-probe/CaseProbe.txt", "case_policy": "target-outcome-row", "expected_status": "planned"},
+    {"id": "open-explicit-root", "plan_variable": "opened_explicit_root", "root": "fixtures", "relative_path": "explicit-root/input.txt", "source_path": "explicit-root/input.txt", "resolved_path": "fixtures/explicit-root/input.txt", "source_file": "fixtures/explicit-root/input.txt", "source_file_sha256": "17210213f49c08f26939500d5c998c6866d01ef7f078fde5462525942d77bcec", "expected_read_value": "Explicit root path probe\n", "max_read_bytes": 64, "expected_status": "planned"},
+    {"id": "reject-root-escape", "root": "fixtures", "relative_path": "../outside.txt", "case_policy": "must-reject", "expected_error_code": "config.outside-root", "expected_status": "planned"}
+  ],
+  "raw_non_unicode_payload": {
+    "id": "raw-non-unicode-path",
+    "payload_hex": "6669787475726573ff2e747874",
+    "byte_length": 13,
+    "max_bytes": 64,
+    "valid_utf8": false,
+    "capability_id": "filesystem.raw-non-unicode-path",
+    "unsupported_error_code": "unsupported-capability",
+    "stable_error_code": "runtime.capability.unsupported",
+    "cli_exit_class": "capability.unavailable",
+    "configuration_error_code": "config.invalid-utf8",
+    "status": "planned",
+    "required_context": ["profile_id", "capability", "operation", "payload_length", "target_triple", "source_path"],
+    "preservation": "retain the opaque payload for diagnostics; never replace, drop, or reinterpret it as UTF-8"
+  },
+  "normalization": {
+    "ignored_fields": ["runtime.hostname", "runtime.target_image_id", "runtime.ephemeral_root"],
+    "reason": "No oracle result exists. Path spelling, path class, target triple, capability status, and stable error category remain observable; host-specific roots are future manifest-declared values only."
+  },
+  "generated_from": {
+    "generator": "Original jmeter-rs static path matrix",
+    "generator_version": "not applicable",
+    "oracle_status": "not-run",
+    "oracle_command": "future pinned JMeter 5.6.3 matrix recipe only; no process was started",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "ignored; no oracle artifacts collected"
+  }
+}

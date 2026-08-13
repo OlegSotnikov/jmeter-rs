@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testResults version="1.2"><sample t="8" s="true" lb="file response" rc="200" rm="OK" dt="text" de="UTF-8"><responseFile class="java.lang.String">resources/response-file-body.txt</responseFile></sample></testResults>

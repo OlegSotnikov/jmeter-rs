@@ -1,0 +1,303 @@
+# SPDX-License-Identifier: Apache-2.0
+
+name: Pinned JMeter fixture smoke (disabled)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 4 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pinned-jmeter-oracle-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_NET_RETRY: "3"
+  CARGO_TERM_COLOR: always
+  LANG: C
+  LC_ALL: C
+  TZ: UTC
+  JMETER_ARCHIVE: apache-jmeter-5.6.3.zip
+  JMETER_SHA512: 387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076
+  JMETER_URL: https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip
+  JMETER_SIGNATURE_URL: https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.asc
+  JMETER_KEYS_URL: https://archive.apache.org/dist/jmeter/KEYS
+  JMETER_SIGNING_FINGERPRINT: C4923F9ABFB2F1A06F08E88BAC214CAA0612B399
+  # GitHub-hosted runner labels are not image digests. A future enabled lane
+  # must provide this required immutable image identifier before it can emit
+  # an oracle artifact manifest.
+  ORACLE_OS_IMAGE_DIGEST: ""
+
+jobs:
+  oracle:
+    # Fail closed until the shared process-supervision safety gate is green.
+    # Keep the future lane's lifecycle behind jmeter-oracle; do not enable a
+    # direct Java/JMeter launcher or an external process wrapper as a workaround.
+    if: ${{ false }}
+    name: JMeter 5.6.3 fixture smoke (disabled pending supervisor gate)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      # Keep every generated Cargo and oracle output outside the checkout.
+      CARGO_HOME: ${{ runner.temp }}/jmeter-cargo-home
+      CARGO_TARGET_DIR: ${{ runner.temp }}/jmeter-cargo-target
+      ORACLE_RUN_ROOT: ${{ runner.temp }}/jmeter-oracle
+      ORACLE_CACHE_ROOT: ${{ runner.temp }}/jmeter-cache
+    steps:
+      # actions/checkout v7.0.1; tag verified against the official repository.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify clean checkout before generated outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_status="$(git status --porcelain=v1 --untracked-files=all)"
+          if [[ -n "$source_status" ]]; then
+            echo "oracle requires a clean checkout before any generated output" >&2
+            printf '%s\n' "$source_status" >&2
+            exit 78
+          fi
+          mkdir -p "$RUNNER_TEMP/jmeter-oracle"
+          {
+            echo "source_commit=$(git rev-parse HEAD)"
+            echo "dirty_state=clean"
+          } > "$RUNNER_TEMP/jmeter-oracle/source-provenance.env"
+      # actions/setup-java v5.7.0; tag verified against the official repository.
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: 17.0.20
+          architecture: x64
+      # actions-rust-lang/setup-rust-toolchain v1.17.0; tag verified against the official repository.
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: 1.97.1
+          cache: false
+          rustflags: ""
+      # actions/cache v6.1.0; tag verified against the official repository.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/jmeter-cargo-home/registry
+            ${{ runner.temp }}/jmeter-cargo-home/git
+            ${{ runner.temp }}/jmeter-cargo-target
+          key: oracle-cargo-${{ runner.os }}-${{ runner.arch }}-1.97.1-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
+      - name: Prepare archive cache
+        run: mkdir -p "$RUNNER_TEMP/jmeter-cache"
+      # The cache key contains the profile digest, and the archive is checked
+      # again after every restore. A cache hit is never trusted as evidence.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/jmeter-cache/${{ env.JMETER_ARCHIVE }}
+          key: jmeter-5.6.3-${{ env.JMETER_SHA512 }}
+      - name: Download and verify Apache JMeter archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive_path="$RUNNER_TEMP/jmeter-cache/${JMETER_ARCHIVE}"
+          if [[ ! -f "$archive_path" ]]; then
+            curl --fail --location --proto '=https' --tlsv1.2 --retry 3 --retry-connrefused \
+              --connect-timeout 30 --max-time 600 "$JMETER_URL" --output "$archive_path"
+          fi
+          printf '%s  %s\n' "$JMETER_SHA512" "$archive_path" | sha512sum --check --status -
+      - name: Verify Apache OpenPGP signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          gpg_home="$RUNNER_TEMP/jmeter-gnupg"
+          mkdir -m 700 "$gpg_home"
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 3 --retry-connrefused \
+            --connect-timeout 30 --max-time 120 "$JMETER_KEYS_URL" --output "$RUNNER_TEMP/jmeter-KEYS"
+          curl --fail --location --proto '=https' --tlsv1.2 --retry 3 --retry-connrefused \
+            --connect-timeout 30 --max-time 120 "$JMETER_SIGNATURE_URL" --output "$RUNNER_TEMP/$JMETER_ARCHIVE.asc"
+          gpg --batch --homedir "$gpg_home" --import "$RUNNER_TEMP/jmeter-KEYS"
+          gpg --batch --homedir "$gpg_home" --status-fd 1 --verify \
+            "$RUNNER_TEMP/$JMETER_ARCHIVE.asc" "$RUNNER_TEMP/jmeter-cache/$JMETER_ARCHIVE" 2>&1 \
+            | tee "$RUNNER_TEMP/jmeter-gpg-status"
+          grep -Fq "[GNUPG:] VALIDSIG $JMETER_SIGNING_FINGERPRINT " \
+            "$RUNNER_TEMP/jmeter-gpg-status"
+      - name: Unpack and record smoke environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/jmeter"
+          unzip -q "$RUNNER_TEMP/jmeter-cache/$JMETER_ARCHIVE" -d "$RUNNER_TEMP/jmeter"
+          runner_locale="${LC_ALL:-${LANG:-}}"
+          runner_lang="${LANG:-}"
+          runner_lc_all="${LC_ALL:-}"
+          runner_tz="${TZ:-}"
+          runner_charmap="$(locale charmap 2>/dev/null || true)"
+          test -n "$runner_locale"
+          test -n "$runner_tz"
+          test -n "$runner_charmap"
+          {
+            echo "profile_id=jmeter-5.6.3"
+            echo "artifact=$JMETER_ARCHIVE"
+            echo "artifact_sha512=$JMETER_SHA512"
+            echo "runner_locale=$runner_locale"
+            echo "runner_LANG=$runner_lang"
+            echo "runner_LC_ALL=$runner_lc_all"
+            echo "runner_TZ=$runner_tz"
+            echo "runner_charmap=$runner_charmap"
+            echo "locale=$runner_locale"
+            echo "timezone=$runner_tz"
+            echo "charset=$runner_charmap"
+            echo "jmeter_version_requested=5.6.3"
+            echo "java_distribution=temurin"
+            echo "java_version_requested=17.0.20"
+            rustc --version --verbose
+            cargo --version --verbose
+          } > "$RUNNER_TEMP/jmeter-oracle/fixture-smoke-environment.txt"
+      - name: Validate the pinned smoke harness
+        run: cargo test --package jmeter-oracle --locked
+      - name: Record required oracle provenance manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          os_image_digest="${ORACLE_OS_IMAGE_DIGEST:-}"
+          if [[ -z "$os_image_digest" ]]; then
+            echo "ORACLE_OS_IMAGE_DIGEST is required before enabling this lane" >&2
+            exit 78
+          fi
+          source_status="$(git status --porcelain=v1 --untracked-files=all)"
+          if [[ -n "$source_status" ]]; then
+            echo "generated oracle output escaped RUNNER_TEMP" >&2
+            printf '%s\n' "$source_status" >&2
+            exit 78
+          fi
+          source_file="$RUNNER_TEMP/jmeter-oracle/source-provenance.env"
+          # This file was captured before setup/cache/unpack output existed.
+          # shellcheck disable=SC1090
+          source "$source_file"
+          cargo_lock_sha256="$(sha256sum Cargo.lock | awk '{print $1}')"
+          runner_charmap="$(locale charmap 2>/dev/null || true)"
+          test -n "$runner_charmap"
+          python3 - "$source_commit" "$dirty_state" "$os_image_digest" "$cargo_lock_sha256" \
+            "$LANG" "$LC_ALL" "$TZ" "$runner_charmap" > "$RUNNER_TEMP/jmeter-oracle/oracle-run-manifest.json" <<'PY'
+          import json
+          import sys
+
+          (
+              source_commit,
+              dirty_state,
+              os_image_digest,
+              cargo_lock_sha256,
+              lang,
+              lc_all,
+              timezone,
+              charmap,
+          ) = sys.argv[1:]
+          json.dump(
+              {
+                  "schema_id": "jmeter-rs.oracle-run-manifest",
+                  "schema_version": 1,
+                  "profile_id": "jmeter-5.6.3",
+                  "source_commit": source_commit,
+                  "dirty_state": dirty_state,
+                  "os_image_digest": os_image_digest,
+                  "cargo_lock_sha256": cargo_lock_sha256,
+                  "artifact": "apache-jmeter-5.6.3.zip",
+                  "runner_environment": {
+                      "LANG": lang,
+                      "LC_ALL": lc_all,
+                      "TZ": timezone,
+                  },
+                  "runner_locale": lc_all or lang,
+                  "runner_timezone": timezone,
+                  "locale": lc_all or lang,
+                  "timezone": timezone,
+                  "charset": charmap,
+              },
+              sys.stdout,
+              indent=2,
+              sort_keys=True,
+          )
+          print()
+          PY
+      - name: Run pinned JMeter fixture smoke (disabled)
+        shell: bash
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          jmeter_home="$RUNNER_TEMP/jmeter/apache-jmeter-5.6.3"
+          profile="$GITHUB_WORKSPACE/compat/profiles/jmeter-5.6.3.json"
+          artifact="$RUNNER_TEMP/jmeter-cache/$JMETER_ARCHIVE"
+          java="$JAVA_HOME/bin/java"
+          mkdir -p "$RUNNER_TEMP/jmeter-oracle/fixture-smoke-runs"
+
+          run_fixture() {
+            local name="$1"
+            local output_dir="$RUNNER_TEMP/jmeter-oracle/fixture-smoke-runs/$name"
+            local case_file="$GITHUB_WORKSPACE/compat/fixtures/jmeter-5.6.3/$name/case.json"
+            mkdir -p "$output_dir"
+            # The launcher environment is part of the provenance contract.
+            # Refuse a case whose declared locale/timezone is not what this
+            # runner actually exports; do not infer or silently normalize it.
+            IFS=$'\t' read -r case_locale case_timezone case_lang case_lc_all < <(
+              python3 - "$case_file" <<'PY'
+          import json
+          import sys
+
+          case = json.load(open(sys.argv[1], encoding="utf-8"))
+          command = case.get("command", {})
+          determinism = case.get("determinism", {})
+          locale = command.get("locale", determinism.get("locale", ""))
+          timezone = command.get("timezone", determinism.get("timezone", ""))
+          allowlist = determinism.get("environment_allowlist", [])
+          values = {entry.split("=", 1)[0]: entry.split("=", 1)[1] for entry in allowlist if "=" in entry}
+          print("\t".join((locale, timezone, values.get("LANG", ""), values.get("LC_ALL", ""))))
+          PY
+            )
+            runner_locale="${LC_ALL:-${LANG:-}}"
+            if [[ "$case_locale" != "$runner_locale" || "$case_timezone" != "$TZ" ]]; then
+              echo "case $name locale/timezone does not match runner: case=$case_locale/$case_timezone runner=$runner_locale/$TZ" >&2
+              exit 78
+            fi
+            if [[ -n "$case_lang" && "$case_lang" != "$LANG" ]] || \
+              [[ -n "$case_lc_all" && "$case_lc_all" != "$LC_ALL" ]]; then
+              echo "case $name environment allowlist does not match runner" >&2
+              exit 78
+            fi
+            # Future smoke execution must use the owned oracle supervisor,
+            # which enforces the child deadline and reaps its exact handle.
+            # The step limit above is only GitHub's outer runner failsafe.
+            cargo run --locked --package jmeter-oracle -- \
+              run \
+              --profile "$profile" \
+              --case "$case_file" \
+              --fixture-dir "${case_file%/case.json}" \
+              --jmeter "$jmeter_home/bin/jmeter" \
+              --java "$java" \
+              --artifact "$artifact" \
+              --output-dir "$output_dir" \
+              --timeout-ms 300000 \
+              --max-output-bytes 1048576 \
+              --max-artifact-bytes 67108864 \
+              --json > "$output_dir/supervisor.json"
+          }
+
+          run_fixture assertion-failure
+          run_fixture controllers
+          run_fixture jmx-topology
+          run_fixture lifecycle-debug
+          run_fixture jtl-fields
+          if ! git diff --quiet || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
+            echo "generated oracle output escaped RUNNER_TEMP" >&2
+            git status --short >&2
+            exit 78
+          fi
+      # actions/upload-artifact v7.0.1; tag verified against the official repository.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: jmeter-5.6.3-fixture-smoke-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/jmeter-oracle/fixture-smoke-environment.txt
+            ${{ runner.temp }}/jmeter-oracle/oracle-run-manifest.json
+            ${{ runner.temp }}/jmeter-oracle/fixture-smoke-runs/
+          if-no-files-found: warn
+          retention-days: 7

@@ -1,0 +1,68 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-FUNCTIONS-FILES-CONCURRENCY",
+  "profile_id": "jmeter-5.6.3",
+  "evidence_status": "not_run",
+  "format": "jmx-semantic",
+  "bounds_contract": {
+    "schema_id": "jmeter-rs.fixture-bounds",
+    "schema_version": 1,
+    "source": "case.bounds",
+    "comparator_enforced": false,
+    "max_threads": 2,
+    "max_iterations_per_thread": 1,
+    "max_samplers_per_iteration": 1,
+    "max_samples": 2,
+    "max_input_bytes": 128,
+    "max_output_files": 0,
+    "max_label_bytes": 1024
+  },
+  "planned_invariants": {
+    "schema_id": "jmeter-rs.planned-constraint-contract",
+    "schema_version": 1,
+    "enforcement": "not-comparator-enforced",
+    "comparator_enforced": false,
+    "reason": "The corpus has not run, and the current validator has no concurrency/function-cursor assertion schema. Upstream scheduling may change which shared cursor value each thread observes.",
+    "thread_count": 2,
+    "one_iteration_per_thread": true,
+    "csv_row_mapping": "not_asserted",
+    "string_from_file_cursor": "unordered-by-thread",
+    "arrival_order": "not_asserted",
+    "unordered_mapping": {
+      "thread_count": 2,
+      "samples": 2,
+      "comparator_enforced": false,
+      "string_from_file_occurrences": [
+        {
+          "source": "inputs/lines.txt",
+          "output_variable": "concurrent_line_first",
+          "expected_values": ["line-one", "line-two"],
+          "each_value_once": true,
+          "thread_assignment": "unordered"
+        },
+        {
+          "source": "inputs/lines.txt",
+          "output_variable": "concurrent_line_second",
+          "expected_values": ["line-one", "line-two"],
+          "each_value_once": true,
+          "thread_assignment": "unordered"
+        }
+      ],
+      "csv": {
+        "source": "inputs/rows.csv",
+        "selectors": ["0", "1"],
+        "rows": [
+          {"fields": ["thread-one", "row-a"], "thread_assignment": "unordered"},
+          {"fields": ["thread-two", "row-b"], "thread_assignment": "unordered"}
+        ],
+        "each_row_once": true,
+        "row_assignment": "unordered"
+      }
+    }
+  },
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.by"],
+    "reason": "This planned descriptor records only finite topology and cursor coverage; no runtime sample or per-thread value is comparator-enforced."
+  }
+}

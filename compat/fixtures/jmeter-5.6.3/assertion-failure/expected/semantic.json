@@ -1,0 +1,65 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-ASSERTION-FAILURE",
+  "format": "jtl-xml",
+  "evidence_status": "external-raw-observation",
+  "rust_conformance_claim": false,
+  "expectation_basis": "Recorded Apache JMeter 5.6.3 XML output retained as external raw observation; no Rust output was compared and no continuation behavior is claimed.",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 1,
+  "process_exit": 0,
+  "samples": [{
+    "position": 0,
+    "attributes": {
+      "s": "false",
+      "lb": "assertion-source",
+      "rc": "200",
+      "rm": "OK",
+      "tn": "One deterministic user 1-1",
+      "dt": "text",
+      "de": "US-ASCII",
+      "sby": "0",
+      "sc": "1",
+      "ec": "1",
+      "ng": "1",
+      "na": "1"
+    },
+    "ignored_attributes": ["t", "by", "it", "lt", "ct", "ts"],
+    "assertions": [{
+      "name": "Absent literal assertion",
+      "failure": "true",
+      "error": "false",
+      "failure_message": "Test failed: text expected to contain /never-present-in-debug-response/"
+    }],
+    "debug_response_projection": {
+      "required_sections": ["JMeterVariables:"],
+      "variables": {
+        "JMeterThread.last_sample_ok": "true",
+        "known_value": "present"
+      },
+      "ignored_line_patterns": [
+        "^JMeterThread\\.pack=.*$",
+        "^(START|TESTSTART)\\.(HMS|MS|YMD)=.*$",
+        "^__jm__.*$",
+        "^__jmv_.*$"
+      ]
+    }
+  }],
+  "generated_from": {
+    "status": "external-raw-observation",
+    "rust_conformance_claim": false,
+    "comparator_ready": false,
+    "generator": "Apache JMeter",
+    "generator_version": "5.6.3",
+    "random_seed": null,
+    "oracle_command": "env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=C LANG=C TZ=UTC jmeter-oracle-cache/apache-jmeter-5.6.3/bin/jmeter -n -q compat/fixtures/jmeter-5.6.3/assertion-failure/oracle.properties -t compat/fixtures/jmeter-5.6.3/assertion-failure/plan.jmx -l oracle-runs/assertion-failure/oracle.jtl -j oracle-runs/assertion-failure/oracle.log",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "oracle-runs/assertion-failure/ (ignored; local evidence only)"
+  },
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.ts", "sample.by", "debug_response.dynamic_lines"],
+    "reason": "The assertion result is deterministic, while the local Debug Sampler response contains wall-clock and Java identity lines."
+  }
+}

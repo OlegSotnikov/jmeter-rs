@@ -1,0 +1,39 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-TIMER-BEANSHELL-EXTERNAL",
+  "format": "jmx-semantic",
+  "evidence_status": "planned",
+  "source": {
+    "kind": "original-static-contract",
+    "oracle_status": "not-run",
+    "note": "No JMeter or Java process was run while creating this corpus."
+  },
+  "timer_contract": {
+    "kind": "external-preservation",
+    "testclass": "BeanShellTimer",
+    "properties": {
+      "filename": "",
+      "parameters": "",
+      "resetInterpreter": false,
+      "script": "return 0;"
+    },
+    "labels": [
+      "beanshell-timer-sample"
+    ],
+    "observed_sample_count": null,
+    "sample_count_asserted": false,
+    "required_capabilities": ["EXT-JVM-001", "EXT-PLUGIN-001"]
+  },
+  "normalization": {
+    "ignored_fields": [],
+    "timing_tolerances": {
+      "enforcement": "descriptor-only",
+      "comparator_enforced": false,
+      "runtime_values": "oracle-pending because the JVM/script boundary was not executed"
+    },
+    "byte_policy": {"bytes": "retained; no normalization", "sent_bytes": "retained; no normalization"},
+    "reason": "The external case asserts preserved timer class and properties only; no execution output is normalized."
+  }
+}

@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/jmeter-rs/test-003-fuzz-evidence-v1.schema.json",
+  "title": "TEST-003 fuzz campaign evidence",
+  "description": "Machine-checkable result descriptor for a bounded fuzz campaign. The scaffold itself records not-run/planned values until a runner supplies actual evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "campaign_id",
+    "profile_id",
+    "target",
+    "runner",
+    "invariants",
+    "outcome",
+    "corpus"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "test-003-fuzz-evidence-v1"
+    },
+    "campaign_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "profile_id": {
+      "const": "jmeter-5.6.3"
+    },
+    "target": {
+      "enum": [
+        "jmx_xml",
+        "jtl_csv",
+        "jtl_xml",
+        "jtl_model",
+        "expr",
+        "bridge",
+        "bridge_rmi",
+        "property_config",
+        "save_config",
+        "http_policy",
+        "plugin_json",
+        "remote",
+        "runtime",
+        "all"
+      ]
+    },
+    "runner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nightly", "cargo_fuzz", "libfuzzer_sys", "flags"],
+      "properties": {
+        "nightly": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Actual toolchain version, or not-run when no campaign was executed."
+        },
+        "cargo_fuzz": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Actual cargo-fuzz version, or not-run when no campaign was executed."
+        },
+        "libfuzzer_sys": {
+          "const": "0.4.13"
+        },
+        "flags": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "invariants": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["invariant_id", "target", "status"],
+        "properties": {
+          "invariant_id": {
+            "enum": [
+              "JMX-LIMIT-001",
+              "JMX-SOURCE-RETAIN-001",
+              "JMX-OPAQUE-INVENTORY-001",
+              "JMX-DROPPED-INVENTORY-001",
+              "JTL-CSV-LIMIT-001",
+              "JTL-CSV-PROJECTION-001",
+              "JTL-CSV-UNKNOWN-HEADER-001",
+              "JTL-XML-LIMIT-001",
+              "JTL-XML-PROJECTION-001",
+              "JTL-XML-WIRE-001",
+              "TEST-003-JTL-MODEL-001",
+              "TEST-003-JTL-MODEL-002",
+              "TEST-003-JTL-MODEL-003",
+              "TEST-003-JTL-MODEL-LIMIT-001",
+              "EXPR-UNDEFINED-001",
+              "EXPR-LIMITS-001",
+              "EXPR-PROGRESS-001",
+              "BRIDGE-LIMIT-001",
+              "BRIDGE-FRAME-ROUNDTRIP-001",
+              "BRIDGE-METADATA-001",
+              "BRIDGE-RMI-CODEC-001",
+              "BRIDGE-RMI-STATE-001",
+              "BRIDGE-RMI-BACKPRESSURE-001",
+              "BRIDGE-RMI-LIMIT-001",
+              "CONFIG-UNKNOWN-IGNORED-001",
+              "CONFIG-DUPLICATE-001",
+              "CONFIG-BOUNDS-001",
+              "SAVE-CONFIG-MODEL-001",
+              "SAVE-CONFIG-PRECEDENCE-001",
+              "SAVE-CONFIG-UNKNOWN-001",
+              "SAVE-CONFIG-CANONICAL-001",
+              "HTTP-URL-BOUNDS-001",
+              "HTTP-HEADER-BOUNDS-001",
+              "HTTP-COOKIE-BOUNDS-001",
+              "PLUGIN-JSON-PREFLIGHT-001",
+              "REMOTE-CODEC-ROUNDTRIP-001",
+              "REMOTE-STATE-001",
+              "REMOTE-BOUNDS-001",
+              "RUNTIME-CONTROLLER-001",
+              "RUNTIME-SCHEDULER-001",
+              "RUNTIME-BOUNDS-001"
+            ]
+          },
+          "target": {
+            "enum": [
+              "jmx_xml",
+              "jtl_csv",
+              "jtl_xml",
+              "jtl_model",
+              "expr",
+              "bridge",
+              "bridge_rmi",
+              "property_config",
+              "save_config",
+              "http_policy",
+              "plugin_json",
+              "remote",
+              "runtime"
+            ]
+          },
+          "status": {
+            "enum": ["planned", "not_run", "observed", "failed"]
+          },
+          "notes": {
+            "type": "string"
+          },
+          "coverage_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "JTL-XML-WIRE-PROBE-001",
+                "PLUG-003"
+              ]
+            },
+            "description": "Additional source or profile IDs covered by this canonical top-level invariant."
+          }
+        }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "artifacts", "notes"],
+      "properties": {
+        "status": {
+          "enum": ["not_run", "pass", "fail"]
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "kind"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1},
+              "kind": {"enum": ["artifact", "minimized_input", "log", "report"]},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            }
+          }
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "corpus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provenance_file", "seed_files", "sha256_manifest"],
+      "properties": {
+        "provenance_file": {
+          "const": "corpus/PROVENANCE.md"
+        },
+        "seed_files": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "sha256_manifest": {
+          "oneOf": [
+            {"const": "not-generated-static-only"},
+            {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

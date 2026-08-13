@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="ELEM-008 negative and bounds corpus" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="Negative inputs" enabled="true">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="fixture.empty" elementType="Argument">
+            <stringProp name="Argument.name">fixture.empty</stringProp>
+            <stringProp name="Argument.value"></stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+      <collectionProp name="TestPlan.thread_groups"/>
+      <stringProp name="TestPlan.comments">Negative values are source contracts only; no runtime error text is fabricated.</stringProp>
+      <stringProp name="TestPlan.user_define_classpath"></stringProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="One bounded user" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="One iteration" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">1</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">0</stringProp>
+        <longProp name="ThreadGroup.start_time">0</longProp>
+        <longProp name="ThreadGroup.end_time">0</longProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <stringProp name="ThreadGroup.duration"></stringProp>
+        <stringProp name="ThreadGroup.delay"></stringProp>
+      </ThreadGroup>
+      <hashTree>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="Empty and malformed response carrier" enabled="true">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">true</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree>
+          <SampleTimeout guiclass="TestBeanGUI" testclass="SampleTimeout" testname="Minimum non-zero timeout" enabled="true">
+            <stringProp name="InterruptTimer.timeout">1</stringProp>
+          </SampleTimeout>
+          <hashTree/>
+          <RegexExtractor guiclass="RegexExtractorGui" testclass="RegexExtractor" testname="Invalid match number" enabled="true">
+            <stringProp name="RegexExtractor.useHeaders">false</stringProp>
+            <stringProp name="RegexExtractor.refname">invalid_match</stringProp>
+            <stringProp name="RegexExtractor.regex">(value)</stringProp>
+            <stringProp name="RegexExtractor.template">$1$</stringProp>
+            <stringProp name="RegexExtractor.default">INVALID_MATCH_DEFAULT</stringProp>
+            <stringProp name="RegexExtractor.match_number">not-an-integer</stringProp>
+          </RegexExtractor>
+          <hashTree/>
+          <BoundaryExtractor guiclass="BoundaryExtractorGui" testclass="BoundaryExtractor" testname="Empty boundaries" enabled="true">
+            <stringProp name="BoundaryExtractor.refname">empty_boundary</stringProp>
+            <stringProp name="BoundaryExtractor.lboundary"></stringProp>
+            <stringProp name="BoundaryExtractor.rboundary"></stringProp>
+            <stringProp name="BoundaryExtractor.match_number">0</stringProp>
+            <stringProp name="BoundaryExtractor.default">BOUNDARY_DEFAULT</stringProp>
+            <boolProp name="BoundaryExtractor.default_empty_value">true</boolProp>
+            <stringProp name="BoundaryExtractor.useHeaders">false</stringProp>
+          </BoundaryExtractor>
+          <hashTree/>
+          <HtmlExtractor guiclass="HtmlExtractorGui" testclass="HtmlExtractor" testname="Empty selector and default" enabled="true">
+            <stringProp name="HtmlExtractor.extractor_impl">JSOUP</stringProp>
+            <stringProp name="HtmlExtractor.attribute">missing-attribute</stringProp>
+            <stringProp name="HtmlExtractor.expr">:not-a-selector</stringProp>
+            <stringProp name="HtmlExtractor.refname">empty_css</stringProp>
+            <stringProp name="HtmlExtractor.match_number">0</stringProp>
+            <stringProp name="HtmlExtractor.default">CSS_DEFAULT</stringProp>
+            <boolProp name="HtmlExtractor.default_empty_value">true</boolProp>
+          </HtmlExtractor>
+          <hashTree/>
+          <XPathExtractor guiclass="XPathExtractorGui" testclass="XPathExtractor" testname="Malformed XPath" enabled="true">
+            <stringProp name="XPathExtractor.xpathQuery">//*[</stringProp>
+            <stringProp name="XPathExtractor.refname">invalid_xpath</stringProp>
+            <stringProp name="XPathExtractor.default">XPATH_DEFAULT</stringProp>
+            <boolProp name="XPathExtractor.tolerant">false</boolProp>
+            <boolProp name="XPathExtractor.namespace">false</boolProp>
+            <boolProp name="XPathExtractor.report_errors">true</boolProp>
+            <boolProp name="XPathExtractor.show_warnings">true</boolProp>
+            <boolProp name="XPathExtractor.quiet">false</boolProp>
+            <boolProp name="XPathExtractor.fragment">false</boolProp>
+            <boolProp name="XPathExtractor.whitespace">true</boolProp>
+            <boolProp name="XPathExtractor.validate">false</boolProp>
+            <boolProp name="XPathExtractor.download_dtds">false</boolProp>
+            <stringProp name="XPathExtractor.matchNumber">0</stringProp>
+          </XPathExtractor>
+          <hashTree/>
+          <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="Mismatched JSON extractor arguments" enabled="true">
+            <stringProp name="JSONPostProcessor.jsonPathExprs">$.items[*].name;$.missing</stringProp>
+            <stringProp name="JSONPostProcessor.referenceNames">json_only_one</stringProp>
+            <stringProp name="JSONPostProcessor.defaultValues">JSON_DEFAULT</stringProp>
+            <boolProp name="JSONPostProcessor.compute_concat">false</boolProp>
+            <stringProp name="JSONPostProcessor.match_numbers">0;1</stringProp>
+          </JSONPostProcessor>
+          <hashTree/>
+          <JMESPathExtractor guiclass="JMESPathExtractorGui" testclass="JMESPathExtractor" testname="Malformed JMESPath" enabled="true">
+            <stringProp name="JMESExtractor.jmesPathExpr">items[</stringProp>
+            <stringProp name="JMESExtractor.referenceName">invalid_jmes</stringProp>
+            <stringProp name="JMESExtractor.defaultValue">JMES_DEFAULT</stringProp>
+            <stringProp name="JMESExtractor.matchNumber">9</stringProp>
+          </JMESPathExtractor>
+          <hashTree/>
+          <RegexExtractor guiclass="RegexExtractorGui" testclass="RegexExtractor" testname="Disabled oversized-output probe" enabled="false">
+            <stringProp name="RegexExtractor.useHeaders">false</stringProp>
+            <stringProp name="RegexExtractor.refname">bounded_output</stringProp>
+            <stringProp name="RegexExtractor.regex">(.{0,65536})</stringProp>
+            <stringProp name="RegexExtractor.template">$1$</stringProp>
+            <stringProp name="RegexExtractor.default">BOUNDED_DEFAULT</stringProp>
+            <stringProp name="RegexExtractor.match_number">-1</stringProp>
+          </RegexExtractor>
+          <hashTree/>
+          <PluginPostProcessor guiclass="com.example.jmeter.PluginPostProcessorGui" testclass="com.example.jmeter.PluginPostProcessor" testname="Disabled unknown error probe" enabled="false" pluginVersion="0.1">
+            <stringProp name="plugin.error_mode">must-preserve</stringProp>
+            <pluginProperty name="plugin.opaque" encoding="raw">unknown processor bytes</pluginProperty>
+          </PluginPostProcessor>
+          <hashTree/>
+        </hashTree>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

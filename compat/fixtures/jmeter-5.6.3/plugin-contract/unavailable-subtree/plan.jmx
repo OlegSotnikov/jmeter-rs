@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Static unavailable plugin subtree" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <stringProp name="TestPlan.user_define_classpath">inputs/classes</stringProp>
+      <stringProp name="TestPlan.comments">Disabled missing-class probes and duplicate opaque plugin subtrees; no classloader is invoked.</stringProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Disabled unavailable probe" enabled="false">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <stringProp name="ThreadGroup.num_threads">1</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">0</stringProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="One disabled iteration" enabled="false">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">1</stringProp>
+        </elementProp>
+      </ThreadGroup>
+      <hashTree>
+        <JavaSampler guiclass="JavaTestSamplerGui" testclass="JavaSampler" testname="Missing Java sampler class" enabled="false">
+          <stringProp name="classname">com.example.plugin.MissingJavaSampler</stringProp>
+          <elementProp name="arguments" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="Empty class arguments" enabled="false">
+            <collectionProp name="Arguments.arguments"/>
+          </elementProp>
+        </JavaSampler>
+        <hashTree/>
+        <JUnitSampler guiclass="JUnitTestSamplerGui" testclass="JUnitSampler" testname="Missing JUnit class" enabled="false">
+          <stringProp name="junitSampler.classname">com.example.plugin.MissingJUnitCase</stringProp>
+          <stringProp name="junitsampler.junit4">true</stringProp>
+          <stringProp name="junitSampler.method">missingMethod</stringProp>
+          <stringProp name="junitSampler.success">true</stringProp>
+        </JUnitSampler>
+        <hashTree/>
+        <OpaqueSampler guiclass="com.example.plugin.OpaqueSamplerGui" testclass="com.example.plugin.OpaqueSampler" testname="Duplicate opaque plugin" enabled="false" pluginVersion="0.1" unknownA="first">
+          <stringProp name="plugin.order.0">first</stringProp>
+          <pluginUnknown name="plugin.raw.0" mode="opaque">raw &amp; first</pluginUnknown>
+          <!-- Unknown comment is part of the preserved subtree. -->
+          <pluginExtension marker="first"><![CDATA[extension <one>]]></pluginExtension>
+        </OpaqueSampler>
+        <hashTree>
+          <PluginChild guiclass="com.example.plugin.PluginChildGui" testclass="com.example.plugin.PluginChild" testname="Duplicate opaque child" enabled="false" childOrder="0">
+            <pluginChildProperty name="child.raw.0">child &amp; first</pluginChildProperty>
+          </PluginChild>
+          <hashTree/>
+          <PluginChildSecond guiclass="com.example.plugin.PluginChildGui" testclass="com.example.plugin.PluginChild" testname="Duplicate opaque child" enabled="false" childOrder="1">
+            <pluginChildProperty name="child.raw.1">child &amp; second</pluginChildProperty>
+          </PluginChildSecond>
+          <hashTree/>
+        </hashTree>
+        <OpaqueSamplerSecond guiclass="com.example.plugin.OpaqueSamplerGui" testclass="com.example.plugin.OpaqueSampler" testname="Duplicate opaque plugin" enabled="false" pluginVersion="0.1" unknownA="second" unknownB="retain">
+          <stringProp name="plugin.order.1">second</stringProp>
+          <pluginUnknown name="plugin.raw.1" mode="opaque">raw &amp; second</pluginUnknown>
+          <pluginExtension marker="second"><![CDATA[extension <two>]]></pluginExtension>
+        </OpaqueSamplerSecond>
+        <hashTree/>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="Known sibling after opaque nodes" enabled="false">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">false</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

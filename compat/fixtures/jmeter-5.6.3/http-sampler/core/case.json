@@ -1,0 +1,192 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-HTTP-SAMPLER-CORE",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-ELEMENTS-CORE-001",
+  "sampler_implementation": "HttpClient4",
+  "conformance_ids": ["ELEM-001"],
+  "coverage": {
+    "slice": "HTTP sampler only",
+    "redirect": {"status": "not-covered", "allowed_status_codes": [301, 302, 303, 307, 308]},
+    "embedded_resources": {"status": "not-covered"}
+  },
+  "normalization_policy_refs": [
+    "NORM-STRUCTURE-001",
+    "NORM-TIME-001",
+    "NORM-JTL-001",
+    "NORM-EXTERNAL-001",
+    "NORM-SECURITY-001",
+    "NORM-ENV-001"
+  ],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "b746ff0da9ef06dc32264aab35ffaa619f5d963691e425343c3c76a9ecbb7312"
+  },
+  "property_files": [
+    {
+      "path": "oracle.properties",
+      "sha256": "ae7446561b40b3cf589d19ce8be170dcbc2d6e3f7251f7549eb30e90f97918d2"
+    }
+  ],
+  "source_references": [
+    {
+      "path": "compat/fixtures/jmeter-5.6.3/http-sampler/server.py",
+      "sha256": "cca0470b50141ace78e0662d813cb014fcd1431fc217b1c332db7f9743c323b6"
+    },
+    {
+      "path": "compat/fixtures/jmeter-5.6.3/http-sampler/runner-contract.md",
+      "sha256": "99618bff1b1f4fb399c3c981dc16a5411d602bc632701e503772d27b3f1ea28e"
+    },
+    {
+      "path": "compat/fixtures/jmeter-5.6.3/http-sampler/core/expected/semantic.json",
+      "sha256": "84bed71b9919fd5d30668e86a52f39cc0bca601b3547eb6afa7e59d1d34bbee5"
+    }
+  ],
+  "inputs": [
+    {
+      "path": "trace-contract.json",
+      "sha256": "05c5bbba64d1691e564af096527949365effaa3f224133e84322be2e2ddce08b"
+    }
+  ],
+  "runner_contract": "../runner-contract.md",
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/http-sampler/core",
+    "mode": "nongui",
+    "canonical_run_root": "<materialized:fixture.run-root>",
+    "process_supervision": {
+      "server_child": "exact-owned-child-handle",
+      "jmeter_child": "exact-owned-child-handle",
+      "readiness_timeout_ms": 10000,
+      "wait_and_reap_on": ["success", "error", "timeout", "cancellation"],
+      "termination_policy": "no PID lookup, shell, negative signal, process-name, or process-group heuristic"
+    },
+    "runtime_recording": {
+      "required_before_execution": true,
+      "python": {
+        "implementation": "CPython",
+        "minimum_version": "3.10",
+        "version_binding": "<materialized:fixture.python.version>",
+        "executable_binding": "<materialized:fixture.server-python>",
+        "executable_digest_binding": "<materialized:fixture.server-python.sha256>"
+      },
+      "zlib": {
+        "version_binding": "<materialized:fixture.zlib.version>",
+        "runtime_version_binding": "<materialized:fixture.zlib.runtime-version>",
+        "module_binding": "<materialized:fixture.zlib.module>",
+        "module_digest_binding": "<materialized:fixture.zlib.module.sha256>"
+      },
+      "compression_hash_policy": "conditional-unobserved-until-exact-runtime-gate"
+    },
+    "argv_template": [
+      "<materialized:jmeter-executable>",
+      "-Dfile.encoding=UTF-8",
+      "-n",
+      "-q",
+      "oracle.properties",
+      "-Joracle.port=<materialized:fixture.server.port>",
+      "-t",
+      "plan.jmx",
+      "-l",
+      "<materialized:fixture.run-root>/oracle.jtl",
+      "-j",
+      "<materialized:fixture.run-root>/oracle.log"
+    ],
+    "fixture_server": {
+      "argv_template": [
+        "<materialized:fixture.server-python>",
+        "../server.py",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "0",
+        "--max-requests",
+        "21",
+        "--idle-timeout-ms",
+        "5000",
+        "--session-timeout-ms",
+        "30000",
+        "--trace",
+        "<materialized:fixture.run-root>/trace.jsonl",
+        "--ready",
+        "<materialized:fixture.run-root>/ready.json",
+        "--outcome",
+        "<materialized:fixture.run-root>/outcome.json"
+      ],
+      "bind_address": "127.0.0.1",
+      "network": "loopback-only",
+      "port_policy": "0 or 1024..65535",
+      "port_min": 1024,
+      "port_max": 65535,
+      "max_request_budget": 10000,
+      "max_requests": 21,
+      "idle_timeout_ms": 5000,
+      "session_timeout_ms": 30000,
+      "readiness_timeout_ms": 10000,
+      "preparse_max_line_bytes": 65536,
+      "preparse_readline_limit_bytes": 65537,
+      "preparse_max_header_count": 100,
+      "max_body_bytes": 1048576,
+      "max_request_line_bytes": 65534,
+      "max_target_bytes": 8192,
+      "max_header_bytes": 6553600,
+      "max_header_count": 100,
+      "max_chunk_line_bytes": 128,
+      "max_chunks": 1024,
+      "max_trailer_bytes": 12800,
+      "forbidden_trailer_names": ["content-length", "host", "trailer", "transfer-encoding"],
+      "max_response_header_fields": 128,
+      "max_response_header_bytes": 65536,
+      "max_query_fields": 128,
+      "max_form_fields": 16,
+      "max_multipart_fields": 2,
+      "entity_field_limit_status": 413,
+      "max_ready_bytes": 16384,
+      "max_outcome_bytes": 16384,
+      "max_trace_record_bytes": 2097152,
+      "max_trace_bytes": 8388608,
+      "max_workers": 32,
+      "request_timeout_ms": 10000,
+      "timeout_delay_ms": 450,
+      "sampler_timeout_ms": 100,
+      "reset_linger_layouts": ["ii", "hh"],
+      "redirect_codes": [301, 302, 303, 307, 308],
+      "publication": {
+        "method": "temporary-sibling",
+        "flush": true,
+        "fsync": true,
+        "atomic_rename": true,
+        "directory_fsync": "best-effort",
+        "max_ready_bytes": 16384,
+        "max_outcome_bytes": 16384
+      }
+    },
+    "network": "loopback-only",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "jvm_system_properties": ["file.encoding=UTF-8"],
+    "random_seed": null,
+    "environment_allowlist": ["LC_ALL=en_US.UTF-8", "LANG=en_US.UTF-8", "TZ=UTC"],
+    "proxy_environment": "deny HTTP_PROXY, HTTPS_PROXY, ALL_PROXY and lowercase variants"
+  },
+  "execution": {
+    "status": "not-run-static",
+    "process_exit": null,
+    "process_exit_asserted": false,
+    "oracle_available": false,
+    "sample_count": null,
+    "sample_count_asserted": false,
+    "raw_artifacts": "oracle-runs/http-sampler/ (ignored; local evidence only)",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "Static validation does not start server.py, a network client, Java, or Apache JMeter.",
+    "The expected JSON is an original HTTP-slice protocol contract derived from the hand-authored route matrix, not a fabricated oracle result; pinned JMeter evidence is required before profile promotion.",
+    "The server reserves exactly 21 request slots for the 21 plan vectors; idle and session watchdogs terminate runs after pre-network failures or incomplete sessions instead of waiting forever for that count.",
+    "The /timeout route uses one fixed, bounded delay only to support a later response-timeout differential case; no wall-clock value is asserted by this static contract.",
+    "Form and multipart field limits are hard parser bounds: over-limit entities are rejected with typed HTTP 413 before request admission or trace recording.",
+    "Compression wire/decoded digests remain conditional-unobserved until the future runner records the exact CPython executable and zlib identities declared in command.runtime_recording.",
+    "Trace files, ready/outcome files, JTL/log output, downloaded JMeter distributions, and raw differential artifacts remain in the canonical fresh run root as ignored temporary evidence."
+  ]
+}

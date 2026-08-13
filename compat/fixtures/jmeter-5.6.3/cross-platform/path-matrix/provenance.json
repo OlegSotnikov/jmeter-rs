@@ -1,0 +1,64 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-CROSS-PLATFORM-PATHS",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored UTF-8 JMX, properties, and bounded repository-owned path-open probes for an explicit six-target capability matrix, including Windows separator/drive/UNC wire values, POSIX and Windows root-escape contracts, and NFC/NFD source forms; no oracle or filesystem probe process was run.",
+    "upstream_plan_copied": false
+  },
+  "behavior_references": [
+    "docs/research/environment-capabilities.md",
+    "docs/research/rust-testing-strategy.md",
+    "https://jmeter.apache.org/usermanual/get-started.html#1.5-configuring-jmeter"
+  ],
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter is a pinned future oracle only; no upstream plan, result, binary, or source file is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true,
+    "execution_status": "not-run-static-corpus"
+  },
+  "runtime": {
+    "java": {"vendor": null, "version": null, "vm": null, "major": null},
+    "target_triple": "not recorded (six-target static matrix)",
+    "os_image": "not recorded (static corpus)",
+    "locale": "en-US (required for the profile baseline)",
+    "timezone": "UTC (required for the profile baseline)",
+    "default_charset": "UTF-8 (required for the profile baseline)",
+    "hostname_policy": "not asserted; no host value is in the projection",
+    "environment_allowlist": [],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "not executed; future runs must use only the pinned Apache JMeter 5.6.3 distribution",
+    "static_only": true
+  },
+  "inputs": {
+    "plan_sha256": "bb88888f07554ca935f8452263add306e23ebe7d69dedb4cecd933667eaf3a43",
+    "property_sha256": "00bd918673ec439c77d779593d950e8d612997febf6ac3a770a49ab4614bafda",
+    "descriptor_sha256": {"expected/semantic.json": "41fffd440dabed5454137be1623df8c412599f0c6c392265b0dbfd6adbb0a537"},
+    "probe_files": [
+      {"path": "fixtures/data/input.txt", "sha256": "086cb5cf2d6a81adf6006747a49235c99ab2cd7b2497886768f7d4a7b3afd1a9"},
+      {"path": "fixtures/data with space/input.txt", "sha256": "cc53837b6212d212f4ee75fae2dc07121ed620a67d57458a9371d9bab99e6485"},
+      {"path": "fixtures/données/雪.txt", "sha256": "140a236dbd9bc459a4f1f6183c755ea167f269634a95b45b9268b3d06bf2f2c3"},
+      {"path": "fixtures/case-probe/CaseProbe.txt", "sha256": "9d95eb53ae2b7384d145ed393ee314e15baa0ffd342794f96d797cd42c4cbfd5"},
+      {"path": "fixtures/explicit-root/input.txt", "sha256": "17210213f49c08f26939500d5c998c6866d01ef7f078fde5462525942d77bcec"}
+    ],
+    "public_network_used": false,
+    "secrets_or_credentials": false,
+    "matrix_targets": ["linux/x86_64", "linux/arm64", "macos/x86_64", "macos/arm64", "windows/x86_64", "windows/arm64"]
+  }
+}

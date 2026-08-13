@@ -1,0 +1,58 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-TIMER-SYNCHRONIZING",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored finite-plan timer corpus case for synchronizing-barrier.",
+    "upstream_plan_copied": false
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter is an external pinned oracle; no upstream plan, result, or binary is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true
+  },
+  "runtime": {
+    "java": {
+      "vendor": "Ubuntu OpenJDK",
+      "version": "17.0.19+10-1-24.04.2-Ubuntu",
+      "vm": "OpenJDK 64-Bit Server VM",
+      "major": 17
+    },
+    "target_triple": "x86_64-unknown-linux-gnu",
+    "os_image": "Ubuntu 24.04 (noble), Linux x86_64",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "not asserted; hostname saving disabled",
+    "environment_allowlist": [
+      "LC_ALL=C",
+      "LANG=C",
+      "TZ=UTC"
+    ],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "profile-pinned Apache JMeter 5.6.3 distribution (SHA-512 checked; PGP verification required before oracle use)",
+    "classpath_artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076"
+  },
+  "inputs": {
+    "plan_sha256": "d86f880b67e88cdb53cb6804bc1150d089657b5da97d4a21f10e0928dfb2b266",
+    "property_sha256": "6f85e6b6e39c0e74bedee6a774e8f308084652c54ea2ed5da5f35dcde8ab9555",
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  }
+}

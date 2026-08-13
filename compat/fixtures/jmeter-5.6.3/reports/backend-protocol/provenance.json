@@ -1,0 +1,65 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-REPORT-BACKEND-PROTOCOL",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored three-event JTL-shaped XML input with exact sample_id attributes, deterministic aggregate metrics, pinned LEGACY backend percentile configuration, and planned Apache JMeter 5.6.3 Graphite/InfluxDB metric vocabulary descriptors; disabled external listener nodes are retained in the plan and no transport record or backend output is fabricated.",
+    "upstream_plan_copied": false
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter and external backend services are future pinned boundaries; no upstream result, service output, credential, or binary is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": false,
+    "verification_note": "No artifact was downloaded or executed while authoring this static corpus; the digest is copied from the active profile pin.",
+    "execution_note": "The pinned artifact is recorded for future differential use; no Java, JMeter, backend listener, external service, HTTP request, or subprocess execution was performed while authoring this static corpus."
+  },
+  "runtime": {
+    "java": {
+      "vendor": "Ubuntu OpenJDK baseline (not invoked for static corpus)",
+      "version": "17.0.19+10-1-24.04.2-Ubuntu baseline (not invoked)",
+      "vm": "OpenJDK 64-Bit Server VM baseline (not invoked)",
+      "major": 17
+    },
+    "target_triple": "x86_64-unknown-linux-gnu baseline",
+    "os_image": "Ubuntu 24.04 (noble), Linux x86_64 baseline",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "not asserted; static inputs disable host identity",
+    "environment_allowlist": ["LC_ALL=C", "LANG=C", "TZ=UTC"],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "profile-pinned Apache JMeter 5.6.3 distribution (SHA-512 checked; PGP verification required before oracle use) if a future oracle run is enabled",
+    "classpath_artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076"
+  },
+  "external_runtime": {
+    "boundary_ids": ["EXT-SERVICE-001"],
+    "graphite_service": {"host": "127.0.0.1", "port": 2003, "protocol": "plaintext", "version": "not pinned; service not started"},
+    "influxdb_service": {"url": "http://127.0.0.1:8086", "version": "not pinned; service not started"},
+    "credentials": "none",
+    "network_used": false
+  },
+  "inputs": {
+    "plan_sha256": "592acae8b07d5f5063f7a1c1fd2413894edfd1bea72caafcd397f9b697c3cfd5",
+    "property_sha256": "eebc985f500f5455252840f6b8893a87676a476383b990c873f0355467a00671",
+    "input_sha256": {"inputs/backend.xml": "f156761f1d0163bdafd92089cce8a5280e5df6ddbaf4c5547e8fe1de9a79b8e8"},
+    "expected_sha256": {"expected/input.json": "1a528f5a25451e83686c391f3a090105d28d662c34890aaaf158096b57f0b437", "expected/backend.json": "0d64bfa7184acc21b94b0a22f379bd1185f6258137419bddf2eda37df7111ff6"},
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  }
+}

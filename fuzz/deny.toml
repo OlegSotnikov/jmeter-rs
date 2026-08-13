@@ -1,0 +1,35 @@
+# Dependency policy for the standalone TEST-003 fuzz workspace.
+#
+# This intentionally mirrors the root policy's graph, ban, and source
+# restrictions. NCSA is allowed here only because libfuzzer-sys includes the
+# NCSA-licensed libFuzzer sources. Unicode-3.0 is required only by the exact
+# metadata expression of transitive unicode-ident; the root product policy
+# remains unchanged.
+
+[graph]
+all-features = true
+exclude-dev = false
+
+[advisories]
+version = 2
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+
+[licenses]
+version = 2
+confidence-threshold = 0.8
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "Unicode-3.0",
+    "NCSA",
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

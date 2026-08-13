@@ -1,0 +1,55 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-FUNCTIONS-FILES-COVERAGE",
+  "profile_id": "jmeter-5.6.3",
+  "evidence_status": "not_run",
+  "format": "jtl-xml",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 3,
+  "ordered_labels": [
+    "dynamic=dynamic value\n",
+    "sequence=sequence-one|sequence-one",
+    "csv=|\"quoted|field\"|xpath=beta|missing="
+  ],
+  "sample_contract": {
+    "attributes": {
+      "s": "true",
+      "rc": "200",
+      "rm": "OK",
+      "dt": "text",
+      "de": "UTF-8",
+      "sby": "0",
+      "sc": "1",
+      "ec": "0",
+      "ng": "1",
+      "na": "1"
+    },
+    "ignored_attributes": ["t", "it", "lt", "ct", "by"],
+    "debug_response_projection": {"required_sections": []}
+  },
+  "samples": [
+    {
+      "position": 0,
+      "debug_response_projection": {"required_sections": []}
+    },
+    {
+      "position": 1,
+      "debug_response_projection": {
+        "required_sections": ["JMeterVariables:"],
+        "variables": {
+          "coverage_sequence_first": "sequence-one",
+          "coverage_sequence_second": "sequence-one"
+        }
+      }
+    },
+    {
+      "position": 2,
+      "debug_response_projection": {"required_sections": []}
+    }
+  ],
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "Enabled labels and the sequence sampler's variable projection are comparator-enforced. The disabled unknown/case-sensitive sampler source-preservation contract remains static-only in the case documentation because the strict JTL comparator does not compare disabled JMX topology."
+  }
+}

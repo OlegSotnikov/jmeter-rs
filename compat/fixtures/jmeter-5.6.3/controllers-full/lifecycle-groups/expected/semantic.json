@@ -1,0 +1,47 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-CONTROLLERS-FULL-LIFECYCLE",
+  "format": "jtl-xml",
+  "evidence_status": "planned",
+  "expectation_basis": "Original hand-authored setup/main/teardown lifecycle hypothesis; no Apache JMeter output was measured.",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 3,
+  "ordered_labels": ["setup-marker", "main-marker", "teardown-marker"],
+  "expected_counts": {"setup-marker": 1, "main-marker": 1, "teardown-marker": 1},
+  "thread_groups": [
+    {"testclass": "SetupThreadGroup", "guiclass": "SetupThreadGroupGui", "name": "Setup lifecycle group", "child_label": "setup-marker", "order": 0},
+    {"testclass": "ThreadGroup", "guiclass": "ThreadGroupGui", "name": "Main lifecycle group", "child_label": "main-marker", "order": 1},
+    {"testclass": "PostThreadGroup", "guiclass": "PostThreadGroupGui", "name": "Teardown lifecycle group", "child_label": "teardown-marker", "order": 2}
+  ],
+  "lifecycle_contract": {
+    "order": ["setup", "main", "teardown"],
+    "setup_runs_before_main": true,
+    "teardown_runs_after_main": true,
+    "each_group": {"threads": 1, "iterations": 1}
+  },
+  "sample_contract": {
+    "attributes": {"s": "true", "rc": "200", "rm": "OK", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"},
+    "tn_by_label": {"setup-marker": "Setup lifecycle group 1-1", "main-marker": "Main lifecycle group 1-1", "teardown-marker": "Teardown lifecycle group 1-1"},
+    "thread_name_by_label": {"setup-marker": "Setup lifecycle group 1-1", "main-marker": "Main lifecycle group 1-1", "teardown-marker": "Teardown lifecycle group 1-1"},
+    "absent_attributes": ["responseFile"],
+    "retained_attributes": ["s", "tn", "sby", "rm", "ec"],
+    "ignored_attributes": ["t", "by", "it", "lt", "ct", "ts"],
+    "ignored_dynamic_sections": ["DebugSampler.response_data"]
+  },
+  "assertion_results": {
+    "configured": true,
+    "mode": "all",
+    "node": "assertionResult",
+    "child_order": ["name", "failure", "error", "failureMessage"],
+    "failure_message_property": "jmeter.save.saveservice.assertion_results_failure_message",
+    "expected_count": 0,
+    "absence": "no assertionResult nodes; this plan contains no assertion elements",
+    "retained_fields": ["name", "failure", "error", "failureMessage"]
+  },
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.ts", "sample.by", "debug_response.dynamic_lines"],
+    "reason": "Lifecycle order, group identity, child counts, thread names, and sent-byte fields remain exact targets; timing, received bytes, and dynamic Debug Sampler lines require explicit normalization."
+  }
+}

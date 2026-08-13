@@ -1,0 +1,70 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-PLUGIN-UNAVAILABLE-SUBTREE",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-PLUGIN-001",
+  "conformance_ids": ["PLUG-003", "JMX-004", "SCRIPT-002"],
+  "normalization_policy_refs": ["NORM-JMX-001", "NORM-STRUCTURE-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001"],
+  "external_runtime_boundary_ids": ["EXT-JVM-001", "EXT-PLUGIN-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "9088dba1f6f6c6130d288c4d729782778607a26c8377768aaf42a3b95d1a5fd2"
+  },
+  "property_files": [
+    {
+      "path": "oracle.properties",
+      "sha256": "1de9bf8ce4ae10164023695f74032e4b43147f34d0d2ef1dd95d5b10feb9541b"
+    }
+  ],
+  "input_files": [
+    {
+      "path": "inputs/missing-class-descriptors.json",
+      "sha256": "c324293756a4fa09e0fd981edd13f2189f4e0daab996fd15f44c8a18b1d6468f",
+      "kind": "declarative-unavailable-class-descriptor",
+      "max_bytes": 8192
+    }
+  ],
+  "descriptor": {
+    "path": "expected/semantic.json",
+    "sha256": "12c4ed0f05c7c3fbb1ed3e71747b1b11e2641e7c0f6e3c4ef4496bf4e4dc6692"
+  },
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/plugin-contract/unavailable-subtree",
+    "mode": "nongui-static-only",
+    "argv_template": ["jmeter", "-n", "-q", "oracle.properties", "-t", "plan.jmx", "-l", "<ignored>/oracle.jtl", "-j", "<ignored>/oracle.log"],
+    "network": "none",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null
+  },
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations_per_thread": 1,
+    "max_samples": 0,
+    "max_plan_nodes": 12,
+    "max_plan_depth": 7,
+    "max_property_text_bytes": 12288,
+    "max_opaque_subtree_bytes": 8192,
+    "max_class_requests": 3,
+    "max_plugin_artifacts": 0,
+    "max_network_requests": 0,
+    "max_processes": 0,
+    "max_process_output_bytes": 0
+  },
+  "execution": {
+    "status": "external-unavailable",
+    "oracle_available": false,
+    "process_exit": null,
+    "sample_count": null,
+    "raw_artifacts": "none",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "This is a static, original missing-class and no-drop descriptor; no Java, JMeter, JVM worker, classloader, plugin JAR, subprocess, or network was run.",
+    "Java Sampler, JUnit, and plugin classes are deliberately absent placeholder identities. All corresponding JMX nodes are disabled and produce no result claim.",
+    "Opaque subtree hashes cover authored XML bytes for untouched nodes only; they are preservation requirements, not oracle output.",
+    "A future adapter run must pin user classes, plugin artifacts, loader versions, licenses, checksums, and raw diagnostics before adding evidence."
+  ]
+}

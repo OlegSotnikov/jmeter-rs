@@ -1,0 +1,238 @@
+{
+  "schema_id": "jmeter-rs.http-trace",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-HTTP-SAMPLER-CORE",
+  "fixture_family_id": "FX-ELEMENTS-CORE-001",
+  "conformance_ids": ["ELEM-001"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-TIME-001", "NORM-JTL-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001", "NORM-ENV-001"],
+  "format": "http-trace",
+  "evidence_status": "not-run-static",
+  "process_exit": null,
+  "process_exit_asserted": false,
+  "oracle_available": false,
+  "sample_count": 21,
+  "ordered_labels": [
+    "GET 200 success",
+    "POST raw body",
+    "PUT raw body",
+    "DELETE no body",
+    "PATCH raw body",
+    "POST form arguments",
+    "POST multipart arguments",
+    "Duplicate request headers",
+    "399 is successful",
+    "400 is unsuccessful",
+    "Chunked response",
+    "Connection close",
+    "Connection reuse one",
+    "Connection reuse two",
+    "Gzip response",
+    "Deflate response",
+    "UTF-8 response",
+    "ISO-8859-1 response",
+    "Partial response",
+    "Connection reset",
+    "Response timeout"
+  ],
+  "events": [
+    {"sequence": 1, "sampler": "GET 200 success", "method": "GET", "path": "/ok"},
+    {"sequence": 2, "sampler": "POST raw body", "method": "POST", "path": "/echo"},
+    {"sequence": 3, "sampler": "PUT raw body", "method": "PUT", "path": "/echo"},
+    {"sequence": 4, "sampler": "DELETE no body", "method": "DELETE", "path": "/echo"},
+    {"sequence": 5, "sampler": "PATCH raw body", "method": "PATCH", "path": "/echo"},
+    {"sequence": 6, "sampler": "POST form arguments", "method": "POST", "path": "/echo"},
+    {"sequence": 7, "sampler": "POST multipart arguments", "method": "POST", "path": "/echo"},
+    {"sequence": 8, "sampler": "Duplicate request headers", "method": "GET", "path": "/headers"},
+    {"sequence": 9, "sampler": "399 is successful", "method": "GET", "path": "/status/399"},
+    {"sequence": 10, "sampler": "400 is unsuccessful", "method": "GET", "path": "/status/400"},
+    {"sequence": 11, "sampler": "Chunked response", "method": "GET", "path": "/chunked"},
+    {"sequence": 12, "sampler": "Connection close", "method": "GET", "path": "/close"},
+    {"sequence": 13, "sampler": "Connection reuse one", "method": "GET", "path": "/reuse"},
+    {"sequence": 14, "sampler": "Connection reuse two", "method": "GET", "path": "/reuse"},
+    {"sequence": 15, "sampler": "Gzip response", "method": "GET", "path": "/gzip"},
+    {"sequence": 16, "sampler": "Deflate response", "method": "GET", "path": "/deflate"},
+    {"sequence": 17, "sampler": "UTF-8 response", "method": "GET", "path": "/encoding/utf8"},
+    {"sequence": 18, "sampler": "ISO-8859-1 response", "method": "GET", "path": "/encoding/latin1"},
+    {"sequence": 19, "sampler": "Partial response", "method": "GET", "path": "/partial"},
+    {"sequence": 20, "sampler": "Connection reset", "method": "GET", "path": "/reset"},
+    {"sequence": 21, "sampler": "Response timeout", "method": "GET", "path": "/timeout"}
+  ],
+  "trace_contract": {
+    "event_count": 21,
+    "sequence_base": 1,
+    "ordered_events": [
+      {"sequence": 1, "label": "GET 200 success", "method": "GET", "path": "/ok"},
+      {"sequence": 2, "label": "POST raw body", "method": "POST", "path": "/echo"},
+      {"sequence": 3, "label": "PUT raw body", "method": "PUT", "path": "/echo"},
+      {"sequence": 4, "label": "DELETE no body", "method": "DELETE", "path": "/echo"},
+      {"sequence": 5, "label": "PATCH raw body", "method": "PATCH", "path": "/echo"},
+      {"sequence": 6, "label": "POST form arguments", "method": "POST", "path": "/echo"},
+      {"sequence": 7, "label": "POST multipart arguments", "method": "POST", "path": "/echo"},
+      {"sequence": 8, "label": "Duplicate request headers", "method": "GET", "path": "/headers"},
+      {"sequence": 9, "label": "399 is successful", "method": "GET", "path": "/status/399"},
+      {"sequence": 10, "label": "400 is unsuccessful", "method": "GET", "path": "/status/400"},
+      {"sequence": 11, "label": "Chunked response", "method": "GET", "path": "/chunked"},
+      {"sequence": 12, "label": "Connection close", "method": "GET", "path": "/close"},
+      {"sequence": 13, "label": "Connection reuse one", "method": "GET", "path": "/reuse"},
+      {"sequence": 14, "label": "Connection reuse two", "method": "GET", "path": "/reuse"},
+      {"sequence": 15, "label": "Gzip response", "method": "GET", "path": "/gzip"},
+      {"sequence": 16, "label": "Deflate response", "method": "GET", "path": "/deflate"},
+      {"sequence": 17, "label": "UTF-8 response", "method": "GET", "path": "/encoding/utf8"},
+      {"sequence": 18, "label": "ISO-8859-1 response", "method": "GET", "path": "/encoding/latin1"},
+      {"sequence": 19, "label": "Partial response", "method": "GET", "path": "/partial"},
+      {"sequence": 20, "label": "Connection reset", "method": "GET", "path": "/reset"},
+      {"sequence": 21, "label": "Response timeout", "method": "GET", "path": "/timeout"}
+    ],
+    "request_projection": {
+      "headers": "ordered duplicate pairs; non-allowlisted and sensitive values are redacted",
+      "body": [
+        "length",
+        "sha256",
+        "content_type",
+        "redacted=true",
+        "effective_form.fields/bytes for the known non-secret form",
+        "effective_multipart.fields/canonical_bytes/wire_length/wire_sha256 with boundary bytes redacted",
+        "over-limit form/multipart entities are rejected with typed status 413 before admission"
+      ],
+      "query": "path plus query_parameter_count; query values are never retained",
+      "connection": ["connection_id", "connection_reused"]
+    },
+    "request_header_contract": {
+      "ordered_duplicate_pairs": true,
+      "duplicate_example": {"label": "Duplicate request headers", "pairs": [["X-Oracle-Duplicate", "one"], ["X-Oracle-Duplicate", "two"]]},
+      "sensitive_values": "structurally redacted",
+      "unknown_values": "structurally redacted"
+    },
+    "response_projection": {
+      "fields": ["status", "message", "headers", "body", "data", "transport"],
+      "body": ["wire_length", "wire_sha256", "decoded_length", "decoded_sha256", "redacted=true"],
+      "data": "same digest-only projection as body; raw response bytes are not retained",
+      "transport": "null for normal HTTP responses; bounded descriptor for partial/reset/timeout routes",
+      "headers": "ordered duplicate pairs from the actual response"
+    },
+    "completion": {
+      "normal": {"events": 21, "shutdown_reason": "request-budget", "server_exit_code": 0},
+      "incomplete": {
+        "events": "less-than-21",
+        "shutdown_reasons": ["idle-timeout", "session-timeout", "bounded-error", "server-close"],
+        "server_exit_code": 3
+      }
+    },
+    "compression_hash_contract": {
+      "status": "conditional-unobserved",
+      "required_runtime_metadata": [
+        "runtime.python.version",
+        "runtime.python.executable_sha256",
+        "runtime.python.zlib.version",
+        "runtime.python.zlib.runtime_version",
+        "runtime.python.zlib.module_sha256"
+      ],
+      "comparison": "candidate compression hashes are comparable only after every exact runtime identity is recorded; this static fixture contains no observed compression result"
+    },
+    "transport_descriptor_schema": {
+      "partial": {
+        "required_fields": ["kind", "declared_content_length", "received_wire_bytes", "connection_action"],
+        "fixed_values": {"kind": "truncated-response", "connection_action": "half-close"},
+        "integer_fields": ["declared_content_length", "received_wire_bytes"]
+      },
+      "reset": {
+        "required_fields": ["kind", "response_started", "connection_action", "linger_layout"],
+        "fixed_values": {"kind": "connection-reset", "response_started": false, "connection_action": "SO_LINGER reset best effort"},
+        "allowed_values": {"linger_layout": ["ii", "hh", "unsupported"]}
+      },
+      "timeout": {
+        "required_fields": ["kind", "server_delay_ms", "sampler_timeout_ms"],
+        "fixed_values": {"kind": "response-timeout", "server_delay_ms": 450, "sampler_timeout_ms": 100},
+        "integer_fields": ["server_delay_ms", "sampler_timeout_ms"]
+      }
+    }
+  },
+  "request_body_contract": [
+    {"label": "GET 200 success", "length": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "content_type": null},
+    {"label": "POST raw body", "length": 14, "sha256": "c461493a1c09a359ee84c6231209c3eec50ae3911a7c515dcd9c2ad16e35ff51", "content_type": null, "effective_bytes": "raw-body-alpha"},
+    {"label": "PUT raw body", "length": 13, "sha256": "e653d3e5609df3d2867181b15d4157d06ab24b2f716fd9b2b16caac9eda02288", "content_type": null, "effective_bytes": "put-body-beta"},
+    {"label": "DELETE no body", "length": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "content_type": null},
+    {"label": "PATCH raw body", "length": 16, "sha256": "b4146876d508b3326f0a41be143d9e89d3397c44e2d7594c90c4a0b8874a89c7", "content_type": null, "effective_bytes": "patch-body-gamma"},
+    {"label": "POST form arguments", "length": 27, "sha256": "c256e03380568f24d0977ee739b83b9db9c11581bedf7414ab8c82ca10c128ea", "content_type": "application/x-www-form-urlencoded", "effective_form_bytes": "first=alpha+beta&second=two"},
+    {"label": "POST multipart arguments", "length": null, "sha256": null, "digest_algorithm": "SHA-256", "trace_fields": {"length_field": "body.length", "digest_field": "body.sha256"}, "content_type_prefix": "multipart/form-data; boundary=", "effective_multipart": {"fields": [["part-one", "one"], ["part-two", "two"]], "canonical_bytes": "--<boundary>\\r\\nContent-Disposition: form-data; name=\\\"part-one\\\"\\r\\n\\r\\none\\r\\n--<boundary>\\r\\nContent-Disposition: form-data; name=\\\"part-two\\\"\\r\\n\\r\\ntwo\\r\\n--<boundary>--\\r\\n", "wire_length": null, "wire_sha256": null, "wire_fields": {"length_field": "body.length", "digest_field": "body.sha256"}, "boundary_bytes": "redacted"}},
+    {"label": "Duplicate request headers", "length": 0, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "content_type": null, "duplicate_headers": [["X-Oracle-Duplicate", "one"], ["X-Oracle-Duplicate", "two"]]}
+  ],
+  "response_body_contract": [
+    {"label": "GET 200 success", "status": 200, "body": {"wire_length": 19, "wire_sha256": "0fc8e2a7ae91f29867161db70bc61d27b5b45a74858606bbd9f47a8b1461f7db", "decoded_length": 19, "decoded_sha256": "0fc8e2a7ae91f29867161db70bc61d27b5b45a74858606bbd9f47a8b1461f7db"}},
+    {"label": "POST raw body", "status": 200, "body": {"wire_length": 7, "wire_sha256": "2259e982e2df525d8f9c1af62ef8297da690c4ba28102bacf35c8b084fb08968", "decoded_length": 7, "decoded_sha256": "2259e982e2df525d8f9c1af62ef8297da690c4ba28102bacf35c8b084fb08968"}},
+    {"label": "PUT raw body", "status": 200, "body": {"wire_length": 7, "wire_sha256": "2259e982e2df525d8f9c1af62ef8297da690c4ba28102bacf35c8b084fb08968", "decoded_length": 7, "decoded_sha256": "2259e982e2df525d8f9c1af62ef8297da690c4ba28102bacf35c8b084fb08968"}},
+    {"label": "DELETE no body", "status": 200, "body": {"wire_length": 7, "wire_sha256": "2259e982e2df525d8f9c1af62ef8297da690c4ba28102bacf35c8b084fb08968", "decoded_length": 7, "decoded_sha256": "2259e982e2df525d8f9c1af62ef8297da690c4ba28102bacf35c8b084fb08968"}},
+    {"label": "PATCH raw body", "status": 200, "body": {"wire_length": 7, "wire_sha256": "2259e982e2df525d8f9c1af62ef8297da690c4ba28102bacf35c8b084fb08968", "decoded_length": 7, "decoded_sha256": "2259e982e2df525d8f9c1af62ef8297da690c4ba28102bacf35c8b084fb08968"}},
+    {"label": "POST form arguments", "status": 200, "body": {"wire_length": 7, "wire_sha256": "2259e982e2df525d8f9c1af62ef8297da690c4ba28102bacf35c8b084fb08968", "decoded_length": 7, "decoded_sha256": "2259e982e2df525d8f9c1af62ef8297da690c4ba28102bacf35c8b084fb08968"}},
+    {"label": "POST multipart arguments", "status": 200, "body": {"wire_length": 7, "wire_sha256": "2259e982e2df525d8f9c1af62ef8297da690c4ba28102bacf35c8b084fb08968", "decoded_length": 7, "decoded_sha256": "2259e982e2df525d8f9c1af62ef8297da690c4ba28102bacf35c8b084fb08968"}},
+    {"label": "Duplicate request headers", "status": 200, "body": {"wire_length": 10, "wire_sha256": "f8f3f9c01d73d3b896fd1309a0d3718bf21f2a654e930081a7487ba821ce33b6", "decoded_length": 10, "decoded_sha256": "f8f3f9c01d73d3b896fd1309a0d3718bf21f2a654e930081a7487ba821ce33b6"}},
+    {"label": "399 is successful", "status": 399, "body": {"wire_length": 10, "wire_sha256": "118bacef2f2cef37f76f8bf3494986f82b46168b0651b34d2265ac8249e1e782", "decoded_length": 10, "decoded_sha256": "118bacef2f2cef37f76f8bf3494986f82b46168b0651b34d2265ac8249e1e782"}},
+    {"label": "400 is unsuccessful", "status": 400, "body": {"wire_length": 10, "wire_sha256": "7175719cbc3f8da93c6fb98fa2c45f247fb7f31e0e6a7cdb868d1521e8dc1109", "decoded_length": 10, "decoded_sha256": "7175719cbc3f8da93c6fb98fa2c45f247fb7f31e0e6a7cdb868d1521e8dc1109"}},
+    {"label": "Chunked response", "status": 200, "body": {"wire_length": 21, "wire_sha256": "26ee129a53823941dc1370f7ee4544ef01ca6720b76bd4aa6203d45baf34e883", "decoded_length": 21, "decoded_sha256": "26ee129a53823941dc1370f7ee4544ef01ca6720b76bd4aa6203d45baf34e883"}},
+    {"label": "Connection close", "status": 200, "body": {"wire_length": 14, "wire_sha256": "ccc28e372aa5b0c03be976df0c0f91ef3bc9338b0fd5c85378b401edd76cd99e", "decoded_length": 14, "decoded_sha256": "ccc28e372aa5b0c03be976df0c0f91ef3bc9338b0fd5c85378b401edd76cd99e"}},
+    {"label": "Connection reuse one", "status": 200, "body": {"wire_length": 14, "wire_sha256": "572cdd4eb0fbee69a927ddfa5946038fdb60b3030eb656e852556e5516f434c1", "decoded_length": 14, "decoded_sha256": "572cdd4eb0fbee69a927ddfa5946038fdb60b3030eb656e852556e5516f434c1"}},
+    {"label": "Connection reuse two", "status": 200, "body": {"wire_length": 14, "wire_sha256": "572cdd4eb0fbee69a927ddfa5946038fdb60b3030eb656e852556e5516f434c1", "decoded_length": 14, "decoded_sha256": "572cdd4eb0fbee69a927ddfa5946038fdb60b3030eb656e852556e5516f434c1"}},
+    {"label": "Gzip response", "status": 200, "hash_status": "conditional-unobserved", "runtime_gate": "trace_contract.compression_hash_contract", "body": {"wire_length": 48, "wire_sha256": "c74bcba3a219e193e8c888a4ec04d0133c232f8446d4e3d5c3cb1548655fa18c", "decoded_length": 28, "decoded_sha256": "1ec086c12106463ab890c736ce8a22dd0acbdb876579e7b5e6373128e79a327a"}},
+    {"label": "Deflate response", "status": 200, "hash_status": "conditional-unobserved", "runtime_gate": "trace_contract.compression_hash_contract", "body": {"wire_length": 36, "wire_sha256": "3012c3b018abb8072818fab582633974b39dbcde7bf21e744c7c2237eefea5b3", "decoded_length": 28, "decoded_sha256": "1ec086c12106463ab890c736ce8a22dd0acbdb876579e7b5e6373128e79a327a"}},
+    {"label": "UTF-8 response", "status": 200, "body": {"wire_length": 9, "wire_sha256": "ce335642bab85530c756f72c1afb3bfc2067dd39b92e2368e4475c8dbeacc48e", "decoded_length": 9, "decoded_sha256": "ce335642bab85530c756f72c1afb3bfc2067dd39b92e2368e4475c8dbeacc48e"}},
+    {"label": "ISO-8859-1 response", "status": 200, "body": {"wire_length": 4, "wire_sha256": "dafd66c0b98965e688be1fc12942c09f0350e6be0685017c3f234e97d0adc92e", "decoded_length": 4, "decoded_sha256": "dafd66c0b98965e688be1fc12942c09f0350e6be0685017c3f234e97d0adc92e"}},
+    {"label": "Partial response", "status": 200, "body": {"declared_content_length": 32, "wire_length": 12, "wire_sha256": "5c5c446854416047a2647807c45ce48bbd88b7081bbf63c6f5937981db12ec30", "decoded_length": 12, "decoded_sha256": "5c5c446854416047a2647807c45ce48bbd88b7081bbf63c6f5937981db12ec30"}},
+    {"label": "Connection reset", "status": null, "body": null},
+    {"label": "Response timeout", "status": 200, "body": {"wire_length": 13, "wire_sha256": "43d4bb5ed675fb0f105dc8e16e03aa9ab1867fddd8a87b83fa7fd6568894a6a5", "decoded_length": 13, "decoded_sha256": "43d4bb5ed675fb0f105dc8e16e03aa9ab1867fddd8a87b83fa7fd6568894a6a5"}}
+  ],
+  "response_header_contract": {
+    "trace_field": "response.headers",
+    "ordered_duplicate_pairs": true,
+    "safe_values": ["connection", "content-encoding", "content-length", "content-type", "location", "transfer-encoding", "x-oracle", "x-oracle-body-length"],
+    "duplicate_example": {"label": "Duplicate request headers", "pairs": [["X-Oracle", "first"], ["X-Oracle", "second"]]}
+  },
+  "response_data_contract": {
+    "trace_field": "response.data",
+    "same_digest_fields_as": "response.body",
+    "raw_bytes": "not retained"
+  },
+  "jtl_mapping_contract": {
+    "comparator_enforced_fields": ["format", "root", "sample_count", "ordered_labels"],
+    "sample_element": "httpSample",
+    "standard_attributes": ["lb", "rc", "rm", "s", "tn", "dt", "de", "by", "sby", "ts", "t", "it", "lt", "ct", "sc", "ec", "ng", "na", "url"],
+    "sections": ["responseData", "responseHeader", "requestHeader", "samplerData"],
+    "section_capture": "Trace response/body/header fields are authoritative until a pinned JTL run supplies volatile wire section text; the comparator intentionally asserts only stable JTL projection fields listed above.",
+    "stable_field_mappings": {
+      "label": "ordered_labels[position]",
+      "response_code": "response.status when an HTTP response exists; transport descriptors otherwise",
+      "response_message": "response.message when an HTTP response exists",
+      "successful": "JMeter sampler outcome, observed only from the pinned JTL",
+      "responseData": "trace response.body/data digest projection",
+      "responseHeader": "trace response.headers ordered duplicate projection",
+      "requestHeader": "trace request headers ordered duplicate projection",
+      "samplerData": "trace method/path/query/connection projection"
+    },
+    "connection_reuse": {"labels": ["Connection reuse one", "Connection reuse two"], "trace_field": "connection_reused", "expected": [false, true]},
+    "transport_mappings": [
+      {"label": "Partial response", "transport": {"kind": "truncated-response", "declared_content_length": 32, "received_wire_bytes": 12, "connection_action": "half-close"}, "jtl_mapping": {"response_code": "not asserted; transport descriptor is authoritative", "successful": "observe pinned JTL", "responseData": "partial wire digest when present"}},
+      {"label": "Connection reset", "transport": {"kind": "connection-reset", "response_started": false, "connection_action": "SO_LINGER reset best effort", "linger_layout": "observed value is ii, hh, or unsupported"}, "jtl_mapping": {"response_code": "not asserted; transport descriptor is authoritative", "successful": "observe pinned JTL", "responseData": "no response bytes"}},
+      {"label": "Response timeout", "transport": {"kind": "response-timeout", "server_delay_ms": 450, "sampler_timeout_ms": 100}, "jtl_mapping": {"response_code": "not asserted; timeout mapping is sampler-dependent", "successful": "observe pinned JTL", "responseData": "late response digest only if sampler receives it"}}
+    ],
+    "compression": [
+      {"label": "Gzip response", "content_encoding": "gzip", "hash_status": "conditional-unobserved", "runtime_gate": "trace_contract.compression_hash_contract", "wire_sha256": "c74bcba3a219e193e8c888a4ec04d0133c232f8446d4e3d5c3cb1548655fa18c", "decoded_sha256": "1ec086c12106463ab890c736ce8a22dd0acbdb876579e7b5e6373128e79a327a", "jtl_mapping": {"responseHeader": "Content-Encoding: gzip", "responseData": {"wire_sha256": "trace response.body.wire_sha256", "decoded_sha256": "trace response.data.decoded_sha256"}}},
+      {"label": "Deflate response", "content_encoding": "deflate", "hash_status": "conditional-unobserved", "runtime_gate": "trace_contract.compression_hash_contract", "wire_sha256": "3012c3b018abb8072818fab582633974b39dbcde7bf21e744c7c2237eefea5b3", "decoded_sha256": "1ec086c12106463ab890c736ce8a22dd0acbdb876579e7b5e6373128e79a327a", "jtl_mapping": {"responseHeader": "Content-Encoding: deflate", "responseData": {"wire_sha256": "trace response.body.wire_sha256", "decoded_sha256": "trace response.data.decoded_sha256"}}}
+    ],
+    "encoding": [
+      {"label": "UTF-8 response", "charset": "UTF-8", "body_sha256": "ce335642bab85530c756f72c1afb3bfc2067dd39b92e2368e4475c8dbeacc48e", "jtl_mapping": {"de": "UTF-8", "responseData": {"sha256": "trace response.data.decoded_sha256", "encoding": "UTF-8"}}},
+      {"label": "ISO-8859-1 response", "charset": "ISO-8859-1", "body_sha256": "dafd66c0b98965e688be1fc12942c09f0350e6be0685017c3f234e97d0adc92e", "jtl_mapping": {"de": "ISO-8859-1", "responseData": {"sha256": "trace response.data.decoded_sha256", "encoding": "ISO-8859-1"}}}
+    ]
+  },
+  "state_projection": {
+    "ordered_trace": "trace_contract.ordered_events",
+    "request_body": "request_body_contract",
+    "response_body": "response_body_contract",
+    "headers": "response_header_contract",
+    "response_data": "response_data_contract",
+    "jtl": "jtl_mapping_contract"
+  },
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "HTTP body, header, response-data, and transport digests are observable trace state and are not normalized; only JTL timing, byte counters, host, and port fields are handled by the comparator expectation's declared policies."
+  }
+}

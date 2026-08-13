@@ -1,0 +1,38 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-REPORT-AGGREGATE-DASHBOARD",
+  "format": "jtl-csv",
+  "source": "inputs/aggregate.csv",
+  "header": ["timeStamp", "elapsed", "label", "responseCode", "responseMessage", "threadName", "dataType", "success", "failureMessage", "bytes", "sentBytes", "grpThreads", "allThreads", "URL", "Filename", "Latency", "Encoding", "SampleCount", "ErrorCount", "Hostname", "IdleTime", "Connect", "sample_id", "suite_id"],
+  "rows": [
+    {"position": 0, "fields": {"timeStamp": "1704067200000", "elapsed": "100", "label": "api/login", "responseCode": "200", "responseMessage": "OK", "threadName": "report-thread-1", "dataType": "text", "success": "true", "failureMessage": "", "bytes": "1000", "sentBytes": "120", "grpThreads": "1", "allThreads": "1", "URL": "", "Filename": "", "Latency": "20", "Encoding": "UTF-8", "SampleCount": "1", "ErrorCount": "0", "Hostname": "", "IdleTime": "0", "Connect": "10", "sample_id": "s01", "suite_id": "reports-static"}},
+    {"position": 1, "fields": {"timeStamp": "1704067201000", "elapsed": "500", "label": "api/search", "responseCode": "200", "responseMessage": "OK", "threadName": "report-thread-1", "dataType": "text", "success": "true", "failureMessage": "", "bytes": "2000", "sentBytes": "180", "grpThreads": "1", "allThreads": "1", "URL": "", "Filename": "", "Latency": "30", "Encoding": "UTF-8", "SampleCount": "1", "ErrorCount": "0", "Hostname": "", "IdleTime": "0", "Connect": "15", "sample_id": "s02", "suite_id": "reports-static"}},
+    {"position": 2, "fields": {"timeStamp": "1704067202000", "elapsed": "600", "label": "api/search", "responseCode": "503", "responseMessage": "overload", "threadName": "report-thread-1", "dataType": "text", "success": "false", "failureMessage": "overload", "bytes": "2200", "sentBytes": "240", "grpThreads": "1", "allThreads": "1", "URL": "", "Filename": "", "Latency": "40", "Encoding": "UTF-8", "SampleCount": "2", "ErrorCount": "1", "Hostname": "", "IdleTime": "0", "Connect": "20", "sample_id": "s03", "suite_id": "reports-static"}},
+    {"position": 3, "fields": {"timeStamp": "1704067203000", "elapsed": "1500", "label": "api/write", "responseCode": "200", "responseMessage": "OK", "threadName": "report-thread-1", "dataType": "text", "success": "true", "failureMessage": "", "bytes": "3000", "sentBytes": "300", "grpThreads": "1", "allThreads": "1", "URL": "", "Filename": "", "Latency": "100", "Encoding": "UTF-8", "SampleCount": "1", "ErrorCount": "0", "Hostname": "", "IdleTime": "0", "Connect": "50", "sample_id": "s04", "suite_id": "reports-static"}},
+    {"position": 4, "fields": {"timeStamp": "1704067204000", "elapsed": "1501", "label": "api/write", "responseCode": "409", "responseMessage": "conflict", "threadName": "report-thread-1", "dataType": "text", "success": "false", "failureMessage": "conflict", "bytes": "400", "sentBytes": "80", "grpThreads": "1", "allThreads": "1", "URL": "", "Filename": "", "Latency": "120", "Encoding": "UTF-8", "SampleCount": "1", "ErrorCount": "1", "Hostname": "", "IdleTime": "0", "Connect": "60", "sample_id": "s05", "suite_id": "reports-static"}},
+    {"position": 5, "fields": {"timeStamp": "1704067205000", "elapsed": "", "label": "api/health", "responseCode": "204", "responseMessage": "No Content", "threadName": "report-thread-1", "dataType": "text", "success": "true", "failureMessage": "", "bytes": "0", "sentBytes": "0", "grpThreads": "1", "allThreads": "1", "URL": "", "Filename": "", "Latency": "", "Encoding": "UTF-8", "SampleCount": "1", "ErrorCount": "0", "Hostname": "", "IdleTime": "0", "Connect": "", "sample_id": "s06", "suite_id": "reports-static"}, "absent_fields": ["elapsed", "Latency", "Connect"]},
+    {"position": 6, "fields": {"timeStamp": "1704067206000", "elapsed": "2500", "label": "api/cache", "responseCode": "200", "responseMessage": "OK", "threadName": "report-thread-1", "dataType": "text", "success": "true", "failureMessage": "", "bytes": "500", "sentBytes": "50", "grpThreads": "1", "allThreads": "1", "URL": "", "Filename": "", "Latency": "200", "Encoding": "UTF-8", "SampleCount": "1", "ErrorCount": "0", "Hostname": "", "IdleTime": "0", "Connect": "100", "sample_id": "s07", "suite_id": "reports-static"}}
+  ],
+  "decoded_projection": {
+    "root_event_count": 7,
+    "represented_sample_count": 8,
+    "weighted_error_count": 2,
+    "elapsed_observations_in_source_order": [100, 500, 600, 1500, 1501, 0, 2500],
+    "weighted_listener_elapsed_observations": [100, 500, 300, 300, 1500, 1501, 0, 2500],
+    "label_order_in_source": ["api/login", "api/search", "api/search", "api/write", "api/write", "api/health", "api/cache"]
+  },
+  "generated_from": {
+    "generator": "jmeter-rs project, hand-authored static corpus",
+    "generator_version": "repository source",
+    "random_seed": null,
+    "oracle_command": null,
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "none; no Java, JMeter, report generator, or subprocess was invoked"
+  },
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "This is an exact static CSV descriptor. Header order, empty fields, timestamps, quoting vocabulary, sample variables, weighted listener counts, row-based dashboard observations, and source row order remain observable."
+  }
+}

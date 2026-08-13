@@ -1,0 +1,48 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-CONTROLLERS-FULL-NEGATIVE",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-ELEMENTS-CORE-001",
+  "conformance_ids": ["ELEM-003", "JMX-001", "JMX-002", "TEST-001"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-JMX-001", "NORM-SECURITY-001", "NORM-ENV-001"],
+  "plan": {"path": "syntax-static/plan.jmx", "sha256": "c9b107980e4e801ae603da6f7ab4fe495da787435d09b398a4c35cffe621572a"},
+  "property_files": [{"path": "oracle.properties", "sha256": "b37d21bb8e09d99f9c9f9d17a1e6b5fe9c515561c4f9f0a3455015c2925a8981"}],
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/controllers-full/negative-wire-values",
+    "mode": "static-only",
+    "argv_template": ["static-validator-only", "--plan", "syntax-static/plan.jmx"],
+    "network": "none",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null
+  },
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations_per_thread": 1,
+    "max_samplers_per_iteration": 0,
+    "max_controller_visits_per_iteration": 0,
+    "max_samples": 0,
+    "max_plan_nodes": 48,
+    "max_plan_depth": 7,
+    "max_property_text_bytes": 8192,
+    "max_label_bytes": 2048,
+    "max_result_bytes": 65536,
+    "max_log_bytes": 65536,
+    "max_process_output_bytes": 65536,
+    "max_process_wait_seconds": 0
+  },
+  "execution": {
+    "status": "static-only-forbidden-oracle",
+    "process_exit": null,
+    "sample_count": null,
+    "raw_artifacts": "ignored local evidence: none collected; no artifact path materialized",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "No Java or JMeter invocation is permitted for this case. The plan is isolated under syntax-static/ because LoopController.loops=-2 is deliberately not an executable bounded oracle input; the -1 forever-loop child is retained for static wire comparison and is never entered.",
+    "Upstream semantics are recorded separately from Rust policy: RunTime.seconds=-1 means an already-expired deadline (zero child visits), a missing IfController.condition is an empty/false condition (zero child visits), and RandomController is a built-in upstream controller that selects one child per iteration without a fixed seed.",
+    "A Rust implementation may reject negative loop counts or unsupported RandomController execution with stable policy diagnostics; those policy choices must not be labeled as Apache JMeter semantics."
+  ]
+}

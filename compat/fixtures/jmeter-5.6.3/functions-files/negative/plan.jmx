@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Original negative file-function plan" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="Negative file inputs" enabled="true">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="missing_file" elementType="Argument">
+            <stringProp name="Argument.name">missing_file</stringProp>
+            <stringProp name="Argument.value">${__FileToString(inputs/missing.txt,UTF-8,missing_file_ref)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="missing_line" elementType="Argument">
+            <stringProp name="Argument.name">missing_line</stringProp>
+            <stringProp name="Argument.value">${__StringFromFile(inputs/missing-lines.txt,missing_line_ref)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="missing_csv" elementType="Argument">
+            <stringProp name="Argument.name">missing_csv</stringProp>
+            <stringProp name="Argument.value">${__CSVRead(inputs/missing.csv,0)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="empty_file" elementType="Argument">
+            <stringProp name="Argument.name">empty_file</stringProp>
+            <stringProp name="Argument.value">${__FileToString(inputs/empty.txt,UTF-8,empty_file_ref)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="empty_csv" elementType="Argument">
+            <stringProp name="Argument.name">empty_csv</stringProp>
+            <stringProp name="Argument.value">${__CSVRead(inputs/empty.csv,0)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="blank_csv_first" elementType="Argument">
+            <stringProp name="Argument.name">blank_csv_first</stringProp>
+            <stringProp name="Argument.value">${__CSVRead(inputs/blank-line.csv,0)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="blank_csv_next" elementType="Argument">
+            <stringProp name="Argument.name">blank_csv_next</stringProp>
+            <stringProp name="Argument.value">${__CSVRead(inputs/blank-line.csv,next)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="blank_csv_blank" elementType="Argument">
+            <stringProp name="Argument.name">blank_csv_blank</stringProp>
+            <stringProp name="Argument.value">${__CSVRead(inputs/blank-line.csv,0)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="blank_csv_next_last" elementType="Argument">
+            <stringProp name="Argument.name">blank_csv_next_last</stringProp>
+            <stringProp name="Argument.value">${__CSVRead(inputs/blank-line.csv,next)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="blank_csv_last" elementType="Argument">
+            <stringProp name="Argument.name">blank_csv_last</stringProp>
+            <stringProp name="Argument.value">${__CSVRead(inputs/blank-line.csv,0)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="eof_csv" elementType="Argument">
+            <stringProp name="Argument.name">eof_csv</stringProp>
+            <stringProp name="Argument.value">${__CSVRead(inputs/empty.csv,next)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="bounded_line" elementType="Argument">
+            <stringProp name="Argument.name">bounded_line</stringProp>
+            <stringProp name="Argument.value">${__StringFromFile(inputs/bounded-lines-#.txt,bounded_line_ref,2,2)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="ragged_first" elementType="Argument">
+            <stringProp name="Argument.name">ragged_first</stringProp>
+            <stringProp name="Argument.value">${__CSVRead(inputs/ragged.csv,0)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="ragged_next" elementType="Argument">
+            <stringProp name="Argument.name">ragged_next</stringProp>
+            <stringProp name="Argument.value">${__CSVRead(inputs/ragged.csv,next)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="ragged_invalid_column" elementType="Argument">
+            <stringProp name="Argument.name">ragged_invalid_column</stringProp>
+            <stringProp name="Argument.value">${__CSVRead(inputs/ragged.csv,1)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="ragged_third_next" elementType="Argument">
+            <stringProp name="Argument.name">ragged_third_next</stringProp>
+            <stringProp name="Argument.value">${__CSVRead(inputs/ragged.csv,next)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="ragged_third_invalid_column" elementType="Argument">
+            <stringProp name="Argument.name">ragged_third_invalid_column</stringProp>
+            <stringProp name="Argument.value">${__CSVRead(inputs/ragged.csv,3)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="invalid_xpath" elementType="Argument">
+            <stringProp name="Argument.name">invalid_xpath</stringProp>
+            <stringProp name="Argument.value">${__XPath(inputs/invalid.xml,//item/text())}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="invalid_xpath_syntax" elementType="Argument">
+            <stringProp name="Argument.name">invalid_xpath_syntax</stringProp>
+            <stringProp name="Argument.value">${__XPath(inputs/document.xml,//item[)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+      <collectionProp name="TestPlan.thread_groups"/>
+      <stringProp name="TestPlan.comments">Missing, empty, blank-line, ragged, bounded-sequence, malformed-XML, and malformed-XPath-expression inputs are local; the empty StringFromFile probe remains disabled as a typed stop-thread contract.</stringProp>
+      <stringProp name="TestPlan.user_define_classpath"></stringProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="One negative file user" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="One negative iteration" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">1</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">0</stringProp>
+        <longProp name="ThreadGroup.start_time">0</longProp>
+        <longProp name="ThreadGroup.end_time">0</longProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <stringProp name="ThreadGroup.duration"></stringProp>
+        <stringProp name="ThreadGroup.delay"></stringProp>
+      </ThreadGroup>
+      <hashTree>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="negative-file-functions" enabled="true">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">true</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree/>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="empty-stop=${__StringFromFile(inputs/empty.txt,empty_line_ref,,2)}" enabled="false">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">false</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Original JSR223 engine matrix" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="JSR223 matrix variables" enabled="true">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="matrix_seed" elementType="Argument">
+            <stringProp name="Argument.name">matrix_seed</stringProp>
+            <stringProp name="Argument.value">seed</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+      <collectionProp name="TestPlan.thread_groups"/>
+      <stringProp name="TestPlan.comments">Original inline/file scripts preserve JSR223 language, binding, cache, and failure contracts.</stringProp>
+      <stringProp name="TestPlan.user_define_classpath"></stringProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="One JSR223 user" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="One JSR223 loop" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">1</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">0</stringProp>
+        <longProp name="ThreadGroup.start_time">0</longProp>
+        <longProp name="ThreadGroup.end_time">0</longProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <stringProp name="ThreadGroup.duration"></stringProp>
+        <stringProp name="ThreadGroup.delay"></stringProp>
+      </ThreadGroup>
+      <hashTree>
+        <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="Groovy inline bindings" enabled="true">
+          <stringProp name="scriptLanguage">groovy</stringProp>
+          <stringProp name="parameters">inline-parameters</stringProp>
+          <stringProp name="filename"></stringProp>
+          <stringProp name="cacheKey">true</stringProp>
+          <stringProp name="script">def names = ['vars', 'props', 'ctx', 'prev', 'sampler', 'log', 'OUT', 'Parameters', 'args', 'FileName', 'Label', 'SampleResult'].join(',')
+vars.put('jsr223_binding_names', names)
+vars.put('jsr223_inline_marker', 'groovy-inline')
+vars.put('jsr223_inline_parameters', Parameters ?: '')
+vars.put('jsr223_binding_value_ctx_present', String.valueOf(ctx != null))
+vars.put('jsr223_binding_value_vars_present', String.valueOf(vars != null))
+vars.put('jsr223_binding_value_props_present', String.valueOf(props != null))
+vars.put('jsr223_binding_value_sampler_present', String.valueOf(sampler != null))
+vars.put('jsr223_binding_value_prev_present', String.valueOf(prev != null))
+vars.put('jsr223_binding_value_log_present', String.valueOf(log != null))
+vars.put('jsr223_binding_value_out_present', String.valueOf(OUT != null))
+vars.put('jsr223_binding_value_parameters', String.valueOf(Parameters))
+vars.put('jsr223_binding_value_args_count', String.valueOf(args == null ? 0 : args.length))
+vars.put('jsr223_binding_value_filename', String.valueOf(FileName ?: ''))
+vars.put('jsr223_binding_value_label', String.valueOf(Label))
+vars.put('jsr223_sample_result_present', String.valueOf(SampleResult != null))
+SampleResult.setSampleLabel(Label)
+SampleResult.setSuccessful(true)
+SampleResult.setResponseCode('200')
+SampleResult.setResponseMessage('OK')
+SampleResult.setResponseData('fixture-jsr223-response'.getBytes('UTF-8'))
+vars.put('jsr223_sample_result_label', String.valueOf(SampleResult.getSampleLabel()))
+vars.put('jsr223_sample_result_response_code', String.valueOf(SampleResult.getResponseCode()))
+vars.put('jsr223_sample_result_response_message', String.valueOf(SampleResult.getResponseMessage()))
+vars.put('jsr223_sample_result_response_data', String.valueOf(new String(SampleResult.getResponseData(), 'UTF-8')))
+vars.put('jsr223_sample_result_successful', String.valueOf(SampleResult.isSuccessful()))
+vars.put('jsr223_sample_result_identity_previous', String.valueOf(prev != null &amp;&amp; SampleResult.is(prev)))
+vars.put('jsr223_sampler_identity_current', String.valueOf(sampler != null &amp;&amp; sampler.is(ctx.getCurrentSampler())))
+if (OUT != null) { OUT.println('fixture-jsr223-inline') }
+return null</stringProp>
+        </JSR223Sampler>
+        <hashTree/>
+        <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="Groovy inline cache same source" enabled="true">
+          <stringProp name="scriptLanguage">groovy</stringProp>
+          <stringProp name="parameters">inline-parameters</stringProp>
+          <stringProp name="filename"></stringProp>
+          <stringProp name="cacheKey">true</stringProp>
+          <stringProp name="script">def names = ['vars', 'props', 'ctx', 'prev', 'sampler', 'log', 'OUT', 'Parameters', 'args', 'FileName', 'Label', 'SampleResult'].join(',')
+vars.put('jsr223_binding_names', names)
+vars.put('jsr223_inline_marker', 'groovy-inline')
+vars.put('jsr223_inline_parameters', Parameters ?: '')
+vars.put('jsr223_binding_value_ctx_present', String.valueOf(ctx != null))
+vars.put('jsr223_binding_value_vars_present', String.valueOf(vars != null))
+vars.put('jsr223_binding_value_props_present', String.valueOf(props != null))
+vars.put('jsr223_binding_value_sampler_present', String.valueOf(sampler != null))
+vars.put('jsr223_binding_value_prev_present', String.valueOf(prev != null))
+vars.put('jsr223_binding_value_log_present', String.valueOf(log != null))
+vars.put('jsr223_binding_value_out_present', String.valueOf(OUT != null))
+vars.put('jsr223_binding_value_parameters', String.valueOf(Parameters))
+vars.put('jsr223_binding_value_args_count', String.valueOf(args == null ? 0 : args.length))
+vars.put('jsr223_binding_value_filename', String.valueOf(FileName ?: ''))
+vars.put('jsr223_binding_value_label', String.valueOf(Label))
+vars.put('jsr223_sample_result_present', String.valueOf(SampleResult != null))
+SampleResult.setSampleLabel(Label)
+SampleResult.setSuccessful(true)
+SampleResult.setResponseCode('200')
+SampleResult.setResponseMessage('OK')
+SampleResult.setResponseData('fixture-jsr223-response'.getBytes('UTF-8'))
+vars.put('jsr223_sample_result_label', String.valueOf(SampleResult.getSampleLabel()))
+vars.put('jsr223_sample_result_response_code', String.valueOf(SampleResult.getResponseCode()))
+vars.put('jsr223_sample_result_response_message', String.valueOf(SampleResult.getResponseMessage()))
+vars.put('jsr223_sample_result_response_data', String.valueOf(new String(SampleResult.getResponseData(), 'UTF-8')))
+vars.put('jsr223_sample_result_successful', String.valueOf(SampleResult.isSuccessful()))
+vars.put('jsr223_sample_result_identity_previous', String.valueOf(prev != null &amp;&amp; SampleResult.is(prev)))
+vars.put('jsr223_sampler_identity_current', String.valueOf(sampler != null &amp;&amp; sampler.is(ctx.getCurrentSampler())))
+if (OUT != null) { OUT.println('fixture-jsr223-inline') }
+return null</stringProp>
+        </JSR223Sampler>
+        <hashTree/>
+        <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="Groovy inline cache different source" enabled="true">
+          <stringProp name="scriptLanguage">groovy</stringProp>
+          <stringProp name="parameters">inline-different-source</stringProp>
+          <stringProp name="filename"></stringProp>
+          <stringProp name="cacheKey">true</stringProp>
+          <stringProp name="script">vars.put('jsr223_inline_different_marker', 'groovy-inline-different')
+return 'groovy-inline-different'</stringProp>
+        </JSR223Sampler>
+        <hashTree/>
+        <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="Groovy inline cache disabled" enabled="true">
+          <stringProp name="scriptLanguage">groovy</stringProp>
+          <stringProp name="parameters">inline-cache-disabled</stringProp>
+          <stringProp name="filename"></stringProp>
+          <stringProp name="cacheKey">false</stringProp>
+          <stringProp name="script">vars.put('jsr223_inline_cache_disabled_marker','groovy-inline-cache-disabled'); return 'groovy-inline-cache-disabled'</stringProp>
+        </JSR223Sampler>
+        <hashTree/>
+        <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="Groovy file bindings" enabled="true">
+          <stringProp name="scriptLanguage">groovy</stringProp>
+          <stringProp name="parameters">file-parameters</stringProp>
+          <stringProp name="filename">inputs/scripts/bindings.groovy</stringProp>
+          <stringProp name="cacheKey">true</stringProp>
+          <stringProp name="script"></stringProp>
+        </JSR223Sampler>
+        <hashTree/>
+        <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="Groovy file cache repeat" enabled="true">
+          <stringProp name="scriptLanguage">groovy</stringProp>
+          <stringProp name="parameters">file-parameters-repeat</stringProp>
+          <stringProp name="filename">inputs/scripts/bindings.groovy</stringProp>
+          <stringProp name="cacheKey">true</stringProp>
+          <stringProp name="script"></stringProp>
+        </JSR223Sampler>
+        <hashTree/>
+        <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="Groovy file cache disabled" enabled="true">
+          <stringProp name="scriptLanguage">groovy</stringProp>
+          <stringProp name="parameters">file-parameters-disabled</stringProp>
+          <stringProp name="filename">inputs/scripts/bindings.groovy</stringProp>
+          <stringProp name="cacheKey">false</stringProp>
+          <stringProp name="script"></stringProp>
+        </JSR223Sampler>
+        <hashTree/>
+        <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="BeanShell inline" enabled="true">
+          <stringProp name="scriptLanguage">beanshell</stringProp>
+          <stringProp name="parameters">beanshell-inline-parameters</stringProp>
+          <stringProp name="filename"></stringProp>
+          <stringProp name="cacheKey">true</stringProp>
+          <stringProp name="script">vars.put('beanshell_inline_marker','beanshell-inline'); return 'beanshell-inline';</stringProp>
+        </JSR223Sampler>
+        <hashTree/>
+        <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="BeanShell file" enabled="true">
+          <stringProp name="scriptLanguage">beanshell</stringProp>
+          <stringProp name="parameters">beanshell-file-parameters</stringProp>
+          <stringProp name="filename">inputs/scripts/beanshell-file.bsh</stringProp>
+          <stringProp name="cacheKey">true</stringProp>
+          <stringProp name="script"></stringProp>
+        </JSR223Sampler>
+        <hashTree/>
+        <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="JEXL3 inline" enabled="true">
+          <stringProp name="scriptLanguage">jexl3</stringProp>
+          <stringProp name="parameters">jexl3-inline-parameters</stringProp>
+          <stringProp name="filename"></stringProp>
+          <stringProp name="cacheKey">true</stringProp>
+          <stringProp name="script">vars.put('jexl3_inline_marker','jexl3-inline'); 'jexl3-inline'</stringProp>
+        </JSR223Sampler>
+        <hashTree/>
+        <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="JEXL3 file" enabled="true">
+          <stringProp name="scriptLanguage">jexl3</stringProp>
+          <stringProp name="parameters">jexl3-file-parameters</stringProp>
+          <stringProp name="filename">inputs/scripts/jexl3-file.jexl</stringProp>
+          <stringProp name="cacheKey">true</stringProp>
+          <stringProp name="script"></stringProp>
+        </JSR223Sampler>
+        <hashTree/>
+        <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="Rhino inline" enabled="true">
+          <stringProp name="scriptLanguage">javascript</stringProp>
+          <stringProp name="parameters">rhino-inline-parameters</stringProp>
+          <stringProp name="filename"></stringProp>
+          <stringProp name="cacheKey">true</stringProp>
+          <stringProp name="script">vars.put('rhino_inline_marker','rhino-inline'); 'rhino-inline';</stringProp>
+        </JSR223Sampler>
+        <hashTree/>
+        <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="Rhino file" enabled="true">
+          <stringProp name="scriptLanguage">javascript</stringProp>
+          <stringProp name="parameters">rhino-file-parameters</stringProp>
+          <stringProp name="filename">inputs/scripts/rhino-file.js</stringProp>
+          <stringProp name="cacheKey">true</stringProp>
+          <stringProp name="script"></stringProp>
+        </JSR223Sampler>
+        <hashTree/>
+        <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="Groovy inline exception" enabled="true">
+          <stringProp name="scriptLanguage">groovy</stringProp>
+          <stringProp name="parameters">exception-inline-parameters</stringProp>
+          <stringProp name="filename"></stringProp>
+          <stringProp name="cacheKey">true</stringProp>
+          <stringProp name="script">throw new RuntimeException('fixture-jsr223-inline-exception')</stringProp>
+        </JSR223Sampler>
+        <hashTree/>
+        <JSR223Sampler guiclass="TestBeanGUI" testclass="JSR223Sampler" testname="Groovy file exception" enabled="true">
+          <stringProp name="scriptLanguage">groovy</stringProp>
+          <stringProp name="parameters">exception-file-parameters</stringProp>
+          <stringProp name="filename">inputs/scripts/failure.groovy</stringProp>
+          <stringProp name="cacheKey">false</stringProp>
+          <stringProp name="script"></stringProp>
+        </JSR223Sampler>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

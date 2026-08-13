@@ -1,0 +1,36 @@
+{
+  "schema_id": "jmeter-rs.file-artifact-contract",
+  "schema_version": 1,
+  "contract_kind": "string-to-file-artifacts",
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-FUNCTIONS-FILES-BASIC",
+  "evidence_status": "not_run",
+  "artifact_status": "future-run-only",
+  "root": "<case-root>/outputs",
+  "artifacts": [
+    {
+      "path": "outputs/string-to-file.txt",
+      "operation": "replace-then-append",
+      "encoding": "UTF-8",
+      "expected_content": "first-line|second-line",
+      "expected_bytes": 22,
+      "sha256": "a4498975e2370bad0e411c89cf7f3e16c88d66969722e1dbe4f57d6a73866ed5",
+      "present_in_repository": false,
+      "repository_policy": "outputs is ignored; a future runner materializes the file below the case root and compares it to this contract"
+    },
+    {
+      "path": "outputs/string-to-file-utf16.txt",
+      "operation": "replace",
+      "encoding": "UTF-16LE",
+      "expected_content": "café\n",
+      "expected_bytes": 10,
+      "sha256": "52c7058c2174fce8597b4f08eeaa403098f6d042280b67b0596727c5075c2cd8",
+      "present_in_repository": false,
+      "repository_policy": "outputs is ignored; the UTF-16LE bytes are future-run evidence only"
+    }
+  ],
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "StringToFile output files are not checked-in artifacts. Their exact relative paths, encodings, bytes, and SHA-256 values are a future-run contract under the explicit case root."
+  }
+}

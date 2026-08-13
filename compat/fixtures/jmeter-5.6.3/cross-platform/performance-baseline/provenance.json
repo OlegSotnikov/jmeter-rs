@@ -1,0 +1,57 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-CROSS-PLATFORM-PERFORMANCE-BASELINE",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored bounded performance/capacity metadata envelope for six future CI target lanes, including target-specific separators, queue-overflow accounting, and typed static routing; no benchmark or soak process was run.",
+    "upstream_plan_copied": false
+  },
+  "behavior_references": [
+    "docs/research/environment-capabilities.md",
+    "docs/research/rust-testing-strategy.md",
+    "tools/perf/README.md"
+  ],
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter is a pinned future comparison identity only; no upstream plan, result, binary, or source file is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true,
+    "execution_status": "not-run-static-corpus"
+  },
+  "runtime": {
+    "java": {"vendor": null, "version": null, "vm": null, "major": null},
+    "target_triple": "not recorded (six-target static matrix)",
+    "os_image": "not recorded (static corpus)",
+    "locale": "en-US (required for the profile baseline)",
+    "timezone": "UTC (required for the profile baseline)",
+    "default_charset": "UTF-8 (required for the profile baseline)",
+    "hostname_policy": "not asserted; no host value is in the projection",
+    "environment_allowlist": [],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "not executed; future comparisons must use only the pinned Apache JMeter 5.6.3 distribution",
+    "static_only": true
+  },
+  "inputs": {
+    "public_network_used": false,
+    "secrets_or_credentials": false,
+    "descriptor_sha256": {"expected/semantic.json": "29954e1122ffe253e2d1932d9a654f0e0f6a7cd7ec3df89ea27d9016cea9ee4d"},
+    "matrix_targets": ["linux/x86_64", "linux/arm64", "macos/x86_64", "macos/arm64", "windows/x86_64", "windows/arm64"],
+    "measurement_files": [],
+    "measurement_status": "not-run"
+  }
+}

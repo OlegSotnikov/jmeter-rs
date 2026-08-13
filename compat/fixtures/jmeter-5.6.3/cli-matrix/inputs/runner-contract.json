@@ -1,0 +1,149 @@
+{
+  "schema_id": "jmeter-rs.cli-runner-contract",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-CLI-001",
+  "compatibility_ids": ["CLI-001", "CLI-002", "CLI-003"],
+  "status": "planned",
+  "execution_status": "not-run-static-corpus",
+  "purpose": "Future setup and materialization contract only; this file does not provide a runner and no scenario has been executed.",
+  "argv_materialization": {
+    "source": "inputs/scenarios.json",
+    "scenario_ids_are_not_commands": true,
+    "exec_mode": "direct-argv-no-shell",
+    "working_directory": "compat/fixtures/jmeter-5.6.3/cli-matrix",
+    "max_argv_tokens_per_scenario": 32,
+    "placeholder_policy": {
+      "syntax": "<name>",
+      "all_option_pairs_must_remain_concrete": true,
+      "unresolved_placeholders": "reject-before-launch",
+      "known_placeholders": [
+        "<fixture-home>",
+        "<ignored>",
+        "<registry-port>",
+        "<unavailable-registry>"
+      ],
+      "path_rewrite": "Rebase future oracle-runs/cli-matrix paths under one fresh ignored run root without modifying checked-in vectors.",
+      "shell_interpolation": "forbidden"
+    }
+  },
+  "platform_materialization": {
+    "target_operating_systems": ["linux", "windows", "macos"],
+    "target_triple_required": true,
+    "path": {
+      "ambient_inheritance": false,
+      "policy": "Construct PATH from target-specific absolute entries for the pinned JMeter launcher, pinned Java runtime, and minimal required system tools; do not use a POSIX path list on Windows or inherit the host PATH.",
+      "separator": "target-native",
+      "required_recorded_fields": ["target_triple", "os_image", "path_entries", "jmeter_launcher", "java_executable"],
+      "static_value": null,
+      "static_value_asserted": false
+    },
+    "locale": {
+      "requested_semantics": "locale-neutral CLI diagnostics",
+      "timezone": "UTC",
+      "charset": "UTF-8",
+      "posix_environment": {"LC_ALL": "C", "LANG": "C"},
+      "windows_environment": {"LC_ALL": null, "LANG": null},
+      "windows_rule": "Use target-supported JVM locale properties instead of injecting unsupported POSIX variables; record the resulting OS and JVM locale.",
+      "host_locale_inheritance": false,
+      "required_recorded_fields": ["target_triple", "os_image", "os_locale", "jvm_default_locale", "jvm_file_encoding"],
+      "static_observation": false
+    }
+  },
+  "filesystem_setup": {
+    "evidence_root": "oracle-runs/cli-matrix/<run-id>",
+    "evidence_root_must_be_ignored": true,
+    "fresh_run_root": true,
+    "allowlisted_roots": ["fixture directory", "fresh evidence root"],
+    "output_directories": [
+      {
+        "name": "load-test-results",
+        "scenario_ids": ["nongui-load", "report-at-end", "normal-sample-failure"],
+        "path_tokens": ["<ignored>/cli-result.jtl", "<ignored>/sample-failure.jtl"],
+        "prelaunch": "create parent under the fresh evidence root and ensure the result file is absent",
+        "postlaunch": "retain only bounded evidence under the same run root"
+      },
+      {
+        "name": "report-output-empty",
+        "scenario_ids": ["report-only", "report-only-with-testfile", "report-only-with-report-at-end"],
+        "path_tokens": ["oracle-runs/cli-matrix/report-only", "oracle-runs/cli-matrix/report-only-with-e"],
+        "prelaunch": "materialize an absent or empty output directory under the fresh evidence root; do not reuse a prior run",
+        "postlaunch": "bound report entries by max_report_entries and retain output only under the run root"
+      },
+      {
+        "name": "report-output-nonempty-rejection",
+        "scenario_ids": ["illegal-output-folder-nonempty-without-force"],
+        "path_tokens": ["oracle-runs/cli-matrix/preexisting-nonempty"],
+        "prelaunch": "create the directory and one deterministic sentinel file before launch; do not assert the rejection until the oracle run",
+        "postlaunch": "record whether the sentinel and directory were preserved; never delete outside the owned run root"
+      },
+      {
+        "name": "report-output-force-replacement",
+        "scenario_ids": ["report-only-force-delete"],
+        "path_tokens": ["oracle-runs/cli-matrix/preexisting-dashboard"],
+        "prelaunch": "create a nonempty directory with a deterministic sentinel file so -f has a real replacement target",
+        "postlaunch": "record replacement behavior and keep cleanup bounded to the owned run root"
+      },
+      {
+        "name": "log-files",
+        "scenario_ids": ["nongui-load", "logging", "logging-date-pattern"],
+        "path_tokens": ["<ignored>/cli-run.log", "<ignored>/run-'yyyyMMdd-HHmmss'.log"],
+        "prelaunch": "create the parent directory and use a fresh path; preserve the quoted date pattern as one argv token",
+        "postlaunch": "bound log bytes by max_log_bytes and normalize only declared temporary fields"
+      }
+    ],
+    "static_setup_observed": false
+  },
+  "process_lifecycle": {
+    "max_wait_seconds": 30,
+    "readiness_timeout_seconds": 30,
+    "ownership": "Every launched client, server, registry, and worker must have an exact runner-owned child handle.",
+    "before_signal": "call try_wait on the exact child and never signal an exited child",
+    "shutdown": "request graceful shutdown through the fixture protocol, wait with the bounded deadline, then escalate only to the still-live direct child",
+    "reap": "wait and reap each exact child on success, error, timeout, and cancellation",
+    "process_group_signalling": "forbidden for this fixture",
+    "broad_cleanup": "forbidden; never discover or terminate processes by name, PID scans, labels, images, users, or ancestors",
+    "server_mode": {
+      "scenario_ids": ["server-mode"],
+      "setup": "launch the server as an owned child and record a deterministic local readiness transition",
+      "shutdown": "use the owned child handle and the same bounded graceful/direct-child policy; do not leave a long-lived server behind"
+    }
+  },
+  "local_rmi_setup": {
+    "network_scope": "loopback-only",
+    "public_network": false,
+    "scenario_ids": ["remote-all-hosts", "remote-explicit-hosts", "shutdown-remote-exit-property"],
+    "registry": "runner-owned local registry and worker only",
+    "remote_hosts": "materialize remote_hosts for -r from the runner-owned loopback worker; -R receives the materialized loopback host and port",
+    "remote_hosts_property_source": "Copy the checked-in primary property input into the fresh run root and add the runner-assigned loopback host for -r, or use an equivalent explicitly recorded property injection; never modify the checked-in input or rely on an ambient jmeter.properties file.",
+    "port_materialization": "replace <registry-port> with a runner-assigned loopback port and record it; do not depend on a fixed host port",
+    "worker_count": 1,
+    "readiness": "bounded local readiness handshake before the client starts",
+    "worker_shutdown": "wait for the client shutdown request and worker outcome separately, then reap the exact worker and registry children",
+    "static_observation": false
+  },
+  "unavailable_registry_setup": {
+    "scenario_ids": ["remote-failure"],
+    "token": "<unavailable-registry>",
+    "materialization": "use a loopback endpoint with no runner-owned listener, verify absence at setup, and record the selected port",
+    "network_scope": "loopback-only",
+    "process_discovery": "forbidden; do not scan or terminate an unrelated listener",
+    "expected_status": "remote-or-fatal-deferred; process_exit remains null until observed",
+    "static_observation": false
+  },
+  "stop_failure_setup": {
+    "scenario_ids": ["shutdown-property-matrix"],
+    "property_values": ["jmeterengine.stopfail.system.exit=false", "jmeterengine.stopfail.system.exit=true"],
+    "induction": "A future bounded harness must deliberately keep one owned worker/thread live through the immediate-stop deadline. The checked-in CLI plan does not induce this condition.",
+    "comparison": "Run both property values against the identical harness and compare local process, worker, and diagnostic fields separately.",
+    "max_wait_seconds": 30,
+    "numeric_exit_asserted": false,
+    "static_observation": false
+  },
+  "observation_rules": {
+    "process_exit": "Retain and compare the exact child integer only when observed; static descriptors keep it null and unasserted.",
+    "sample_status": "Compare sample success/failure separately from client and worker process status.",
+    "metadata": ["target_triple", "os_image", "java_vendor_version", "jvm_locale", "charset", "timezone", "path_entries", "port_assignments"],
+    "raw_artifacts": "none in this static corpus; future bounded artifacts belong below the ignored evidence root"
+  }
+}

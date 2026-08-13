@@ -1,0 +1,60 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-CONTROLLERS-FULL-BASIC",
+  "format": "jtl-xml",
+  "evidence_status": "planned",
+  "expectation_basis": "Original hand-authored controller traversal hypothesis; no Apache JMeter output was measured.",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 11,
+  "ordered_labels": [
+    "simple-before-0", "simple-after", "finite-0", "finite-1", "once-only", "interleave-a", "simple-before-1", "simple-after", "finite-0", "finite-1", "interleave-b"
+  ],
+  "expected_counts": {
+    "simple-before-0": 1,
+    "simple-before-1": 1,
+    "simple-after": 2,
+    "finite-0": 2,
+    "finite-1": 2,
+    "once-only": 1,
+    "interleave-a": 1,
+    "interleave-b": 1,
+    "disabled-must-not-run": 0,
+    "zero-must-not-run": 0
+  },
+  "controller_contracts": [
+    {"testclass": "LoopController", "wire_properties": {"LoopController.continue_forever": "false", "LoopController.loops": "2"}, "observable": "ordered children repeat twice per thread-group iteration"},
+    {"testclass": "LoopController", "wire_properties": {"LoopController.continue_forever": "false", "LoopController.loops": "0"}, "observable": "zero-loop child is retained in source but emits no sample"},
+    {"testclass": "OnceOnlyController", "wire_properties": {}, "observable": "child runs only on the first iteration of its looping parent"},
+    {"testclass": "InterleaveControl", "wire_properties": {"InterleaveControl.style": "0"}, "observable": "child selection follows ordered interleave state"}
+  ],
+  "sample_contract": {
+    "attributes": {"s": "true", "rc": "200", "rm": "OK", "tn": "Basic two iterations 1-1", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"},
+    "absent_attributes": ["responseFile"],
+    "retained_attributes": ["s", "tn", "sby", "rm", "ec"],
+    "ignored_attributes": ["t", "by", "it", "lt", "ct", "ts"]
+  },
+  "assertion_results": {
+    "configured": true,
+    "mode": "all",
+    "node": "assertionResult",
+    "child_order": ["name", "failure", "error", "failureMessage"],
+    "failure_message_property": "jmeter.save.saveservice.assertion_results_failure_message",
+    "expected_count": 0,
+    "absence": "no assertionResult nodes; this plan contains no assertion elements",
+    "retained_fields": ["name", "failure", "error", "failureMessage"]
+  },
+  "generated_from": {
+    "generator": "hand-authored static expectation",
+    "generator_version": "5.6.3",
+    "random_seed": 20260812,
+    "oracle_command": "future pinned-oracle recipe only; no Java or JMeter invocation was performed",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "ignored local evidence: none collected; no artifact path materialized"
+  },
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.ts", "sample.by"],
+    "reason": "Controller order, labels, status, thread identity, and sample counts remain exact; timing and byte fields are not controlled by this offline plan."
+  }
+}

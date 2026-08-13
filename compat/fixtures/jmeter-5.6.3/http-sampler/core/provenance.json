@@ -1,0 +1,105 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-HTTP-SAMPLER-CORE",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored local HTTP-sampler slice of ELEM-001 and stdlib loopback server for deterministic method, body, header, response, and transport-failure protocol vectors.",
+    "upstream_plan_copied": false
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter 5.6.3 is an external oracle only; no upstream plan, result, binary, plugin, or service is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "signature_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.asc",
+    "keys_url": "https://archive.apache.org/dist/jmeter/KEYS",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true,
+    "signature_verified_before_execution": false,
+    "signing_fingerprint": null,
+    "pgp": {
+      "verified": false,
+      "status": "not-verified-static",
+      "verified_at": null,
+      "method": null
+    },
+    "verification_status": "digest-checked-profile-pgp-not-verified-static",
+    "verification_note": "The active profile records the pinned SHA-512 check. This static fixture handoff did not fetch, authenticate, or execute the Apache JMeter artifact, so no PGP verification claim is made."
+  },
+  "runtime": {
+    "java": {
+      "status": "planned",
+      "vendor": null,
+      "version": null,
+      "vm": null,
+      "major": null,
+      "minimum_major": 8,
+      "planned_major": 17
+    },
+    "python": {
+      "status": "planned",
+      "implementation": "CPython",
+      "executable": "<materialized:fixture.server-python>",
+      "minimum_version": "3.10",
+      "version": null,
+      "executable_sha256": null,
+      "zlib": {
+        "status": "planned",
+        "version": null,
+        "runtime_version": null,
+        "module": null,
+        "module_sha256": null
+      },
+      "compression_hashes": {
+        "status": "conditional-unobserved",
+        "runtime_gate": [
+          "python.version",
+          "python.executable_sha256",
+          "python.zlib.version",
+          "python.zlib.runtime_version",
+          "python.zlib.module_sha256"
+        ]
+      }
+    },
+    "target_triple": null,
+    "os_image": null,
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "loopback address is explicit; hostname saving is disabled",
+    "environment_allowlist": ["LC_ALL=en_US.UTF-8", "LANG=en_US.UTF-8", "TZ=UTC"],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "planned: only the pinned Apache JMeter 5.6.3 distribution when oracle execution is enabled",
+    "jmeter_executable": "<materialized:jmeter-executable>",
+    "jmeter_version": null,
+    "jmeter_artifact_sha512_observed": null
+  },
+  "inputs": {
+    "plan_sha256": "b746ff0da9ef06dc32264aab35ffaa619f5d963691e425343c3c76a9ecbb7312",
+    "property_sha256": "ae7446561b40b3cf589d19ce8be170dcbc2d6e3f7251f7549eb30e90f97918d2",
+    "expected_path": "expected/semantic.json",
+    "expected_sha256": "84bed71b9919fd5d30668e86a52f39cc0bca601b3547eb6afa7e59d1d34bbee5",
+    "trace_contract_path": "trace-contract.json",
+    "trace_contract_sha256": "05c5bbba64d1691e564af096527949365effaa3f224133e84322be2e2ddce08b",
+    "public_network_used": false,
+    "secrets_or_credentials": false,
+    "server_source": "../server.py",
+    "runner_contract_path": "../runner-contract.md",
+    "runner_contract_sha256": "99618bff1b1f4fb399c3c981dc16a5411d602bc632701e503772d27b3f1ea28e",
+    "server_sha256": "cca0470b50141ace78e0662d813cb014fcd1431fc217b1c332db7f9743c323b6",
+    "server_policy": "stdlib-only, loopback-only, finite trace cap plus bounded idle/session watchdog, no ambient proxy/network, no PID-based lifecycle; form/multipart field limits are hard pre-admission bounds with typed 413 rejection; trace allowlisted paths and query counts only, body bytes are digest-only except known non-secret effective form fields and multipart field descriptors, and sensitive/custom/non-allowlisted header values are structurally redacted; compression digests remain conditional-unobserved until exact CPython/zlib runtime identities are recorded"
+  }
+}

@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: Apache-2.0
+
+name: Dependency and security policy
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_NET_RETRY: "3"
+  CARGO_TERM_COLOR: always
+  LANG: C
+  LC_ALL: C
+  RUST_BACKTRACE: short
+  TZ: UTC
+
+jobs:
+  cargo-deny:
+    name: cargo-deny policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      # actions/checkout v7.0.1; tag verified against the official repository.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # EmbarkStudios/cargo-deny-action v2.1.1 (cargo-deny 0.20.2); tag verified against the official repository.
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          # Keep cargo-deny's Rust/Cargo runtime on the repository's pinned
+          # stable toolchain; the action's default image version is not a CI
+          # latest/MSRV lane.
+          rust-version: "1.97.1"
+          command: check
+          arguments: --all-features
+
+  cargo-audit:
+    name: RustSec audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      # actions/checkout v7.0.1; tag verified against the official repository.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # actions-rust-lang/setup-rust-toolchain v1.17.0; tag verified against the official repository.
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: 1.97.1
+          cache: false
+          rustflags: ""
+      # cargo-audit 0.22.2 (current stable crates.io release; --locked package graph).
+      - name: Install pinned cargo-audit
+        run: cargo install --locked cargo-audit --version 0.22.2
+      - name: Audit dependencies
+        run: cargo audit --deny warnings
+
+  dependency-review:
+    name: dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      # actions/checkout v7.0.1; tag verified against the official repository.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # actions/dependency-review-action v5.0.0; tag verified against the official repository.
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0

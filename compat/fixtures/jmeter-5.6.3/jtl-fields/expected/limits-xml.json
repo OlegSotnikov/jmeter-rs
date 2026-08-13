@@ -1,0 +1,21 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JTL-FIELDS",
+  "format": "jtl-xml",
+  "contract_kind": "resource-limit-contract",
+  "projection_schema": "error-contract-v1",
+  "comparator_ready": false,
+  "evidence_status": "planned",
+  "expectation_basis": "Bounded parser-error targets are static non-comparator contracts; no limit-triggering oracle run was measured.",
+  "sample_count": 0,
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "Limit XML contracts are rejected before a successful projection is accepted."
+  },
+  "contracts": [
+    {"id": "LIMIT-EVENTS-001", "path": "inputs/limits/too-many-events.xml", "bound": {"name": "max_events", "value": 2}, "expected_error_code": "output-limit"},
+    {"id": "LIMIT-DEPTH-001", "path": "inputs/limits/too-deep.xml", "bound": {"name": "max_depth", "value": 1}, "expected_error_code": "output-limit"}
+  ]
+}

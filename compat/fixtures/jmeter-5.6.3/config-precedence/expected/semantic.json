@@ -1,0 +1,581 @@
+{
+  "schema_id": "jmeter-rs.configuration-projection",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-CONFIG-PRECEDENCE",
+  "projection_schema": "configuration-projection",
+  "projection_schema_version": 1,
+  "format": "configuration-projection",
+  "format_note": "This is a structured configuration projection, not a JMX-output or JTL expectation. The repository fixture validator checks the declared custom-schema identity and references; it does not execute a configuration comparator.",
+  "oracle_status": "not-run",
+  "evidence_status": "not_run",
+  "coverage": ["CFG-001", "CFG-002", "CFG-003"],
+  "validation_contract": {
+    "contract_version": 1,
+    "comparator_enforced": false,
+    "dedicated_comparator_id": "CMP-CONFIG-PROJECTION-001",
+    "comparator_id": null,
+    "comparator_activation": "comparator_enforced may become true only when comparator_id equals CMP-CONFIG-PROJECTION-001 and that dedicated comparator's implementation/version and evidence are recorded; no current validator or runner satisfies this condition",
+    "validator_scope": "static schema, profile-reference, path, and input-hash checks only",
+    "comparator_scope": "not implemented for this custom projection; no Java/JMeter or Rust comparator execution is claimed",
+    "required_top_level_fields": [
+      "schema_id",
+      "schema_version",
+      "profile_id",
+      "case_id",
+      "projection_schema",
+      "projection_schema_version",
+      "format",
+      "evidence_status",
+      "source_semantics",
+      "scenarios",
+      "normalization"
+    ],
+    "required_scenario_fields": [
+      "id",
+      "argv_index",
+      "assertion_basis",
+      "jmeter_properties",
+      "system_properties",
+      "remote_properties_projection",
+      "map_completeness",
+      "selected_keys",
+      "omitted_keys"
+    ],
+    "invariants": [
+      {
+        "id": "CFG-PROJECTION-INV-001",
+        "name": "selected-keys-exact",
+        "rule": "Every selected_keys list names exactly the keys present in its corresponding values map.",
+        "declared": true,
+        "enforced": false,
+        "enforcement": "future-comparator-only"
+      },
+      {
+        "id": "CFG-PROJECTION-INV-002",
+        "name": "explicit-absence-disjoint",
+        "rule": "Every absent_*_properties list is disjoint from its corresponding values map and records an explicit removal or remote-only absence.",
+        "declared": true,
+        "enforced": false,
+        "enforcement": "future-comparator-only"
+      },
+      {
+        "id": "CFG-PROJECTION-INV-003",
+        "name": "remote-only-global-properties",
+        "rule": "A -G projection is remote-only: every projected remote key is absent from both local JMeter and Java system maps in the same scenario.",
+        "declared": true,
+        "enforced": false,
+        "enforcement": "future-comparator-only"
+      },
+      {
+        "id": "CFG-PROJECTION-INV-004",
+        "name": "omitted-is-not-default",
+        "rule": "An unselected key is omitted, not implicitly asserted empty or default.",
+        "declared": true,
+        "enforced": false,
+        "enforcement": "future-comparator-only"
+      },
+      {
+        "id": "CFG-PROJECTION-INV-005",
+        "name": "java-properties-decoding",
+        "rule": "Property-file source bytes are decoded with Java Properties.load(InputStream) ISO-8859-1 semantics; literal UTF-8 effective values remain pending until oracle observation.",
+        "declared": true,
+        "enforced": false,
+        "enforcement": "future-comparator-only"
+      },
+      {
+        "id": "CFG-PROJECTION-INV-006",
+        "name": "pending-evidence-no-promotion",
+        "rule": "Remote projection values and locale/charset runtime values cannot promote this static corpus to observed evidence.",
+        "declared": true,
+        "enforced": false,
+        "enforcement": "future-comparator-only"
+      }
+    ],
+    "pending_checks": [
+      "Run each argv template with the pinned Java/JMeter artifact and record raw Debug Sampler output.",
+      "Run the corresponding Rust configuration projection and compare only after dedicated comparator CMP-CONFIG-PROJECTION-001 supports this schema; until then comparator_enforced remains false.",
+      "Record Java vendor/version, target triple, OS image, effective locale, timezone, and default charset for each run."
+    ]
+  },
+  "source_semantics": {
+    "basis": "JMeter 5.6.3 documented startup order and pinned-source option handling; differential execution remains pending.",
+    "load_order": [
+      {"position": 1, "source": "-p", "scope": "jmeter_properties", "repeat": "one initial file"},
+      {"position": 2, "source": "-j", "scope": "logging_selection", "condition": "select the run-log target before logging initialization; no property map is mutated by this phase"},
+      {"position": 3, "source": "logging initialization", "scope": "logging", "condition": "initialize Log4j2 before implicit user/system property loads"},
+      {"position": 4, "source": "user.properties", "scope": "jmeter_properties", "condition": "the initial file's user.properties path resolves in the working directory, then the declared JMeter bin fallback"},
+      {"position": 5, "source": "system.properties", "scope": "java_system_properties", "condition": "the initial file's system.properties path resolves in the working directory, then the declared JMeter bin fallback"},
+      {"position": 6, "source": "all remaining command-line property options (-q/-S/-J/-D/-G)", "scope": "option-dependent", "order": "argv order; each repeatable option is applied when encountered"}
+    ],
+    "property_map_order": "The logging phases above are startup ordering only; the effective property merge is -p, implicit user.properties, implicit system.properties, then remaining repeatable property options in argv order.",
+    "implicit_lookup": {
+      "initial_file_key": "user.properties/system.properties",
+      "required_fixture_paths": {
+        "user.properties": "user.properties",
+        "system.properties": "system.properties"
+      },
+      "lookup_roots": ["working_directory", "<jmeter-home>/bin"],
+      "runner_requirement": "resolve the selected -p file first, read its path keys, then resolve each dynamic source from the case root; do not consult ambient paths"
+    },
+    "property_parser": {
+      "file_charset": "Properties.load(InputStream) ISO-8859-1 byte semantics with explicit \\uXXXX escapes; this corpus also carries literal UTF-8 bytes as a raw-input probe whose effective Java decoding is oracle-pending",
+      "duplicate_key": "last occurrence wins",
+      "empty_file_value": "key is retained with an empty string",
+      "line_continuation": "an odd trailing backslash joins the next physical line and continuation indentation is ignored",
+      "recognized_escapes": ["\\t", "\\n", "\\f", "\\r", "\\uXXXX", "\\=", "\\:", "\\#", "\\!", "\\\\"]
+    },
+    "option_scopes": {
+      "-q": {"scope": "jmeter_properties", "input": "property file", "empty_value": "not applicable", "repeat": "each file is merged in argv order"},
+      "-J": {"scope": "jmeter_properties", "input": "name=value", "empty_value": "remove the named property", "repeat": "last assignment or removal wins"},
+      "-G": {"scope": "remote_properties", "input": "name=value or property-file path when no assignment is present", "local_visibility": "not added to local JMeter or Java system properties", "local_absence_assertions": ["jmeter_properties", "system_properties"], "repeat": "each assignment or file is merged in argv order", "observability": "static merge projection only; unobservable without a remote worker run"},
+      "-S": {"scope": "java_system_properties", "input": "property file", "empty_value": "not applicable", "repeat": "each file is merged in argv order"},
+      "-D": {"scope": "java_system_properties", "input": "name=value", "empty_value": "remove the named property", "repeat": "last assignment or removal wins"}
+    }
+  },
+  "documented_property_families": [
+    {
+      "family": "user.properties and system.properties",
+      "fixture_keys": ["user.properties", "system.properties"],
+      "role": "automatic local JMeter-property and Java-system-property source paths",
+      "default_claim": "not asserted; paths are explicitly set by the fixture"
+    },
+    {
+      "family": "jmeter.save.saveservice.*",
+      "fixture_keys": [
+        "jmeter.save.saveservice.output_format",
+        "jmeter.save.saveservice.timestamp_format",
+        "jmeter.save.saveservice.hostname",
+        "jmeter.save.saveservice.response_data",
+        "jmeter.save.saveservice.samplerData",
+        "jmeter.save.saveservice.responseHeaders",
+        "jmeter.save.saveservice.requestHeaders"
+      ],
+      "role": "result-format and save-service configuration family",
+      "default_claim": "not asserted; every listed value is explicitly set in the initial property files"
+    },
+    {
+      "family": "command-line property overrides",
+      "fixture_keys": ["cfg.source", "cfg.repeat", "cfg.empty", "cfg.system.file", "cfg.system.repeat", "cfg.remote"],
+      "role": "local JMeter, Java system, and remote-only precedence probes",
+      "default_claim": "not applicable; keys are fixture-owned probes"
+    }
+  ],
+  "literal_utf8_inputs": [
+    {
+      "path": "primary.properties",
+      "key": "cfg.literal.utf8",
+      "literal_value": "literal-雪-☃",
+      "raw_value_bytes_hex": "6c69746572616c2de99baa2de29883",
+      "source_encoding": "UTF-8",
+      "java_decoder": "ISO-8859-1",
+      "effective_value": null,
+      "effective_value_status": "pending-oracle; do not decode literal UTF-8 bytes as UTF-8 when modeling Properties.load(InputStream)"
+    },
+    {
+      "path": "plan.jmx",
+      "field": "TestPlan.comments",
+      "literal_value": "Original local configuration/property precedence fixture; literal UTF-8 snowman ☃.",
+      "source_encoding": "UTF-8",
+      "effective_value": "Original local configuration/property precedence fixture; literal UTF-8 snowman ☃.",
+      "effective_value_status": "static XML input decoding; JMeter execution remains pending"
+    }
+  ],
+  "scenario_map_contract": {
+    "completeness": "partial",
+    "selected_keys": "Each scenario's selected_keys arrays name exactly the keys represented in its corresponding values map.",
+    "omitted_keys": "Keys absent from selected_keys are intentionally omitted from that scenario projection; they are not implicit empty/default assertions. Explicit deletions are listed under absent_jmeter_properties or absent_system_properties.",
+    "absence_assertions": "When a scenario uses -G, local_absence_assertions must list every projected remote key under both jmeter_properties and system_properties.",
+    "remote_properties_projection": {
+      "observable": false,
+      "reason": "-G values are held for remote workers; this corpus has no remote worker run and cannot observe them locally."
+    },
+    "comparator_enforced": false,
+    "dedicated_comparator_id": "CMP-CONFIG-PROJECTION-001",
+    "validation_status": "static contract only; current repository validator does not compare these maps and cannot set comparator_enforced=true"
+  },
+  "decoded_input_assertions": [
+    {
+      "path": "primary.properties",
+      "scope": "jmeter_properties",
+      "values": {
+        "cfg.escaped": "left=right:colon#hash!bang\\slash",
+        "cfg.continuation": "primary-firstprimary-second",
+        "cfg.unicode": "smile-☺-omega-Ω",
+        "cfg.empty": "",
+        "cfg.duplicate": "primary-last",
+        "user.properties": "user.properties",
+        "system.properties": "system.properties"
+      },
+      "raw_input_probes": [
+        {
+          "key": "cfg.literal.utf8",
+          "source_encoding": "UTF-8",
+          "raw_value_bytes_hex": "6c69746572616c2de99baa2de29883",
+          "decoder": "ISO-8859-1",
+          "decoded_value": null,
+          "decoded_value_status": "pending-oracle"
+        }
+      ]
+    },
+    {
+      "path": "default-jmeter.properties",
+      "scope": "jmeter_properties",
+      "values": {
+        "cfg.escaped": "default=escape:value",
+        "cfg.unicode": "default-☂",
+        "cfg.empty": "",
+        "cfg.duplicate": "default-last",
+        "cfg.default.marker": "default-file"
+      }
+    },
+    {
+      "path": "user.properties",
+      "scope": "jmeter_properties",
+      "values": {
+        "cfg.source": "user",
+        "cfg.repeat": "user-repeat",
+        "cfg.escaped": "user=escape:value",
+        "cfg.unicode": "user-☃",
+        "cfg.empty": "",
+        "cfg.duplicate": "user-last"
+      }
+    },
+    {
+      "path": "system.properties",
+      "scope": "java_system_properties",
+      "values": {
+        "cfg.system.file": "system-file",
+        "cfg.system.escaped": "system=escape:value",
+        "cfg.system.unicode": "system-★",
+        "cfg.system.empty": "",
+        "cfg.system.remove": "system-remove-me",
+        "cfg.system.duplicate": "system-last"
+      }
+    },
+    {
+      "path": "additional-first.properties",
+      "scope": "jmeter_properties",
+      "values": {
+        "cfg.source": "additional-first",
+        "cfg.q.repeat": "additional-first",
+        "cfg.repeat": "additional-first",
+        "cfg.escaped": "additional=first",
+        "cfg.empty": "",
+        "cfg.duplicate": "additional-first"
+      }
+    },
+    {
+      "path": "additional-second.properties",
+      "scope": "jmeter_properties",
+      "values": {
+        "cfg.source": "additional-second",
+        "cfg.q.repeat": "additional-second",
+        "cfg.repeat": "additional-second",
+        "cfg.escaped": "additional=second",
+        "cfg.empty": "",
+        "cfg.duplicate": "additional-second"
+      }
+    },
+    {
+      "path": "additional-system.properties",
+      "scope": "java_system_properties",
+      "values": {
+        "cfg.system.file": "additional-system",
+        "cfg.system.repeat": "additional-system-repeat",
+        "cfg.system.escaped": "additional=system:value",
+        "cfg.system.unicode": "system-☂",
+        "cfg.system.empty": "",
+        "cfg.system.remove": "additional-system-remove-me",
+        "cfg.system.duplicate": "additional-system-last"
+      }
+    },
+    {
+      "path": "additional-system-second.properties",
+      "scope": "java_system_properties",
+      "values": {
+        "cfg.system.file": "additional-system-second",
+        "cfg.system.repeat": "additional-system-second-repeat",
+        "cfg.system.escaped": "additional=system-second:value",
+        "cfg.system.unicode": "system-☆",
+        "cfg.system.empty": "",
+        "cfg.system.remove": "additional-system-second-remove-me",
+        "cfg.system.duplicate": "additional-system-second-last"
+      }
+    },
+    {
+      "path": "global.properties",
+      "scope": "remote_properties",
+      "values": {
+        "cfg.global.file": "global-file",
+        "cfg.global.duplicate": "global-last",
+        "cfg.remote": "global-file-remote"
+      }
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "baseline-q-order",
+      "argv_index": 0,
+      "assertion_basis": "static merge projection; pending pinned Java oracle",
+      "jmeter_properties": {
+        "cfg.source": "additional-second",
+        "cfg.order": "primary",
+        "cfg.repeat": "additional-second",
+        "cfg.q.repeat": "additional-second",
+        "cfg.escaped": "additional=second",
+        "cfg.continuation": "primary-firstprimary-second",
+        "cfg.unicode": "user-☃",
+        "cfg.empty": "",
+        "cfg.duplicate": "additional-second",
+        "cfg.default.marker": "primary-default-override",
+        "cfg.user.file": "user-file",
+        "jmeter.save.saveservice.output_format": "xml",
+        "jmeter.save.saveservice.timestamp_format": "none",
+        "jmeter.save.saveservice.hostname": "false"
+      },
+      "system_properties": {
+        "cfg.system.file": "system-file",
+        "cfg.system.duplicate": "system-last",
+        "cfg.system.escaped": "system=escape:value",
+        "cfg.system.unicode": "system-★",
+        "cfg.system.empty": "",
+        "cfg.system.remove": "system-remove-me"
+      },
+      "remote_properties_projection": {
+        "observable": false,
+        "values": {}
+      },
+      "map_completeness": "partial",
+      "selected_keys": {
+        "jmeter_properties": [
+          "cfg.source", "cfg.order", "cfg.repeat", "cfg.q.repeat",
+          "cfg.escaped", "cfg.continuation", "cfg.unicode", "cfg.empty",
+          "cfg.duplicate", "cfg.default.marker", "cfg.user.file",
+          "jmeter.save.saveservice.output_format",
+          "jmeter.save.saveservice.timestamp_format",
+          "jmeter.save.saveservice.hostname"
+        ],
+        "system_properties": [
+          "cfg.system.file", "cfg.system.duplicate", "cfg.system.escaped",
+          "cfg.system.unicode", "cfg.system.empty", "cfg.system.remove"
+        ],
+        "remote_properties_projection": []
+      },
+      "omitted_keys": {
+        "jmeter_properties": "All fixture keys not listed under selected_keys are intentionally omitted.",
+        "system_properties": "All fixture keys not listed under selected_keys are intentionally omitted.",
+        "remote_properties_projection": "No remote keys are selected in this local-only scenario."
+      }
+    },
+    {
+      "id": "local-cli-overrides",
+      "argv_index": 1,
+      "assertion_basis": "static merge projection; pending pinned Java oracle",
+      "jmeter_properties": {
+        "cfg.source": "cli-jmeter",
+        "cfg.order": "primary",
+        "cfg.repeat": "cli-repeat",
+        "cfg.q.repeat": "additional-second",
+        "cfg.escaped": "additional=second",
+        "cfg.continuation": "primary-firstprimary-second",
+        "cfg.unicode": "user-☃",
+        "cfg.duplicate": "additional-second",
+        "cfg.default.marker": "primary-default-override",
+        "cfg.user.file": "user-file",
+        "jmeter.save.saveservice.output_format": "xml",
+        "jmeter.save.saveservice.timestamp_format": "none",
+        "jmeter.save.saveservice.hostname": "false"
+      },
+      "absent_jmeter_properties": ["cfg.empty"],
+      "system_properties": {
+        "cfg.system.file": "cli-system",
+        "cfg.system.repeat": "cli-system-repeat",
+        "cfg.system.duplicate": "additional-system-second-last",
+        "cfg.system.escaped": "additional=system-second:value",
+        "cfg.system.unicode": "system-☆",
+        "cfg.system.empty": ""
+      },
+      "absent_system_properties": ["cfg.system.remove"],
+      "local_absence_assertions": {
+        "status": "pending-oracle",
+        "reason": "-Gcfg.remote=remote-cli is remote-only and must not appear in either local Debug Sampler map",
+        "jmeter_properties": ["cfg.remote"],
+        "system_properties": ["cfg.remote"]
+      },
+      "remote_properties_projection": {
+        "observable": false,
+        "values": {"cfg.remote": "remote-cli"}
+      },
+      "map_completeness": "partial",
+      "selected_keys": {
+        "jmeter_properties": [
+          "cfg.source", "cfg.order", "cfg.repeat", "cfg.q.repeat",
+          "cfg.escaped", "cfg.continuation", "cfg.unicode", "cfg.duplicate",
+          "cfg.default.marker", "cfg.user.file",
+          "jmeter.save.saveservice.output_format",
+          "jmeter.save.saveservice.timestamp_format",
+          "jmeter.save.saveservice.hostname"
+        ],
+        "system_properties": [
+          "cfg.system.file", "cfg.system.repeat", "cfg.system.duplicate",
+          "cfg.system.escaped", "cfg.system.unicode", "cfg.system.empty"
+        ],
+        "remote_properties_projection": ["cfg.remote"]
+      },
+      "omitted_keys": {
+        "jmeter_properties": "All fixture keys not listed under selected_keys are intentionally omitted; cfg.empty is explicitly removed by -Jcfg.empty=.",
+        "system_properties": "All fixture keys not listed under selected_keys are intentionally omitted; cfg.system.remove is explicitly removed by -Dcfg.system.remove=.",
+        "remote_properties_projection": "Only cfg.remote is selected; the projection is unobservable without a remote worker run."
+      }
+    },
+    {
+      "id": "global-file-scope",
+      "argv_index": 2,
+      "assertion_basis": "static scope projection; pending pinned Java oracle",
+      "jmeter_properties": {
+        "cfg.source": "user",
+        "cfg.repeat": "user-repeat",
+        "cfg.escaped": "user=escape:value",
+        "cfg.unicode": "user-☃",
+        "cfg.empty": "",
+        "cfg.duplicate": "user-last",
+        "cfg.default.marker": "primary-default-override",
+        "cfg.user.file": "user-file"
+      },
+      "system_properties": {
+        "cfg.system.file": "system-file",
+        "cfg.system.duplicate": "system-last",
+        "cfg.system.escaped": "system=escape:value",
+        "cfg.system.unicode": "system-★",
+        "cfg.system.empty": "",
+        "cfg.system.remove": "system-remove-me"
+      },
+      "remote_properties_projection": {
+        "observable": false,
+        "values": {
+          "cfg.global.file": "global-file",
+          "cfg.global.duplicate": "global-last",
+          "cfg.remote": "remote-cli"
+        }
+      },
+      "local_absence_assertions": {
+        "jmeter_properties": ["cfg.global.file", "cfg.global.duplicate", "cfg.remote"],
+        "system_properties": ["cfg.global.file", "cfg.global.duplicate", "cfg.remote"],
+        "status": "pending-oracle",
+        "reason": "Both -Gglobal.properties and -Gcfg.remote=remote-cli populate only the remote map; all three keys must be absent from local JMeter and Java system maps."
+      },
+      "map_completeness": "partial",
+      "selected_keys": {
+        "jmeter_properties": [
+          "cfg.source", "cfg.repeat", "cfg.escaped", "cfg.unicode",
+          "cfg.empty", "cfg.duplicate", "cfg.default.marker", "cfg.user.file"
+        ],
+        "system_properties": [
+          "cfg.system.file", "cfg.system.duplicate", "cfg.system.escaped",
+          "cfg.system.unicode", "cfg.system.empty", "cfg.system.remove"
+        ],
+        "remote_properties_projection": [
+          "cfg.global.file", "cfg.global.duplicate", "cfg.remote"
+        ]
+      },
+      "omitted_keys": {
+        "jmeter_properties": "All fixture keys not listed under selected_keys are intentionally omitted.",
+        "system_properties": "All fixture keys not listed under selected_keys are intentionally omitted.",
+        "remote_properties_projection": "Only the three keys selected above are projected; the projection is unobservable without a remote worker run."
+      }
+    },
+    {
+      "id": "default-file-q-order",
+      "argv_index": 3,
+      "assertion_basis": "static merge projection; pending pinned Java oracle",
+      "jmeter_properties": {
+        "cfg.source": "additional-second",
+        "cfg.default.marker": "default-file",
+        "cfg.repeat": "additional-second",
+        "cfg.q.repeat": "additional-second",
+        "cfg.escaped": "additional=second",
+        "cfg.unicode": "user-☃",
+        "cfg.empty": "",
+        "cfg.duplicate": "additional-second",
+        "cfg.user.file": "user-file",
+        "jmeter.save.saveservice.output_format": "xml",
+        "jmeter.save.saveservice.timestamp_format": "none",
+        "jmeter.save.saveservice.hostname": "false"
+      },
+      "absent_jmeter_properties": ["cfg.order", "cfg.continuation"],
+      "system_properties": {
+        "cfg.system.file": "system-file",
+        "cfg.system.duplicate": "system-last",
+        "cfg.system.escaped": "system=escape:value",
+        "cfg.system.unicode": "system-★",
+        "cfg.system.empty": "",
+        "cfg.system.remove": "system-remove-me"
+      },
+      "remote_properties_projection": {
+        "observable": false,
+        "values": {}
+      },
+      "map_completeness": "partial",
+      "selected_keys": {
+        "jmeter_properties": [
+          "cfg.source", "cfg.default.marker", "cfg.repeat", "cfg.q.repeat",
+          "cfg.escaped", "cfg.unicode", "cfg.empty", "cfg.duplicate",
+          "cfg.user.file", "jmeter.save.saveservice.output_format",
+          "jmeter.save.saveservice.timestamp_format",
+          "jmeter.save.saveservice.hostname"
+        ],
+        "system_properties": [
+          "cfg.system.file", "cfg.system.duplicate", "cfg.system.escaped",
+          "cfg.system.unicode", "cfg.system.empty", "cfg.system.remove"
+        ],
+        "remote_properties_projection": []
+      },
+      "omitted_keys": {
+        "jmeter_properties": "All fixture keys not listed under selected_keys are intentionally omitted; cfg.order and cfg.continuation are absent from the default initial file.",
+        "system_properties": "All fixture keys not listed under selected_keys are intentionally omitted.",
+        "remote_properties_projection": "No remote keys are selected in this local-only scenario."
+      }
+    }
+  ],
+  "plan_projection": {
+    "encoding": "UTF-8",
+    "encoding_evidence": "declared JMX input encoding; runtime default charset remains pending-oracle",
+    "root": {"tag": "jmeterTestPlan", "version": "1.2", "properties": "5.0", "jmeter": "5.6.3"},
+    "literal_utf8_comment": "Original local configuration/property precedence fixture; literal UTF-8 snowman ☃.",
+    "ordered_nodes": ["TestPlan", "ThreadGroup", "DebugSampler"],
+    "debug_sampler_flags": {
+      "displayJMeterProperties": "true",
+      "displayJMeterVariables": "true",
+      "displaySystemProperties": "true"
+    },
+    "network": "none"
+  },
+  "generated_from": {
+    "generator": "Original jmeter-rs static fixture projection",
+    "generator_version": "not applicable",
+    "oracle_status": "not-run",
+    "runtime_executed": false,
+    "comparator_executed": false,
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "oracle-runs/config-precedence/ (ignored; no Java/JMeter run recorded)"
+  },
+  "normalization": {
+    "ignored_fields": [
+      "runtime.ambient_jvm_properties",
+      "runtime.hostname",
+      "runtime.start_time",
+      "runtime.target_triple",
+      "runtime.os_image",
+      "runtime.locale",
+      "runtime.timezone",
+      "runtime.default_charset",
+      "execution.process_exit",
+      "execution.sample_count",
+      "execution.jtl_bytes",
+      "execution.log_text"
+    ],
+    "comparator_enforced": false,
+    "reason": "This is a static, oracle-ready configuration corpus. Only fixture-owned decoded values, source scopes, documented load order, and explicit absence assertions are described until the pinned Java run is performed; no runtime output, locale/charset observation, or comparator result is fabricated."
+  }
+}

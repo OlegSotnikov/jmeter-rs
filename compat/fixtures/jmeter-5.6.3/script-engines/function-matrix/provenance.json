@@ -1,0 +1,105 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-SCRIPT-FUNCTION-MATRIX",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored bounded JMX function matrix for BeanShell, Groovy, Commons JEXL 2/3, and Rhino-backed __javaScript expressions, bindings, side effects, cache policy, and failures.",
+    "upstream_plan_copied": false
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter is an external pinned oracle only; no upstream plan, result, binary, engine JAR, or machine path is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true
+  },
+  "runtime": {
+    "java": {
+      "vendor": "recorded by a future oracle runner; not executed by static validation",
+      "version": "Java 8+ required by the profile; Java 17 recommended; exact version pending oracle run",
+      "vm": "recorded by a future oracle runner",
+      "major": null,
+      "target_major": 17
+    },
+    "target_triple": "recorded by a future oracle runner",
+    "os_image": "recorded by a future oracle runner",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "not asserted; hostname saving is disabled",
+    "environment_allowlist": ["LC_ALL=C", "LANG=C", "TZ=UTC"],
+    "plugin_artifacts": [],
+    "plugin_artifact_inventory": {
+      "status": "absent",
+      "paths": [],
+      "reason": "No third-party plugin JAR is part of this static function fixture; EXT-PLUGIN-001 remains unavailable until a separately pinned plugin case exists."
+    },
+    "script_engines": [
+      {
+        "name": "BeanShell",
+        "artifact_path": "lib/bsh-2.0b6.jar",
+        "version": "2.0b6",
+        "artifact_sha256": "a17955976070c0573235ee662f2794a78082758b61accffce8d3f8aedcd91047",
+        "service_provider": {"path": "META-INF/services/javax.script.ScriptEngineFactory", "class": "bsh.engine.BshScriptEngineFactory"},
+        "availability": "pinned",
+        "fallback": "none"
+      },
+      {
+        "name": "Groovy",
+        "artifact_path": "lib/groovy-jsr223-3.0.20.jar",
+        "version": "3.0.20",
+        "artifact_sha256": "f5fd449d8ac64009c569dd6e81b431408b27eda75d6b54db2f9983442d579974",
+        "service_provider": {"path": "META-INF/services/javax.script.ScriptEngineFactory", "class": "org.codehaus.groovy.jsr223.GroovyScriptEngineFactory"},
+        "availability": "pinned",
+        "fallback": "none"
+      },
+      {
+        "name": "Commons JEXL 2",
+        "artifact_path": "lib/commons-jexl-2.1.1.jar",
+        "version": "2.1.1",
+        "artifact_sha256": "03c9a9fae5da78ce52c0bf24467cc37355b7e23196dff4839e2c0ff018a01306",
+        "service_provider": {"path": "META-INF/services/javax.script.ScriptEngineFactory", "class": "org.apache.commons.jexl2.scripting.JexlScriptEngineFactory"},
+        "availability": "pinned",
+        "fallback": "none"
+      },
+      {
+        "name": "Commons JEXL 3",
+        "artifact_path": "lib/commons-jexl3-3.2.1.jar",
+        "version": "3.2.1",
+        "artifact_sha256": "0e40a3730b96bf6f2ebbf62552726c1655dba1abaf86ebc4bd14295feea240f6",
+        "service_provider": {"path": "META-INF/services/javax.script.ScriptEngineFactory", "class": "org.apache.commons.jexl3.scripting.JexlScriptEngineFactory"},
+        "availability": "pinned",
+        "fallback": "none"
+      },
+      {
+        "name": "Rhino",
+        "artifact_path": "lib/rhino-1.7.14.jar",
+        "version": "1.7.14",
+        "artifact_sha256": "c9290b0d801bf0dbbbc44338e0f769b7650a0c5d04e6bb1aeb85775c0211b003",
+        "service_provider": null,
+        "availability": "pinned-for-__javaScript-function",
+        "fallback": "none"
+      }
+    ],
+    "jmeter_classpath": "profile-pinned Apache JMeter 5.6.3 distribution (SHA-512 checked; PGP verification required before oracle use) and its declared bundled engine dependencies; no repository JARs"
+  },
+  "inputs": {
+    "plan_sha256": "cc0af31e3d966fbd94d76490a1ad862a18b6569e11ba710956ffb4a234ebfe4e",
+    "property_sha256": "98dc9e69f54e2fb6a3afc2bbeae1d6206855343406f0677f2381195a9a3a167e",
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  }
+}

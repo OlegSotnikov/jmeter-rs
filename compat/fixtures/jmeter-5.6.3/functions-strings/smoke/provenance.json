@@ -1,0 +1,75 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-FUNC-STRINGS-SMOKE",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored deterministic JMX matrix for the 5.6.3 built-in function vocabulary, with capability-dependent rows disabled for inventory and DebugSampler projections for numeric/split side effects.",
+    "upstream_plan_copied": false
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "The pinned Apache JMeter distribution is an external oracle reference only; no upstream plan, result, binary, or source is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true,
+    "execution_status": "not-run-static-corpus",
+    "execution_note": "The profile pin is recorded; no Java/JMeter oracle execution was performed while authoring this static corpus."
+  },
+  "runtime": {
+    "java": {
+      "vendor": null,
+      "version": null,
+      "vm": null,
+      "major": null
+    },
+    "target_triple": "not recorded; no oracle execution",
+    "os_image": "not recorded; no oracle execution",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "jvm_charset_requirement": {
+      "file_encoding": "UTF-8",
+      "required": true,
+      "verification": "A future oracle runner must verify JVM file.encoding=UTF-8 before execution; this static corpus does not infer it from the process locale."
+    },
+    "hostname_policy": "not asserted; host-dependent rows are disabled",
+    "environment_allowlist": ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL=en_US.UTF-8", "LANG=en_US.UTF-8", "TZ=UTC"],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "not executed; future runs must use only the pinned Apache JMeter 5.6.3 distribution",
+    "classpath_artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076"
+  },
+  "inputs": {
+    "plan_sha256": "04e5bfd5429a30451fa854bb1c532159c860a431018af6c56065069c17d9ea51",
+    "property_sha256": "017f05c9923ba6e7abea0baa02e26249937c81b00bbc8ee12237ab4ba6727b3c",
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  },
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations_per_thread": 1,
+    "max_samplers_per_iteration": 7,
+    "max_samples": 7,
+    "max_plan_nodes": 128,
+    "max_plan_depth": 6,
+    "max_property_text_bytes": 16384,
+    "max_label_bytes": 4096,
+    "max_result_bytes": 65536,
+    "max_log_bytes": 65536,
+    "max_process_output_bytes": 65536,
+    "max_process_wait_seconds": 30
+  }
+}

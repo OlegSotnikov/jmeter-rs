@@ -1,0 +1,1 @@
+<jmeterTestPlan version="1.2"><hashTree><DataSource guiclass="TestBeanGUI" testclass="org.apache.jmeter.protocol.jdbc.config.DataSourceElement" testname="upgrade" enabled="true"><stringProp name="JDBCSampler.connections">original dropped bytes ☃</stringProp><stringProp name="JDBCSampler.maxuse">3</stringProp></DataSource><hashTree/></hashTree></jmeterTestPlan>

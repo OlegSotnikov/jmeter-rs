@@ -1,0 +1,58 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-ELEMENTS-EXTERNAL-ELEM-009",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-ELEMENTS-EXTERNAL-001",
+  "conformance_ids": ["ELEM-009", "JMX-003", "JMX-004", "TEST-002"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-JMX-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001", "NORM-ENV-001"],
+  "external_runtime_boundary_ids": ["EXT-JVM-001", "EXT-SERVICE-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "4dcf4935816490a111d9345af6e4b6dfd9fbac05c2dc40a51c6ee4f08fa21a3f"
+  },
+  "property_files": [{
+    "path": "oracle.properties",
+    "sha256": "02e34a87c4a169903a9943de913aeca9e32a608fd0897d1dff7ca3535ba19827"
+  }],
+  "descriptor": {
+    "path": "expected/semantic.json",
+    "sha256": "eca04460f3153fe03855c03982320a6f7064cb60dadd916cb9b1d1a0ccd578f8"
+  },
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/external-samplers/elem-009-deprecated",
+    "mode": "nongui-static-only",
+    "argv_template": ["jmeter", "-n", "-q", "oracle.properties", "-t", "plan.jmx", "-l", "<ignored>/oracle.jtl", "-j", "<ignored>/oracle.log"],
+    "network": "none",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null
+  },
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations_per_thread": 1,
+    "max_samples": 0,
+    "max_plan_nodes": 30,
+    "max_plan_depth": 6,
+    "max_property_text_bytes": 12288,
+    "max_result_bytes": 0,
+    "max_log_bytes": 65536,
+    "max_process_output_bytes": 0,
+    "max_process_wait_seconds": 0
+  },
+  "execution": {
+    "status": "external-unavailable",
+    "oracle_available": false,
+    "process_exit": null,
+    "sample_count": null,
+    "raw_artifacts": "oracle-runs/external-samplers/elem-009-deprecated/ (ignored; no external adapter was run)",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "This is a static alias-preservation and capability-accounting case. No Java, Apache JMeter, JVM script engine, report renderer, MongoDB driver, service, network, or subprocess was executed.",
+    "BSF and report-plan names are historical/deprecated aliases. They must be retained or upgraded according to the pinned SaveService/upgrade vocabulary; they must not be silently mapped to a modern sampler or treated as an executed report.",
+    "The script paths, report paths, MongoDB endpoint, and class names are placeholders only. No script, report output, MongoDB driver, classpath artifact, or credential is supplied.",
+    "A future conformance run must pin the engine/JVM, legacy alias behavior, MongoDB driver/service, licenses, checksums, fixture source revisions, and bounded diagnostic artifacts before adding any result expectation."
+  ]
+}

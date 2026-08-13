@@ -1,0 +1,135 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-GUI-STATIC-GUICLASS",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-GUI-001",
+  "conformance_ids": ["GUI-001"],
+  "external_runtime_boundary_ids": ["EXT-JVM-001", "EXT-OS-001"],
+  "normalization_policy_refs": ["NORM-JMX-001", "NORM-STRUCTURE-001", "NORM-EXTERNAL-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "c3a83e0ea161a541e5def081cda82721f1dbab57ed4239b1c42efe6b0038e62f"
+  },
+  "property_files": [
+    {
+      "path": "oracle.properties",
+      "sha256": "fde3045521fc7c915b51e0320bf57ea55e93a0f1135d7fc420886421b8e04f71"
+    }
+  ],
+  "inputs": [
+    {
+      "path": "plan.jmx",
+      "sha256": "c3a83e0ea161a541e5def081cda82721f1dbab57ed4239b1c42efe6b0038e62f"
+    },
+    {
+      "path": "oracle.properties",
+      "sha256": "fde3045521fc7c915b51e0320bf57ea55e93a0f1135d7fc420886421b8e04f71"
+    },
+    {
+      "path": "expected/semantic.json",
+      "sha256": "5d5405653ee97e335045f19b5244257edbc25e12519b1f3dc9ef11b39e18e7d1"
+    }
+  ],
+  "command": {
+    "working_directory": "<temporary-root>/workspace/guiclass-roundtrip",
+    "workspace_root": "<temporary-root>/workspace/guiclass-roundtrip",
+    "output_root": "<temporary-root>/oracle-runs/gui-static/guiclass-roundtrip",
+    "gui_save_as_destination": "<temporary-root>/oracle-runs/gui-static/guiclass-roundtrip/saved-plan.jmx",
+    "working_directory_by_template": [
+      "<temporary-root>/workspace/guiclass-roundtrip",
+      "<temporary-root>/workspace/guiclass-roundtrip"
+    ],
+    "path_policy": {
+      "copy_inputs_to_workspace": true,
+      "generated_outputs_root": "<temporary-root>/oracle-runs/gui-static/guiclass-roundtrip",
+      "static_corpus_writes": "forbidden",
+      "path_expansion": "Expand <temporary-root> once to a fresh absolute root before launching; do not resolve relative to this fixture directory."
+    },
+    "mode": "gui; future only",
+    "argv_templates": [
+      ["jmeter", "-d", "<temporary-root>/jmeter-home", "-q", "<temporary-root>/workspace/guiclass-roundtrip/oracle.properties", "-j", "<temporary-root>/oracle-runs/gui-static/guiclass-roundtrip/gui.log", "-t", "<temporary-root>/workspace/guiclass-roundtrip/plan.jmx"],
+      ["jmeter", "-d", "<temporary-root>/jmeter-home", "-q", "<temporary-root>/workspace/guiclass-roundtrip/oracle.properties", "-n", "-t", "<temporary-root>/oracle-runs/gui-static/guiclass-roundtrip/saved-plan.jmx", "-l", "<temporary-root>/oracle-runs/gui-static/guiclass-roundtrip/saved.jtl", "-j", "<temporary-root>/oracle-runs/gui-static/guiclass-roundtrip/saved.log"]
+    ],
+    "network": "none",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null,
+    "launcher_environment": {
+      "JMETER_LANGUAGE": "-Duser.language=en -Duser.region=US"
+    },
+    "jvm_system_properties": {
+      "user.language": "en",
+      "user.region": "US",
+      "user.timezone": "UTC",
+      "file.encoding": "UTF-8",
+      "java.util.prefs.userRoot": "<temporary-root>/prefs/guiclass-roundtrip"
+    },
+    "pre_launch": {
+      "materialize_tokens": {
+        "<temporary-root>": "fresh allowlisted temporary root"
+      },
+      "materialize_inputs": [
+        {
+          "source": "plan.jmx",
+          "destination": "<temporary-root>/workspace/guiclass-roundtrip/plan.jmx",
+          "copy_only": true
+        },
+        {
+          "source": "oracle.properties",
+          "destination": "<temporary-root>/workspace/guiclass-roundtrip/oracle.properties",
+          "copy_only": true
+        }
+      ],
+      "preferences": {
+        "user_root": "<temporary-root>/prefs/guiclass-roundtrip",
+        "fresh_root_per_run": true,
+        "clear_before_run": true
+      },
+      "required": [
+        "Set java.util.prefs.userRoot before JVM startup; do not inherit user preferences.",
+        "Set JMETER_LANGUAGE before -q is processed; the oracle.properties file is an additional property file, not an early locale source."
+      ]
+    }
+  },
+  "bounds": {
+    "schema_id": "jmeter-rs.fixture-bounds",
+    "schema_version": 1,
+    "enforcement": "declared; static-only; future runner must enforce",
+    "comparator_enforced": false,
+    "max_plan_bytes": 65536,
+    "max_plan_nodes": 32,
+    "max_plan_depth": 8,
+    "max_property_text_bytes": 8192,
+    "max_property_count_per_element": 32,
+    "max_backup_files": 10,
+    "max_backup_name_bytes": 96,
+    "max_template_files": 4,
+    "max_template_entries": 64,
+    "max_toolbar_entries": 64,
+    "max_icon_resource_bytes": 65536,
+    "max_output_bytes": 65536,
+    "max_log_bytes": 65536,
+    "max_gui_wait_seconds": 30
+  },
+  "future_oracle_actions": [
+    "On each declared OS image, materialize the two inputs under workspace_root, set the fresh preference root and launcher locale before JVM startup, and launch the GUI with the first argv template.",
+    "Load, save-as to <temporary-root>/oracle-runs/gui-static/guiclass-roundtrip/saved-plan.jmx, close, and reopen the plan; compare normalized XML and retain raw saved XML outside Git.",
+    "Assert preservation of guiclass, testclass, testname, enabled, typed property values/order, the opaque disabled stringProp, and alternating hashTree pairs. The empty WorkBench source pair is discarded on load/save; the non-empty migration is covered by workbench-migration/plan.jmx.",
+    "Run the second argv template only as a parser/exit diagnostic with the sampler still disabled; record Java/JMeter versions and all diagnostics."
+  ],
+  "execution": {
+    "status": "static-only; oracle not executed",
+    "process_exit": null,
+    "sample_count": null,
+    "raw_artifacts": "<temporary-root>/oracle-runs/gui-static/guiclass-roundtrip/ (ignored; no artifacts committed)",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "This plan is hand-authored original XML and is not a GUI-produced upstream file.",
+    "No Java, Apache JMeter, JVM, GUI display server, or subprocess was invoked.",
+    "The expected descriptor is a conservative preservation contract and does not claim observed GUI serialization.",
+    "The launcher and preference-root fields are future-run requirements; no locale, preference, save, or headless observation is recorded."
+  ]
+}

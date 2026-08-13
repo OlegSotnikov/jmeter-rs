@@ -1,0 +1,50 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-REPORT-BACKEND-PROTOCOL",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-REPORT-EXTERNAL-001",
+  "conformance_ids": ["REPORT-003"],
+  "normalization_policy_refs": ["NORM-REPORT-001", "NORM-EXTERNAL-001", "NORM-TIME-001", "NORM-ENV-001"],
+  "plan": {"path": "plan.jmx", "sha256": "592acae8b07d5f5063f7a1c1fd2413894edfd1bea72caafcd397f9b697c3cfd5"},
+  "property_files": [{"path": "backend.properties", "sha256": "eebc985f500f5455252840f6b8893a87676a476383b990c873f0355467a00671", "format": "backend-static"}],
+  "input_files": [{"path": "inputs/backend.xml", "sha256": "f156761f1d0163bdafd92089cce8a5280e5df6ddbaf4c5547e8fe1de9a79b8e8", "format": "jtl-xml"}],
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/reports/backend-protocol",
+    "mode": "nongui",
+    "argv_template": ["jmeter", "-n", "-q", "backend.properties", "-t", "plan.jmx", "-l", "<ignored>/backend.xml", "-j", "<ignored>/backend.log"],
+    "network": "none",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null
+  },
+  "bounds": {
+    "schema_id": "jmeter-rs.fixture-bounds",
+    "max_manifest_bytes": 262144,
+    "max_input_bytes": 65536,
+    "max_samples": 128,
+    "max_property_text_bytes": 8192,
+    "max_result_bytes": 1048576,
+    "max_artifact_bytes": 1048576,
+    "max_log_bytes": 65536,
+    "max_process_output_bytes": 65536,
+    "max_process_wait_seconds": 30
+  },
+  "execution": {
+    "status": "external-unavailable",
+    "process_exit": null,
+    "sample_count": 3,
+    "sample_count_semantics": "input_rows; no external backend records are materialized",
+    "input_row_count": 3,
+    "represented_sample_count": 3,
+    "raw_artifacts": "oracle-runs/reports/backend-protocol/ (ignored; no artifact exists for this static-only case)",
+    "expected": ["expected/input.json", "expected/backend.json"]
+  },
+  "limitations": [
+    "No Graphite or InfluxDB service, Java runtime, JMeter process, report generator, or subprocess was started, so no process exit is asserted.",
+    "The backend expectation names the planned JMeter Graphite/InfluxDB metric vocabulary and wire templates; it contains no fabricated delivery records or project-specific transport fields.",
+    "The plan carries exact GraphiteBackendListenerClient and InfluxdbBackendListenerClient BackendListener argument blocks, but both external nodes are disabled until a bounded local service runner grants REPORT-003 capability; backend_metrics_percentile_estimator=LEGACY is pinned in the property file.",
+    "A future differential run must pin the service/driver version, capture delivery or stable connection failure, and preserve the source event ordering."
+  ]
+}

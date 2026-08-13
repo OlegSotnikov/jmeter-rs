@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Static plugin alias contract" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <stringProp name="TestPlan.user_define_classpath">inputs/classes</stringProp>
+      <stringProp name="TestPlan.comments">Disabled duplicate plugin elements and a literal plugin function expression; no plugin is loaded.</stringProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Disabled alias probe" enabled="false">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <stringProp name="ThreadGroup.num_threads">1</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">0</stringProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="One disabled iteration" enabled="false">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">1</stringProp>
+        </elementProp>
+      </ThreadGroup>
+      <hashTree>
+        <AliasSampler guiclass="com.example.plugin.AliasSamplerGui" testclass="com.example.plugin.AliasSampler" testname="Duplicate alias node" enabled="false" pluginAlias="primary" sourceOrder="0">
+          <stringProp name="plugin.order.0">first</stringProp>
+          <pluginProperty name="plugin.unknown" encoding="raw" marker="retain-a">opaque &amp; first</pluginProperty>
+          <elementProp name="plugin.config" elementType="com.example.plugin.AliasConfig" custom="a">
+            <stringProp name="plugin.config.known">known-a</stringProp>
+            <opaquePluginChild index="0"><![CDATA[opaque-a]]></opaquePluginChild>
+          </elementProp>
+        </AliasSampler>
+        <hashTree/>
+        <AliasSampler guiclass="com.example.plugin.AliasSamplerGui" testclass="com.example.plugin.AliasSampler" testname="Duplicate alias node" enabled="false" pluginAlias="historical" sourceOrder="1">
+          <stringProp name="plugin.order.1">second</stringProp>
+          <pluginProperty name="plugin.unknown" encoding="raw" marker="retain-b">opaque &amp; second</pluginProperty>
+          <elementProp name="plugin.config" elementType="com.example.plugin.AliasConfig" custom="b">
+            <stringProp name="plugin.config.known">known-b</stringProp>
+            <opaquePluginChild index="1"><![CDATA[opaque-b]]></opaquePluginChild>
+          </elementProp>
+        </AliasSampler>
+        <hashTree/>
+        <LegacyAliasSampler guiclass="com.example.plugin.LegacySamplerGui" testclass="com.example.plugin.LegacySampler" testname="Historical plugin alias" enabled="false" pluginAlias="legacy-v0">
+          <stringProp name="plugin.legacy.property">legacy &lt;value&gt;</stringProp>
+          <stringProp name="plugin.function.expression">${__fixturePluginFunction(alpha\,beta)}</stringProp>
+        </LegacyAliasSampler>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

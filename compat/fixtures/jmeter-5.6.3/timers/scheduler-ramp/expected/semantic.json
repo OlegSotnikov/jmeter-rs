@@ -1,0 +1,63 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-TIMER-SCHEDULER-RAMP",
+  "format": "jmx-semantic",
+  "evidence_status": "planned",
+  "source": {
+    "kind": "original-static-contract",
+    "oracle_status": "not-run",
+    "note": "No JMeter or Java process was run while creating this corpus."
+  },
+  "timer_contract": {
+    "kind": "scheduler-ramp-interaction",
+    "thread_group": {
+      "num_threads": 2,
+      "ramp_time_seconds": 1,
+      "scheduler": true,
+      "duration_seconds": 1,
+      "delay_seconds": 0
+    },
+    "loop_count": 2,
+    "timer": {
+      "testclass": "ConstantTimer",
+      "delay_ms": 600
+    },
+    "timer_can_cross_scheduler_end": null,
+    "timer_crossing_status": "unobserved-candidate",
+    "timer_crossing_reason": "The pinned TimerService API documents clipping and a -1 result for runTillEnd=false, while the repository research also records timer carry-over; the full JMeterThread call path and runTillEnd choice remain oracle-pending.",
+    "timer_service": {
+      "delay_is_clipped_to_scheduler_remaining_ms": true,
+      "past_scheduler_end_delay_ms": -1,
+      "negative_sentinel_means_early_thread_stop": true,
+      "sampler_invoked_when_sentinel": false
+    },
+    "sampler_boundary": {
+      "can_cross_scheduler_end_after_start": true,
+      "exercised_by_this_debug_sampler": false,
+      "reason": "The static contract separates the pre-sampler timer boundary from an already-running sampler overrun; exact 5.6.3 call-path timing remains oracle-pending."
+    },
+    "labels": [
+      "scheduler-sample"
+    ],
+    "planned_sample_count_upper_bound": 4,
+    "observed_sample_count": null,
+    "sample_count_asserted": false,
+    "sample_count_semantics": "Unobserved. The finite plan permits at most four loop-selected visits; TimerService clipping or -1 early stop can reduce that count, while only a sampler already in progress may cross the scheduler boundary."
+  },
+  "normalization": {
+    "ignored_fields": [],
+    "timing_tolerances": {
+      "enforcement": "descriptor-only",
+      "comparator_enforced": false,
+      "sample.t": {"comparison": "descriptor-only", "allowed_variance": "oracle-pending"},
+      "sample.it": {"comparison": "descriptor-only", "allowed_variance": "oracle-pending"},
+      "sample.lt": {"comparison": "descriptor-only", "allowed_variance": "oracle-pending"},
+      "sample.ct": {"comparison": "descriptor-only", "allowed_variance": "oracle-pending"},
+      "sample.ts": {"comparison": "descriptor-only", "allowed_variance": "oracle-pending"}
+    },
+    "byte_policy": {"bytes": "retained; no normalization", "sent_bytes": "retained; no normalization"},
+    "reason": "Static JMX contract only; TimerService clipping/-1 early-stop, the candidate timer-crossing outcome, and the separate sampler-overrun boundary require a future controlled-clock oracle run."
+  }
+}

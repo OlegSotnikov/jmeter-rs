@@ -1,0 +1,365 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-FUNCTIONS-RANDOM-TIME",
+  "format": "jtl-xml",
+  "normalization_policy_refs": ["NORM-JTL-001", "NORM-TIME-001", "NORM-ENV-001"],
+  "oracle_status": "not-run-static-corpus",
+  "evidence_status": "not_run",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 12,
+  "sample_count_asserted": false,
+  "bounds_contract": {
+    "schema_id": "jmeter-rs.fixture-bounds",
+    "schema_version": 1,
+    "source": "case.bounds",
+    "comparator_enforced": false,
+    "max_plan_bytes": 32768,
+    "max_plan_nodes": 64,
+    "max_plan_depth": 8,
+    "max_property_text_bytes": 16384,
+    "max_property_count_per_element": 64,
+    "max_threads": 2,
+    "max_iterations_per_thread": 2,
+    "max_samplers_per_iteration": 3,
+    "max_samples": 12,
+    "max_label_bytes": 2048,
+    "max_result_bytes": 131072,
+    "max_jtl_bytes": 131072,
+    "max_log_bytes": 65536,
+    "max_stdout_bytes": 65536,
+    "max_stderr_bytes": 65536,
+    "max_process_output_bytes": 65536,
+    "max_artifact_bytes": 1048576,
+    "max_processes": 1,
+    "max_child_processes": 1,
+    "max_process_wait_seconds": 30,
+    "max_operation_seconds": 30,
+    "max_case_seconds": 60,
+    "network": {"policy": "none", "max_connections": 0, "allowed_hosts": [], "max_request_bytes": 0, "max_response_bytes": 0}
+  },
+  "sample_contract": {
+    "attributes": {
+      "s": "true",
+      "rc": "200",
+      "rm": "OK",
+      "dt": "text",
+      "de": "US-ASCII",
+      "sc": "1",
+      "ec": "0"
+    },
+    "enabled_xml_attributes": [
+      "t", "it", "lt", "ct", "ts", "s", "lb", "rc", "rm", "tn", "dt", "de", "sc", "ec", "ng", "na"
+    ],
+    "disabled_xml_attributes": ["by", "sby"],
+    "ignored_attributes": ["t", "it", "lt", "ct", "ts"],
+    "attribute_projections": {
+      "t": {
+        "kind": "non-negative-duration-milliseconds",
+        "status": "descriptor-only",
+        "normalization_policy_ref": "NORM-TIME-001",
+        "comparator_enforced": false
+      },
+      "it": {
+        "kind": "non-negative-duration-milliseconds",
+        "status": "descriptor-only",
+        "normalization_policy_ref": "NORM-TIME-001",
+        "comparator_enforced": false
+      },
+      "lt": {
+        "kind": "non-negative-duration-milliseconds",
+        "status": "descriptor-only",
+        "normalization_policy_ref": "NORM-TIME-001",
+        "comparator_enforced": false
+      },
+      "ct": {
+        "kind": "non-negative-duration-milliseconds",
+        "status": "descriptor-only",
+        "normalization_policy_ref": "NORM-TIME-001",
+        "comparator_enforced": false
+      },
+      "ts": {
+        "kind": "epoch-milliseconds",
+        "status": "descriptor-only",
+        "normalization_policy_ref": "NORM-TIME-001",
+        "comparator_enforced": false
+      },
+      "lb": {
+        "kind": "label",
+        "status": "planned",
+        "comparator_enforced": false
+      },
+      "tn": {
+        "kind": "thread-name",
+        "status": "planned",
+        "comparator_enforced": false
+      },
+      "ng": {
+        "kind": "integer-range",
+        "inclusive_min": 1,
+        "inclusive_max": 2,
+        "status": "planned",
+        "comparator_enforced": false
+      },
+      "na": {
+        "kind": "integer-range",
+        "inclusive_min": 1,
+        "inclusive_max": 2,
+        "status": "planned",
+        "comparator_enforced": false
+      }
+    }
+  },
+  "side_effect_probe_contract": {
+    "status": "planned",
+    "enforcement": "not-comparator-enforced",
+    "comparator_enforced": false,
+    "capture_sample_label_prefix": "capture|",
+    "probe_sample_label_prefix": "side-effects|",
+    "sample_order": ["capture", "side-effects", "undefined"],
+    "producer_consumer_pairs": [
+      {"variable": "r_fixed", "producer": "${__Random(4,4,r_fixed)}", "consumer": "side-effects.r_fixed", "domain": {"kind": "exact", "value": "4"}},
+      {"variable": "r_range", "producer": "${__Random(1,3,r_range)}", "consumer": "side-effects.r_range", "domain": {"kind": "integer-range", "inclusive_min": 1, "inclusive_max": 3}},
+      {"variable": "rd_fixed", "producer": "${__RandomDate(yyyy-MM-dd,2024-02-29,2024-03-01,en_US,rd_fixed)}", "consumer": "side-effects.rd_fixed", "domain": {"kind": "exact", "value": "2024-02-29"}},
+      {"variable": "rd_range", "producer": "${__RandomDate(yyyy-MM-dd,2024-03-01,2024-03-04,en_US,rd_range)}", "consumer": "side-effects.rd_range", "domain": {"kind": "date-range", "start_inclusive": "2024-03-01", "end_exclusive": "2024-03-04"}},
+      {"variable": "rfrom_simple", "producer": "${__RandomFromMultipleVars(choice1,rfrom_simple)}", "consumer": "side-effects.rfrom_simple", "domain": {"kind": "allowed-values", "values": ["red"]}},
+      {"variable": "rfrom_choices", "producer": "${__RandomFromMultipleVars(choice1|choice2,rfrom_choices)}", "consumer": "side-effects.rfrom_choices", "domain": {"kind": "allowed-values", "values": ["red", "blue"]}},
+      {"variable": "rfrom_multi", "producer": "${__RandomFromMultipleVars(multi,rfrom_multi)}", "consumer": "side-effects.rfrom_multi", "domain": {"kind": "allowed-values", "values": ["one", "two", "three"]}},
+      {"variable": "rs_fixed", "producer": "${__RandomString(6,A,rs_fixed)}", "consumer": "side-effects.rs_fixed", "domain": {"kind": "exact", "value": "AAAAAA"}},
+      {"variable": "rs_choices", "producer": "${__RandomString(6,ab,rs_choices)}", "consumer": "side-effects.rs_choices", "domain": {"kind": "alphabet-and-length", "length": 6, "alphabet": "ab"}},
+      {"variable": "counter_local", "producer": "${__counter(TRUE,counter_local)}", "consumer": "side-effects.counter_local", "domain": {"kind": "per-thread-sequence", "values": [1, 2]}},
+      {"variable": "counter_local_again", "producer": "${__counter(TRUE,counter_local_again)}", "consumer": "side-effects.counter_local_again", "domain": {"kind": "per-thread-sequence", "values": [1, 2]}},
+      {"variable": "counter_global", "producer": "${__counter(FALSE,counter_global)}", "consumer": "side-effects.counter_global", "domain": {"kind": "multiset", "values": [1, 2, 3, 4]}},
+      {"variable": "dt", "producer": "${__dateTimeConvert(2024-02-29,yyyy-MM-dd,dd/MM/yyyy,dt)}", "consumer": "side-effects.dt", "domain": {"kind": "exact", "value": "29/02/2024"}},
+      {"variable": "dt_epoch", "producer": "${__dateTimeConvert(1709251200000,,yyyy-MM-dd,dt_epoch)}", "consumer": "side-effects.dt_epoch", "domain": {"kind": "exact", "value": "2024-03-01", "timezone": "UTC"}},
+      {"variable": "shift", "producer": "${__timeShift(yyyy-MM-dd,2024-02-28,P2D,en_US,shift)}", "consumer": "side-effects.shift", "domain": {"kind": "exact", "value": "2024-03-01"}},
+      {"variable": "shift_epoch", "producer": "${__timeShift(,1709251200000,PT10S,,shift_epoch)}", "consumer": "side-effects.shift_epoch", "domain": {"kind": "exact", "value": "1709251210000", "timezone": "UTC"}},
+      {"variable": "time_ms", "producer": "${__time(,time_ms)}", "consumer": "side-effects.time_ms", "domain": {"kind": "epoch-milliseconds", "normalization_policy_ref": "NORM-TIME-001"}},
+      {"variable": "time_s", "producer": "${__time(/1000,time_s)}", "consumer": "side-effects.time_s", "domain": {"kind": "epoch-seconds", "normalization_policy_ref": "NORM-TIME-001"}},
+      {"variable": "time_ymd", "producer": "${__time(YMD,time_ymd)}", "consumer": "side-effects.time_ymd", "domain": {"kind": "date-pattern", "pattern": "^[0-9]{8}$", "timezone": "UTC", "normalization_policy_ref": "NORM-TIME-001"}}
+    ],
+    "thread_isolation": {
+      "thread_numbers": [1, 2],
+      "rule": "Each side-effects sample must consume only the preceding capture values from the same virtual user; values from another thread are leakage.",
+      "status": "planned",
+      "comparator_enforced": false
+    },
+    "uuid_note": "__UUID has no variable-name argument and therefore has no later-consumed variable side effect in this probe."
+  },
+  "expansion_phase_contract": {
+    "status": "planned",
+    "enforcement": "not-comparator-enforced",
+    "comparator_enforced": false,
+    "phases": [
+      {
+        "phase": "test-plan-initialization",
+        "wire_path": "TestPlan.user_defined_variables.plan_phase_probe",
+        "expression": "${__threadNum}",
+        "later_observation": "side-effects.plan_phase",
+        "expected": "unobserved; Test Plan fields are processed before thread variables exist",
+        "comparator_enforced": false
+      },
+      {
+        "phase": "configuration-element",
+        "wire_path": "ThreadGroup/Arguments.config_phase_probe",
+        "expression": "${__Random(4,4,config_phase_random)}",
+        "later_observation": "side-effects.config_phase and side-effects.config_random",
+        "expected": "unobserved; fixed domain permits only 4 if the configuration expansion occurs",
+        "comparator_enforced": false
+      },
+      {
+        "phase": "sampler-runtime",
+        "wire_path": "capture.testname.thread",
+        "expression": "${__threadNum}",
+        "later_observation": "capture.thread and side-effects.thread",
+        "expected": "planned thread number 1 or 2",
+        "comparator_enforced": false
+      },
+      {
+        "phase": "preprocessor",
+        "wire_path": null,
+        "expression": null,
+        "status": "planned-gap",
+        "expected": "No preprocessor is represented in this offline case; requires a future fixture.",
+        "comparator_enforced": false
+      },
+      {
+        "phase": "postprocessor-and-listener",
+        "wire_path": null,
+        "expression": null,
+        "status": "planned-gap",
+        "expected": "No response-producing sampler or postprocessor/listener function expansion is represented; absence is not treated as coverage.",
+        "comparator_enforced": false
+      }
+    ]
+  },
+  "planned_constraints": {
+    "schema_id": "jmeter-rs.planned-constraint-contract",
+    "schema_version": 1,
+    "enforcement": "not-comparator-enforced",
+    "constraints": [
+      {
+        "id": "capture-label",
+        "target": "sample.label",
+        "kind": "regex-and-field-domains",
+        "expression": "^capture\\|thread=(1|2)\\|group=Two scoped function users\\|r_fixed=4\\|r_range=(1|2|3)\\|rd_fixed=2024-02-29\\|rd_range=2024-03-0[123]\\|rfrom_simple=red\\|rfrom_choices=(red|blue)\\|rfrom_multi=(one|two|three)\\|rs_fixed=AAAAAA\\|rs_choices=[ab]{6}\\|uuid=[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\|counter_local=[12]\\|counter_local_again=[12]\\|counter_global=[1-4]\\|dt=29/02/2024\\|dt_epoch=2024-03-01\\|shift=2024-03-01\\|shift_epoch=1709251210000\\|time_ms=[0-9]+\\|time_s=[0-9]+\\|time_ymd=[0-9]{8}$",
+        "count": 4,
+        "status": "planned",
+        "comparator_enforced": false
+      },
+      {
+        "id": "side-effect-projection",
+        "target": "sample.label",
+        "kind": "field-domains",
+        "prefix": "side-effects|",
+        "count": 4,
+        "fields": {
+          "thread": {"kind": "integer-range", "inclusive_min": 1, "inclusive_max": 2},
+          "r_fixed": {"kind": "exact", "value": "4"},
+          "r_range": {"kind": "integer-range", "inclusive_min": 1, "inclusive_max": 3},
+          "rd_fixed": {"kind": "exact", "value": "2024-02-29"},
+          "rd_range": {"kind": "date-range", "start_inclusive": "2024-03-01", "end_exclusive": "2024-03-04"},
+          "rfrom_simple": {"kind": "allowed-values", "values": ["red"]},
+          "rfrom_choices": {"kind": "allowed-values", "values": ["red", "blue"]},
+          "rfrom_multi": {"kind": "allowed-values", "values": ["one", "two", "three"]},
+          "rs_fixed": {"kind": "exact", "value": "AAAAAA"},
+          "rs_choices": {"kind": "alphabet-and-length", "length": 6, "alphabet": "ab"},
+          "counter_local": {"kind": "per-thread-sequence", "values": [1, 2]},
+          "counter_local_again": {"kind": "per-thread-sequence", "values": [1, 2]},
+          "counter_global": {"kind": "multiset", "values": [1, 2, 3, 4]},
+          "dt": {"kind": "exact", "value": "29/02/2024"},
+          "dt_epoch": {"kind": "exact", "value": "2024-03-01", "timezone": "UTC"},
+          "shift": {"kind": "exact", "value": "2024-03-01"},
+          "shift_epoch": {"kind": "exact", "value": "1709251210000", "timezone": "UTC"},
+          "time_ms": {"kind": "epoch-milliseconds", "normalization_policy_ref": "NORM-TIME-001"},
+          "time_s": {"kind": "epoch-seconds", "normalization_policy_ref": "NORM-TIME-001"},
+          "time_ymd": {"kind": "date-pattern", "pattern": "^[0-9]{8}$", "timezone": "UTC", "normalization_policy_ref": "NORM-TIME-001"},
+          "plan_phase": {"kind": "unobserved-expansion-result"},
+          "config_phase": {"kind": "unobserved-expansion-result"},
+          "config_random": {"kind": "exact-if-expanded", "value": "4"}
+        },
+        "status": "planned",
+        "comparator_enforced": false
+      },
+      {
+        "id": "capture-random-domains",
+        "target": "sample.label",
+        "kind": "field-domains",
+        "fields": {
+          "r_fixed": {"kind": "exact", "value": "4"},
+          "r_range": {"kind": "integer-range", "inclusive_min": 1, "inclusive_max": 3},
+          "rd_fixed": {"kind": "exact", "value": "2024-02-29"},
+          "rd_range": {"kind": "date-range", "start_inclusive": "2024-03-01", "end_exclusive": "2024-03-04"},
+          "rfrom_simple": {"kind": "allowed-values", "values": ["red"]},
+          "rfrom_choices": {"kind": "allowed-values", "values": ["red", "blue"]},
+          "rfrom_multi": {"kind": "allowed-values", "values": ["one", "two", "three"]},
+          "rs_fixed": {"kind": "exact", "value": "AAAAAA"},
+          "rs_choices": {"kind": "alphabet-and-length", "length": 6, "alphabet": "ab"},
+          "uuid": {"kind": "format", "format": "RFC-4122-version-4"}
+        },
+        "status": "planned",
+        "comparator_enforced": false
+      },
+      {
+        "id": "capture-counter-domains",
+        "target": "sample.label",
+        "kind": "field-domains",
+        "fields": {
+          "counter_local": {"kind": "per-thread-sequence", "values": [1, 2]},
+          "counter_local_again": {"kind": "per-thread-sequence", "values": [1, 2]},
+          "counter_global": {"kind": "multiset", "values": [1, 2, 3, 4]}
+        },
+        "status": "planned",
+        "comparator_enforced": false
+      },
+      {
+        "id": "capture-fixed-date-domains",
+        "target": "sample.label",
+        "kind": "field-domains",
+        "fields": {
+          "dt": {"kind": "exact", "value": "29/02/2024"},
+          "dt_epoch": {"kind": "exact", "value": "2024-03-01"},
+          "shift": {"kind": "exact", "value": "2024-03-01"},
+          "shift_epoch": {"kind": "exact", "value": "1709251210000"}
+        },
+        "status": "planned",
+        "comparator_enforced": false
+      },
+      {
+        "id": "capture-current-time",
+        "target": "sample.label",
+        "kind": "field-domains",
+        "fields": {
+          "time_ms": {"kind": "epoch-milliseconds", "normalization_policy_ref": "NORM-TIME-001"},
+          "time_s": {"kind": "epoch-seconds", "normalization_policy_ref": "NORM-TIME-001"},
+          "time_ymd": {"kind": "date-pattern", "pattern": "^[0-9]{8}$", "timezone": "UTC", "normalization_policy_ref": "NORM-TIME-001"}
+        },
+        "status": "planned-normalization",
+        "comparator_enforced": false
+      },
+      {
+        "id": "undefined-expansion",
+        "target": "sample.label",
+        "kind": "exact-and-repeat",
+        "exact": "undefined=\u0024{UNDEFINED_RANDOM}|unknown=\u0024{__random(1,3)}|known=4|case=\u0024{__TIME(YMD)}",
+        "repeats_per_thread": 2,
+        "status": "planned",
+        "comparator_enforced": false
+      },
+      {
+        "id": "thread-scope",
+        "target": "function-state",
+        "kind": "scope",
+        "thread_numbers": [1, 2],
+        "thread_group_name": "Two scoped function users",
+        "variables": "counter and random/date/time variable-name outputs are consumed by a later sampler in the same virtual user; cross-thread leakage is a planned failure condition",
+        "properties": "oracle fixture metadata is run-scoped; no function writes a shared property",
+        "status": "planned",
+        "comparator_enforced": false
+      },
+      {
+        "id": "thread-name",
+        "target": "sample.thread_name",
+        "kind": "regex",
+        "expression": "^Two scoped function users \\d+-\\d+$",
+        "status": "planned",
+        "comparator_enforced": false
+      },
+      {
+        "id": "event-order",
+        "target": "sample.events",
+        "kind": "ordering",
+        "description": "per-thread order is stable; cross-thread interleaving and global-counter order are unspecified",
+        "status": "planned",
+        "comparator_enforced": false
+      }
+    ]
+  },
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.ts", "capture.time_ms", "capture.time_s", "capture.time_ymd"],
+    "timing_tolerances": {
+      "enforcement": "descriptor-only",
+      "comparator_enforced": false,
+      "sample.t": {"comparison": "descriptor-only", "allowed_variance": "not asserted"},
+      "sample.it": {"comparison": "descriptor-only", "allowed_variance": "not asserted"},
+      "sample.lt": {"comparison": "descriptor-only", "allowed_variance": "not asserted"},
+      "sample.ct": {"comparison": "descriptor-only", "allowed_variance": "not asserted"},
+      "sample.ts": {"comparison": "descriptor-only", "allowed_variance": "not asserted"}
+    },
+    "reason": "NORM-JTL-001 retains the XML structure and exact stable attributes. NORM-TIME-001 handles elapsed/timestamp fields and the explicit current-time label fields only. Byte counters are disabled in oracle.properties rather than ignored. Random, later-consumed variable, scope, and expansion-phase constraints are declared as planned contracts and are not comparator-enforced until a validator supports those projections."
+  },
+  "generated_from": {
+    "generator": "static contract authored against Apache JMeter 5.6.3 source/manual",
+    "generator_version": "5.6.3",
+    "random_seed": null,
+    "oracle_command": "Materialize command.argv_template after resolving <jmeter-home>, <java-home>, and <case-root> from the profile-pinned runner manifest; do not invoke an ambient jmeter name or a shell.",
+    "oracle_command_template": ["<jmeter-home>/bin/jmeter", "-Duser.timezone=UTC", "-Dfile.encoding=UTF-8", "-n", "-q", "oracle.properties", "-t", "plan.jmx", "-l", "<ignored>/oracle.jtl", "-j", "<ignored>/oracle.log"],
+    "oracle_command_network": "none",
+    "oracle_command_timeout_seconds": 30,
+    "oracle_command_output_limits": {"max_jtl_bytes": 131072, "max_log_bytes": 65536, "max_stdout_bytes": 65536, "max_stderr_bytes": 65536},
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "oracle-runs/functions-random-time/ (ignored; not generated in this task)",
+    "runtime_executed": false
+  }
+}

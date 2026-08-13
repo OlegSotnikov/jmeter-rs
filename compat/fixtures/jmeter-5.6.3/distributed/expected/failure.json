@@ -1,0 +1,107 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-DISTRIBUTED-RMI",
+  "format": "jmx-semantic",
+  "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+  "intended_result_format": "jtl-xml",
+  "projection": {
+    "status": "partial",
+    "complete": false,
+    "scenarios": ["partial-retry", "partial-continue"],
+    "scope": ["unavailable-worker classification", "retry policy", "continue-on-fail policy", "fail-closed startup"],
+    "omitted": ["observed event count", "healthy-worker event count", "retry arrival timing", "process exit evidence", "terminal accounting observation"]
+  },
+  "failure_contract": {
+    "missing_worker": "one selected worker is unavailable",
+    "injection": {"failure_type": "startup-connect-exception", "mode": "withhold-worker", "worker_id": "worker-b", "registry": "127.0.0.1:<base+1>", "engine": "127.0.0.1:<base+3>", "server_start": "do-not-start-worker-b-registry-or-engine", "startup_exception_class": "java.rmi.ConnectException", "startup_exception_message": "Connection refused to withheld worker-b registry", "observed": false},
+    "failure_category": "unavailable-worker",
+    "no_silent_success": true,
+    "continue_on_fail": {
+      "partial-retry": false,
+      "partial-continue": true
+    },
+    "result_policy": "retain failure category and result fields; do not fabricate a sample for an unavailable worker"
+  },
+  "retry_policy": {
+    "properties": {"client.tries": 3, "client.retries_delay": 250},
+    "max_retries": 2,
+    "initial_attempt_included": true,
+    "max_total_attempts": 3,
+    "total_attempts_formula": "one initial attempt plus at most max_retries retries",
+    "retry_delay_ms": 250,
+    "observed": false,
+    "scope": "remote worker startup/connection attempt, not sample-event multiplicity",
+    "retry_disposition": {
+      "type": "RetryDisposition",
+      "closed": true,
+      "variants": [{"name": "PreStartSafe", "fields": ["reason", "next_attempt"]}, {"name": "FinalNonRetryable", "fields": ["phase", "outcome_certainty"]}, {"name": "PoisonedUnknownOutcome", "fields": []}],
+      "derived_by": "Rust state machine only",
+      "worker_failure_authorizes_retry": false,
+      "retry_allowed_only_before": ["configure admission", "start admission", "useful execution"],
+      "retry_forbidden_after": ["configure admission", "start admission", "any callback", "unknown outcome"],
+      "observed": false
+    }
+  },
+  "terminal_failure_accounting": {
+    "terminal_variants": ["Failed", "Cancelled", "TimedOut", "Crashed"],
+    "exactly_one_terminal_per_worker_stream": true,
+    "required_fields": ["test_ended_absence_reason", "sender_proof_absence_reason", "last_frame_sequence", "last_callback_invocation", "last_delivered_event", "delivered/accepted/acknowledged counts and bytes", "pending counts", "primary_error", "bounded_secondary_errors"],
+    "event_count_fields": ["delivered_events", "accepted_events", "acknowledged_events"],
+    "byte_count_fields": ["delivered_bytes", "accepted_bytes", "acknowledged_bytes"],
+    "event_byte_accounting": "retain delivered, accepted, and acknowledged event counts and encoded-byte counts independently; no missing field defaults to zero or success",
+    "protocol_errors": ["EOF before terminal", "duplicate terminal", "terminal with unaccounted accepted events", "frame after terminal"],
+    "observed": false
+  },
+  "event_ack": {
+    "message": "EventAck",
+    "ack_unit": "validated router-admitted delivered events, never only a transport frame",
+    "fields": ["worker", "generation", "highest_contiguous_delivered_event_ordinal", "newly_accepted_event_count", "newly_accepted_encoded_bytes", "cumulative_accepted_event_count", "cumulative_accepted_encoded_bytes", "router_admission_digest"],
+    "counts_and_bytes_must_agree": true,
+    "observed": false
+  },
+  "scenario_contracts": [
+    {
+      "id": "partial-retry",
+      "client_properties": "properties/client-failure.properties",
+      "client_continue_on_fail": false,
+      "failure_injection": {"failure_type": "startup-connect-exception", "worker_id": "worker-b", "registry": "127.0.0.1:<base+1>", "engine": "127.0.0.1:<base+3>", "server_start": "do-not-start-worker-b-registry-or-engine", "startup_exception_class": "java.rmi.ConnectException", "startup_exception_message": "Connection refused to withheld worker-b registry"},
+      "expected_failure": {"category": "unavailable-worker", "silent_success": false},
+      "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/client-failure.properties", "-t", "plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-l", "oracle-runs/distributed/partial-retry.jtl", "-j", "oracle-runs/distributed/partial-retry.log"]
+    },
+    {
+      "id": "partial-continue",
+      "client_properties": "properties/client-continue.properties",
+      "client_continue_on_fail": true,
+      "failure_injection": {"failure_type": "startup-connect-exception", "worker_id": "worker-b", "registry": "127.0.0.1:<base+1>", "engine": "127.0.0.1:<base+3>", "server_start": "do-not-start-worker-b-registry-or-engine", "startup_exception_class": "java.rmi.ConnectException", "startup_exception_message": "Connection refused to withheld worker-b registry"},
+      "expected_failure": {"category": "unavailable-worker", "silent_success": false, "healthy_worker_continues": true},
+      "client_argv": ["jmeter", "-Djava.rmi.server.hostname=127.0.0.1", "-n", "-q", "properties/client-continue.properties", "-t", "plan.jmx", "-R", "127.0.0.1:<base+0>,127.0.0.1:<base+1>", "-l", "oracle-runs/distributed/partial-continue.jtl", "-j", "oracle-runs/distributed/partial-continue.log"]
+    }
+  ],
+  "result_field_policy": {
+    "retained": ["success", "response_code", "response_message", "thread_name", "worker_identity", "iteration_marker", "failure_category", "bytes", "sent_bytes", "elapsed", "latency", "connect_time", "idle_time", "timestamp"],
+    "response_data": "configured for XML output; no failure payload is fabricated",
+    "byte_fields": "retained and compared when a pinned run exists; never normalized away",
+    "timing": "see normalization.timing_tolerances; no runtime value is supplied"
+  },
+  "generated_from": {
+    "generator": "original static fixture authoring",
+    "generator_version": "not applicable",
+    "oracle_execution": "not run; this is a partial contract projection",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "none; no oracle output is committed"
+  },
+  "normalization": {
+    "ignored_fields": ["sample.hn", "ephemeral_ports", "temporary_paths", "arrival_order", "JVM_object_ids"],
+    "timing_tolerances": {
+      "timestamp": {"comparison": "descriptor-only", "allowed_variance": "wall-clock value is recorded by a future run but not asserted"},
+      "elapsed": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000, "reason": "bounded startup and stop wait"},
+      "latency": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000, "reason": "remote failure delivery is external and unobserved"},
+      "connect_time": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000, "reason": "remote connection is external and unobserved"},
+      "idle_time": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000, "reason": "idle-time reporting is external and unobserved"}
+    },
+    "byte_policy": {"bytes": "retained; no normalization", "sent_bytes": "retained; no normalization"},
+    "reason": "This partial projection distinguishes retry policy from total-attempt bounds and records failure semantics without claiming a measured sample count."
+  }
+}

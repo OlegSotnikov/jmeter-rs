@@ -1,0 +1,48 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-CONTROLLERS-FULL-LIFECYCLE",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-ELEMENTS-CORE-001",
+  "conformance_ids": ["ELEM-003", "JTL-001", "TEST-001"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-JTL-001", "NORM-TIME-001", "NORM-ENV-001"],
+  "plan": {"path": "plan.jmx", "sha256": "118601b1d060810efe674f1ac6b8a64be42a84673f3e705b0956bff1426bde43"},
+  "property_files": [{"path": "oracle.properties", "sha256": "b37d21bb8e09d99f9c9f9d17a1e6b5fe9c515561c4f9f0a3455015c2925a8981"}],
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/controllers-full/lifecycle-groups",
+    "mode": "nongui",
+    "argv_template": ["jmeter", "-n", "-q", "oracle.properties", "-t", "plan.jmx", "-l", "<unmaterialized>/oracle.jtl", "-j", "<unmaterialized>/oracle.log"],
+    "network": "none",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null
+  },
+  "bounds": {
+    "max_threads": 3,
+    "max_iterations_per_thread": 1,
+    "max_samplers_per_iteration": 1,
+    "max_controller_visits_per_iteration": 1,
+    "max_samples": 3,
+    "max_plan_nodes": 64,
+    "max_plan_depth": 7,
+    "max_property_text_bytes": 4096,
+    "max_label_bytes": 2048,
+    "max_result_bytes": 65536,
+    "max_log_bytes": 65536,
+    "max_process_output_bytes": 65536,
+    "max_process_wait_seconds": 30
+  },
+  "execution": {
+    "status": "planned",
+    "process_exit": null,
+    "sample_count": 3,
+    "raw_artifacts": "ignored local evidence: none collected; no artifact path materialized",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "No Java or JMeter invocation was performed. The projection is a hand-authored static hypothesis for the pinned oracle.",
+    "SetupThreadGroup, main ThreadGroup, and PostThreadGroup are each bounded to one thread and one iteration; their marker order is the lifecycle contract.",
+    "Timing, received-byte fields, and dynamic Debug Sampler response lines are normalized; thread name and sent-byte fields remain retained assertions."
+  ]
+}

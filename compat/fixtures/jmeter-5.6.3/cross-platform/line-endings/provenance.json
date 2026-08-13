@@ -1,0 +1,59 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-CROSS-PLATFORM-LINE-ENDINGS",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored LF, CRLF, and literal UTF-8 Java-properties inputs for a bounded cross-platform parser/charset matrix; the executable plan is a typed future materialization reference and no oracle process was run.",
+    "upstream_plan_copied": false
+  },
+  "behavior_references": [
+    "docs/research/environment-capabilities.md",
+    "docs/research/rust-testing-strategy.md",
+    "https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/Properties.html"
+  ],
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter is a pinned future oracle only; no upstream plan, result, binary, or source file is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true,
+    "execution_status": "not-run-static-corpus"
+  },
+  "runtime": {
+    "java": {"vendor": null, "version": null, "vm": null, "major": null},
+    "target_triple": "not recorded (six-target static matrix)",
+    "os_image": "not recorded (static corpus)",
+    "locale": "en-US (required for the profile baseline)",
+    "timezone": "UTC (required for the profile baseline)",
+    "default_charset": "UTF-8 (required for the profile baseline)",
+    "hostname_policy": "not asserted; no host value is in the projection",
+    "environment_allowlist": [],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "not executed; future runs must use only the pinned Apache JMeter 5.6.3 distribution",
+    "static_only": true
+  },
+  "inputs": {
+    "files": [
+      {"path": "inputs/fixture-lf.properties", "sha256": "2fd3bad88ea4448ef80c551b53fe1af54ff9a6c355ced26fac718b92bcd1f848"},
+      {"path": "inputs/fixture-crlf.properties", "sha256": "d10e97eb8fdcc4a0e5ae57561cd9d0c7f77fc4db4ac2c4a3e11b1accebd0abac"},
+      {"path": "inputs/fixture-utf8.properties", "sha256": "ecc5044595affaf436a7fac2a638857ec9012bf162cc6d397f8b5e560d6e15ef"}
+    ],
+    "descriptor_sha256": {"expected/semantic.json": "b6ba1a686de0b9acf47a1cc0fc1982c20d5deec3fc14cdaeaa072cfb3336e1a7"},
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  }
+}

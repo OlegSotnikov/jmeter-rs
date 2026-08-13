@@ -1,0 +1,156 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-REPORT-AGGREGATE-DASHBOARD",
+  "format": "jtl-xml",
+  "source": "inputs/aggregate.xml",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 7,
+  "represented_sample_count": 8,
+  "samples": [
+    {
+      "position": 0,
+      "element": "sample",
+      "wire_attributes": {
+        "ts": "1704067200000", "t": "100", "it": "0", "lt": "20", "ct": "10", "s": "true",
+        "lb": "api/login", "rc": "200", "rm": "OK", "tn": "report-thread-1", "dt": "text", "de": "UTF-8",
+        "by": "1000", "sby": "120", "sc": "1", "ec": "0", "ng": "1", "na": "1",
+        "sample_id": "s01", "suite_id": "reports-static"
+      },
+      "semantic": {
+        "timestamp_ms": 1704067200000, "elapsed_millis": 100, "idle_millis": 0, "latency_millis": 20, "connect_millis": 10,
+        "label": "api/login", "successful": true, "response_code": "200", "response_message": "OK",
+        "thread_name": "report-thread-1", "received_bytes": 1000, "sent_bytes": 120, "sample_count": 1, "error_count": 0,
+        "group_threads": 1, "all_threads": 1
+      },
+      "variables": {"sample_id": "s01", "suite_id": "reports-static"},
+      "assertions": [],
+      "sub_result_count": 0
+    },
+    {
+      "position": 1,
+      "element": "sample",
+      "wire_attributes": {
+        "ts": "1704067201000", "t": "500", "it": "0", "lt": "30", "ct": "15", "s": "true",
+        "lb": "api/search", "rc": "200", "rm": "OK", "tn": "report-thread-1", "dt": "text", "de": "UTF-8",
+        "by": "2000", "sby": "180", "sc": "1", "ec": "0", "ng": "1", "na": "1",
+        "sample_id": "s02", "suite_id": "reports-static"
+      },
+      "semantic": {
+        "timestamp_ms": 1704067201000, "elapsed_millis": 500, "idle_millis": 0, "latency_millis": 30, "connect_millis": 15,
+        "label": "api/search", "successful": true, "response_code": "200", "response_message": "OK",
+        "thread_name": "report-thread-1", "received_bytes": 2000, "sent_bytes": 180, "sample_count": 1, "error_count": 0,
+        "group_threads": 1, "all_threads": 1
+      },
+      "variables": {"sample_id": "s02", "suite_id": "reports-static"},
+      "assertions": [],
+      "sub_result_count": 0
+    },
+    {
+      "position": 2,
+      "element": "sample",
+      "wire_attributes": {
+        "ts": "1704067202000", "t": "600", "it": "0", "lt": "40", "ct": "20", "s": "false",
+        "lb": "api/search", "rc": "503", "rm": "overload", "tn": "report-thread-1", "dt": "text", "de": "UTF-8",
+        "by": "2200", "sby": "240", "sc": "2", "ec": "1", "ng": "1", "na": "1",
+        "sample_id": "s03", "suite_id": "reports-static"
+      },
+      "semantic": {
+        "timestamp_ms": 1704067202000, "elapsed_millis": 600, "idle_millis": 0, "latency_millis": 40, "connect_millis": 20,
+        "label": "api/search", "successful": false, "response_code": "503", "response_message": "overload",
+        "thread_name": "report-thread-1", "received_bytes": 2200, "sent_bytes": 240, "sample_count": 2, "error_count": 1,
+        "group_threads": 1, "all_threads": 1
+      },
+      "variables": {"sample_id": "s03", "suite_id": "reports-static"},
+      "assertions": [{"name": "service status", "failure": true, "error": false, "failure_message": "overload"}],
+      "sub_result_count": 0
+    },
+    {
+      "position": 3,
+      "element": "sample",
+      "wire_attributes": {
+        "ts": "1704067203000", "t": "1500", "it": "0", "lt": "100", "ct": "50", "s": "true",
+        "lb": "api/write", "rc": "200", "rm": "OK", "tn": "report-thread-1", "dt": "text", "de": "UTF-8",
+        "by": "3000", "sby": "300", "sc": "1", "ec": "0", "ng": "1", "na": "1",
+        "sample_id": "s04", "suite_id": "reports-static"
+      },
+      "semantic": {
+        "timestamp_ms": 1704067203000, "elapsed_millis": 1500, "idle_millis": 0, "latency_millis": 100, "connect_millis": 50,
+        "label": "api/write", "successful": true, "response_code": "200", "response_message": "OK",
+        "thread_name": "report-thread-1", "received_bytes": 3000, "sent_bytes": 300, "sample_count": 1, "error_count": 0,
+        "group_threads": 1, "all_threads": 1
+      },
+      "variables": {"sample_id": "s04", "suite_id": "reports-static"},
+      "assertions": [],
+      "sub_result_count": 0
+    },
+    {
+      "position": 4,
+      "element": "httpSample",
+      "wire_attributes": {
+        "ts": "1704067204000", "t": "1501", "it": "0", "lt": "120", "ct": "60", "s": "false",
+        "lb": "api/write", "rc": "409", "rm": "conflict", "tn": "report-thread-1", "dt": "text", "de": "UTF-8",
+        "by": "400", "sby": "80", "sc": "1", "ec": "1", "ng": "1", "na": "1",
+        "sample_id": "s05", "suite_id": "reports-static"
+      },
+      "semantic": {
+        "timestamp_ms": 1704067204000, "elapsed_millis": 1501, "idle_millis": 0, "latency_millis": 120, "connect_millis": 60,
+        "label": "api/write", "successful": false, "response_code": "409", "response_message": "conflict",
+        "thread_name": "report-thread-1", "received_bytes": 400, "sent_bytes": 80, "sample_count": 1, "error_count": 1,
+        "group_threads": 1, "all_threads": 1
+      },
+      "variables": {"sample_id": "s05", "suite_id": "reports-static"},
+      "assertions": [{"name": "service status", "failure": true, "error": false, "failure_message": "conflict"}],
+      "sub_result_count": 0
+    },
+    {
+      "position": 5,
+      "element": "sample",
+      "wire_attributes": {
+        "ts": "1704067205000", "it": "0", "s": "true", "lb": "api/health", "rc": "204", "rm": "No Content",
+        "tn": "report-thread-1", "dt": "text", "de": "UTF-8", "by": "0", "sby": "0", "sc": "1", "ec": "0",
+        "ng": "1", "na": "1", "sample_id": "s06", "suite_id": "reports-static"
+      },
+      "semantic": {
+        "timestamp_ms": 1704067205000, "elapsed_millis": 0, "elapsed_present": false, "label": "api/health",
+        "successful": true, "response_code": "204", "response_message": "No Content", "thread_name": "report-thread-1",
+        "received_bytes": 0, "sent_bytes": 0, "sample_count": 1, "error_count": 0, "group_threads": 1, "all_threads": 1
+      },
+      "variables": {"sample_id": "s06", "suite_id": "reports-static"},
+      "assertions": [],
+      "sub_result_count": 0
+    },
+    {
+      "position": 6,
+      "element": "sample",
+      "wire_attributes": {
+        "ts": "1704067206000", "t": "2500", "it": "0", "lt": "200", "ct": "100", "s": "true",
+        "lb": "api/cache", "rc": "200", "rm": "OK", "tn": "report-thread-1", "dt": "text", "de": "UTF-8",
+        "by": "500", "sby": "50", "sc": "1", "ec": "0", "ng": "1", "na": "1",
+        "sample_id": "s07", "suite_id": "reports-static"
+      },
+      "semantic": {
+        "timestamp_ms": 1704067206000, "elapsed_millis": 2500, "idle_millis": 0, "latency_millis": 200, "connect_millis": 100,
+        "label": "api/cache", "successful": true, "response_code": "200", "response_message": "OK",
+        "thread_name": "report-thread-1", "received_bytes": 500, "sent_bytes": 50, "sample_count": 1, "error_count": 0,
+        "group_threads": 1, "all_threads": 1
+      },
+      "variables": {"sample_id": "s07", "suite_id": "reports-static"},
+      "assertions": [],
+      "sub_result_count": 0
+    }
+  ],
+  "generated_from": {
+    "generator": "jmeter-rs project, hand-authored static corpus",
+    "generator_version": "repository source",
+    "random_seed": null,
+    "oracle_command": null,
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "none; no Java, JMeter, report generator, or subprocess was invoked"
+  },
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "This is an exact static input descriptor. Epoch timestamps, field presence, root event order, abbreviated attributes, variable names, assertion text, and weighted sample counts remain observable; the absent XML elapsed attribute is decoded as the pinned zero value."
+  }
+}

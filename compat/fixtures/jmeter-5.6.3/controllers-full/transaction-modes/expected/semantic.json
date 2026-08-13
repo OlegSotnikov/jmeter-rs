@@ -1,0 +1,72 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-CONTROLLERS-FULL-TRANSACTION",
+  "format": "jtl-xml",
+  "evidence_status": "planned",
+  "expectation_basis": "Original hand-authored TransactionController result-tree hypothesis; no Apache JMeter output was measured.",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 6,
+  "top_level_sample_count": 4,
+  "ordered_top_level_labels": ["transaction-independent-first", "transaction-independent-second", "transaction-independent", "transaction-parent"],
+  "ordered_all_labels": ["transaction-independent-first", "transaction-independent-second", "transaction-independent", "transaction-parent", "transaction-parent-first", "transaction-parent-second"],
+  "ordered_sub_results": [
+    {"parent_label": "transaction-parent", "labels": ["transaction-parent-first", "transaction-parent-second"]}
+  ],
+  "transactions": [
+    {
+      "label": "transaction-independent",
+      "wire_properties": {"TransactionController.parent": "false", "TransactionController.includeTimers": "false"},
+      "result_shape": "additional-sample-after-children",
+      "children_in_order": ["transaction-independent-first", "transaction-independent-second"],
+      "success_rule": "false when any child sample fails",
+      "failed_child_labels": ["transaction-independent-second"]
+    },
+    {
+      "label": "transaction-parent",
+      "wire_properties": {"TransactionController.parent": "true", "TransactionController.includeTimers": "true"},
+      "result_shape": "parent-with-sub-results",
+      "children_in_order": ["transaction-parent-first", "transaction-parent-second"],
+      "sub_results": [
+        {"label": "transaction-parent-first", "order": 0},
+        {"label": "transaction-parent-second", "order": 1}
+      ],
+      "success_rule": "true only when all child samples succeed"
+    }
+  ],
+  "failed_labels": ["transaction-independent-second", "transaction-independent"],
+  "sample_contract": {
+    "attributes": {"s": "sample-dependent", "rc": "200", "rm": "OK", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "sample-dependent", "ng": "1", "na": "1"},
+    "per_label_attributes": {
+      "transaction-independent-first": {"s": "true", "rc": "200", "rm": "OK", "tn": "Independent transaction user 1-1", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"},
+      "transaction-independent-second": {"s": "false", "rc": "200", "rm": "OK", "tn": "Independent transaction user 1-1", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "1", "ng": "1", "na": "1"},
+      "transaction-independent": {"s": "false", "rc": "200", "rm": "OK", "tn": "Independent transaction user 1-1", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "1", "ng": "1", "na": "1"},
+      "transaction-parent": {"s": "true", "rc": "200", "rm": "OK", "tn": "Parent transaction user 1-1", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"},
+      "transaction-parent-first": {"s": "true", "rc": "200", "rm": "OK", "tn": "Parent transaction user 1-1", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"},
+      "transaction-parent-second": {"s": "true", "rc": "200", "rm": "OK", "tn": "Parent transaction user 1-1", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"}
+    },
+    "absent_attributes": ["responseFile"],
+    "thread_name_by_phase": {"independent": "Independent transaction user 1-1", "parent": "Parent transaction user 1-1"},
+    "retained_attributes": ["s", "tn", "sby", "rm", "ec"],
+    "ignored_attributes": ["t", "by", "it", "lt", "ct", "ts"],
+    "ignored_dynamic_sections": ["DebugSampler.response_data"]
+  },
+  "assertion_results": {
+    "configured": true,
+    "mode": "all",
+    "node": "assertionResult",
+    "child_order": ["name", "failure", "error", "failureMessage"],
+    "failure_message_property": "jmeter.save.saveservice.assertion_results_failure_message",
+    "total_count": 1,
+    "per_failed_sample_count": 1,
+    "failed_labels": ["transaction-independent-second"],
+    "retained_fields": ["name", "failure", "error", "failureMessage"],
+    "failure_message_asserted": false,
+    "absence_labels": ["transaction-independent-first", "transaction-independent", "transaction-parent", "transaction-parent-first", "transaction-parent-second"]
+  },
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.ts", "sample.by", "debug_response.dynamic_lines"],
+    "reason": "Transaction mode, parent/sub-result topology, child order, and stable result metadata remain targets; timing, received-byte field, and Debug Sampler identity lines require explicit normalization while thread name and sent bytes remain retained."
+  }
+}

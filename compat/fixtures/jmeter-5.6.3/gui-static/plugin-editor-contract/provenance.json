@@ -1,0 +1,66 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-GUI-STATIC-PLUGIN-EDITOR",
+  "profile_id": "jmeter-5.6.3",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-13",
+    "description": "Original synthetic plugin-editor class/property declaration covering positive provisioning, missing-capability failure, and opaque no-drop preservation.",
+    "upstream_plan_copied": false,
+    "source_material": "Clean-room contract design from docs/research/compatibility-surface.md, docs/research/upstream-semantics.md, the active profile, and Decision 0002; no plugin artifact, upstream plan, source file, or GUI output was copied."
+  },
+  "behavior_references": [
+    "docs/research/compatibility-surface.md",
+    "docs/research/upstream-semantics.md",
+    "docs/decisions/0002-hybrid-gui-compatibility.md"
+  ],
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "The pinned Apache JMeter distribution is an external oracle reference only; no upstream plugin artifact, plan, result, binary, or source is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-13",
+    "sha512_verified_before_execution": true,
+    "verification_scope": "The active profile records artifact digest verification; this static case intentionally performs no oracle execution."
+  },
+  "runtime": {
+    "java": {"vendor": "not invoked", "version": "not invoked", "vm": "not invoked", "major": null},
+    "target_triple": "not invoked; see future GUI platform matrix",
+    "os_image": "not invoked",
+    "locale": "en-US (planned baseline)",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "not asserted; no process was run",
+    "environment_allowlist": [],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "profile-pinned Apache JMeter 5.6.3 distribution (not invoked)",
+    "classpath_artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "plugin_contract": "synthetic original declaration only; no plugin artifact bundled"
+  },
+  "inputs": {
+    "plan_sha256": "024a128909013a8ca6546b11fefe980f66a1a3dab829cb82e137b5258bc4f5f6",
+    "property_sha256": "b835ca6e4da5beafa1cf9b70fa36605bd3716b2ec3946a0957e0dc271d03c9d8",
+    "expected_sha256": "be42ff78d3f07513566fde5946ce2431b2c83d594e461d109d02363c8b24e9cd",
+    "public_network_used": false,
+    "secrets_or_credentials": false,
+    "static_corpus_mutated": false
+  },
+  "oracle_execution": {
+    "performed": false,
+    "status": "planned; not-run",
+    "reason": "The static corpus task explicitly forbids Java/JMeter/GUI/plugin/subprocess execution.",
+    "raw_artifacts": "none"
+  }
+}

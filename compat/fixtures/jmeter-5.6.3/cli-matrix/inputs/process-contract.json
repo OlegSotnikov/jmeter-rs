@@ -1,0 +1,228 @@
+{
+  "schema_id": "jmeter-rs.cli-process-contract",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-CLI-001",
+  "compatibility_ids": ["CLI-002", "CLI-003"],
+  "status": "planned",
+  "execution_status": "not-run-static-corpus",
+  "normalization_policy_refs": ["NORM-CLI-001", "NORM-ENV-001"],
+  "exit_status_vocabulary": {
+    "canonical_classes": [
+      "usage-return",
+      "normal-return",
+      "normal-return-with-sample-failure",
+      "fatal-throwable-system-exit",
+      "remote-diagnostic-with-fatal-throwable-candidate",
+      "normal-client-return-with-remote-shutdown-request",
+      "property-controlled-stop-failure",
+      "property-controlled-remote-worker-exit",
+      "normal-report-return",
+      "fatal-report-throwable-system-exit",
+      "remote-or-fatal-deferred"
+    ],
+    "usage_return_definition": "JMeter.start returns after help/version output or parser/IllegalUserActionException handling; numeric process status remains unasserted.",
+    "numeric_status_rule": "Numeric status is a separate exact process comparator field and is null/unasserted in this static corpus."
+  },
+  "report_only_parser_disallowed_options": ["-n/--nongui", "-r/--runremote", "-R/--remotestart", "-l/--logfile"],
+  "report_only_other_option_behavior": {
+    "-t/--testfile": "accepted-by-the-report-only-parser-and-not-used-as-the-report-input",
+    "-e/--reportatendofloadtests": "accepted-by-the-report-only-parser-and-not-used-for-a-load-test"
+  },
+  "logging": {
+    "options": [
+      {
+        "short": "-i",
+        "long": "--jmeterlogconf",
+        "fixture_input": "inputs/log4j2.xml",
+        "contract": "Log4j2 configuration is selected before run diagnostics are compared."
+      },
+      {
+        "short": "-j",
+        "long": "--jmeterlogfile",
+        "fixture_input": "<ignored>/cli-run.log",
+        "last_values": ["LAST", "LAST.log"],
+        "last_resolution": "JMeter.java comments mention LAST.log, but NewDriver receives -j directly and does not perform recent-project resolution; both forms remain planned literal-handling probes",
+        "date_pattern_probe": "<ignored>/run-'yyyyMMdd-HHmmss'.log",
+        "date_pattern_engine": null,
+        "date_pattern_engine_candidates": ["java.text.SimpleDateFormat", "java.time.format.DateTimeFormatter"],
+        "date_pattern_engine_asserted": false,
+        "date_pattern_source_status": "ambiguous-research-versus-pinned-source-call-site",
+        "contract": "The paired single-quoted -j pattern is retained as an oracle probe. The research baseline names SimpleDateFormat, while the pinned NewDriver call-site formatter is not asserted by this static corpus; resolve the engine from the exact pinned source and observed output before implementing or comparing it."
+      },
+      {
+        "short": "-L",
+        "long": "--loglevel",
+        "values": ["INFO", "org.apache.jmeter=DEBUG"],
+        "repeatable": true,
+        "contract": "Global and category-specific levels are ordered repeatable options."
+      }
+    ],
+    "diagnostic_categories": [
+      "help",
+      "version",
+      "option-parser",
+      "configuration",
+      "startup",
+      "sample-failure",
+      "remote",
+      "remote-shutdown",
+      "report",
+      "fatal"
+    ],
+    "comparison": {
+      "retain": ["stream", "diagnostic_category", "stable_error_code", "option_name", "exit_status_class", "termination_behavior", "process_exit", "process_exit_asserted", "remote_shutdown_state"],
+      "normalize": ["temporary_paths", "timestamps", "hostnames"],
+      "do_not_use_as_sole_oracle": ["localized_prose", "whitespace", "JVM_object_ids"],
+      "log_bytes_asserted": false,
+      "process_exit_comparison": "Compare the child process exit value exactly when an oracle run observes it; static descriptors keep process_exit null and process_exit_asserted false. Do not normalize numeric exits or infer them from sample success.",
+      "reason": "NORM-CLI-001 compares canonical exit categories, termination behavior, and process exit as separate fields without treating localized prose as the sole oracle."
+    }
+  },
+  "exit_contracts": [
+    {
+      "id": "EXIT-HELP",
+      "trigger": "-?/--? and -h/--help",
+      "class": "usage-return",
+      "numeric_status": null,
+      "numeric_status_asserted": false,
+      "sample_status": "not-applicable",
+      "termination_behavior": "JMeter.start returns after printing the option output; no System.exit is called in the normal option path",
+      "system_exit_observation": "not observed; method-return category is planned"
+    },
+    {
+      "id": "EXIT-VERSION",
+      "trigger": "-v/--version",
+      "class": "usage-return",
+      "numeric_status": null,
+      "numeric_status_asserted": false,
+      "sample_status": "not-applicable",
+      "termination_behavior": "JMeter.start returns after printing the version banner; no System.exit is called in the normal option path",
+      "system_exit_observation": "not observed; method-return category is planned"
+    },
+    {
+      "id": "EXIT-NORMAL",
+      "trigger": "normal non-GUI load-test completion",
+      "class": "normal-return",
+      "numeric_status": null,
+      "numeric_status_asserted": false,
+      "sample_status": "compare-separately",
+      "termination_behavior": "normal CLI lifecycle returns without an explicit System.exit unless a separately selected force/stop policy applies",
+      "system_exit_observation": "not observed; process exit is a required comparator field"
+    },
+    {
+      "id": "EXIT-SAMPLE-FAILURE",
+      "trigger": "ordinary assertion/sample failure during a completed CLI run",
+      "class": "normal-return-with-sample-failure",
+      "numeric_status": null,
+      "numeric_status_asserted": false,
+      "sample_status": "failed-sample-is-retained",
+      "termination_behavior": "the plan completes normally while the failed sample remains in the result stream",
+      "system_exit_observation": "must not be inferred from sample success; process_exit remains a separate field"
+    },
+    {
+      "id": "EXIT-PARSER-USAGE",
+      "trigger": "unknown option or missing option argument reported by CLArgsParser",
+      "class": "usage-return",
+      "numeric_status": null,
+      "numeric_status_asserted": false,
+      "sample_status": "not-started",
+      "termination_behavior": "CLArgsParser error is printed with Usage and JMeter.start returns before initialization; no System.exit is called",
+      "system_exit_observation": "not observed; numeric status is intentionally not asserted"
+    },
+    {
+      "id": "EXIT-ILLEGAL-USAGE",
+      "trigger": "IllegalUserActionException such as missing non-GUI plan, -e without -l, or report-only with -n/-r/-R/-l",
+      "class": "usage-return",
+      "numeric_status": null,
+      "numeric_status_asserted": false,
+      "sample_status": "not-started",
+      "termination_behavior": "the IllegalUserActionException catch prints Incorrect Usage and options, then JMeter.start returns; no System.exit is called",
+      "system_exit_observation": "not observed; numeric status is intentionally not asserted"
+    },
+    {
+      "id": "EXIT-THROWABLE",
+      "trigger": "unreadable/missing plan, report input/output failure, or another uncaught startup Throwable",
+      "class": "fatal-throwable-system-exit",
+      "documented_candidate_numeric_status": 1,
+      "candidate_status_basis": "JMeter.java source calls System.exit(1) in the outer Throwable catch; this is not an observed child-process exit",
+      "numeric_status": null,
+      "numeric_status_asserted": false,
+      "sample_status": "not-started",
+      "termination_behavior": "JMeter.start catches Throwable, prints an error, and calls System.exit(1)",
+      "system_exit_observation": "not observed; candidate status is source-derived only"
+    },
+    {
+      "id": "EXIT-REMOTE-FAILURE",
+      "trigger": "remote host selection or worker failure",
+      "class": "remote-diagnostic-with-fatal-throwable-candidate",
+      "documented_candidate_numeric_status": 1,
+      "candidate_status_basis": "Only a client-side Throwable would reach JMeter.java System.exit(1); no remote/client process was run",
+      "numeric_status": null,
+      "numeric_status_asserted": false,
+      "sample_status": "compare-worker-and-client-status-separately",
+      "termination_behavior": "retain the remote diagnostic category; if it escapes as a Throwable on the client, the outer catch calls System.exit(1)",
+      "system_exit_observation": "not observed; candidate status is not asserted"
+    },
+    {
+      "id": "EXIT-REMOTE-EXIT",
+      "trigger": "-X/--remoteexit after a remote CLI test",
+      "class": "normal-client-return-with-remote-shutdown-request",
+      "numeric_status": null,
+      "numeric_status_asserted": false,
+      "sample_status": "compare-separately",
+      "remote_shutdown_requested": true,
+      "termination_behavior": "the client requests each selected remote engine to exit; worker System.exit(0) is controlled separately by jmeterengine.remote.system.exit",
+      "system_exit_observation": "not observed; client and worker process outcomes are separate fields"
+    },
+    {
+      "id": "EXIT-STOPFAIL-PROPERTY",
+      "trigger": "jmeterengine.stopfail.system.exit override",
+      "class": "property-controlled-stop-failure",
+      "numeric_status": null,
+      "numeric_status_asserted": false,
+      "sample_status": "compare-separately",
+      "property_transport": "-J sets the local JMeter property before StandardJMeterEngine initializes its static stop-failure policy",
+      "termination_behavior": "false suppresses the worker-side System.exit(1) escalation when an immediate stop cannot stop all threads; true is the pinned default",
+      "system_exit_observation": "not observed; no stop-failure was induced by static validation"
+    },
+    {
+      "id": "EXIT-REMOTE-PROPERTY",
+      "trigger": "jmeterengine.remote.system.exit override",
+      "class": "property-controlled-remote-worker-exit",
+      "numeric_status": null,
+      "numeric_status_asserted": false,
+      "sample_status": "compare-separately",
+      "property_transport": "-G sends jmeterengine.remote.system.exit to selected remote workers; -J would affect only the client and is not equivalent",
+      "termination_behavior": "true permits a remote StandardJMeterEngine.exit path to call System.exit(0) after RMI returns; false leaves worker JVM shutdown to normal lifecycle",
+      "system_exit_observation": "not observed; no remote worker was started"
+    },
+    {
+      "id": "EXIT-REPORT-ONLY",
+      "trigger": "-g/--reportonly with the bounded inputs/report-input.csv fixture",
+      "class": "normal-report-return",
+      "numeric_status": null,
+      "numeric_status_asserted": false,
+      "sample_status": "not-applicable",
+      "termination_behavior": "ReportGenerator returns normally when generation succeeds; process_exit remains a separate comparator field",
+      "system_exit_observation": "not observed"
+    },
+    {
+      "id": "EXIT-REPORT-FATAL",
+      "trigger": "report-only or report-at-end input/output restriction",
+      "class": "fatal-report-throwable-system-exit",
+      "documented_candidate_numeric_status": 1,
+      "candidate_status_basis": "Report failure may escape to JMeter.java's System.exit(1) catch; this static corpus records no process status",
+      "numeric_status": null,
+      "numeric_status_asserted": false,
+      "sample_status": "not-started-or-no-load-samples",
+      "termination_behavior": "an output/input failure escaping report generation reaches the Throwable catch and calls System.exit(1); parser-disallowed combinations remain usage-return instead",
+      "system_exit_observation": "not observed; candidate status is not asserted"
+    }
+  ],
+  "future_observations": {
+    "required_process_fields": ["process_exit", "exit_status_class", "termination_behavior", "stderr_category", "stdout_vocabulary", "log_category", "remote_shutdown_state"],
+    "raw_artifacts": "oracle-runs/cli-matrix/ (ignored and absent for this static corpus)",
+    "process_exit_rule": "The comparator must retain and compare process_exit exactly when observed, while this static corpus keeps it null and unasserted. Do not promote a numeric status from these descriptors; run the exact pinned oracle in a separate evidence-producing change."
+  }
+}

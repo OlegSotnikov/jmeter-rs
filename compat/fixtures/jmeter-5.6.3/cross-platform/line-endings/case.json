@@ -1,0 +1,93 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-CROSS-PLATFORM-LINE-ENDINGS",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-CROSS-PLATFORM-001",
+  "conformance_ids": ["CFG-003", "TEST-005"],
+  "normalization_policy_refs": ["NORM-CONFIG-001", "NORM-ENV-001", "NORM-TIME-001", "NORM-EXTERNAL-001"],
+  "external_runtime_boundary_ids": ["EXT-OS-001"],
+  "inputs": {
+    "files": [
+      {"path": "inputs/fixture-lf.properties", "sha256": "2fd3bad88ea4448ef80c551b53fe1af54ff9a6c355ced26fac718b92bcd1f848", "line_ending": "LF"},
+      {"path": "inputs/fixture-crlf.properties", "sha256": "d10e97eb8fdcc4a0e5ae57561cd9d0c7f77fc4db4ac2c4a3e11b1accebd0abac", "line_ending": "CRLF"},
+      {"path": "inputs/fixture-utf8.properties", "sha256": "ecc5044595affaf436a7fac2a638857ec9012bf162cc6d397f8b5e560d6e15ef", "line_ending": "LF", "source_charset": "UTF-8"}
+    ],
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  },
+  "descriptor": {
+    "path": "expected/semantic.json",
+    "sha256": "b6ba1a686de0b9acf47a1cc0fc1982c20d5deec3fc14cdaeaa072cfb3336e1a7",
+    "kind": "static-semantic-projection"
+  },
+  "static_descriptor_routing": {
+    "kind": "declarative-only",
+    "plan_required": false,
+    "descriptor_ref": "expected/semantic.json#/projection_policy",
+    "oracle_route": "future-jmx-plan-materialization-and-properties-parser",
+    "runtime_observations": false,
+    "status": "planned"
+  },
+  "plan_materialization": {
+    "kind": "future-input-materialization",
+    "artifact_kind": "jmx-plan",
+    "materialization_id": "cross-platform-line-endings-plan",
+    "reference": "future-fixture://FX-CROSS-PLATFORM-001/line-endings/plan.jmx",
+    "typed_argv_token": "<materialize:jmx-plan:cross-platform-line-endings-plan>",
+    "status": "planned",
+    "required_before_execution": true,
+    "hash_required_before_evidence": true
+  },
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/cross-platform/line-endings",
+    "mode": "nongui-static-only",
+    "argv_templates": [
+      ["<jmeter-home>/bin/jmeter", "-n", "-q", "inputs/fixture-lf.properties", "-t", "<materialize:jmx-plan:cross-platform-line-endings-plan>", "-l", "<ignored>/lf.jtl", "-j", "<ignored>/lf.log"],
+      ["<jmeter-home>/bin/jmeter", "-n", "-q", "inputs/fixture-crlf.properties", "-t", "<materialize:jmx-plan:cross-platform-line-endings-plan>", "-l", "<ignored>/crlf.jtl", "-j", "<ignored>/crlf.log"],
+      ["<jmeter-home>/bin/jmeter", "-n", "-q", "inputs/fixture-utf8.properties", "-t", "<materialize:jmx-plan:cross-platform-line-endings-plan>", "-l", "<ignored>/utf8.jtl", "-j", "<ignored>/utf8.log"]
+    ],
+    "network": "none",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": 20260812,
+    "environment_allowlist": []
+  },
+  "execution": {
+    "status": "not-run-static-corpus",
+    "process_exit": null,
+    "process_exit_asserted": false,
+    "sample_count_asserted": false,
+    "raw_artifacts": "ignored; no Java/JMeter process or oracle artifacts were collected",
+    "expected": "expected/semantic.json"
+  },
+  "matrix_axes": {
+    "line_endings": ["LF", "CRLF"],
+    "target_matrix": [
+      {"target_os": "linux", "architecture": "x86_64", "target_triple": "x86_64-unknown-linux-gnu"},
+      {"target_os": "linux", "architecture": "arm64", "target_triple": "aarch64-unknown-linux-gnu"},
+      {"target_os": "macos", "architecture": "x86_64", "target_triple": "x86_64-apple-darwin"},
+      {"target_os": "macos", "architecture": "arm64", "target_triple": "aarch64-apple-darwin"},
+      {"target_os": "windows", "architecture": "x86_64", "target_triple": "x86_64-pc-windows-msvc"},
+      {"target_os": "windows", "architecture": "arm64", "target_triple": "aarch64-pc-windows-msvc"}
+    ],
+    "matrix_status": "future-ci-targets-only",
+    "current_ci": {"status": "not-configured", "targets": [], "runs_recorded": 0},
+    "targets": ["linux/x86_64", "linux/arm64", "macos/x86_64", "macos/arm64", "windows/x86_64", "windows/arm64"],
+    "target_outcomes_ref": "expected/semantic.json#/target_outcomes",
+    "plan_materialization_ref": "expected/semantic.json#/plan_materialization",
+    "charsets": ["UTF-8", "ISO-8859-1"],
+    "charset_probe_paths": ["inputs/fixture-utf8.properties"],
+    "parser_contract": "line ending handling is explicit; no ambient platform conversion is assumed",
+    "charset_contract": "Literal non-ASCII bytes are interpreted only under the explicitly declared charset; ISO-8859-1 behavior remains oracle-pending and must not be normalized to UTF-8."
+  },
+  "limitations": [
+    "The LF and CRLF files are original source inputs. Their bytes have not been read by Java/JMeter and no parsed value is asserted as observed.",
+    "The command templates contain a typed future JMX-plan materialization token; they do not authorize or record a subprocess run.",
+    "The JMX plan is intentionally absent from this descriptor-only case. A future runner must resolve the materialization_id, record its source/hash, and only then construct an executable argv.",
+    "The LF and CRLF properties files contain a Java-style Unicode escape as input data; the expected semantic value is the decoded snowman. The separate UTF-8 file is a literal non-ASCII byte probe, and its effective Java decoding under each declared charset remains oracle-pending.",
+    "The six target rows describe future CI lanes. No current CI target, target availability, or cross-platform parser run is recorded by this case.",
+    "No process exit, sample count, timing, or performance measurement is asserted."
+  ]
+}

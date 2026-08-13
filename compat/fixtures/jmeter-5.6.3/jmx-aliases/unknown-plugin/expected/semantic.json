@@ -1,0 +1,142 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JMX-UNKNOWN-PLUGIN",
+  "format": "jmx-semantic",
+  "evidence_status": "external-unavailable",
+  "source": {
+    "kind": "original-static-descriptor",
+    "oracle_status": "not-run",
+    "note": "No Java, JMeter, JVM worker, plugin artifact, classloader, network service, or subprocess was run while creating this corpus."
+  },
+  "capability_accounting": {
+    "status": "planned",
+    "required_boundaries": ["EXT-PLUGIN-001"],
+    "capability": "com.example.jmeter.PluginSampler",
+    "capability_kind": "element",
+    "unsupported_error_code": "unsupported-capability",
+    "stable_error_code": "plugin.capability.unsupported",
+    "stable_error_code_status": "planned",
+    "no_silent_success": true,
+    "no_sample_output_claimed": true,
+    "missing_adapter_behavior": "retain the complete unknown element, exact class/GUI aliases, properties, extra attributes, raw extension bytes, and ordered hashTree companion; return a typed unsupported-capability error rather than dropping, translating, or executing it",
+    "execution_outcome": "unavailable-capability",
+    "error_context_fields": ["profile_id", "capability", "testclass", "guiclass", "node_id", "source_path"]
+  },
+  "root": {
+    "element": "jmeterTestPlan",
+    "attributes": {"version": "1.2", "properties": "5.0", "jmeter": "5.6.3"},
+    "ordered_children": ["hashTree"]
+  },
+  "ordered_hash_tree_pairs": [
+    {
+      "element": {
+        "tag": "TestPlan",
+        "canonical_wire_tag": "TestPlan",
+        "guiclass": "TestPlanGui",
+        "testclass": "TestPlan",
+        "testname": "Unknown extension preservation",
+        "enabled": "true",
+        "opaque": false
+      },
+      "hash_tree_children": ["PluginSampler", "DebugSampler"]
+    },
+    {
+      "element": {
+        "tag": "PluginSampler",
+        "canonical_wire_tag": "PluginSampler",
+        "guiclass": "com.example.jmeter.PluginSamplerGui",
+        "testclass": "com.example.jmeter.PluginSampler",
+        "testname": "Unknown plug-in <α>",
+        "enabled": "true",
+        "opaque": true,
+        "extra_attributes": {"pluginVersion": "0.1", "custom": "retain-me"},
+        "opaque_element_sha256": "84b73af682f4ee924963ecb9ee86bfcd9ae1ff2648329465bc8f253e76ccb4c5",
+        "contains": ["comment", "pluginExtension", "objProp", "elementProp"]
+      },
+      "hash_tree_children": ["PluginChild"]
+    },
+    {
+      "element": {
+        "tag": "PluginChild",
+        "canonical_wire_tag": "PluginChild",
+        "guiclass": "com.example.jmeter.PluginChildGui",
+        "testclass": "com.example.jmeter.PluginChild",
+        "testname": "Opaque child",
+        "enabled": "false",
+        "opaque": true,
+        "extra_attributes": {"childFlag": "keep"},
+        "opaque_element_sha256": "6928136b4959f983cd3572df82419b130e22a76e135b87c12fc281f2b08e7510"
+      },
+      "hash_tree_children": []
+    },
+    {
+      "element": {
+        "tag": "DebugSampler",
+        "canonical_wire_tag": "DebugSampler",
+        "guiclass": "TestBeanGUI",
+        "testclass": "DebugSampler",
+        "testname": "Known sibling after plugin",
+        "enabled": "false",
+        "opaque": false
+      },
+      "hash_tree_children": []
+    }
+  ],
+  "known_properties_around_unknown": [
+    {"path": "TestPlan/fixture.before", "node": "stringProp", "value": "before-plugin"},
+    {"path": "TestPlan/fixture.after", "node": "stringProp", "value": "after-plugin"},
+    {"path": "PluginSampler/plugin.known", "node": "stringProp", "value": "known & value"},
+    {"path": "PluginSampler/plugin.object", "node": "objProp", "object_class": "com.example.jmeter.PluginBytes", "value_attributes": {"type": "com.example.jmeter.PluginBytes", "encoding": "utf-8", "extra": "preserve"}, "value": "opaque object & bytes"},
+    {"path": "PluginSampler/plugin.config", "node": "elementProp", "element_type": "com.example.jmeter.PluginConfig", "extra_attributes": {"custom": "yes"}},
+    {"path": "PluginSampler/plugin.config/plugin.config.known", "node": "stringProp", "value": "nested known"},
+    {"path": "PluginChild/child.raw", "node": "pluginChildProperty", "value": "child & raw", "opaque": true},
+    {"path": "DebugSampler/displayJMeterProperties", "node": "boolProp", "value": "false"},
+    {"path": "DebugSampler/displayJMeterVariables", "node": "boolProp", "value": "false"},
+    {"path": "DebugSampler/displaySystemProperties", "node": "boolProp", "value": "false"}
+  ],
+  "opaque_payloads": [
+    {
+      "owner": "PluginSampler",
+      "wire_tag": "pluginProperty",
+      "wire_name": "plugin.opaque",
+      "raw_xml_sha256": "1d17609459dc58bfd881d3711836e9891e4b228a28118531325a007e03e1573d",
+      "must_preserve_raw_xml": true
+    },
+    {
+      "owner": "PluginSampler",
+      "wire_tag": "pluginExtension",
+      "raw_xml_sha256": "f7af3b134f814a87514c6f0ed6ccb497aa337b0802c2d3e3644eec3d5a33eff9",
+      "contains": ["CDATA", "opaqueChild"],
+      "must_preserve_raw_xml": true
+    },
+    {
+      "owner": "PluginSampler/plugin.config",
+      "wire_tag": "pluginNested",
+      "raw_xml_sha256": "95be1d5262abd37e76fd98c3c448a3ea91c85a64f1069190745db71d3bf14063",
+      "must_preserve_raw_xml": true
+    },
+    {
+      "owner": "PluginChild",
+      "wire_tag": "pluginChildProperty",
+      "wire_name": "child.raw",
+      "raw_xml_sha256": "a4db81eea5f629deeccd215e4587d7061e70f527b19b45d1b1414bfbccd7617a",
+      "must_preserve_raw_xml": true
+    }
+  ],
+  "diagnostics": [
+    {"code": "jmx.semantic.unknown_element", "element": "PluginSampler", "severity": "warning", "executable": false},
+    {"code": "jmx.semantic.unknown_element", "element": "PluginChild", "severity": "warning", "executable": false}
+  ],
+  "preservation_invariants": [
+    "Unknown test-element bytes, special attributes, extra attributes, comments, CDATA, unknown property tags, nested unknown extension tags, and ordered hashTree companions remain available for semantic round-trip.",
+    "Known siblings before and after an unknown plugin remain distinct ordered nodes; no subtree may be dropped or merged by name.",
+    "An unknown/plugin node is preservation-only. Execution must report an unsupported capability and must not silently map it to a built-in sampler."
+  ],
+  "normalization": {
+    "ignored_fields": ["xml_lexical_whitespace"],
+    "lexical_preserving_regions": ["PluginSampler", "PluginSampler/pluginProperty", "PluginSampler/pluginExtension", "PluginSampler/plugin.config/pluginNested", "PluginChild"],
+    "reason": "Unknown/plugin regions are compared byte-for-byte by their recorded raw hashes when untouched; semantic structure and ordered known siblings are compared separately. Only indentation outside lexical-preserving regions is ignored."
+  }
+}

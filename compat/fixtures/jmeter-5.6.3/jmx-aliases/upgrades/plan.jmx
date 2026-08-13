@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.0" properties="5.0" jmeter="2.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Legacy+upgrade%26property corpus" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <stringProp name="TestPlan.comments">legacy+comments%26values</stringProp>
+      <stringProp name="fixture.empty"></stringProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Legacy group" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="One loop" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">1</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">0</stringProp>
+        <longProp name="ThreadGroup.start_time">0</longProp>
+        <longProp name="ThreadGroup.end_time">0</longProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <stringProp name="ThreadGroup.duration"></stringProp>
+        <stringProp name="ThreadGroup.delay"></stringProp>
+      </ThreadGroup>
+      <hashTree>
+        <JDBCSampler guiclass="org.apache.jmeter.protocol.jdbc.control.gui.JdbcTestSampleGui" testclass="JDBCSampler" testname="Legacy JDBC sampler" enabled="false">
+          <stringProp name="JDBCSampler.query">select+1%26two</stringProp>
+          <stringProp name="JDBCSampler.url">jdbc%3Afixture</stringProp>
+        </JDBCSampler>
+        <hashTree/>
+        <JDBCDataSource guiclass="org.apache.jmeter.protocol.jdbc.config.gui.DbConfigGui" testclass="JDBCDataSource" testname="Legacy JDBC data source" enabled="false">
+          <stringProp name="JDBCSampler.url">jdbc%3Aexample</stringProp>
+          <stringProp name="JDBCSampler.driver">fixture%2EDriver</stringProp>
+          <stringProp name="JDBCSampler.query">select+2</stringProp>
+          <stringProp name="ConfigTestElement.username">fixture%40user</stringProp>
+          <stringProp name="ConfigTestElement.password">fixture-pass</stringProp>
+          <stringProp name="JDBCSampler.connections">2</stringProp>
+          <stringProp name="JDBCSampler.connPoolClass">legacy.Pool</stringProp>
+          <stringProp name="JDBCSampler.maxuse">3</stringProp>
+        </JDBCDataSource>
+        <hashTree/>
+        <ConstantThroughputTimer guiclass="org.apache.jmeter.timers.gui.ConstantThroughputTimerGui" testclass="ConstantThroughputTimer" testname="Legacy throughput timer" enabled="false">
+          <stringProp name="ConstantThroughputTimer.throughput">12.5</stringProp>
+        </ConstantThroughputTimer>
+        <hashTree/>
+        <AccessLogSampler guiclass="org.apache.jmeter.protocol.http.control.gui.AccessLogSamplerGui" testclass="AccessLogSampler" testname="Legacy access log" enabled="false">
+          <stringProp name="AccessLogSampler.log_file">fixture%2Elog</stringProp>
+          <stringProp name="HTTPSampler.port">8080</stringProp>
+          <stringProp name="HTTPSampler.domain">fixture%2Einvalid</stringProp>
+          <stringProp name="AccessLogSampler.parser_class_name">fixture.Parser</stringProp>
+          <stringProp name="HTTPSampler.image_parser">true</stringProp>
+        </AccessLogSampler>
+        <hashTree/>
+        <BSFSampler guiclass="BSFSamplerGui" testclass="BSFSampler" testname="Legacy BSF sampler" enabled="false">
+          <stringProp name="BSFSampler.filename">fixture%2Ebsf</stringProp>
+          <stringProp name="BSFSampler.language">beanshell</stringProp>
+          <stringProp name="BSFSampler.parameters">arg+one</stringProp>
+          <stringProp name="BSFSampler.query">return+one</stringProp>
+        </BSFSampler>
+        <hashTree/>
+        <JMSSampler guiclass="JMSConfigGui" testclass="JMSSampler" testname="Legacy JMS GUI" enabled="false">
+          <stringProp name="JMS.destination">fixture%2Equeue</stringProp>
+        </JMSSampler>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

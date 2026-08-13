@@ -1,0 +1,72 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JTL-FIELDS",
+  "format": "jtl-xml",
+  "contract_kind": "jmeter-reader-semantics",
+  "comparator_ready": false,
+  "evidence_status": "planned",
+  "expectation_basis": "Hand-authored reader-loss projection of variants/jmeter-reader-loss/url-and-file.xml; no Apache JMeter output was measured.",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 1,
+  "reader_wire_contract": {
+    "string_children": [{"element": "responseFile", "class": "java.lang.String"}],
+    "url_child": {"element": "java.net.URL", "class": null},
+    "child_order": ["responseFile", "java.net.URL"]
+    ,"wire_order": ["responseFile", "java.net.URL"]
+  },
+  "samples": [{
+    "position": 0,
+    "element": "sample",
+    "attributes": {"t": "4", "s": "true", "lb": "reader loss", "rc": "200", "rm": "OK"},
+    "assertions": [],
+    "sections": {"responseFile": "resources/response-file-body.txt"},
+    "children": [{
+      "position": 0,
+      "element": "java.net.URL",
+      "attributes": {},
+      "sections": {},
+      "text": "https://example.invalid/reader",
+      "assertions": [],
+      "children": []
+      }]
+  }],
+  "reader_contracts": [
+    {
+      "id": "JTL-READER-FILE-001",
+      "consumer": "jmeter-reader",
+      "input_section": "responseFile",
+      "precondition": "responseData-absent",
+      "action": "fallback-load-resource",
+      "resource": "resources/response-file-body.txt",
+      "expected_loaded_text": "response-file fixture body\n"
+    },
+    {
+      "id": "JTL-READER-URL-001",
+      "consumer": "jmeter-reader",
+      "input_element": "java.net.URL",
+      "action": "drop-from-SampleResult",
+      "expected_restored_field": null
+    },
+    {
+      "id": "JTL-RUST-NODROP-URL-001",
+      "consumer": "rust-parser",
+      "input_element": "java.net.URL",
+      "action": "retain-typed-url",
+      "rust_type": "java.net.URL",
+      "expected_text": "https://example.invalid/reader"
+    },
+    {
+      "id": "JTL-RUST-NODROP-FILE-001",
+      "consumer": "rust-parser",
+      "input_section": "responseFile",
+      "action": "retain-reference-without-implicit-load",
+      "expected_value": "resources/response-file-body.txt"
+    }
+  ],
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "The canonical reader projection retains both wire sections and the typed java.net.URL child; reader actions are separate executable contract records and are not writer-wire claims."
+  }
+}

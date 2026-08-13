@@ -1,0 +1,28 @@
+[package]
+name = "jmeter-oracle"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# serde/serde_json retain the complete source documents in `Value` while the
+# runner validates only the fields it understands.  This avoids silently
+# dropping profile or case-manifest extensions.
+serde = { version = "=1.0.229", default-features = false, features = ["derive", "std"] }
+serde_json = { version = "=1.0.151", default-features = false, features = ["std"] }
+# SHA-512 is the digest pinned by the compatibility profile.  SHA-256 is used
+# for fixture and emitted-artifact identity, matching the case manifests.
+sha2 = { version = "=0.11.0", default-features = false }
+# nix 0.31.3 (MIT, MSRV 1.69, Rust-only/no native build) supplies the safe
+# `killpg` process-group boundary and Unix pipe nonblocking flags; std has no
+# equivalent. Keep only the process, signal, and fd APIs; no shell or process
+# utility is needed for cleanup.
+nix = { version = "=0.31.3", default-features = false, features = ["fs", "process", "signal"] }

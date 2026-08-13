@@ -1,0 +1,108 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-CROSS-PLATFORM-HEADLESS-GUI",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-CROSS-PLATFORM-001",
+  "conformance_ids": ["CFG-003", "GUI-003"],
+  "normalization_policy_refs": ["NORM-CONFIG-001", "NORM-ENV-001", "NORM-EXTERNAL-001"],
+  "external_runtime_boundary_ids": ["EXT-OS-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "88386f95ee6978278b9eaefe2392d872a33b78f54d485673ba8e2512195b9d7a"
+  },
+  "property_files": [
+    {"path": "oracle.properties", "sha256": "00bd918673ec439c77d779593d950e8d612997febf6ac3a770a49ab4614bafda"}
+  ],
+  "descriptor": {
+    "path": "expected/semantic.json",
+    "sha256": "4bd131ff11e4e041f86caa600533de96755fda2a9c0cfc8fc50b58682134ba5e",
+    "kind": "static-semantic-projection"
+  },
+  "static_descriptor_routing": {
+    "kind": "declarative-projection",
+    "plan_required": true,
+    "descriptor_ref": "expected/semantic.json#/projection_policy",
+    "oracle_route": "future-headless-gui-platform-lanes",
+    "runtime_observations": false,
+    "status": "planned"
+  },
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/cross-platform/headless-gui",
+    "mode": "nongui",
+    "argv_templates": [
+      ["<jmeter-home>/bin/jmeter", "-n", "-q", "oracle.properties", "-t", "plan.jmx", "-l", "<ignored>/oracle.jtl", "-j", "<ignored>/oracle.log"]
+    ],
+    "network": "none",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": 20260812,
+    "environment_allowlist": [],
+    "environment_overrides": {
+      "inherit": false,
+      "environment_allowlist": [],
+      "rows_ref": "expected/semantic.json#/environment_cases",
+      "set_before_jvm_start": true,
+      "missing_capability_behavior": "typed-error-and-preserve-source"
+    },
+    "display_contract": "nongui execution must not require or probe a display; GUI execution requires a declared display capability."
+  },
+  "execution": {
+    "status": "not-run-static-corpus",
+    "process_exit": null,
+    "process_exit_asserted": false,
+    "sample_count_asserted": false,
+    "raw_artifacts": "ignored; no Java/JMeter process, GUI display, or oracle artifacts were collected",
+    "expected": "expected/semantic.json"
+  },
+  "matrix_axes": {
+    "operating_systems": ["linux", "macos", "windows"],
+    "architectures": ["x86_64", "arm64"],
+    "target_matrix": [
+      {"target_os": "linux", "architecture": "x86_64", "target_triple": "x86_64-unknown-linux-gnu"},
+      {"target_os": "linux", "architecture": "arm64", "target_triple": "aarch64-unknown-linux-gnu"},
+      {"target_os": "macos", "architecture": "x86_64", "target_triple": "x86_64-apple-darwin"},
+      {"target_os": "macos", "architecture": "arm64", "target_triple": "aarch64-apple-darwin"},
+      {"target_os": "windows", "architecture": "x86_64", "target_triple": "x86_64-pc-windows-msvc"},
+      {"target_os": "windows", "architecture": "arm64", "target_triple": "aarch64-pc-windows-msvc"}
+    ],
+    "matrix_status": "future-ci-targets-only",
+    "current_ci": {"status": "not-configured", "targets": [], "runs_recorded": 0},
+    "target_outcomes_ref": "expected/semantic.json#/target_outcomes",
+    "environment_cases_ref": "expected/semantic.json#/environment_cases",
+    "locales": ["en-US", "fr-FR"],
+    "timezones": ["UTC", "America/Los_Angeles"],
+    "charsets": ["UTF-8", "ISO-8859-1"],
+    "headless_modes": [true, false],
+    "display_policy": "future GUI lanes must declare a display capability; nongui lanes must not require one",
+    "observable_axes": ["effective_locale", "effective_timezone", "effective_charset", "headless", "display_access", "source_gui_metadata"]
+  },
+  "limitations": [
+    "PlatformSettings is an original unknown extension used to test lossless GUI metadata retention. It is not a bundled JMeter or third-party plugin.",
+    "The headless command is a future oracle recipe only. GUI rendering, look-and-feel, toolbar, tree, undo behavior, display access, and localized labels were not observed.",
+    "Alternate locale, timezone, and charset rows are explicit override probes. A future run must record effective values and diagnostic context for each row; they are not profile defaults or compatibility claims.",
+    "The source extension carries explicit locale, timezone, charset, headless, and display fields so a nongui load/edit/save path can be checked for lossless retention without rendering a GUI.",
+    "The six target rows describe future CI lanes. No current CI target, target availability, display server, GUI smoke test, or cross-platform run is recorded by this case.",
+    "No process exit, sample count, timing, screenshot, or GUI availability is asserted."
+  ],
+  "observable_contract": {
+    "status": "planned",
+    "headless": {
+      "required": true,
+      "display_access": "must-not-access",
+      "preserve_source_document": true,
+      "observable_fields": ["mode", "headless", "display_access", "source_path", "node_id"]
+    },
+    "gui": {
+      "required": false,
+      "display_access": "requires-declared-display",
+      "observable_fields": ["mode", "headless", "display_id", "look_and_feel", "toolbar", "tree_state", "undo_history", "locale", "timezone", "charset"]
+    },
+    "environment": {
+      "locale": {"input_field": "command.locale", "observable_fields": ["effective_locale", "PlatformSettings.locale"], "must_not_fallback_silently": true},
+      "timezone": {"input_field": "command.timezone", "observable_fields": ["effective_timezone", "PlatformSettings.timezone"], "must_not_fallback_silently": true},
+      "charset": {"input_field": "command.default_charset", "observable_fields": ["effective_charset", "PlatformSettings.charset", "source_encoding"], "must_not_fallback_silently": true}
+    }
+  }
+}

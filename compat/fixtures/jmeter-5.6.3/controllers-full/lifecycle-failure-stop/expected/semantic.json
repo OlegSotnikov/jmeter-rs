@@ -1,0 +1,50 @@
+{
+  "schema_id": "jmeter-rs.planned-constraint-contract",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-CONTROLLERS-FULL-LIFECYCLE-FAILURE-STOP",
+  "fixture_family_id": "FX-ELEMENTS-CORE-001",
+  "conformance_ids": ["ELEM-003", "JTL-001", "TEST-001"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-JTL-001", "NORM-ENV-001"],
+  "evidence_status": "static-only",
+  "source_only": true,
+  "raw_artifacts": null,
+  "expectation_basis": "Original lifecycle failure/stop/teardown/static topology contract; no Apache JMeter output was measured.",
+  "comparator_contract": {"mode": "planned-invariant", "enforcement": "not-comparator-enforced", "comparator_enforced": false, "reason": "The repository comparator accepts this static lifecycle contract but does not run stop/teardown behavior.", "unasserted_runtime_fields": ["elapsed time", "timestamps", "received bytes", "DebugSampler response text"]},
+  "save_service_contract": {"jmeter.save.saveservice.filename": "false", "responseFile": "absent"},
+  "bounds": {"max_threads": 3, "max_iterations_per_thread": 1, "max_samples": 5, "max_process_wait_seconds": 30},
+  "sample_contract": {
+    "attributes": {"s": "sample-dependent", "rc": "200", "rm": "OK", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "sample-dependent", "ng": "1", "na": "1"},
+    "tn_by_group": {"setup": "Setup failure group 1-1", "main": "Main stop-test group 1-1", "teardown": "Teardown after stop group 1-1"},
+    "thread_name_by_group": {"setup": "Setup failure group 1-1", "main": "Main stop-test group 1-1", "teardown": "Teardown after stop group 1-1"},
+    "retained_attributes": ["s", "tn", "sby", "rm", "ec"],
+    "absent_attributes": ["responseFile"],
+    "failure_labels": ["setup-failure", "main-failure"],
+    "failure_success_attribute": "false"
+  },
+  "assertion_results": {
+    "configured": true,
+    "mode": "all",
+    "node": "assertionResult",
+    "child_order": ["name", "failure", "error", "failureMessage"],
+    "failure_message_property": "jmeter.save.saveservice.assertion_results_failure_message",
+    "total_count": 2,
+    "per_failed_sample_count": 1,
+    "failed_labels": ["setup-failure", "main-failure"],
+    "retained_fields": ["name", "failure", "error", "failureMessage"],
+    "failure_message_asserted": false,
+    "absence_labels": ["setup-before-failure", "main-before-stop", "teardown-after-stop"]
+  },
+  "lifecycle_contract": {
+    "serialized_threadgroups": true,
+    "groups_in_source_order": ["setup", "main", "teardown"],
+    "setup": {"on_sample_error": "stopthread", "failure_label": "setup-failure", "after_stop_label": "setup-after-stop-must-not-run"},
+    "main": {"on_sample_error": "stoptest", "null_result_controller": "null-result-controller", "failure_label": "main-failure", "after_stop_label": "main-after-stop-must-not-run"},
+    "teardown": {"marker_label": "teardown-after-stop", "runs_after_stop": "planned; verify only with a future pinned oracle run"}
+  },
+  "invariants": {
+    "null_result": {"controller": "GenericController", "label": "null-result-controller", "emitted_sample_count": 0},
+    "failure_and_stop": {"failed_labels": ["setup-failure", "main-failure"], "stop_policies": ["stopthread", "stoptest"]},
+    "bounded_emission": {"possible_sample_labels": ["setup-before-failure", "setup-failure", "main-before-stop", "main-failure", "teardown-after-stop"], "sample_count": {"min": 0, "max": 5}}
+  }
+}

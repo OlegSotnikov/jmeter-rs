@@ -1,0 +1,75 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-ASSERTIONS-FULL-INVALID",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-ELEMENTS-CORE-001",
+  "conformance_ids": ["ELEM-006", "JTL-001", "TEST-001"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-JTL-001", "NORM-TIME-001", "NORM-ENV-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "7da32932da60371ac052df4c20d6cde793d9cee80359660588515f3bd372f9dd"
+  },
+  "property_files": [{
+    "path": "oracle.properties",
+    "sha256": "36599238660e55aab620bcbc3f48068a9e3256209b31f5fb0303799fe6ce42e3"
+  }],
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/assertions-full/invalid",
+    "mode": "nongui",
+    "argv_template": ["jmeter", "-n", "-q", "oracle.properties", "-t", "plan.jmx", "-l", "<ignored>/oracle.jtl", "-j", "<ignored>/oracle.log"],
+    "network": "none",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null
+  },
+  "determinism": {
+    "environment_allowlist": ["LC_ALL=C", "LANG=C", "TZ=UTC"],
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null,
+    "randomness": "not-used-by-plan",
+    "clock_mode": "system-wall-clock",
+    "clock_controlled": false,
+    "network": "none",
+    "normalized_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.ts"]
+  },
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations_per_thread": 1,
+    "max_samples": 6,
+    "max_plan_nodes": 90,
+    "max_plan_depth": 7,
+    "max_property_text_bytes": 4096,
+    "max_result_bytes": 65536,
+    "max_log_bytes": 65536,
+    "max_process_output_bytes": 65536,
+    "max_process_wait_seconds": 30
+  },
+  "resource_limits": {
+    "max_threads": 1,
+    "max_iterations": 1,
+    "max_samples": 6,
+    "max_response_bytes": 65536,
+    "max_assertion_results": 6,
+    "network": "none"
+  },
+  "execution": {
+    "status": "planned-invalid-outcomes",
+    "process_exit": null,
+    "sample_count": 6,
+    "sample_count_status": "planned-from-topology",
+    "sample_count_asserted": false,
+    "observed_sample_count": null,
+    "raw_artifacts": "oracle-runs/assertions-full/invalid/ (ignored; no oracle evidence captured)",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "Malformed patterns and malformed numeric values are retained as inputs so an implementation can report the pinned assertion error category instead of silently defaulting.",
+    "SizeAssertion and DurationAssertion numeric conversion results and exception messages are candidate-unobserved until the pinned oracle run; this static corpus does not claim a Java-version-specific NumberFormatException or assertion-result outcome.",
+    "No Java/JMeter oracle execution was performed while authoring this corpus; process_exit remains null rather than observed. Filename saving is disabled, and all six Debug Sampler responses are configured empty so zero received bytes are asserted exactly.",
+    "The case uses no external script engine, plugin, network, file, or process capability."
+  ]
+}

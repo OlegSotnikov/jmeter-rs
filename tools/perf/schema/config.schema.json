@@ -1,0 +1,1175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/OlegSotnikov/jmeter-rs/blob/main/tools/perf/schema/config.schema.json",
+  "x-schema-id": "jmeter-rs.perf-config",
+  "x-schema-version": 3,
+  "title": "jmeter-rs performance run configuration",
+  "description": "A reproducible, plan-only performance configuration. The current harness accepts dry-run-only configurations; a future runner may execute the declared workload through an explicit capability.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "config_id",
+    "kind",
+    "compatibility",
+    "reproducibility",
+    "platform_matrix",
+    "execution",
+    "workload",
+    "metrics",
+    "thresholds",
+    "leak_sampling",
+    "artifacts"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "jmeter-rs.perf-config"
+    },
+    "schema_version": {
+      "const": 3
+    },
+    "config_id": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-z0-9][a-z0-9-]{2,63}$"
+    },
+    "kind": {
+      "enum": [
+        "micro",
+        "macro",
+        "soak"
+      ]
+    },
+    "compatibility": {
+      "$ref": "#/$defs/compatibility"
+    },
+    "reproducibility": {
+      "$ref": "#/$defs/reproducibility"
+    },
+    "platform_matrix": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/platform_target"}
+    },
+    "execution": {
+      "$ref": "#/$defs/execution"
+    },
+    "workload": {
+      "$ref": "#/$defs/workload"
+    },
+    "metrics": {
+      "$ref": "#/$defs/metrics"
+    },
+    "thresholds": {
+      "$ref": "#/$defs/thresholds"
+    },
+    "leak_sampling": {
+      "$ref": "#/$defs/leak_sampling"
+    },
+    "artifacts": {
+      "$ref": "#/$defs/artifacts"
+    },
+    "extensions": {
+      "type": "object",
+      "maxProperties": 64,
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_id",
+        "feature_ids",
+        "fixture_id",
+        "fixture_ids",
+        "normalization_policy_refs"
+      ],
+      "properties": {
+        "profile_id": {
+          "const": "jmeter-5.6.3"
+        },
+        "feature_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z]+-[0-9]{3}$"
+          }
+        },
+        "fixture_id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^FX-[A-Z0-9-]+$"
+        },
+        "fixture_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^FX-[A-Z0-9-]+$"
+          }
+        },
+        "normalization_policy_refs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^NORM-[A-Z0-9-]+$"
+          }
+        }
+      }
+    },
+    "reproducibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seed",
+        "locale",
+        "timezone",
+        "charset",
+        "target_os",
+        "target_arch",
+        "target_triple",
+        "os_image_id",
+        "os_image_reference",
+        "os_image_reference_sha256",
+        "os_image_artifact_digest_sha256",
+        "rust_toolchain",
+        "rust_toolchain_sha256",
+        "cargo_lock_sha256",
+        "source_date_epoch",
+        "environment_allowlist",
+        "working_directory_policy",
+        "clock_mode"
+      ],
+      "properties": {
+        "seed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "locale": {
+          "const": "en-US"
+        },
+        "timezone": {
+          "const": "UTC"
+        },
+        "charset": {
+          "const": "UTF-8"
+        },
+        "target_os": {
+          "enum": [
+            "linux",
+            "windows",
+            "macos"
+          ]
+        },
+        "target_arch": {
+          "enum": ["x86_64", "aarch64"]
+        },
+        "target_triple": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 80
+        },
+        "os_image_id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:/-]{2,127}$"
+        },
+        "os_image_reference": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._:/-]{1,190}@sha256:[0-9a-f]{64}$"
+        },
+        "os_image_reference_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "os_image_artifact_digest_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "rust_toolchain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "rust_toolchain_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "cargo_lock_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "source_date_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4102444800
+        },
+        "environment_allowlist": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z_][A-Z0-9_]{0,63}$"
+          }
+        },
+        "working_directory_policy": {
+          "const": "ephemeral-run-root"
+        },
+        "clock_mode": {
+          "enum": [
+            "controlled-fixture",
+            "monotonic-only"
+          ]
+        }
+      }
+    },
+    "platform_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "target_os",
+        "target_arch",
+        "target_triple",
+        "status",
+        "os_image_reference",
+        "os_image_reference_sha256",
+        "os_image_artifact_digest_sha256",
+        "evidence_id"
+      ],
+      "properties": {
+        "id": {"type": "string", "maxLength": 64, "pattern": "^[a-z0-9][a-z0-9_-]{2,63}$"},
+        "target_os": {"enum": ["linux", "windows", "macos"]},
+        "target_arch": {"enum": ["x86_64", "aarch64"]},
+        "target_triple": {"type": "string", "maxLength": 80, "pattern": "^[A-Za-z0-9._-]{3,80}$"},
+        "status": {"const": "future-planned"},
+        "os_image_reference": {"type": "string", "maxLength": 256, "pattern": "^[A-Za-z0-9._:/-]{1,190}@sha256:[0-9a-f]{64}$"},
+        "os_image_reference_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "os_image_artifact_digest_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "evidence_id": {"type": "null"}
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "subprocess_policy",
+        "children",
+        "containers"
+      ],
+      "properties": {
+        "mode": {
+          "const": "dry-run-only"
+        },
+        "subprocess_policy": {
+          "$ref": "#/$defs/subprocess_policy"
+        },
+        "children": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/child"
+          }
+        },
+        "containers": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/container"
+          }
+        }
+      }
+    },
+    "subprocess_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "benchmark_processes",
+        "service_processes",
+        "shell",
+        "network",
+        "process_start",
+        "group_signalling"
+      ],
+      "properties": {
+        "benchmark_processes": {
+          "const": "forbidden"
+        },
+        "service_processes": {
+          "const": "forbidden"
+        },
+        "shell": {
+          "const": false
+        },
+        "network": {
+          "const": "offline"
+        },
+        "process_start": {
+          "const": "disabled"
+        },
+        "group_signalling": {
+          "const": "forbidden"
+        }
+      }
+    },
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identity",
+        "pre_signal_check",
+        "reap",
+        "termination",
+        "pid_validation"
+      ],
+      "properties": {
+        "identity": {
+          "const": "owned-child-handle"
+        },
+        "pre_signal_check": {
+          "const": "try_wait-before-signal"
+        },
+        "reap": {
+          "const": "wait-exact-child-on-all-paths"
+        },
+        "termination": {
+          "const": "direct-child-only"
+        },
+        "pid_validation": {
+          "const": "live-child-pgid-greater-than-one"
+        }
+      }
+    },
+    "child": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "role",
+        "enabled",
+        "future_only",
+        "executable",
+        "executable_reference_sha256",
+        "executable_artifact_digest_sha256",
+        "artifact_status",
+        "args",
+        "max_arg_bytes",
+        "max_output_bytes",
+        "startup_timeout_ms",
+        "operation_timeout_ms",
+        "graceful_shutdown_timeout_ms",
+        "deadline_policy",
+        "shell",
+        "working_directory",
+        "environment",
+        "ownership"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z0-9][a-z0-9-]{2,63}$"
+        },
+        "role": {
+          "enum": [
+            "benchmark",
+            "fixture-service",
+            "measurement-helper"
+          ]
+        },
+        "enabled": {
+          "const": false
+        },
+        "future_only": {
+          "const": true
+        },
+        "executable": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^/[A-Za-z0-9._/@:+,-]{1,255}$",
+          "not": {"pattern": "(^|/)\\.\\.?(/|$)"}
+        },
+        "executable_reference_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "executable_artifact_digest_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "artifact_status": {
+          "const": "future-pinned-not-present"
+        },
+        "args": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "maxLength": 1024
+          }
+        },
+        "max_arg_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8192
+        },
+        "max_output_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000000
+        },
+        "startup_timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400000
+        },
+        "operation_timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400000
+        },
+        "graceful_shutdown_timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400000
+        },
+        "deadline_policy": {
+          "const": "bounded-monotonic"
+        },
+        "shell": {
+          "const": false
+        },
+        "working_directory": {
+          "const": "ephemeral-run-root"
+        },
+        "environment": {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": false
+        },
+        "ownership": {
+          "$ref": "#/$defs/ownership"
+        }
+      }
+    },
+    "container": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "role",
+        "enabled",
+        "future_only",
+        "runtime",
+        "runtime_reference_sha256",
+        "runtime_artifact_digest_sha256",
+        "image_reference",
+        "image_reference_sha256",
+        "image_artifact_digest_sha256",
+        "image_status",
+        "create_args",
+        "max_arg_bytes",
+        "max_output_bytes",
+        "startup_timeout_ms",
+        "operation_timeout_ms",
+        "graceful_shutdown_timeout_ms",
+        "deadline_policy",
+        "id_source",
+        "cleanup",
+        "selectors"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z0-9][a-z0-9-]{2,63}$"
+        },
+        "role": {
+          "const": "fixture-service"
+        },
+        "enabled": {
+          "const": false
+        },
+        "future_only": {
+          "const": true
+        },
+        "runtime": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^/[A-Za-z0-9._/@:+,-]{1,255}$",
+          "not": {"pattern": "(^|/)\\.\\.?(/|$)"}
+        },
+        "runtime_reference_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "runtime_artifact_digest_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "image_reference": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._:/-]{1,190}@sha256:[0-9a-f]{64}$"
+        },
+        "image_reference_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "image_artifact_digest_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "image_status": {
+          "const": "future-pinned-not-present"
+        },
+        "create_args": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "maxLength": 1024
+          }
+        },
+        "max_arg_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8192
+        },
+        "max_output_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000000
+        },
+        "startup_timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400000
+        },
+        "operation_timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400000
+        },
+        "graceful_shutdown_timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400000
+        },
+        "deadline_policy": {
+          "const": "bounded-monotonic"
+        },
+        "id_source": {
+          "const": "created-by-this-run"
+        },
+        "cleanup": {
+          "const": "exact-created-id-only"
+        },
+        "selectors": {
+          "const": []
+        }
+      }
+    },
+    "workload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scenario_id",
+        "case_id",
+        "case_manifest_path",
+        "fixture_family_id",
+        "fixture_path",
+        "fixture_sha256",
+        "operations",
+        "virtual_users",
+        "iterations",
+        "duration_seconds",
+        "warmup_seconds",
+        "ramp_up_seconds",
+        "target_rate_per_second",
+        "open_loop"
+      ],
+      "properties": {
+        "scenario_id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z0-9][a-z0-9-]{2,63}$"
+        },
+        "case_id": {"type": "string", "maxLength": 128, "pattern": "^ORACLE-[A-Z0-9-]+$"},
+        "case_manifest_path": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^compat/fixtures/[^/].*",
+          "not": {"pattern": "(^|/)\\.\\.?(/|$)"}
+        },
+        "fixture_family_id": {"type": "string", "maxLength": 64, "pattern": "^FX-[A-Z0-9-]+$"},
+        "fixture_path": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^compat/fixtures/[^/].*",
+          "not": {"pattern": "(^|/)\\.\\.?(/|$)"}
+        },
+        "fixture_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "operations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/operation"
+          }
+        },
+        "virtual_users": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "iterations": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "duration_seconds": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "warmup_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "ramp_up_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "target_rate_per_second": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 10000000
+        },
+        "open_loop": {
+          "type": "boolean"
+        }
+      }
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "enabled",
+        "parameters"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z0-9][a-z0-9-]{2,63}$"
+        },
+        "kind": {
+          "enum": [
+            "parse-jmx",
+            "compile-plan",
+            "execute-offline-fixture",
+            "serialize-results",
+            "aggregate-results",
+            "scheduler-step"
+          ]
+        },
+        "enabled": {
+          "const": true
+        },
+        "parameters": {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": true
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sample_interval_seconds",
+        "warmup_samples",
+        "histograms",
+        "counters",
+        "derived_metrics",
+        "resource_metrics",
+        "queue_policy",
+        "max_samples"
+      ],
+      "properties": {
+        "sample_interval_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "warmup_samples": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "histograms": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/histogram"
+          }
+        },
+        "counters": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{2,63}$"
+          }
+        },
+        "derived_metrics": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/derived_metric"
+          }
+        },
+        "resource_metrics": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/resource_metric"
+          }
+        },
+        "queue_policy": {
+          "const": "bounded-fail-on-overflow"
+        },
+        "max_samples": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        }
+      }
+    },
+    "histogram": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "unit",
+        "percentiles"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9_]{2,63}$"
+        },
+        "unit": {
+          "enum": [
+            "nanoseconds",
+            "bytes",
+            "operations-per-second"
+          ]
+        },
+        "percentiles": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          }
+        }
+      }
+    },
+    "derived_metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "unit"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9_]{2,63}$"
+        },
+        "unit": {
+          "enum": ["count", "nanoseconds", "bytes", "operations-per-second"]
+        }
+      }
+    },
+    "resource_metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "source",
+        "unit",
+        "required"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9_]{2,63}$"
+        },
+        "source": {
+          "enum": [
+            "owned-runner",
+            "owned-child",
+            "owned-container"
+          ]
+        },
+        "unit": {
+          "enum": [
+            "bytes",
+            "count",
+            "nanoseconds"
+          ]
+        },
+        "required": {
+          "type": "boolean"
+        }
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseline_policy",
+        "missing_metric_policy",
+        "baselines",
+        "baseline_artifact",
+        "rules"
+      ],
+      "properties": {
+        "baseline_policy": {
+          "enum": [
+            "artifact-required",
+            "explicit-values-only"
+          ]
+        },
+        "missing_metric_policy": {
+          "const": "fail"
+        },
+        "baselines": {
+          "$ref": "#/$defs/baselines"
+        },
+        "baseline_artifact": {
+          "anyOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/baseline_artifact"}
+          ]
+        },
+        "rules": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/threshold_rule"
+          }
+        }
+      }
+    },
+    "baseline_artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "artifact_digest_sha256", "max_bytes"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^artifacts/[^/].*",
+          "not": {"pattern": "(^|/)\\.\\.?(/|$)"}
+        },
+        "artifact_digest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "max_bytes": {"type": "integer", "minimum": 1, "maximum": 67108864}
+      }
+    },
+    "threshold_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "metric",
+        "operator",
+        "value",
+        "unit",
+        "scope"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z0-9][a-z0-9-]{2,63}$"
+        },
+        "metric": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_.]{2,95}$"
+        },
+        "operator": {
+          "enum": [
+            "<",
+            "<=",
+            "=",
+            ">=",
+            ">"
+          ]
+        },
+        "value": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1000000000000000
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "scope": {
+          "enum": [
+            "run",
+            "steady-state",
+            "final-window"
+          ]
+        }
+      }
+    },
+    "baselines": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minimum_completion_count",
+        "minimum_sample_count",
+        "minimum_steady_state_samples",
+        "source"
+      ],
+      "properties": {
+        "minimum_completion_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "minimum_sample_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "minimum_steady_state_samples": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "source": {
+          "const": "explicit-config"
+        }
+      }
+    },
+    "leak_sampling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "interval_seconds",
+        "initial_delay_seconds",
+        "baseline",
+        "windows",
+        "metrics",
+        "growth_rules",
+        "unavailable_policy",
+        "require_final_sample"
+      ],
+      "properties": {
+        "enabled": {
+          "const": true
+        },
+        "interval_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "initial_delay_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "baseline": {
+          "enum": [
+            "first-stable-window",
+            "first-sample"
+          ]
+        },
+        "windows": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "warmup_samples",
+            "steady_state_samples",
+            "final_samples"
+          ],
+          "properties": {
+            "warmup_samples": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000000
+            },
+            "steady_state_samples": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000000
+            },
+            "final_samples": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000000
+            }
+          }
+        },
+        "metrics": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{2,63}$"
+          }
+        },
+        "growth_rules": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/growth_rule"
+          }
+        },
+        "unavailable_policy": {
+          "const": "fail"
+        },
+        "require_final_sample": {
+          "const": true
+        }
+      }
+    },
+    "growth_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "metric",
+        "unit",
+        "comparison",
+        "max_absolute",
+        "max_relative"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z0-9][a-z0-9-]{2,63}$"
+        },
+        "metric": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9_]{2,63}$"
+        },
+        "unit": {
+          "type": "string",
+          "maxLength": 64,
+          "enum": ["count", "nanoseconds", "bytes", "operations-per-second"]
+        },
+        "comparison": {
+          "const": "final-window-vs-baseline"
+        },
+        "max_absolute": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1000000000000000
+        },
+        "max_relative": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root",
+        "result_filename",
+        "write_mode",
+        "max_bytes",
+        "raw_samples"
+      ],
+      "properties": {
+        "root": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[^/].*"
+        },
+        "result_filename": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{2,127}$"
+        },
+        "write_mode": {
+          "const": "dry-run-only"
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 100000000
+        },
+        "raw_samples": {
+          "const": false
+        }
+      }
+    }
+  }
+}

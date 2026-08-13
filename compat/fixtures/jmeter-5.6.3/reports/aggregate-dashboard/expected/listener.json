@@ -1,0 +1,162 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-REPORT-AGGREGATE-DASHBOARD",
+  "format": "jtl-xml",
+  "source": "inputs/aggregate.xml",
+  "sample_count": 8,
+  "input_row_count": 7,
+  "represented_sample_count": 8,
+  "report_surface": "listener-aggregate-summary-graph",
+  "shape_variant": "nonempty_report_surface",
+  "algorithm": {
+    "percentile": "math_round_weighted_rank",
+    "rank_formula": "Math.round(count * (percentile / 100.0))",
+    "percentile_observations": "Math.round(count * p) over effective elapsed observations; a StatisticalSampleResult row with t=600 and SampleCount=2 contributes 300 twice",
+    "effective_elapsed_observations_source_order": [100, 500, 300, 300, 1500, 1501, 0, 2500],
+    "effective_elapsed_observations_sorted": [0, 100, 300, 300, 500, 1500, 1501, 2500],
+    "apdex_satisfied_millis": 500,
+    "apdex_tolerated_millis": 1500,
+    "top_error_limit": 5,
+    "interval_start_ms": 1704067200000,
+    "interval_end_ms": 1704067210000,
+    "interval_duration_millis": 10000,
+    "interval_timezone": "UTC"
+  },
+  "row_order": ["TOTAL", "api/cache", "api/health", "api/login", "api/search", "api/write"],
+  "total": {
+    "sample_count": 8,
+    "success_count": 6,
+    "error_count": 2,
+    "success_percentage": 75.0,
+    "error_percentage": 25.0,
+    "elapsed_count": 8,
+    "elapsed_min_millis": 0,
+    "elapsed_max_millis": 2500,
+    "elapsed_mean_millis": 837.625,
+    "elapsed_variance_population_millis2": 697509.484375,
+    "elapsed_stddev_millis": 835.1703325519891,
+    "received_bytes": 9100,
+    "sent_bytes": 970,
+    "throughput_per_second": 0.8,
+    "error_throughput_per_second": 0.2,
+    "received_bytes_per_second": 910.0,
+    "sent_bytes_per_second": 97.0,
+    "apdex": {"satisfied": 4, "tolerated": 1, "frustrated": 3, "score": 0.5625},
+    "error_counts": [
+      {"response_code": "409", "message": "conflict", "count": 1},
+      {"response_code": "503", "message": "overload", "count": 1}
+    ],
+    "top_errors": [
+      {"response_code": "409", "message": "conflict", "count": 1},
+      {"response_code": "503", "message": "overload", "count": 1}
+    ],
+    "percentile_sample_count": 8,
+    "percentiles_millis": {"0": 0, "25": 100, "50": 300, "75": 1500, "90": 1501, "95": 2500, "99": 2500, "100": 2500}
+  },
+  "labels": [
+    {
+      "label": "api/cache",
+      "summary": {
+        "sample_count": 1, "success_count": 1, "error_count": 0, "elapsed_count": 1,
+        "elapsed_min_millis": 2500, "elapsed_max_millis": 2500, "elapsed_mean_millis": 2500.0,
+        "elapsed_variance_population_millis2": 0.0, "elapsed_stddev_millis": 0.0,
+        "received_bytes": 500, "sent_bytes": 50, "throughput_per_second": 0.1, "error_throughput_per_second": 0.0,
+        "apdex": {"satisfied": 0, "tolerated": 0, "frustrated": 1, "score": 0.0},
+        "error_counts": [], "top_errors": []
+      },
+      "percentile_sample_count": 1,
+      "percentiles_millis": {"0": 2500, "50": 2500, "90": 2500, "99": 2500, "100": 2500}
+    },
+    {
+      "label": "api/health",
+      "summary": {
+        "sample_count": 1, "success_count": 1, "error_count": 0, "elapsed_count": 1,
+        "elapsed_min_millis": 0, "elapsed_max_millis": 0, "elapsed_mean_millis": 0.0,
+        "elapsed_variance_population_millis2": 0.0, "elapsed_stddev_millis": 0.0,
+        "received_bytes": 0, "sent_bytes": 0, "throughput_per_second": 0.1, "error_throughput_per_second": 0.0,
+        "apdex": {"satisfied": 1, "tolerated": 0, "frustrated": 0, "score": 1.0},
+        "error_counts": [], "top_errors": []
+      },
+      "percentile_sample_count": 1,
+      "percentiles_millis": {"0": 0, "50": 0, "90": 0, "99": 0, "100": 0}
+    },
+    {
+      "label": "api/login",
+      "summary": {
+        "sample_count": 1, "success_count": 1, "error_count": 0, "elapsed_count": 1,
+        "elapsed_min_millis": 100, "elapsed_max_millis": 100, "elapsed_mean_millis": 100.0,
+        "elapsed_variance_population_millis2": 0.0, "elapsed_stddev_millis": 0.0,
+        "received_bytes": 1000, "sent_bytes": 120, "throughput_per_second": 0.1, "error_throughput_per_second": 0.0,
+        "apdex": {"satisfied": 1, "tolerated": 0, "frustrated": 0, "score": 1.0},
+        "error_counts": [], "top_errors": []
+      },
+      "percentile_sample_count": 1,
+      "percentiles_millis": {"0": 100, "50": 100, "90": 100, "99": 100, "100": 100}
+    },
+    {
+      "label": "api/search",
+      "summary": {
+        "sample_count": 3, "success_count": 2, "error_count": 1, "elapsed_count": 3,
+        "elapsed_min_millis": 300, "elapsed_max_millis": 500, "elapsed_mean_millis": 366.6666666666667,
+        "elapsed_variance_population_millis2": 8888.888888888889, "elapsed_stddev_millis": 94.28090415820634,
+        "received_bytes": 4200, "sent_bytes": 420, "throughput_per_second": 0.3, "error_throughput_per_second": 0.1,
+        "apdex": {"satisfied": 2, "tolerated": 0, "frustrated": 1, "score": 0.6666666666666666},
+        "error_counts": [{"response_code": "503", "message": "overload", "count": 1}],
+        "top_errors": [{"response_code": "503", "message": "overload", "count": 1}]
+      },
+      "percentile_sample_count": 3,
+      "percentiles_millis": {"0": 300, "50": 300, "90": 500, "99": 500, "100": 500}
+    },
+    {
+      "label": "api/write",
+      "summary": {
+        "sample_count": 2, "success_count": 1, "error_count": 1, "elapsed_count": 2,
+        "elapsed_min_millis": 1500, "elapsed_max_millis": 1501, "elapsed_mean_millis": 1500.5,
+        "elapsed_variance_population_millis2": 0.25, "elapsed_stddev_millis": 0.5,
+        "received_bytes": 3400, "sent_bytes": 380, "throughput_per_second": 0.2, "error_throughput_per_second": 0.1,
+        "apdex": {"satisfied": 0, "tolerated": 1, "frustrated": 1, "score": 0.25},
+        "error_counts": [{"response_code": "409", "message": "conflict", "count": 1}],
+        "top_errors": [{"response_code": "409", "message": "conflict", "count": 1}]
+      },
+      "percentile_sample_count": 2,
+      "percentiles_millis": {"0": 1500, "50": 1500, "90": 1501, "99": 1501, "100": 1501}
+    }
+  ],
+  "graph": {
+    "granularity_millis": 10000,
+    "bucket_order": [1704067200000],
+    "buckets": [{
+      "start_ms": 1704067200000,
+      "end_ms_exclusive": 1704067210000,
+      "sample_count": 8,
+      "error_count": 2,
+      "elapsed_count": 8,
+      "elapsed_sum_millis": 6701,
+      "effective_elapsed_observations": [0, 100, 300, 300, 500, 1500, 1501, 2500],
+      "received_bytes": 9100,
+      "sent_bytes": 970,
+      "throughput_per_second": 0.8,
+      "error_throughput_per_second": 0.2
+    }]
+  },
+  "ordering": {
+    "labels": "lexicographic UTF-8 order",
+    "error_ties": "response code, then message, ascending",
+    "events": "source order",
+    "total_row": "before labels"
+  },
+  "generated_from": {
+    "generator": "jmeter-rs project, hand-authored static corpus",
+    "generator_version": "repository source",
+    "random_seed": null,
+    "oracle_command": null,
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "none; no Java, JMeter, report generator, or subprocess was invoked"
+  },
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "Listener metrics are exact descriptors: weighted StatisticalSampleResult counts and effective elapsed values, zero-valued absent elapsed input, bytes, APDEX boundaries, sorted error ties, graph bucket assignment, interval rates, and Math.round percentile values are all observable."
+  }
+}

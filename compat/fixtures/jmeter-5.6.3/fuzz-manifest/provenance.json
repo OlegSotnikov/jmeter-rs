@@ -1,0 +1,97 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-FUZZ-MANIFEST",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored static FX-FUZZ-001 index for the repository's ten bounded fuzz targets, 29 source-declared invariant IDs, 34-seed synthetic corpus, and campaign contract files. It records source paths and SHA-256 values without copying fuzz inputs or target code.",
+    "upstream_plan_copied": false
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter 5.6.3 is a pinned profile reference only; no JMeter distribution, plan, result, plugin, or binary is redistributed by this static fuzz manifest."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true,
+    "verification_basis": "Copied from the active profile's pinned artifact metadata; no JMeter or Java process was run for this manifest."
+  },
+  "runtime": {
+    "java": {
+      "vendor": "not executed (static manifest)",
+      "version": "not measured",
+      "vm": "not measured",
+      "major": null
+    },
+    "target_triple": "not measured; target source and corpus paths are platform-independent",
+    "os_image": "not measured; no campaign was run",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "not asserted; fuzz targets must not use hostnames",
+    "environment_allowlist": [],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "not executed; fuzz targets must not load Java or plugins",
+    "classpath_artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076"
+  },
+  "inputs": {
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  },
+  "source_references": {
+    "index": "case.json.source_references is the complete path/hash inventory for the current fuzz workspace, ten target sources, 29 source-declared invariant IDs, 34 corpus seeds, campaign contract files, fixture schema/example/negative vectors, and provenance documents.",
+    "inventory": {
+      "workspace_files": 3,
+      "target_files": 10,
+      "corpus_seed_files": 34,
+      "campaign_contract_files": 2,
+      "fixture_contract_files": 3,
+      "source_of_truth": "case.json.source_references"
+    },
+    "target_contract": {
+      "path": "fuzz/README.md",
+      "sha256": "fefe067eb843e9fa9ba273b1d5ea57f2174bbdc41e950cc3efa20320b95085d5",
+      "role": "canonical target names, input bounds, seed directories, and static validation policy; the local fixture additionally indexes the current Cargo target expansion"
+    },
+    "corpus_provenance": {
+      "path": "fuzz/corpus/PROVENANCE.md",
+      "sha256": "4b8d30bb1a7ac53887ecddae65e975fa0f56a0ea9f911dde4fb4f199b0cd14af",
+      "role": "original synthetic seed provenance and per-seed purpose/bounds; absent new-target directories are recorded as zero-seed by design"
+    },
+    "campaign_contract": {
+      "schema_path": "fuzz/campaign/evidence.schema.json",
+      "schema_sha256": "e7f1ab943859b6006227d4c54d5860266c009a8eade00da7d2f2e3255605756d",
+      "example_path": "fuzz/campaign/evidence.example.json",
+      "example_sha256": "336ac3ea79195d5f10cfb5e4a5073117fec67831cad237ac7050a491c1401c25"
+    },
+    "fixture_contract": {
+      "schema_path": "compat/fixtures/jmeter-5.6.3/fuzz-manifest/expected/campaign-evidence.schema.json",
+      "schema_sha256": "e2f76943e5451d52f02f55f573d901a54894f7ee3b27e34c4aab2cbd7a7c3cea",
+      "example_path": "compat/fixtures/jmeter-5.6.3/fuzz-manifest/expected/campaign-evidence.example.json",
+      "example_sha256": "2e563d168651d7565b7718b3003e51f9f33ddc4f3446c0fe6f105b65790e546a",
+      "negative_vectors_path": "compat/fixtures/jmeter-5.6.3/fuzz-manifest/expected/campaign-evidence.negative.json",
+      "negative_vectors_sha256": "eafdc65c0cb6a714609a6b5f9293539b4ca736c7475e3460340ec304b879de1b"
+    }
+  },
+  "evidence": {
+    "status": "planned",
+    "oracle_invoked": false,
+    "campaign_invoked": false,
+    "measured_output_present": false,
+    "rust_conformance_claim": false,
+    "raw_artifacts": "oracle-runs/fuzz-manifest/ (ignored; no artifacts collected)",
+    "future_evidence": "case.json.future_campaign and expected/campaign-evidence.schema.json declare the bounded run record, per-target counts, invariant results, and crash/hang/minimization artifact schema required before review."
+  }
+}

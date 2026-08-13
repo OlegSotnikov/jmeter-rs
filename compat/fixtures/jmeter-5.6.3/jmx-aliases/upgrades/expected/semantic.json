@@ -1,0 +1,220 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JMX-UPGRADES",
+  "format": "jmx-semantic",
+  "root": {
+    "element": "jmeterTestPlan",
+    "attributes": {"version": "1.0", "properties": "5.0", "jmeter": "2.3"},
+    "ordered_children": ["hashTree"]
+  },
+  "legacy_decoding": {
+    "version": "1.0",
+    "rule": "Decode '+' as space and percent-escaped UTF-8 in attributes and scalar property values before applying upgrade.properties.",
+    "examples": [
+      {"wire": "Legacy+upgrade%26property corpus", "decoded": "Legacy upgrade&property corpus"},
+      {"wire": "select+1%26two", "decoded": "select 1&two"},
+      {"wire": "fixture%40user", "decoded": "fixture@user"}
+    ]
+  },
+  "ordered_hash_tree_pairs": [
+    {
+      "element": {
+        "tag": "TestPlan",
+        "canonical_wire_tag": "TestPlan",
+        "guiclass": "TestPlanGui",
+        "testclass": "TestPlan",
+        "testname": "Legacy upgrade&property corpus",
+        "enabled": "true",
+        "opaque": false
+      },
+      "hash_tree_children": ["ThreadGroup"]
+    },
+    {
+      "element": {
+        "tag": "ThreadGroup",
+        "canonical_wire_tag": "ThreadGroup",
+        "guiclass": "ThreadGroupGui",
+        "testclass": "ThreadGroup",
+        "testname": "Legacy group",
+        "enabled": "true",
+        "opaque": false
+      },
+      "hash_tree_children": ["JDBCSampler", "JDBCDataSource", "ConstantThroughputTimer", "AccessLogSampler", "BSFSampler", "JMSSampler"]
+    },
+    {
+      "element": {
+        "tag": "JDBCSampler",
+        "canonical_wire_tag": "JDBCSampler",
+        "guiclass": "TestBeanGUI",
+        "testclass": "JDBCSampler",
+        "testname": "Legacy JDBC sampler",
+        "enabled": "false",
+        "opaque": false,
+        "original_guiclass": "org.apache.jmeter.protocol.jdbc.control.gui.JdbcTestSampleGui",
+        "original_testclass": "JDBCSampler"
+      },
+      "hash_tree_children": []
+    },
+    {
+      "element": {
+        "tag": "JDBCDataSource",
+        "canonical_wire_tag": "JDBCDataSource",
+        "guiclass": "TestBeanGUI",
+        "testclass": "JDBCDataSource",
+        "testname": "Legacy JDBC data source",
+        "enabled": "false",
+        "opaque": false,
+        "original_guiclass": "org.apache.jmeter.protocol.jdbc.config.gui.DbConfigGui",
+        "original_testclass": "JDBCDataSource"
+      },
+      "hash_tree_children": []
+    },
+    {
+      "element": {
+        "tag": "ConstantThroughputTimer",
+        "canonical_wire_tag": "ConstantThroughputTimer",
+        "guiclass": "TestBeanGUI",
+        "testclass": "ConstantThroughputTimer",
+        "testname": "Legacy throughput timer",
+        "enabled": "false",
+        "opaque": false,
+        "original_guiclass": "org.apache.jmeter.timers.gui.ConstantThroughputTimerGui",
+        "original_testclass": "ConstantThroughputTimer"
+      },
+      "hash_tree_children": []
+    },
+    {
+      "element": {
+        "tag": "AccessLogSampler",
+        "canonical_wire_tag": "AccessLogSampler",
+        "guiclass": "TestBeanGUI",
+        "testclass": "AccessLogSampler",
+        "testname": "Legacy access log",
+        "enabled": "false",
+        "opaque": false,
+        "original_guiclass": "org.apache.jmeter.protocol.http.control.gui.AccessLogSamplerGui",
+        "original_testclass": "AccessLogSampler"
+      },
+      "hash_tree_children": []
+    },
+    {
+      "element": {
+        "tag": "BSFSampler",
+        "canonical_wire_tag": "BSFSampler",
+        "guiclass": "TestBeanGUI",
+        "testclass": "BSFSampler",
+        "testname": "Legacy BSF sampler",
+        "enabled": "false",
+        "opaque": false,
+        "original_guiclass": "BSFSamplerGui",
+        "original_testclass": "BSFSampler"
+      },
+      "hash_tree_children": []
+    },
+    {
+      "element": {
+        "tag": "JMSSampler",
+        "canonical_wire_tag": "JMSSampler",
+        "guiclass": "JMSSamplerGui",
+        "testclass": "JMSSampler",
+        "testname": "Legacy JMS GUI",
+        "enabled": "false",
+        "opaque": false,
+        "original_guiclass": "JMSConfigGui",
+        "original_testclass": "JMSSampler"
+      },
+      "hash_tree_children": []
+    }
+  ],
+  "typed_properties": [
+    {"path": "TestPlan/TestPlan.functional_mode", "node": "boolProp", "value": "false"},
+    {"path": "TestPlan/TestPlan.comments", "node": "stringProp", "wire_value": "legacy+comments%26values", "value": "legacy comments&values"},
+    {"path": "TestPlan/fixture.empty", "node": "stringProp", "value": "", "present": true},
+    {"path": "ThreadGroup/ThreadGroup.on_sample_error", "node": "stringProp", "value": "continue"},
+    {"path": "ThreadGroup/ThreadGroup.main_controller", "node": "elementProp", "element_type": "LoopController"},
+    {"path": "ThreadGroup/LoopController.continue_forever", "node": "boolProp", "value": "false"},
+    {"path": "ThreadGroup/LoopController.loops", "node": "stringProp", "value": "1"},
+    {"path": "ThreadGroup/ThreadGroup.num_threads", "node": "stringProp", "value": "1"},
+    {"path": "ThreadGroup/ThreadGroup.ramp_time", "node": "stringProp", "value": "0"},
+    {"path": "ThreadGroup/ThreadGroup.start_time", "node": "longProp", "value": "0"},
+    {"path": "ThreadGroup/ThreadGroup.end_time", "node": "longProp", "value": "0"},
+    {"path": "ThreadGroup/ThreadGroup.scheduler", "node": "boolProp", "value": "false"},
+    {"path": "ThreadGroup/ThreadGroup.duration", "node": "stringProp", "value": ""},
+    {"path": "ThreadGroup/ThreadGroup.delay", "node": "stringProp", "value": ""},
+    {"path": "JDBCSampler/query", "node": "stringProp", "wire_name": "JDBCSampler.query", "wire_value": "select+1%26two", "value": "select 1&two"},
+    {"path": "JDBCSampler/JDBCSampler.url", "node": "stringProp", "wire_value": "jdbc%3Afixture", "value": "jdbc:fixture"},
+    {"path": "JDBCDataSource/dbUrl", "node": "stringProp", "wire_name": "JDBCSampler.url", "wire_value": "jdbc%3Aexample", "value": "jdbc:example"},
+    {"path": "JDBCDataSource/driver", "node": "stringProp", "wire_name": "JDBCSampler.driver", "wire_value": "fixture%2EDriver", "value": "fixture.Driver"},
+    {"path": "JDBCDataSource/query", "node": "stringProp", "wire_name": "JDBCSampler.query", "wire_value": "select+2", "value": "select 2"},
+    {"path": "JDBCDataSource/username", "node": "stringProp", "wire_name": "ConfigTestElement.username", "wire_value": "fixture%40user", "value": "fixture@user"},
+    {"path": "JDBCDataSource/password", "node": "stringProp", "wire_name": "ConfigTestElement.password", "value": "fixture-pass"},
+    {"path": "JDBCDataSource/poolMax", "node": "stringProp", "wire_name": "JDBCSampler.maxuse", "value": "3"},
+    {"path": "ConstantThroughputTimer/throughput", "node": "stringProp", "wire_name": "ConstantThroughputTimer.throughput", "value": "12.5"},
+    {"path": "AccessLogSampler/logFile", "node": "stringProp", "wire_name": "AccessLogSampler.log_file", "wire_value": "fixture%2Elog", "value": "fixture.log"},
+    {"path": "AccessLogSampler/portString", "node": "stringProp", "wire_name": "HTTPSampler.port", "value": "8080"},
+    {"path": "AccessLogSampler/domain", "node": "stringProp", "wire_name": "HTTPSampler.domain", "wire_value": "fixture%2Einvalid", "value": "fixture.invalid"},
+    {"path": "AccessLogSampler/parserClassName", "node": "stringProp", "wire_name": "AccessLogSampler.parser_class_name", "value": "fixture.Parser"},
+    {"path": "AccessLogSampler/imageParsing", "node": "stringProp", "wire_name": "HTTPSampler.image_parser", "value": "true"},
+    {"path": "BSFSampler/filename", "node": "stringProp", "wire_name": "BSFSampler.filename", "wire_value": "fixture%2Ebsf", "value": "fixture.bsf"},
+    {"path": "BSFSampler/scriptLanguage", "node": "stringProp", "wire_name": "BSFSampler.language", "value": "beanshell"},
+    {"path": "BSFSampler/parameters", "node": "stringProp", "wire_name": "BSFSampler.parameters", "wire_value": "arg+one", "value": "arg one"},
+    {"path": "BSFSampler/script", "node": "stringProp", "wire_name": "BSFSampler.query", "wire_value": "return+one", "value": "return one"},
+    {"path": "JMSSampler/JMS.destination", "node": "stringProp", "wire_value": "fixture%2Equeue", "value": "fixture.queue"}
+  ],
+  "deleted_property_handling": {
+    "diagnostic_retention": [
+      {"element": "JDBCDataSource", "wire_name": "JDBCSampler.connections", "wire_value": "2", "raw_xml": "<stringProp name=\"JDBCSampler.connections\">2</stringProp>", "raw_xml_sha256": "ded1ba85995cecba29bdaf4b9bb07c9de3fbbfab1a167962c84605ebc53a372b", "status": "diagnostic-only-retention", "raw_span_retained": true},
+      {"element": "JDBCDataSource", "wire_name": "JDBCSampler.connPoolClass", "wire_value": "legacy.Pool", "raw_xml": "<stringProp name=\"JDBCSampler.connPoolClass\">legacy.Pool</stringProp>", "raw_xml_sha256": "74ab2587d7cab5fbd6475ea5f59d4218934cdfc6ad5170014d9c92aadfde919d", "status": "diagnostic-only-retention", "raw_span_retained": true}
+    ],
+    "canonical_output": {
+      "status": "omitted",
+      "wire_names": ["JDBCSampler.connections", "JDBCSampler.connPoolClass"],
+      "upgrade_target": null,
+      "round_trip_preserved": false,
+      "rule": "An upgrade.properties entry with an empty target is deleted from canonical upgraded properties. Raw bytes may remain in diagnostics, but diagnostic retention is not a canonical semantic property and must not be described as round-trip preservation."
+    }
+  },
+  "alias_resolutions": [
+    {"input": "JDBCDataSource", "class": "org.apache.jmeter.protocol.jdbc.config.DataSourceElement", "primary_alias": "JDBCDataSource"},
+    {"input": "JDBCSampler", "class": "org.apache.jmeter.protocol.jdbc.sampler.JDBCSampler", "primary_alias": "JDBCSampler"},
+    {"input": "ConstantThroughputTimer", "class": "org.apache.jmeter.timers.ConstantThroughputTimer", "primary_alias": "ConstantThroughputTimer"},
+    {"input": "AccessLogSampler", "class": "org.apache.jmeter.protocol.http.sampler.AccessLogSampler", "primary_alias": "AccessLogSampler"},
+    {"input": "BSFSampler", "class": "org.apache.jmeter.protocol.java.sampler.BSFSampler", "primary_alias": "BSFSampler"},
+    {"input": "JMSConfigGui", "class": "org.apache.jmeter.protocol.jms.control.gui.JMSConfigGui", "primary_alias": "JMSConfigGui", "upgrade_to": "JMSSamplerGui"}
+  ],
+  "upgrade_rules_exercised": [
+    {"kind": "gui", "old": "org.apache.jmeter.protocol.jdbc.control.gui.JdbcTestSampleGui", "new": "org.apache.jmeter.testbeans.gui.TestBeanGUI"},
+    {"kind": "property", "class": "org.apache.jmeter.protocol.jdbc.sampler.JDBCSampler", "old": "JDBCSampler.query", "new": "query"},
+    {"kind": "property", "class": "org.apache.jmeter.protocol.jdbc.config.DataSourceElement", "old": "JDBCSampler.url", "new": "dbUrl"},
+    {"kind": "property", "class": "org.apache.jmeter.protocol.jdbc.config.DataSourceElement", "old": "JDBCSampler.driver", "new": "driver"},
+    {"kind": "property", "class": "org.apache.jmeter.protocol.jdbc.config.DataSourceElement", "old": "JDBCSampler.query", "new": "query"},
+    {"kind": "property", "class": "org.apache.jmeter.protocol.jdbc.config.DataSourceElement", "old": "ConfigTestElement.username", "new": "username"},
+    {"kind": "property", "class": "org.apache.jmeter.protocol.jdbc.config.DataSourceElement", "old": "ConfigTestElement.password", "new": "password"},
+    {"kind": "property", "class": "org.apache.jmeter.protocol.jdbc.config.DataSourceElement", "old": "JDBCSampler.connections", "new": null},
+    {"kind": "property", "class": "org.apache.jmeter.protocol.jdbc.config.DataSourceElement", "old": "JDBCSampler.connPoolClass", "new": null},
+    {"kind": "property", "class": "org.apache.jmeter.protocol.jdbc.config.DataSourceElement", "old": "JDBCSampler.maxuse", "new": "poolMax"},
+    {"kind": "property", "class": "org.apache.jmeter.timers.ConstantThroughputTimer", "old": "ConstantThroughputTimer.throughput", "new": "throughput"},
+    {"kind": "property", "class": "org.apache.jmeter.protocol.http.sampler.AccessLogSampler", "old": "AccessLogSampler.log_file", "new": "logFile"},
+    {"kind": "property", "class": "org.apache.jmeter.protocol.java.sampler.BSFSampler", "old": "BSFSampler.query", "new": "script"}
+  ],
+  "upgrade_rules_omitted": [
+    {"kind": "gui", "source": "org.apache.jmeter.protocol.jdbc.config.gui.DbConfigGui", "target": "org.apache.jmeter.testbeans.gui.TestBeanGUI", "status": "not-exercised", "reason": "The plan records DbConfigGui but this descriptor does not assert the GUI conversion."},
+    {"kind": "gui", "source": "org.apache.jmeter.timers.gui.ConstantThroughputTimerGui", "target": "org.apache.jmeter.testbeans.gui.TestBeanGUI", "status": "not-exercised", "reason": "The plan records ConstantThroughputTimerGui but this descriptor does not assert the GUI conversion."},
+    {"kind": "gui", "source": "org.apache.jmeter.protocol.http.control.gui.AccessLogSamplerGui", "target": "org.apache.jmeter.testbeans.gui.TestBeanGUI", "status": "not-exercised", "reason": "The plan records AccessLogSamplerGui but this descriptor does not assert the GUI conversion."},
+    {"kind": "property", "source": "org.apache.jmeter.protocol.http.sampler.AccessLogSampler/HTTPSampler.port", "target": "portString", "status": "not-exercised", "reason": "The plan does not assert this AccessLogSampler property conversion."},
+    {"kind": "property", "source": "org.apache.jmeter.protocol.http.sampler.AccessLogSampler/HTTPSampler.domain", "target": "domain", "status": "not-exercised", "reason": "The plan does not assert this AccessLogSampler property conversion."},
+    {"kind": "property", "source": "org.apache.jmeter.protocol.http.sampler.AccessLogSampler/AccessLogSampler.parser_class_name", "target": "parserClassName", "status": "not-exercised", "reason": "The plan does not assert this AccessLogSampler property conversion."},
+    {"kind": "property", "source": "org.apache.jmeter.protocol.http.sampler.AccessLogSampler/HTTPSampler.image_parser", "target": "imageParsing", "status": "not-exercised", "reason": "The plan does not assert this AccessLogSampler property conversion."},
+    {"kind": "gui", "source": "org.apache.jmeter.protocol.java.control.gui.BSFSamplerGui", "target": "org.apache.jmeter.testbeans.gui.TestBeanGUI", "status": "not-exercised", "reason": "The plan records BSFSamplerGui but this descriptor does not assert the GUI conversion."},
+    {"kind": "property", "source": "org.apache.jmeter.protocol.java.sampler.BSFSampler/BSFSampler.filename", "target": "filename", "status": "not-exercised", "reason": "The plan does not assert this BSFSampler property conversion."},
+    {"kind": "property", "source": "org.apache.jmeter.protocol.java.sampler.BSFSampler/BSFSampler.language", "target": "scriptLanguage", "status": "not-exercised", "reason": "The plan does not assert this BSFSampler property conversion."},
+    {"kind": "property", "source": "org.apache.jmeter.protocol.java.sampler.BSFSampler/BSFSampler.parameters", "target": "parameters", "status": "not-exercised", "reason": "The plan does not assert this BSFSampler property conversion."},
+    {"kind": "class", "source": "org.apache.jmeter.protocol.jms.control.gui.JMSConfigGui", "target": "org.apache.jmeter.protocol.jms.control.gui.JMSSamplerGui", "status": "not-exercised", "reason": "The plan records JMSConfigGui but this descriptor does not assert the GUI class upgrade."}
+  ],
+  "normalization": {
+    "ignored_fields": ["xml_lexical_whitespace"],
+    "reason": "Compare legacy root metadata, URL-decoded names/values, ordered topology, class and GUI upgrades, renamed properties, diagnostic raw spans for deleted properties, and canonical omission of properties whose upgrade target is empty."
+  }
+}

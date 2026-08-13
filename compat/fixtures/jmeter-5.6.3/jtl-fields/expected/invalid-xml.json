@@ -1,0 +1,25 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JTL-FIELDS",
+  "format": "jtl-xml",
+  "contract_kind": "invalid-input-contract",
+  "projection_schema": "error-contract-v1",
+  "comparator_ready": false,
+  "evidence_status": "planned",
+  "expectation_basis": "Stable parser-error categories are planned static non-comparator targets; no invalid-input oracle run was measured.",
+  "sample_count": 0,
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "Invalid XML contracts contain no successful projection; each listed input must return its declared typed parse or unsupported-format error."
+  },
+  "contracts": [
+    {"id": "XML-WRONG-ROOT-001", "path": "inputs/xml/invalid-wrong-root.xml", "expected_error_code": "jtl-parse", "expected_error_detail": "JTL XML root must be testResults"},
+    {"id": "XML-DUPLICATE-ATTRIBUTE-001", "path": "inputs/xml/invalid-duplicate-attribute.xml", "expected_error_code": "jtl-parse", "expected_error_detail": "XML element repeats an attribute"},
+    {"id": "XML-ENTITY-001", "path": "inputs/xml/invalid-entity.xml", "expected_error_code": "jtl-parse", "expected_error_detail": "unsupported XML entity"},
+    {"id": "XML-CLOSE-001", "path": "inputs/xml/invalid-mismatched-close.xml", "expected_error_code": "jtl-parse", "expected_error_detail": "XML closing element does not match"},
+    {"id": "XML-DOCTYPE-001", "path": "inputs/xml/invalid-doctype.xml", "expected_error_code": "jtl-parse", "expected_error_detail": "DOCTYPE/CDATA is not valid"},
+    {"id": "XML-ROOT-CHILD-001", "path": "inputs/xml/invalid-root-child.xml", "consumer": "jmeter-oracle-compare", "rejection_kind": "consumer-specific-typed-rejection", "expected_error_code": "unsupported-format", "expected_error_detail": "unsupported JTL XML: unexpected XML root child 'notASample'"}
+  ]
+}

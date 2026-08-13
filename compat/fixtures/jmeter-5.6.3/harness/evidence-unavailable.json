@@ -1,0 +1,187 @@
+{
+  "schema_id": "jmeter-rs.harness-evidence",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-HARNESS-REPRODUCIBILITY",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-HARNESS-001",
+  "conformance_ids": ["TEST-001", "TEST-002", "TEST-004"],
+  "coverage_by_conformance_id": {
+    "TEST-001": {
+      "normalization_policy_refs": ["NORM-ENV-001", "NORM-SECURITY-001"],
+      "external_runtime_boundary_ids": []
+    },
+    "TEST-002": {
+      "normalization_policy_refs": ["NORM-EXTERNAL-001", "NORM-ENV-001", "NORM-SECURITY-001"],
+      "external_runtime_boundary_ids": ["EXT-JVM-001", "EXT-SERVICE-001", "EXT-TLS-001", "EXT-PLUGIN-001"]
+    },
+    "TEST-004": {
+      "normalization_policy_refs": ["NORM-EXTERNAL-001", "NORM-SECURITY-001", "NORM-TIME-001"],
+      "external_runtime_boundary_ids": ["EXT-RMI-001", "EXT-TLS-001", "EXT-SERVICE-001"]
+    }
+  },
+  "normalization_policy_refs": ["NORM-ENV-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001", "NORM-TIME-001"],
+  "evidence_status": "static-not-run",
+  "source_only": true,
+  "materialization": {
+    "source_fixture_present": true,
+    "oracle_evidence_materialized": false,
+    "observed_run": false
+  },
+  "oracle_execution": {
+    "status": "not-run-static",
+    "invoked": false,
+    "available": false,
+    "outcome": "not-run",
+    "stable_reason_code": "oracle-not-run-static",
+    "reason": "The static corpus does not provision Java, the Apache JMeter archive, a JVM worker, a plugin, a service, a container, or a process.",
+    "developer_action": "skip-with-clear-reason",
+    "release_action": "fail-closed",
+    "rust_only_substitute": false,
+    "process_exit": null,
+    "sample_count": null
+  },
+  "manifest_ref": {
+    "path": "manifest.json",
+    "sha256": "a29f4bc40ebf0920b6cfc0e493c6a976d501a60581932379cbb23c0c4c77b018"
+  },
+  "profile_ref": {
+    "path": "compat/profiles/jmeter-5.6.3.json",
+    "sha256": "83ad63eb679cc16ffe6fa01f5f77e85203602d4d2cbfc311f74db44b6eac9497",
+    "profile_id": "jmeter-5.6.3"
+  },
+  "artifact_verification": {
+    "filename": "apache-jmeter-5.6.3.zip",
+    "algorithm": "SHA-512",
+    "declared_digest": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "digest_sidecar_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "digest_gate_id": "GATE-ARTIFACT-SHA512-001",
+    "sidecar_ref_id": "jmeter-digest-sidecar",
+    "observed_digest": null,
+    "digest_status": "not-run-static",
+    "signature": {
+      "algorithm": "OpenPGP",
+      "signature_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.asc",
+      "keys_url": "https://archive.apache.org/dist/jmeter/KEYS",
+      "required_fingerprint": "C4923F9ABFB2F1A06F08E88BAC214CAA0612B399",
+      "observed_fingerprint": null,
+      "status": "not-run-static",
+      "required_before_execution": true,
+      "gate_id": "GATE-PGP-SIGNATURE-001"
+    },
+    "gate_status": "not-run-static",
+    "release_eligible": false
+  },
+  "identity": {
+    "jmeter_rs_source_commit": null,
+    "source_commit_status": "not-observed-static",
+    "source_hashes": [
+      {"path": "Cargo.toml", "sha256": "d60d2010e4334e0a71feed6e3c655373c48df61354f245c1d828a393a0a75a0a", "role": "workspace manifest", "status": "source-pinned-not-run"},
+      {"path": "Cargo.lock", "sha256": "6ebb1e9b519ca29aa93740743acc45d69268f9776a8c34bee2237aa3d6a3680c", "role": "resolved dependency graph", "status": "source-pinned-not-run"},
+      {"path": "rust-toolchain.toml", "sha256": "a55035e3085a595e4e73637e5f26e0f89f880d61188888da4e7d023f9144ebf3", "role": "pinned Rust toolchain declaration", "status": "source-pinned-not-run"}
+    ],
+    "profile_hash": {
+      "path": "compat/profiles/jmeter-5.6.3.json",
+      "sha256": "83ad63eb679cc16ffe6fa01f5f77e85203602d4d2cbfc311f74db44b6eac9497"
+    }
+  },
+  "toolchain": {
+    "rust": {
+      "channel": "1.97.1",
+      "status": "pinned-not-run",
+      "compiler_version": null,
+      "cargo_version": null,
+      "manifest_sha256": "a55035e3085a595e4e73637e5f26e0f89f880d61188888da4e7d023f9144ebf3",
+      "cargo_lock_sha256": "6ebb1e9b519ca29aa93740743acc45d69268f9776a8c34bee2237aa3d6a3680c"
+    },
+    "java": {
+      "distribution": "temurin",
+      "version": "17.0.20",
+      "architecture": "x64",
+      "status": "declared-not-run",
+      "observed_version": null,
+      "observed_vm": null
+    },
+    "target_triple": null,
+    "os_image": null
+  },
+  "classpath": {
+    "jmeter_distribution_declared_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "jmeter_distribution_observed_sha512": null,
+    "plugin_pins": [],
+    "service_pins": [],
+    "classpath_hashes_observed": false
+  },
+  "environment": {
+    "inherit": false,
+    "allowlist": ["LANG=C", "LC_ALL=C", "TZ=UTC", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"],
+    "observed_allowlist": null,
+    "locale": "en-US",
+    "timezone": "UTC",
+    "charset": "UTF-8",
+    "observed_locale": null,
+    "observed_timezone": null,
+    "observed_charset": null,
+    "source_date_epoch": null,
+    "observed_source_date_epoch": null
+  },
+  "raw_artifacts": {
+    "storage": "outside-git",
+    "root": "oracle-runs/harness/<case-id>/",
+    "present": false,
+    "references": [
+      {"id": "jmeter-archive", "kind": "oracle-archive", "path": "oracle-runs/harness/<case-id>/apache-jmeter-5.6.3.zip", "bound": "max_artifact_bytes", "max_bytes": 134217728, "sha256": null, "present": false, "status": "not-produced-static"},
+      {"id": "jmeter-digest-sidecar", "kind": "sha512-sidecar", "path": "oracle-runs/harness/<case-id>/apache-jmeter-5.6.3.zip.sha512", "bound": "max_raw_artifact_bytes", "max_bytes": 1048576, "sha256": null, "present": false, "status": "not-produced-static"},
+      {"id": "jmeter-signature", "kind": "detached-signature", "path": "oracle-runs/harness/<case-id>/apache-jmeter-5.6.3.zip.asc", "bound": "max_raw_artifact_bytes", "max_bytes": 1048576, "sha256": null, "present": false, "status": "not-produced-static"},
+      {"id": "jmeter-keys", "kind": "openpgp-keyring", "path": "oracle-runs/harness/<case-id>/KEYS", "bound": "max_raw_artifact_bytes", "max_bytes": 4194304, "sha256": null, "present": false, "status": "not-produced-static"},
+      {"id": "oracle-jtl", "kind": "jtl", "path": "oracle-runs/harness/<case-id>/oracle.jtl", "bound": "max_jtl_bytes", "max_bytes": 67108864, "sha256": null, "present": false, "status": "not-produced-static"},
+      {"id": "rust-jtl", "kind": "jtl", "path": "oracle-runs/harness/<case-id>/rust.jtl", "bound": "max_jtl_bytes", "max_bytes": 67108864, "sha256": null, "present": false, "status": "not-produced-static"},
+      {"id": "oracle-log", "kind": "log", "path": "oracle-runs/harness/<case-id>/oracle.log", "bound": "max_log_bytes", "max_bytes": 1048576, "sha256": null, "present": false, "status": "not-produced-static"},
+      {"id": "process-output", "kind": "process-output", "path": "oracle-runs/harness/<case-id>/process-output.txt", "bound": "max_process_output_bytes", "max_bytes": 1048576, "sha256": null, "present": false, "status": "not-produced-static"},
+      {"id": "structured-diff", "kind": "normalized-diff", "path": "oracle-runs/harness/<case-id>/structured-diff.json", "bound": "max_diff_bytes", "max_bytes": 1048576, "sha256": null, "present": false, "status": "not-produced-static"},
+      {"id": "raw-diff", "kind": "raw-diff", "path": "oracle-runs/harness/<case-id>/raw-diff.txt", "bound": "max_raw_diff_bytes", "max_bytes": 1048576, "sha256": null, "present": false, "status": "not-produced-static"},
+      {"id": "human-diff", "kind": "human-diff", "path": "oracle-runs/harness/<case-id>/human-diff.txt", "bound": "max_human_diff_bytes", "max_bytes": 8192, "sha256": null, "present": false, "status": "not-produced-static"},
+      {"id": "runner-metadata", "kind": "environment-metadata", "path": "oracle-runs/harness/<case-id>/runner-metadata.json", "bound": "max_evidence_bytes", "max_bytes": 262144, "sha256": null, "present": false, "status": "not-produced-static"}
+    ]
+  },
+  "comparison": {
+    "status": "not-produced",
+    "structured_diff_schema": "schemas/normalized-diff.schema.json",
+    "structured_diff_reference": null,
+    "raw_diff_reference": null,
+    "human_diff_reference": null,
+    "human_diff_bound": {"bound": "max_human_diff_bytes", "max_bytes": 8192},
+    "normalized_diff": {
+      "schema_id": "jmeter-rs.harness-normalized-diff",
+      "schema_version": 1,
+      "status": "not-produced",
+      "example_only": false,
+      "normalization_policy_refs": ["NORM-ENV-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001", "NORM-TIME-001"],
+      "ignored_fields": [],
+      "ignored_line_patterns": [],
+      "differences": [],
+      "difference_count": null,
+      "raw_reference": null,
+      "retained_outside_git": false
+    },
+    "normalization_policy_refs": ["NORM-ENV-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001", "NORM-TIME-001"],
+    "implicit_normalization": false
+  },
+  "unavailable_outcomes": [
+    {"boundary_id": "EXT-JVM-001", "conformance_ids": ["TEST-002"], "status": "unavailable", "reason_code": "jvm-not-provisioned", "claim": "no Java or JVM behavior is supported by this static document"},
+    {"boundary_id": "EXT-PLUGIN-001", "conformance_ids": ["TEST-002"], "status": "unavailable", "reason_code": "plugin-not-pinned", "claim": "no plugin capability is inferred from an empty classpath"},
+    {"boundary_id": "EXT-SERVICE-001", "conformance_ids": ["TEST-002", "TEST-004"], "status": "unavailable", "reason_code": "service-not-provisioned", "claim": "no protocol service or driver was contacted"},
+    {"boundary_id": "EXT-RMI-001", "conformance_ids": ["TEST-004"], "status": "unavailable", "reason_code": "worker-not-provisioned", "claim": "no distributed worker or RMI endpoint was started"},
+    {"boundary_id": "EXT-TLS-001", "conformance_ids": ["TEST-002", "TEST-004"], "status": "unavailable", "reason_code": "tls-material-not-generated", "claim": "no certificate, key, trust store, or TLS endpoint was generated"}
+  ],
+  "release_conformance": {
+    "eligible": false,
+    "profile_status_change": "none",
+    "required_before_promotion": [
+      "observed jmeter-rs source commit and Cargo.toml, Cargo.lock, and rust-toolchain.toml SHA-256 hashes",
+      "observed archive SHA-512 and a passing GATE-PGP-SIGNATURE-001 signer fingerprint",
+      "exact observed Rust/Cargo/Java/toolchain/platform/classpath/environment metadata",
+      "bounded retained raw JTL/log/process-output and raw diff references outside Git",
+      "fail-closed comparison and exact per-TEST external-boundary results"
+    ]
+  }
+}

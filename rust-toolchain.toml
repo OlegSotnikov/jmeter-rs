@@ -1,0 +1,19 @@
+[toolchain]
+# This is the pinned developer/release compiler. CI selects the separate
+# MSRV, latest-stable, and nightly-tools lanes explicitly with `cargo +...`;
+# none of those channels changes the production toolchain selected here.
+channel = "1.97.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
+targets = [
+  # Decision 0002 profile target compile rows.
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-pc-windows-msvc",
+  "aarch64-pc-windows-msvc",
+  "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
+  # TEST-005 compile-only musl rows; these are not runtime evidence.
+  "x86_64-unknown-linux-musl",
+  "aarch64-unknown-linux-musl",
+]

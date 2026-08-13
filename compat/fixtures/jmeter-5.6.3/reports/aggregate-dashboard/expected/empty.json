@@ -1,0 +1,67 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-REPORT-AGGREGATE-DASHBOARD",
+  "format": "jtl-xml",
+  "source": "inputs/empty.xml",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 0,
+  "input_row_count": 0,
+  "represented_sample_count": 0,
+  "shape_variant": "empty_combined_report_surface",
+  "shape_policy": {
+    "allowed_variants": ["nonempty_report_surface", "empty_combined_report_surface"],
+    "empty_input": "combined listener and dashboard zero projections are retained in one descriptor",
+    "nonempty_input": "listener and dashboard projections are separate expectation documents"
+  },
+  "listener": {
+    "row_order": ["TOTAL"],
+    "total": {
+      "sample_count": 0,
+      "success_count": 0,
+      "error_count": 0,
+      "success_percentage": 0.0,
+      "error_percentage": 0.0,
+      "elapsed_count": 0,
+      "elapsed_min_millis": null,
+      "elapsed_max_millis": null,
+      "elapsed_mean_millis": null,
+      "elapsed_stddev_millis": null,
+      "received_bytes": 0,
+      "sent_bytes": 0,
+      "throughput_per_second": 0.0,
+      "error_throughput_per_second": 0.0,
+      "apdex": {"satisfied": 0, "tolerated": 0, "frustrated": 0, "score": null},
+      "error_counts": [],
+      "top_errors": [],
+      "percentile_sample_count": 0,
+      "percentiles_millis": {"0": null, "50": null, "90": null, "99": null, "100": null}
+    },
+    "graph": {"granularity_millis": 10000, "bucket_order": [], "buckets": []}
+  },
+  "dashboard": {
+    "percentile": "LEGACY",
+    "estimator": "commons_math_legacy_p_times_n_plus_one_clamped_linear",
+    "estimator_property": "report_static.dashboard.percentile_estimator=LEGACY",
+    "percentile_window_limit": 5,
+    "percentile_sample_count": 0,
+    "window_observations_final_in_fifo_order": [],
+    "percentiles": {"0": null, "50": null, "90": null, "99": null, "100": null},
+    "percentiles_millis_rounded": {"0": null, "50": null, "90": null, "99": null, "100": null},
+    "label_order": [],
+    "labels": []
+  },
+  "generated_from": {
+    "generator": "jmeter-rs project, hand-authored static corpus",
+    "generator_version": "repository source",
+    "random_seed": null,
+    "oracle_command": null,
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "none; no Java, JMeter, report generator, or subprocess was invoked"
+  },
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "An empty input is an exact zero-row descriptor. No synthetic sample, elapsed value, label, percentile, APDEX denominator, graph bucket, or error row is fabricated."
+  }
+}

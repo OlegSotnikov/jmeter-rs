@@ -1,0 +1,68 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-REPORT-AGGREGATE-DASHBOARD",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored deterministic XML and CSV JTL-shaped inputs with exact sample_id/suite_id projections, exact listener and dashboard metric descriptors, including an empty stream, weighted StatisticalSampleResult elapsed/count semantics, row-based dashboard statistics, weighted APDEX, error ties, an absent elapsed field, explicit LEGACY estimation, bounded listener elements, and a non-fabricated graph inventory.",
+    "upstream_plan_copied": false
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter is pinned as a future differential oracle; no upstream plan, result, binary, or generated dashboard is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": false,
+    "verification_note": "No artifact was downloaded or executed while authoring this static corpus; the digest is copied from the active profile pin.",
+    "execution_note": "The pinned artifact is recorded for future differential use; no Java, JMeter, report generator, or subprocess execution was performed while authoring this static corpus."
+  },
+  "runtime": {
+    "java": {
+      "vendor": "Ubuntu OpenJDK baseline (not invoked for static corpus)",
+      "version": "17.0.19+10-1-24.04.2-Ubuntu baseline (not invoked)",
+      "vm": "OpenJDK 64-Bit Server VM baseline (not invoked)",
+      "major": 17
+    },
+    "target_triple": "x86_64-unknown-linux-gnu baseline",
+    "os_image": "Ubuntu 24.04 (noble), Linux x86_64 baseline",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "not asserted; static inputs disable host identity",
+    "environment_allowlist": ["LC_ALL=C", "LANG=C", "TZ=UTC"],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "profile-pinned Apache JMeter 5.6.3 distribution (SHA-512 checked; PGP verification required before oracle use) if a future oracle run is enabled",
+    "classpath_artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076"
+  },
+  "inputs": {
+    "plan_sha256": "f66df4807aee9daf2c7211df80f820da9553bd81dc1b34d5bc42063f3992efd2",
+    "property_sha256": "a9ebe901bfd2b5a6aecc11edea96e7ee09dc5bf497a9ed43036ff923a850b6c9",
+    "input_sha256": {
+      "inputs/aggregate.xml": "fe4dbf2171c156484e92ebd9fa9d05ada7ec2bfbb4cc8c5764cfd148a2e2b05d",
+      "inputs/aggregate.csv": "0883f847cd0d1a1240a64c7de7b30c0fa57551cfd40d897f4ef746ca05362104",
+      "inputs/empty.xml": "aa45b8267d95fa0e433e37fa29cc9372a10f7156196849e2909a2c51c43b1f00"
+    },
+    "expected_sha256": {
+      "expected/input-xml.json": "463a180ac2c6f262af298ccfb017158037ef67b1134889161f221661a26baaf8",
+      "expected/input-csv.json": "d59d0cd2b4f169890a8b59ece8cf47bd8b6a154b6b367a8e2236ed0fe06b663f",
+      "expected/listener.json": "996cf5ceeadbdcf43b3040d39b7735b9977bf1b5df427909b2b9910538d6c9bd",
+      "expected/dashboard.json": "99ed8ef500bfc6cff6609082e30b406c0f78b453d04426e0443428cee0449782",
+      "expected/empty.json": "19cc9830d25f3afd482f360fe12df87acac21bb8a2fd72f81e3cb769d8b76ffa"
+    },
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  }
+}

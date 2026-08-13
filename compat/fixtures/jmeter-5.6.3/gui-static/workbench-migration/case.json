@@ -1,0 +1,133 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-GUI-STATIC-WORKBENCH-MIGRATION",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-GUI-001",
+  "conformance_ids": ["GUI-001", "GUI-002"],
+  "external_runtime_boundary_ids": ["EXT-JVM-001", "EXT-OS-001"],
+  "normalization_policy_refs": ["NORM-JMX-001", "NORM-STRUCTURE-001", "NORM-EXTERNAL-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "7d8120bab3610758591f6ffab31ac50d013592640d33c0c0ea62bd218a060eee"
+  },
+  "property_files": [
+    {
+      "path": "../guiclass-roundtrip/oracle.properties",
+      "sha256": "fde3045521fc7c915b51e0320bf57ea55e93a0f1135d7fc420886421b8e04f71"
+    }
+  ],
+  "inputs": [
+    {
+      "path": "plan.jmx",
+      "sha256": "7d8120bab3610758591f6ffab31ac50d013592640d33c0c0ea62bd218a060eee"
+    },
+    {
+      "path": "../guiclass-roundtrip/oracle.properties",
+      "sha256": "fde3045521fc7c915b51e0320bf57ea55e93a0f1135d7fc420886421b8e04f71"
+    },
+    {
+      "path": "expected/semantic.json",
+      "sha256": "023978149621636c4fd6c8d7e92f361b70822b84377b9c6a50a452d03de275fd"
+    }
+  ],
+  "command": {
+    "working_directory": "<temporary-root>/workspace/workbench-migration",
+    "workspace_root": "<temporary-root>/workspace/workbench-migration",
+    "output_root": "<temporary-root>/oracle-runs/gui-static/workbench-migration",
+    "gui_save_as_destination": "<temporary-root>/oracle-runs/gui-static/workbench-migration/saved-plan.jmx",
+    "working_directory_by_template": [
+      "<temporary-root>/workspace/workbench-migration",
+      "<temporary-root>/workspace/workbench-migration"
+    ],
+    "path_policy": {
+      "copy_inputs_to_workspace": true,
+      "generated_outputs_root": "<temporary-root>/oracle-runs/gui-static/workbench-migration",
+      "static_corpus_writes": "forbidden",
+      "path_expansion": "Expand <temporary-root> once to a fresh absolute root before launching; do not resolve relative to this fixture directory."
+    },
+    "mode": "gui; future only",
+    "argv_templates": [
+      ["jmeter", "-d", "<temporary-root>/jmeter-home", "-q", "<temporary-root>/workspace/workbench-migration/oracle.properties", "-j", "<temporary-root>/oracle-runs/gui-static/workbench-migration/gui.log", "-t", "<temporary-root>/workspace/workbench-migration/plan.jmx"],
+      ["jmeter", "-d", "<temporary-root>/jmeter-home", "-q", "<temporary-root>/workspace/workbench-migration/oracle.properties", "-n", "-t", "<temporary-root>/oracle-runs/gui-static/workbench-migration/saved-plan.jmx", "-l", "<temporary-root>/oracle-runs/gui-static/workbench-migration/saved.jtl", "-j", "<temporary-root>/oracle-runs/gui-static/workbench-migration/saved.log"]
+    ],
+    "network": "none",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null,
+    "launcher_environment": {
+      "JMETER_LANGUAGE": "-Duser.language=en -Duser.region=US"
+    },
+    "jvm_system_properties": {
+      "user.language": "en",
+      "user.region": "US",
+      "user.timezone": "UTC",
+      "file.encoding": "UTF-8",
+      "java.util.prefs.userRoot": "<temporary-root>/prefs/workbench-migration"
+    },
+    "pre_launch": {
+      "materialize_tokens": {
+        "<temporary-root>": "fresh allowlisted temporary root"
+      },
+      "materialize_inputs": [
+        {
+          "source": "plan.jmx",
+          "destination": "<temporary-root>/workspace/workbench-migration/plan.jmx",
+          "copy_only": true
+        },
+        {
+          "source": "../guiclass-roundtrip/oracle.properties",
+          "destination": "<temporary-root>/workspace/workbench-migration/oracle.properties",
+          "copy_only": true
+        }
+      ],
+      "preferences": {
+        "user_root": "<temporary-root>/prefs/workbench-migration",
+        "fresh_root_per_run": true,
+        "clear_before_run": true
+      },
+      "required": [
+        "Set java.util.prefs.userRoot before JVM startup; no ambient preferences are permitted.",
+        "Use the pinned JMeter 5.6.3 source behavior for JMeterTreeModel.addSubTree; do not infer migration from XML alone."
+      ]
+    }
+  },
+  "bounds": {
+    "schema_id": "jmeter-rs.fixture-bounds",
+    "schema_version": 1,
+    "enforcement": "declared; static-only; future runner must enforce",
+    "comparator_enforced": false,
+    "max_plan_bytes": 65536,
+    "max_plan_nodes": 16,
+    "max_plan_depth": 6,
+    "max_property_text_bytes": 4096,
+    "max_property_count_per_element": 16,
+    "max_backup_files": 10,
+    "max_backup_name_bytes": 96,
+    "max_template_files": 4,
+    "max_template_entries": 64,
+    "max_toolbar_entries": 64,
+    "max_icon_resource_bytes": 65536,
+    "max_output_bytes": 65536,
+    "max_log_bytes": 65536,
+    "max_gui_wait_seconds": 30
+  },
+  "future_oracle_actions": [
+    "Materialize plan.jmx and the copied property file under workspace_root, set the fresh preference root, launch the GUI, and save-as to <temporary-root>/oracle-runs/gui-static/workbench-migration/saved-plan.jmx without writing into the static corpus.",
+    "Compare the saved tree: the non-empty WorkBench is absent as a root sibling and its Arguments child is under a disabled TestFragmentController named WorkBench Test Fragment.",
+    "Run the second argv template only as a headless parser diagnostic; no enabled sampler or network operation is present."
+  ],
+  "execution": {
+    "status": "static-only; oracle not executed",
+    "process_exit": null,
+    "sample_count": null,
+    "raw_artifacts": "<temporary-root>/oracle-runs/gui-static/workbench-migration/ (ignored; no artifacts committed)",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "The non-empty WorkBench plan is hand-authored original XML and is not a GUI-produced upstream file.",
+    "No Java, Apache JMeter, JVM, GUI display server, or subprocess was invoked.",
+    "The migration descriptor is a pinned source-derived expectation, not an observed saved JMX."
+  ]
+}

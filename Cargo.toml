@@ -1,0 +1,50 @@
+[workspace]
+resolver = "3"
+members = [
+    "apps/jmeter-rs",
+    "crates/model",
+    "crates/jmx",
+    "crates/expr",
+    "crates/runtime",
+    "crates/results",
+    "crates/http",
+    "crates/report",
+    "crates/remote",
+    "crates/bridge-protocol",
+    "crates/java-bridge",
+    "crates/plugin-host",
+    "crates/observe",
+    "crates/test-support",
+    "crates/process-supervision",
+    "tools/jmeter-oracle",
+    "tools/xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+authors = ["Oleg Sotnikov"]
+license = "Apache-2.0"
+repository = "https://github.com/OlegSotnikov/jmeter-rs"
+description = "Independent Rust implementation scaffold for Apache JMeter compatibility"
+publish = false
+
+[workspace.lints.rust]
+# The shared process supervisor contains one audited, target-specific Windows
+# FFI module. Every other crate keeps the lint enabled and must opt in at the
+# narrowest module boundary; no crate may add a broad unsafe escape hatch.
+unsafe_code = "deny"
+missing_docs = "warn"
+# `rust_2018_idioms` is a lint group. Keep it below individual lint entries
+# so Clippy's lint-group-priority check is deterministic regardless of table
+# ordering (Cargo does not use declaration order for lint precedence).
+rust_2018_idioms = { level = "deny", priority = -1 }
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "deny"
+unimplemented = "deny"

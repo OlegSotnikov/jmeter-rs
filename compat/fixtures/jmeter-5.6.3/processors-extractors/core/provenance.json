@@ -1,0 +1,88 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-ELEM-008-PROCESSORS-EXTRACTORS-CORE",
+  "origin": {
+    "kind": "original-static-fixture",
+    "author": "jmeter-rs compatibility corpus",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored bounded ELEM-008 processor/extractor wire contract using pinned 5.6.3 source/API documentation and local response inputs.",
+    "upstream_plan_copied": false
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "Original project fixture; SPDX header/notice applies.",
+    "upstream_distribution_use": "Read-only source/API semantics and property aliases from the pinned Apache JMeter 5.6.3 distribution; no upstream plan, binary, result, or source file is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": null,
+    "sha512_verified_before_execution": false
+  },
+  "runtime": {
+    "java": {"vendor": null, "version": null, "major": null, "vm": null},
+    "target_triple": null,
+    "os_image": null,
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "not-applicable-static-only",
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "environment_allowlist": ["LC_ALL=C", "LANG=C", "TZ=UTC"],
+    "jmeter_classpath": null
+  },
+  "inputs": {
+    "plan_path": "plan.jmx",
+    "plan_sha256": "902b05bb151d94e7a91fe6d71fff7cbc8587e60989a93bb6699728a84759083e",
+    "property_path": "property.properties",
+    "property_sha256": "bfa52bab0f19bed828efb154bba1abb14bef624efef126698b7b5615ca053d63",
+    "response_corpus_sha256": {
+      "inputs/response-html.html": "79877a1e8895dc8b667d71c9e9229ab38c7c6d76a7821580e68bc2dec892f4e4",
+      "inputs/response-json.payload": "458c174a725103bdb76bce97afabc55bbc71326580b6dc2a7c4adf5fc67e586e",
+      "inputs/response-xml.xml": "8dfa6fffba08276f19e93b41e66cbfe71d1ea10803cb9721da76b9c2f342c5d7",
+      "inputs/response-text.txt": "32970d50e154e338af6ed9d38f0c290f34dbddf8dd9211fb9fd0c65011fd9e4e",
+      "inputs/response-headers.txt": "6222af8439c395ab23b88bb55ea39f21986e99428f26ffbe6a508bb00eb79430",
+      "inputs/response-malformed.payload": "7aa774e640a6916e1be48d360a8f9953fdee3079bb5c52276b584acc70f6ccda",
+      "inputs/response-empty.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "variables_path": "inputs/variables.properties",
+    "variables_sha256": "afda47718ef4a8f5ef17e73ca780d0738abe1390f527f6627d5798706e0415f4",
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  },
+  "bounds": {
+    "max_response_bytes": 4096,
+    "max_variable_count": 64,
+    "max_variable_value_bytes": 4096,
+    "max_extractor_matches": 32,
+    "max_json_path_expressions": 8,
+    "max_regex_input_bytes": 4096,
+    "max_regex_steps": 4096,
+    "max_regex_capture_groups": 8,
+    "max_plan_nodes": 80,
+    "max_plan_depth": 8
+  },
+  "source_references": [
+    {"path": "docs/architecture.md", "sha256": "37295bd9ad0e59cbcec25e200b4b794e5bb1126888aebbfbc94a4a874918fa47", "role": "execution phases, ordered topology, no-drop policy"},
+    {"path": "docs/research/compatibility-surface.md", "sha256": "229d15fc02c0bbf2e528b9225c978ae3b98f7c49df3cd85e654b3a5709de97bb", "role": "processor/extractor inventory and variable semantics"},
+    {"path": "docs/research/upstream-semantics.md", "sha256": "81add4a5eb1f36e17d7a43219991c384763c902655087f2de71cf0d7583febcd", "role": "pipeline, scope, disabled and unknown behavior"},
+    {"path": "compat/README.md", "sha256": "b84e08f527c05436250227d1d52e5de0ce1d6f3d109fa1fcb4a9d3d1c8cd9d5c", "role": "fixture evidence and validation contract"},
+    {"path": "compat/profiles/jmeter-5.6.3.json", "sha256": "83ad63eb679cc16ffe6fa01f5f77e85203602d4d2cbfc311f74db44b6eac9497", "role": "active profile and ELEM-008 pin"}
+  ],
+  "status": "not-run-static",
+  "oracle_observation": {
+    "status": "unobserved",
+    "process_exit": null,
+    "response_values": "unobserved",
+    "variable_snapshots": "candidate-only",
+    "raw_artifacts": "none"
+  }
+}

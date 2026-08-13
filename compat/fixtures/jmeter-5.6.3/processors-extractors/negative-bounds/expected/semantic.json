@@ -1,0 +1,190 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-ELEM-008-PROCESSORS-EXTRACTORS-NEGATIVE-BOUNDS",
+  "format": "jmx-semantic",
+  "evidence_status": "not-run-static",
+  "rust_conformance_claim": false,
+  "expectation_basis": "Original bounded negative corpus derived from JMeter 5.6.3 extractor source contracts. Invalid values, empty inputs, and parser failures remain candidate outcomes; no Java exception or match value is fabricated.",
+  "source": {
+    "kind": "original-static-declarative-descriptor",
+    "oracle_status": "not-run",
+    "runtime_executed": false,
+    "materialization": "case.materialization binds the local empty and malformed corpus entries to isolated negative-node runs; diagnostics and variable values remain unobserved"
+  },
+  "root": {
+    "element": "jmeterTestPlan",
+    "version": "1.2",
+    "properties": "5.0",
+    "jmeter": "5.6.3",
+    "attributes": {"version": "1.2", "properties": "5.0", "jmeter": "5.6.3"},
+    "ordered_children": ["hashTree"]
+  },
+  "ordered_hash_tree_pairs": [
+    {
+      "position": 0,
+      "element": {"tag": "TestPlan", "guiclass": "TestPlanGui", "testclass": "TestPlan", "testname": "ELEM-008 negative and bounds corpus", "enabled": "true"},
+      "hash_tree_children": ["ThreadGroup"]
+    },
+    {
+      "position": 1,
+      "element": {"tag": "ThreadGroup", "guiclass": "ThreadGroupGui", "testclass": "ThreadGroup", "testname": "One bounded user", "enabled": "true"},
+      "hash_tree_children": ["DebugSampler"]
+    },
+    {
+      "position": 2,
+      "element": {"tag": "DebugSampler", "guiclass": "TestBeanGUI", "testclass": "DebugSampler", "testname": "Empty and malformed response carrier", "enabled": "true"},
+      "hash_tree_children": ["SampleTimeout", "RegexExtractor", "BoundaryExtractor", "HtmlExtractor", "XPathExtractor", "JSONPostProcessor", "JMESPathExtractor", "RegexExtractor", "PluginPostProcessor"]
+    },
+    {
+      "position": 3,
+      "element": {"tag": "SampleTimeout", "guiclass": "TestBeanGUI", "testclass": "SampleTimeout", "testname": "Minimum non-zero timeout", "enabled": "true", "property_order": ["InterruptTimer.timeout"], "wire_properties": {"InterruptTimer.timeout": "1"}},
+      "hash_tree_children": []
+    },
+    {
+      "position": 4,
+      "element": {"tag": "RegexExtractor", "guiclass": "RegexExtractorGui", "testclass": "RegexExtractor", "testname": "Invalid match number", "enabled": "true", "property_order": ["RegexExtractor.useHeaders", "RegexExtractor.refname", "RegexExtractor.regex", "RegexExtractor.template", "RegexExtractor.default", "RegexExtractor.match_number"], "wire_properties": {"RegexExtractor.useHeaders": "false", "RegexExtractor.refname": "invalid_match", "RegexExtractor.regex": "(value)", "RegexExtractor.template": "$1$", "RegexExtractor.default": "INVALID_MATCH_DEFAULT", "RegexExtractor.match_number": "not-an-integer"}},
+      "hash_tree_children": []
+    },
+    {
+      "position": 5,
+      "element": {"tag": "BoundaryExtractor", "guiclass": "BoundaryExtractorGui", "testclass": "BoundaryExtractor", "testname": "Empty boundaries", "enabled": "true", "property_order": ["BoundaryExtractor.refname", "BoundaryExtractor.lboundary", "BoundaryExtractor.rboundary", "BoundaryExtractor.match_number", "BoundaryExtractor.default", "BoundaryExtractor.default_empty_value", "BoundaryExtractor.useHeaders"], "wire_properties": {"BoundaryExtractor.refname": "empty_boundary", "BoundaryExtractor.lboundary": "", "BoundaryExtractor.rboundary": "", "BoundaryExtractor.match_number": "0", "BoundaryExtractor.default": "BOUNDARY_DEFAULT", "BoundaryExtractor.default_empty_value": true, "BoundaryExtractor.useHeaders": "false"}},
+      "hash_tree_children": []
+    },
+    {
+      "position": 6,
+      "element": {"tag": "HtmlExtractor", "guiclass": "HtmlExtractorGui", "testclass": "HtmlExtractor", "testname": "Empty selector and default", "enabled": "true", "property_order": ["HtmlExtractor.extractor_impl", "HtmlExtractor.attribute", "HtmlExtractor.expr", "HtmlExtractor.refname", "HtmlExtractor.match_number", "HtmlExtractor.default", "HtmlExtractor.default_empty_value"], "wire_properties": {"HtmlExtractor.extractor_impl": "JSOUP", "HtmlExtractor.attribute": "missing-attribute", "HtmlExtractor.expr": ":not-a-selector", "HtmlExtractor.refname": "empty_css", "HtmlExtractor.match_number": "0", "HtmlExtractor.default": "CSS_DEFAULT", "HtmlExtractor.default_empty_value": true}},
+      "hash_tree_children": []
+    },
+    {
+      "position": 7,
+      "element": {"tag": "XPathExtractor", "guiclass": "XPathExtractorGui", "testclass": "XPathExtractor", "testname": "Malformed XPath", "enabled": "true", "property_order": ["XPathExtractor.xpathQuery", "XPathExtractor.refname", "XPathExtractor.default", "XPathExtractor.tolerant", "XPathExtractor.namespace", "XPathExtractor.report_errors", "XPathExtractor.show_warnings", "XPathExtractor.quiet", "XPathExtractor.fragment", "XPathExtractor.whitespace", "XPathExtractor.validate", "XPathExtractor.download_dtds", "XPathExtractor.matchNumber"], "wire_properties": {"XPathExtractor.xpathQuery": "//*[", "XPathExtractor.refname": "invalid_xpath", "XPathExtractor.default": "XPATH_DEFAULT", "XPathExtractor.tolerant": false, "XPathExtractor.namespace": false, "XPathExtractor.report_errors": true, "XPathExtractor.show_warnings": true, "XPathExtractor.quiet": false, "XPathExtractor.fragment": false, "XPathExtractor.whitespace": true, "XPathExtractor.validate": false, "XPathExtractor.download_dtds": false, "XPathExtractor.matchNumber": "0"}},
+      "hash_tree_children": []
+    },
+    {
+      "position": 8,
+      "element": {"tag": "JSONPostProcessor", "guiclass": "JSONPostProcessorGui", "testclass": "JSONPostProcessor", "testname": "Mismatched JSON extractor arguments", "enabled": "true", "property_order": ["JSONPostProcessor.jsonPathExprs", "JSONPostProcessor.referenceNames", "JSONPostProcessor.defaultValues", "JSONPostProcessor.compute_concat", "JSONPostProcessor.match_numbers"], "wire_properties": {"JSONPostProcessor.jsonPathExprs": "$.items[*].name;$.missing", "JSONPostProcessor.referenceNames": "json_only_one", "JSONPostProcessor.defaultValues": "JSON_DEFAULT", "JSONPostProcessor.compute_concat": false, "JSONPostProcessor.match_numbers": "0;1"}},
+      "hash_tree_children": []
+    },
+    {
+      "position": 9,
+      "element": {"tag": "JMESPathExtractor", "guiclass": "JMESPathExtractorGui", "testclass": "JMESPathExtractor", "testname": "Malformed JMESPath", "enabled": "true", "property_order": ["JMESExtractor.jmesPathExpr", "JMESExtractor.referenceName", "JMESExtractor.defaultValue", "JMESExtractor.matchNumber"], "wire_properties": {"JMESExtractor.jmesPathExpr": "items[", "JMESExtractor.referenceName": "invalid_jmes", "JMESExtractor.defaultValue": "JMES_DEFAULT", "JMESExtractor.matchNumber": "9"}},
+      "hash_tree_children": []
+    },
+    {
+      "position": 10,
+      "element": {"tag": "RegexExtractor", "guiclass": "RegexExtractorGui", "testclass": "RegexExtractor", "testname": "Disabled oversized-output probe", "enabled": "false", "property_order": ["RegexExtractor.useHeaders", "RegexExtractor.refname", "RegexExtractor.regex", "RegexExtractor.template", "RegexExtractor.default", "RegexExtractor.match_number"], "wire_properties": {"RegexExtractor.useHeaders": "false", "RegexExtractor.refname": "bounded_output", "RegexExtractor.regex": "(.{0,65536})", "RegexExtractor.template": "$1$", "RegexExtractor.default": "BOUNDED_DEFAULT", "RegexExtractor.match_number": "-1"}},
+      "hash_tree_children": []
+    },
+    {
+      "position": 11,
+      "element": {"tag": "PluginPostProcessor", "guiclass": "com.example.jmeter.PluginPostProcessorGui", "testclass": "com.example.jmeter.PluginPostProcessor", "testname": "Disabled unknown error probe", "enabled": "false", "extra_attributes": {"pluginVersion": "0.1"}, "property_order": ["plugin.error_mode", "plugin.opaque"], "wire_properties": {"plugin.error_mode": "must-preserve", "plugin.opaque": "unknown processor bytes"}, "opaque": true},
+      "hash_tree_children": []
+    }
+  ],
+  "negative_contracts": [
+    {
+      "id": "invalid-match-number",
+      "plan_node": "RegexExtractor",
+      "input": "not-an-integer",
+      "expected": "typed configuration error or exact pinned component diagnostic; never silently coerce to zero",
+      "observed": false
+    },
+    {
+      "id": "empty-boundaries",
+      "plan_node": "BoundaryExtractor",
+      "input": {"lboundary": "", "rboundary": "", "default_empty_value": true},
+      "expected": "source preserves empty boundaries and explicit empty-default policy; output is unobserved",
+      "observed": false
+    },
+    {
+      "id": "empty-css-selection",
+      "plan_node": "HtmlExtractor",
+      "input": {"expr": ":not-a-selector", "default_empty_value": true},
+      "expected": "typed selector/parser outcome or configured empty default; no fabricated match",
+      "observed": false
+    },
+    {
+      "id": "malformed-xpath",
+      "plan_node": "XPathExtractor",
+      "input": "//*[",
+      "expected": "typed XPath parser error with report_errors policy retained; no exception text asserted",
+      "observed": false
+    },
+    {
+      "id": "json-argument-cardinality",
+      "plan_node": "JSONPostProcessor",
+      "input": {"jsonPathExprs": 2, "referenceNames": 1, "defaultValues": 1, "match_numbers": 2},
+      "expected": "explicit argument-count mismatch; no silent positional truncation",
+      "observed": false
+    },
+    {
+      "id": "malformed-jmespath",
+      "plan_node": "JMESPathExtractor",
+      "input": "items[",
+      "expected": "typed JMESPath parser error; no default promoted to observed success",
+      "observed": false
+    },
+    {
+      "id": "empty-response",
+      "input": "no response bytes are materialized by this case",
+      "expected": "extractors receive explicit empty-source state; output variables remain unobserved",
+      "observed": false
+    },
+    {
+      "id": "disabled-unknown-plugin",
+      "plan_node": "PluginPostProcessor",
+      "expected": "retain unknown tag/attributes/opaque descendants and return explicit unsupported capability when enabled",
+      "observed": false
+    }
+  ],
+  "source_wire_contract": {
+    "ordered_tags": ["SampleTimeout", "RegexExtractor", "BoundaryExtractor", "HtmlExtractor", "XPathExtractor", "JSONPostProcessor", "JMESPathExtractor", "PluginPostProcessor"],
+    "disabled_nodes_remain_serialized": true,
+    "unknown_property_policy": "no-drop",
+    "no_silent_fallback": true
+  },
+  "response_corpus": [
+    {"id": "empty", "path": "inputs/response-empty.txt", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "media_type": "application/octet-stream", "status": "candidate-empty-input", "max_bytes": 0},
+    {"id": "malformed", "path": "inputs/response-malformed.payload", "sha256": "7aa774e640a6916e1be48d360a8f9953fdee3079bb5c52276b584acc70f6ccda", "media_type": "application/json", "status": "candidate-error-input", "max_bytes": 256}
+  ],
+  "variable_snapshots": [
+    {
+      "phase": "postprocessors",
+      "scope": "thread",
+      "status": "candidate-unobserved",
+      "names": ["invalid_match", "empty_boundary", "empty_css", "invalid_xpath", "json_only_one", "invalid_jmes", "bounded_output"],
+      "values": null,
+      "reason": "Negative paths intentionally stop at typed error/default contracts; no output is observed"
+    }
+  ],
+  "resource_limits": {
+    "max_threads": 1,
+    "max_iterations": 1,
+    "max_samples": 1,
+    "max_plan_nodes": 48,
+    "max_plan_depth": 8,
+    "max_response_bytes": 4096,
+    "max_variable_count": 32,
+    "max_variable_value_bytes": 4096,
+    "max_extractor_matches": 16,
+    "max_json_path_expressions": 4,
+    "max_regex_input_bytes": 4096,
+    "max_regex_steps": 4096,
+    "max_regex_capture_groups": 8,
+    "max_process_wait_seconds": 30,
+    "network": "none"
+  },
+  "generated_from": {
+    "generator": "original static fixture authoring",
+    "generator_version": "not applicable",
+    "oracle_execution": "not run; no Java/JMeter process or parser was invoked",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "none; no oracle output is committed"
+  },
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.ts", "sample.by", "runtime_exception_text", "candidate_unobserved_values"],
+    "reason": "Static negative and resource contracts retain every configured input while leaving runtime diagnostics and values unobserved."
+  }
+}

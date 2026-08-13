@@ -1,0 +1,141 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-GUI-STATIC-PLUGIN-EDITOR",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-GUI-001",
+  "conformance_ids": ["GUI-001"],
+  "external_runtime_boundary_ids": ["EXT-JVM-001", "EXT-PLUGIN-001", "EXT-OS-001"],
+  "normalization_policy_refs": ["NORM-JMX-001", "NORM-STRUCTURE-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "024a128909013a8ca6546b11fefe980f66a1a3dab829cb82e137b5258bc4f5f6"
+  },
+  "property_files": [
+    {
+      "path": "plugin-editor.properties",
+      "sha256": "b835ca6e4da5beafa1cf9b70fa36605bd3716b2ec3946a0957e0dc271d03c9d8"
+    }
+  ],
+  "inputs": [
+    {
+      "path": "plan.jmx",
+      "sha256": "024a128909013a8ca6546b11fefe980f66a1a3dab829cb82e137b5258bc4f5f6"
+    },
+    {
+      "path": "plugin-editor.properties",
+      "sha256": "b835ca6e4da5beafa1cf9b70fa36605bd3716b2ec3946a0957e0dc271d03c9d8"
+    },
+    {
+      "path": "expected/semantic.json",
+      "sha256": "be42ff78d3f07513566fde5946ce2431b2c83d594e461d109d02363c8b24e9cd"
+    }
+  ],
+  "command": {
+    "working_directory": "<temporary-root>/workspace/plugin-editor-contract",
+    "workspace_root": "<temporary-root>/workspace/plugin-editor-contract",
+    "output_root": "<temporary-root>/oracle-runs/gui-static/plugin-editor-contract",
+    "path_policy": {
+      "copy_inputs_to_workspace": true,
+      "generated_outputs_root": "<temporary-root>/oracle-runs/gui-static/plugin-editor-contract",
+      "static_corpus_writes": "forbidden",
+      "path_expansion": "Expand <temporary-root> once to a fresh absolute root; never resolve relative to this fixture directory."
+    },
+    "mode": "gui; future only",
+    "argv_templates": [
+      ["jmeter", "-d", "<temporary-root>/jmeter-home", "-q", "<temporary-root>/workspace/plugin-editor-contract/plugin-editor.properties", "-j", "<temporary-root>/oracle-runs/gui-static/plugin-editor-contract/gui.log", "-t", "<temporary-root>/workspace/plugin-editor-contract/plan.jmx"],
+      ["jmeter", "-d", "<temporary-root>/jmeter-home", "-q", "<temporary-root>/workspace/plugin-editor-contract/plugin-editor.properties", "-n", "-t", "<temporary-root>/oracle-runs/gui-static/plugin-editor-contract/saved-plan.jmx", "-l", "<temporary-root>/oracle-runs/gui-static/plugin-editor-contract/saved.jtl", "-j", "<temporary-root>/oracle-runs/gui-static/plugin-editor-contract/saved.log"]
+    ],
+    "network": "none",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null,
+    "launcher_environment": {
+      "JMETER_LANGUAGE": "-Duser.language=en -Duser.region=US"
+    },
+    "jvm_system_properties": {
+      "user.language": "en",
+      "user.region": "US",
+      "user.timezone": "UTC",
+      "file.encoding": "UTF-8",
+      "java.util.prefs.userRoot": "<temporary-root>/prefs/plugin-editor-contract"
+    },
+    "pre_launch": {
+      "materialize_tokens": {
+        "<temporary-root>": "fresh allowlisted temporary root"
+      },
+      "materialize_inputs": [
+        {"source": "plan.jmx", "destination": "<temporary-root>/workspace/plugin-editor-contract/plan.jmx", "copy_only": true},
+        {"source": "plugin-editor.properties", "destination": "<temporary-root>/workspace/plugin-editor-contract/plugin-editor.properties", "copy_only": true}
+      ],
+      "preferences": {
+        "user_root": "<temporary-root>/prefs/plugin-editor-contract",
+        "fresh_root_per_run": true,
+        "clear_before_run": true
+      },
+      "plugin_identity": {
+        "positive_provisioning": "planned; exact synthetic plugin class/gui-class identity, source, version, license, and artifact hashes must be supplied by a future pinned run",
+        "missing_provisioning": "planned; omit the declared plugin identity and require typed unavailable behavior",
+        "native_fallback": "forbidden"
+      },
+      "required": [
+        "The positive route may load only the exact declared plugin editor capability; no native or unrelated plugin-host fallback is allowed.",
+        "The unavailable route must return runtime.capability.unsupported and leave the original plugin subtree opaque and round-trippable.",
+        "Set java.util.prefs.userRoot before JVM startup and never inherit ambient preferences."
+      ]
+    }
+  },
+  "bounds": {
+    "schema_id": "jmeter-rs.fixture-bounds",
+    "schema_version": 1,
+    "enforcement": "declared; static-only; future runner must enforce",
+    "comparator_enforced": false,
+    "max_plan_bytes": 65536,
+    "max_plan_nodes": 8,
+    "max_plan_depth": 4,
+    "max_property_text_bytes": 8192,
+    "max_property_count_per_element": 16,
+    "max_backup_files": 0,
+    "max_template_files": 4,
+    "max_toolbar_entries": 16,
+    "max_output_bytes": 65536,
+    "max_log_bytes": 65536,
+    "max_gui_wait_seconds": 30
+  },
+  "plugin_editor_scenarios": [
+    {
+      "id": "positive_plugin_editor",
+      "plugin_identity": "synthetic original org.example.jmeter.rs.GuiEditorProbe",
+      "capability": "gui.plugin.editor",
+      "expected": "planned editor load/save preserves class, gui-class, property order, and opaque values",
+      "status": "planned; not observed"
+    },
+    {
+      "id": "unavailable_plugin_editor",
+      "plugin_identity": "intentionally absent",
+      "capability": "gui.plugin.editor",
+      "expected_error_code": "runtime.capability.unsupported",
+      "expected_exit_class": "capability.unavailable",
+      "expected": "typed unavailable result with no native fallback and no source subtree loss",
+      "status": "planned; not observed"
+    }
+  ],
+  "future_oracle_actions": [
+    "Run positive_plugin_editor only with a separately pinned, original synthetic plugin artifact and exact JVM/classpath/plugin identity manifest; record the GUI editor load/save observation outside Git.",
+    "Run unavailable_plugin_editor with the plugin identity absent; require runtime.capability.unsupported and compare the untouched opaque subtree against plan.jmx.",
+    "Run the headless parser diagnostic only after the GUI route; it must preserve both plugin class attributes and both unknown string properties without executing the disabled element."
+  ],
+  "execution": {
+    "status": "static-only; oracle not executed",
+    "process_exit": null,
+    "sample_count": null,
+    "raw_artifacts": "<temporary-root>/oracle-runs/gui-static/plugin-editor-contract/ (ignored; no artifacts committed)",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "This is an original synthetic plugin-editor declaration; no upstream plugin, JAR, source, or GUI output is copied.",
+    "No Java, Apache JMeter, JVM, plugin, GUI display server, or subprocess was invoked.",
+    "Positive and unavailable routes are planned contracts only; the static descriptor is not plugin or GUI evidence."
+  ]
+}

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testResults version="1.2">
+  <httpSample t="42" it="3" lt="7" ct="11" ts="1700000000123" s="false" lb="GET /a?x=1&amp;y=2" rc="500" rm="Internal &amp; ready" tn="thread-1" dt="text" de="UTF-8" by="123" sby="9" sc="1" ec="1" ng="2" na="3" hn="host-a" case_id="jtl-fields" comma_value="left,right" quote_value="a &quot;quoted&quot; value">
+    <assertionResult>
+      <name>header &amp; body</name>
+      <failure>false</failure>
+      <error>false</error>
+    </assertionResult>
+    <assertionResult>
+      <name>missing needle</name>
+      <failure>true</failure>
+      <error>false</error>
+      <failureMessage>expected &quot;needle&quot; in body, line 1</failureMessage>
+    </assertionResult>
+    <httpSample t="13" it="0" lt="2" ct="4" ts="1700000000100" s="true" lb="redirect child" rc="302" rm="Found" tn="thread-1" dt="text" de="UTF-8" by="18" sby="0" sc="1" ec="0" case_id="jtl-fields">
+      <assertionResult>
+        <name>child check</name>
+        <failure>false</failure>
+        <error>false</error>
+      </assertionResult>
+      <sample t="2" it="0" lt="0" ct="0" ts="1700000000101" s="true" lb="leaf" rc="200" rm="OK" tn="thread-1" dt="text" de="UTF-8" by="4" sby="0" sc="1" ec="0">
+        <samplerData class="java.lang.String">leaf request</samplerData>
+      </sample>
+      <responseHeader class="java.lang.String">Location: /next</responseHeader>
+    </httpSample>
+    <responseHeader class="java.lang.String">Content-Type: text/plain
+X-Trace: a&amp;b</responseHeader>
+    <requestHeader class="java.lang.String">X-Test: &quot;quoted&quot;
+Accept: text/plain</requestHeader>
+    <responseData class="java.lang.String">JMeterVariables:
+case_id=jtl-fields
+comma_value=left,right</responseData>
+    <samplerData class="java.lang.String">GET /a?x=1&amp;y=2 HTTP/1.1
+Host: example.invalid</samplerData>
+    <java.net.URL>https://example.invalid/a?x=1&amp;y=2</java.net.URL>
+  </httpSample>
+  <sample t="9" it="0" lt="0" ct="0" ts="1700000000200" s="true" lb="standalone" rc="200" rm="OK" tn="thread-1" dt="text" de="UTF-8" by="0" sby="0" sc="1" ec="0"/>
+</testResults>

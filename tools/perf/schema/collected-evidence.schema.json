@@ -1,0 +1,391 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/OlegSotnikov/jmeter-rs/blob/main/tools/perf/schema/collected-evidence.schema.json",
+  "x-schema-id": "jmeter-rs.perf-collected-evidence",
+  "x-schema-version": 2,
+  "title": "Collected performance evidence (future execution boundary)",
+  "description": "Strict evidence envelope for a future collector. This schema is not produced by the dry-run-only orchestrator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "status",
+    "evidence_id",
+    "config_id",
+    "config_sha256",
+    "source_commit",
+    "compatibility",
+    "reproducibility",
+    "runtime",
+    "fixtures",
+    "metrics",
+    "histograms",
+    "thresholds",
+    "leak_sampling",
+    "artifacts",
+    "ownership"
+  ],
+  "properties": {
+    "schema_id": {"const": "jmeter-rs.perf-collected-evidence"},
+    "schema_version": {"const": 2},
+    "status": {"enum": ["completed", "failed"]},
+    "evidence_id": {"type": "string", "maxLength": 128, "pattern": "^[a-z0-9][a-z0-9-]{2,127}$"},
+    "config_id": {"type": "string", "maxLength": 64, "pattern": "^[a-z0-9][a-z0-9-]{2,63}$"},
+    "config_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "compatibility": {"$ref": "#/$defs/compatibility"},
+    "reproducibility": {"$ref": "#/$defs/reproducibility"},
+    "runtime": {"$ref": "#/$defs/runtime"},
+    "fixtures": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/fixture"}
+    },
+    "metrics": {"$ref": "#/$defs/metrics"},
+    "histograms": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/histogram"}
+    },
+    "thresholds": {"$ref": "#/$defs/thresholds"},
+    "leak_sampling": {"$ref": "#/$defs/leak_sampling"},
+    "artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/artifact"}
+    },
+    "ownership": {"$ref": "#/$defs/ownership"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "id": {"type": "string", "maxLength": 128, "pattern": "^[a-z0-9][a-z0-9-]{2,127}$"},
+    "fixture_path": {
+      "type": "string",
+      "maxLength": 256,
+      "pattern": "^compat/fixtures/[^/][^\u0000]*$",
+      "not": {"pattern": "(^|/)\\.\\.?(/|$)"}
+    },
+    "artifact_path": {
+      "type": "string",
+      "maxLength": 256,
+      "pattern": "^artifacts/[^/][^\u0000]*$",
+      "not": {"pattern": "(^|/)\\.\\.?(/|$)"}
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile_id", "feature_ids", "fixture_id", "fixture_ids", "normalization_policy_refs"],
+      "properties": {
+        "profile_id": {"const": "jmeter-5.6.3"},
+        "feature_ids": {"type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Z]+-[0-9]{3}$"}},
+        "fixture_id": {"type": "string", "maxLength": 64, "pattern": "^FX-[A-Z0-9-]+$"},
+        "fixture_ids": {"type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": {"type": "string", "maxLength": 64, "pattern": "^FX-[A-Z0-9-]+$"}},
+        "normalization_policy_refs": {"type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": {"type": "string", "maxLength": 64, "pattern": "^NORM-[A-Z0-9-]+$"}}
+      }
+    },
+    "reproducibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seed", "locale", "timezone", "charset", "target_os", "target_arch", "target_triple", "os_image", "rust_toolchain", "cargo_lock_sha256", "source_date_epoch", "environment_allowlist", "clock_mode"],
+      "properties": {
+        "seed": {"type": "integer", "minimum": 0, "maximum": 18446744073709551615},
+        "locale": {"const": "en-US"},
+        "timezone": {"const": "UTC"},
+        "charset": {"const": "UTF-8"},
+        "target_os": {"enum": ["linux", "windows", "macos"]},
+        "target_arch": {"enum": ["x86_64", "aarch64"]},
+        "target_triple": {"type": "string", "maxLength": 80, "pattern": "^[A-Za-z0-9._-]{3,80}$"},
+        "os_image": {"$ref": "#/$defs/pinned_image_reference"},
+        "rust_toolchain": {"$ref": "#/$defs/toolchain"},
+        "cargo_lock_sha256": {"$ref": "#/$defs/sha256"},
+        "source_date_epoch": {"type": "integer", "minimum": 0, "maximum": 4102444800},
+        "environment_allowlist": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"type": "string", "maxLength": 128}},
+        "clock_mode": {"enum": ["controlled-fixture", "monotonic-only"]}
+      }
+    },
+    "absolute_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference", "reference_sha256", "artifact_digest_sha256"],
+      "properties": {
+        "reference": {"type": "string", "minLength": 2, "maxLength": 256, "pattern": "^/[A-Za-z0-9._/@:+,-]{1,255}$"},
+        "reference_sha256": {"$ref": "#/$defs/sha256"},
+        "artifact_digest_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "pinned_image_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference", "reference_sha256", "artifact_digest_sha256"],
+      "properties": {
+        "reference": {"type": "string", "maxLength": 256, "pattern": "^[A-Za-z0-9._:/-]{1,190}@sha256:[0-9a-f]{64}$"},
+        "reference_sha256": {"$ref": "#/$defs/sha256"},
+        "artifact_digest_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference", "reference_sha256", "artifact_digest_sha256", "compiler_version"],
+      "properties": {
+        "reference": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\u0000]*$"},
+        "reference_sha256": {"$ref": "#/$defs/sha256"},
+        "artifact_digest_sha256": {"$ref": "#/$defs/sha256"},
+        "compiler_version": {"type": "string", "maxLength": 256}
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["executable", "container_runtime", "image"],
+      "properties": {
+        "executable": {"$ref": "#/$defs/absolute_reference"},
+        "container_runtime": {"$ref": "#/$defs/absolute_reference"},
+        "image": {"$ref": "#/$defs/pinned_image_reference"}
+      }
+    },
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "fixture_family_id", "source_path", "source_reference_sha256", "fixture_artifact_digest_sha256", "case_manifest_path", "case_manifest_reference_sha256", "case_manifest_artifact_digest_sha256", "case_id", "profile_id"],
+      "properties": {
+        "id": {"type": "string", "maxLength": 64, "pattern": "^FX-[A-Z0-9-]+$"},
+        "fixture_family_id": {"type": "string", "maxLength": 64, "pattern": "^FX-[A-Z0-9-]+$"},
+        "profile_id": {"const": "jmeter-5.6.3"},
+        "source_path": {"$ref": "#/$defs/fixture_path"},
+        "source_reference_sha256": {"$ref": "#/$defs/sha256"},
+        "fixture_artifact_digest_sha256": {"$ref": "#/$defs/sha256"},
+        "case_manifest_path": {"$ref": "#/$defs/fixture_path"},
+        "case_manifest_reference_sha256": {"$ref": "#/$defs/sha256"},
+        "case_manifest_artifact_digest_sha256": {"$ref": "#/$defs/sha256"},
+        "case_id": {"type": "string", "maxLength": 128, "pattern": "^ORACLE-[A-Z0-9-]+$"}
+      }
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "value", "unit", "scope"],
+      "properties": {
+        "id": {"type": "string", "maxLength": 96, "pattern": "^[a-z][a-z0-9_.]{2,95}$"},
+        "value": {"type": "number", "minimum": 0, "maximum": 1000000000000000},
+        "unit": {"enum": ["count", "nanoseconds", "bytes", "operations-per-second"]},
+        "scope": {"enum": ["run", "steady-state", "final-window"]}
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observations", "completion_count", "sample_count", "throughput", "cpu_time_ns", "allocation_bytes", "samples_failed", "results_dropped", "queue_overflows", "workload_mode", "target_rate_per_second", "target_rate_expected_samples", "target_rate_relationship"],
+      "properties": {
+        "observations": {"type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true, "items": {"$ref": "#/$defs/metric"}},
+        "completion_count": {"type": "integer", "minimum": 0, "maximum": 10000000},
+        "sample_count": {"type": "integer", "minimum": 0, "maximum": 10000000},
+        "throughput": {"type": "number", "minimum": 0, "maximum": 1000000000000000},
+        "cpu_time_ns": {"type": "number", "minimum": 0, "maximum": 1000000000000000},
+        "allocation_bytes": {"type": "number", "minimum": 0, "maximum": 1000000000000000},
+        "samples_failed": {"type": "integer", "minimum": 0, "maximum": 10000000},
+        "results_dropped": {"type": "integer", "minimum": 0, "maximum": 10000000},
+        "queue_overflows": {"type": "integer", "minimum": 0, "maximum": 10000000},
+        "workload_mode": {"enum": ["closed-loop", "open-loop"]},
+        "target_rate_per_second": {"type": ["number", "null"], "minimum": 0, "maximum": 10000000},
+        "target_rate_expected_samples": {"type": ["integer", "null"], "minimum": 0, "maximum": 10000000},
+        "target_rate_relationship": {"enum": ["not-applicable-closed-loop", "bounded-by-duration"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"workload_mode": {"const": "closed-loop"}}},
+          "then": {
+            "properties": {
+              "target_rate_per_second": {"type": "null"},
+              "target_rate_expected_samples": {"type": "null"},
+              "target_rate_relationship": {"const": "not-applicable-closed-loop"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"workload_mode": {"const": "open-loop"}}},
+          "then": {
+            "properties": {
+              "target_rate_per_second": {"type": "number", "exclusiveMinimum": 0},
+              "target_rate_expected_samples": {"type": "integer", "minimum": 1},
+              "target_rate_relationship": {"const": "bounded-by-duration"}
+            }
+          }
+        }
+      ]
+    },
+    "histogram": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "unit", "count", "percentiles"],
+      "properties": {
+        "id": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{2,63}$"},
+        "unit": {"enum": ["nanoseconds", "bytes", "operations-per-second"]},
+        "count": {"type": "integer", "minimum": 1, "maximum": 10000000},
+        "percentiles": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["p50", "p95", "p99"],
+          "properties": {
+            "p50": {"type": "number", "minimum": 0, "maximum": 1000000000000000},
+            "p95": {"type": "number", "minimum": 0, "maximum": 1000000000000000},
+            "p99": {"type": "number", "minimum": 0, "maximum": 1000000000000000}
+          }
+        }
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseline_policy", "minimum_completion_count", "minimum_sample_count", "minimum_steady_state_samples", "required_artifact_ids", "rules", "status"],
+      "properties": {
+        "baseline_policy": {"enum": ["artifact-required", "explicit-values-only"]},
+        "minimum_completion_count": {"type": "integer", "minimum": 1, "maximum": 10000000},
+        "minimum_sample_count": {"type": "integer", "minimum": 1, "maximum": 10000000},
+        "minimum_steady_state_samples": {"type": "integer", "minimum": 1, "maximum": 10000000},
+        "required_artifact_ids": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/id"}},
+        "rules": {"type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true, "items": {"$ref": "#/$defs/threshold_rule"}},
+        "status": {"enum": ["passed", "failed"]}
+      }
+    },
+    "threshold_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "metric", "operator", "threshold", "observed", "unit", "status", "artifact_required", "histogram_id", "percentile"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "metric": {"type": "string", "maxLength": 96, "pattern": "^[a-z][a-z0-9_.]{2,95}$"},
+        "operator": {"enum": ["<", "<=", "=", ">=", ">"]},
+        "threshold": {"type": "number", "minimum": 0, "maximum": 1000000000000000},
+        "observed": {"type": "number", "minimum": 0, "maximum": 1000000000000000},
+        "unit": {"enum": ["count", "nanoseconds", "bytes", "operations-per-second"]},
+        "status": {"enum": ["passed", "failed"]},
+        "artifact_required": {"type": "boolean"},
+        "artifact_id": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/id"}]},
+        "histogram_id": {"anyOf": [{"type": "null"}, {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{2,63}$"}]},
+        "percentile": {"anyOf": [{"type": "null"}, {"enum": [50, 95, 99]}]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"artifact_required": {"const": true}}},
+          "then": {"required": ["artifact_id"], "properties": {"artifact_id": {"type": "string"}}}
+        },
+        {
+          "if": {"properties": {"artifact_required": {"const": false}}},
+          "then": {"required": ["artifact_id"], "properties": {"artifact_id": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"metric": {"pattern": "_p95$"}}},
+          "then": {
+            "properties": {"histogram_id": {"type": "string"}, "percentile": {"const": 95}}
+          }
+        },
+        {
+          "if": {"properties": {"metric": {"pattern": "_p99$"}}},
+          "then": {
+            "properties": {"histogram_id": {"type": "string"}, "percentile": {"const": 99}}
+          }
+        },
+        {
+          "if": {"properties": {"metric": {"pattern": "^(?!.*_p(?:95|99)$)"}}},
+          "then": {
+            "properties": {"histogram_id": {"type": "null"}, "percentile": {"type": "null"}}
+          }
+        }
+      ]
+    },
+    "leak_sampling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["interval_seconds", "initial_delay_seconds", "windows", "horizon_seconds", "iteration_horizon", "sample_count", "metrics", "samples", "growth_status"],
+      "properties": {
+        "interval_seconds": {"type": "integer", "minimum": 1, "maximum": 86400},
+        "initial_delay_seconds": {"type": "integer", "minimum": 0, "maximum": 86400},
+        "windows": {"type": "object", "additionalProperties": false, "required": ["warmup", "steady_state", "final"], "properties": {"warmup": {"type": "integer", "minimum": 0, "maximum": 10000000}, "steady_state": {"type": "integer", "minimum": 1, "maximum": 10000000}, "final": {"type": "integer", "minimum": 1, "maximum": 10000000}}},
+        "horizon_seconds": {"type": "integer", "minimum": 0, "maximum": 86400},
+        "iteration_horizon": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "expected_samples", "minimum_sample_count", "validated"],
+          "properties": {
+            "mode": {"enum": ["iterations", "duration"]},
+            "expected_samples": {"type": "integer", "minimum": 1, "maximum": 10000000},
+            "minimum_sample_count": {"type": "integer", "minimum": 1, "maximum": 10000000},
+            "validated": {"const": true}
+          }
+        },
+        "sample_count": {"type": "integer", "minimum": 1, "maximum": 10000000},
+        "metrics": {"type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{2,63}$"}},
+        "samples": {"type": "array", "minItems": 1, "maxItems": 10000000, "items": {"$ref": "#/$defs/leak_sample"}},
+        "growth_status": {"enum": ["passed", "failed"]}
+      }
+    },
+    "leak_sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "monotonic_ns", "values"],
+      "properties": {
+        "sequence": {"type": "integer", "minimum": 0, "maximum": 10000000},
+        "monotonic_ns": {"type": "integer", "minimum": 0, "maximum": 1000000000000000000},
+        "values": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 64,
+          "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1000000000000000}
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "path", "size_bytes", "max_bytes", "artifact_digest_sha256", "required_for", "immutable"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "kind": {"enum": ["result", "raw-samples", "histogram", "threshold-baseline", "runtime-log", "fixture"]},
+        "path": {"$ref": "#/$defs/artifact_path"},
+        "size_bytes": {"type": "integer", "minimum": 0, "maximum": 100000000},
+        "max_bytes": {"type": "integer", "minimum": 1, "maximum": 100000000},
+        "artifact_digest_sha256": {"$ref": "#/$defs/sha256"},
+        "required_for": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"type": "string", "maxLength": 128}},
+        "immutable": {"const": true}
+      }
+    },
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["children", "containers"],
+      "properties": {
+        "children": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/owned_child"}},
+        "containers": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/owned_container"}}
+      }
+    },
+    "owned_child": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "identity", "reaped", "termination"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "identity": {"const": "owned-child-handle"},
+        "reaped": {"const": true},
+        "termination": {"const": "direct-child-only"}
+      }
+    },
+    "owned_container": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "identity", "cleanup"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "identity": {"const": "created-by-this-run"},
+        "cleanup": {"const": "exact-created-id-only"}
+      }
+    }
+  }
+}

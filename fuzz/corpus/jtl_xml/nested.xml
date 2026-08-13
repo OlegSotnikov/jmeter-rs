@@ -1,0 +1,1 @@
+<testResults version="1.2"><httpSample ts="1700000000001" t="12" s="false" lb="parent" rc="500"><assertionResult name="status" failure="true" error="false"><failureMessage>expected 200</failureMessage></assertionResult><sample t="2" s="true" lb="child" rs="200"/></httpSample></testResults>

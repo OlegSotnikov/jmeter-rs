@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testResults version="1.2">
+  <sample ts="1700000000000" t="10" lt="4" ct="2" s="true" lb="seed &amp; request" rc="200" rm="OK" tn="group 1-1" dt="text" by="5" sby="1" ng="1" na="1" hn="synthetic.invalid">
+    <responseData class="java.lang.String">ok &amp; ready</responseData>
+    <responseHeader class="java.lang.String">X-Seed: yes</responseHeader>
+  </sample>
+</testResults>

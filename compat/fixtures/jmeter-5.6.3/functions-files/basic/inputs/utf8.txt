@@ -1,0 +1,2 @@
+héllo • file
+second UTF-8 line

@@ -1,0 +1,2 @@
+timeStamp	elapsed	label	responseCode	success	"case_id"	"comma_value"
+1700000000123	12	"tab	label"	200	true	jtl-fields	"left,right"

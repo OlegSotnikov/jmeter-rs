@@ -1,0 +1,57 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-ELEMENTS-EXTERNAL-ELEM-002",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-ELEMENTS-EXTERNAL-001",
+  "conformance_ids": ["ELEM-002", "TEST-002"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-JMX-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001", "NORM-ENV-001"],
+  "external_runtime_boundary_ids": ["EXT-SERVICE-001", "EXT-JVM-001", "EXT-OS-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "f3fa3526247f648272f8f6c4b05341aef6b987971a87e51914ca69e78521ce32"
+  },
+  "property_files": [{
+    "path": "oracle.properties",
+    "sha256": "a0065286ed2ecafd1277dc71716a516a3a53fadda219af28af2a19a8fd3a9147"
+  }],
+  "descriptor": {
+    "path": "expected/semantic.json",
+    "sha256": "edc65da8a113fff7cae80c8726dcba2fe7a2a8486a26b632063b8806be9f80e5"
+  },
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/external-samplers/elem-002-external",
+    "mode": "nongui-static-only",
+    "argv_template": ["jmeter", "-n", "-q", "oracle.properties", "-t", "plan.jmx", "-l", "<ignored>/oracle.jtl", "-j", "<ignored>/oracle.log"],
+    "network": "none",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null
+  },
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations_per_thread": 1,
+    "max_samples": 0,
+    "max_plan_nodes": 24,
+    "max_plan_depth": 6,
+    "max_property_text_bytes": 12288,
+    "max_result_bytes": 0,
+    "max_log_bytes": 65536,
+    "max_process_output_bytes": 0,
+    "max_process_wait_seconds": 0
+  },
+  "execution": {
+    "status": "external-unavailable",
+    "oracle_available": false,
+    "process_exit": null,
+    "sample_count": null,
+    "raw_artifacts": "oracle-runs/external-samplers/elem-002-external/ (ignored; no external adapter was run)",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "This is a static preservation and capability-accounting case. No Java, Apache JMeter, JVM worker, broker, mail server, database, OS process, network, or subprocess was executed.",
+    "JMS, mail, MongoDB, Bolt, JUnit, OS, and access-log values are placeholders; no credentials, driver JARs, test classes, access-log files, or service images are supplied.",
+    "A future conformance run must pin each adapter/service/driver/JVM/OS version, license, checksum, fixture source revision, credentials policy, and bounded local trace before adding any result expectation."
+  ]
+}

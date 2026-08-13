@@ -1,0 +1,63 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-DISTRIBUTED-RMI",
+  "format": "jmx-semantic",
+  "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+  "intended_result_format": "jtl-xml",
+  "projection": {
+    "status": "partial",
+    "complete": false,
+    "scenarios": ["stop-shutdown", "stop-stoptest", "stop-remote-exit"],
+    "scope": ["bounded scheduler plan", "exact control command forms", "lifecycle boundary"],
+    "omitted": ["observed process exit", "accepted event count", "stop race timing", "raw JTL output"]
+  },
+  "plan": {
+    "path": "stop-plan.jmx",
+    "root_test_class": "TestPlan",
+    "thread_group": "One stoppable user",
+    "scheduler": true,
+    "duration_seconds": 30,
+    "constant_timer_ms": 50,
+    "sampler": "distributed-stop-sample",
+    "configured_loop_mode": "forever until scheduler or control command; no completed-iteration count is asserted"
+  },
+  "scenario_contracts": [
+    {"id": "stop-shutdown", "control_protocol": "udp", "controller_port": "base+7", "wire_command": "Shutdown\\n", "control_argv": ["Shutdown"], "control_mode": "graceful", "expected": "expected/stop-shutdown.json"},
+    {"id": "stop-stoptest", "control_protocol": "udp", "controller_port": "base+7", "wire_command": "StopTestNow\\n", "control_argv": ["StopTestNow"], "control_mode": "immediate", "expected": "expected/stop-stoptest.json"},
+    {"id": "stop-remote-exit", "control_argv": ["-X"], "control_mode": "remote lifecycle request", "expected": "expected/stop-remote-exit.json"}
+  ],
+  "distributed_contract": {
+    "external_runtime_boundary_ids": ["EXT-RMI-001"],
+    "worker_count": {"minimum": 2, "asserted": false},
+    "bounded_wait_seconds": 10,
+    "flush_obligation": "the external runner must obtain a positive SenderDrainProof for the selected sender before treating shutdown/drain as complete; no proof is observed here",
+    "terminal_accounting": {"allowed_outcomes": ["Succeeded", "Failed", "Cancelled", "TimedOut", "Crashed"], "event_count_fields": ["delivered_events", "accepted_events", "acknowledged_events"], "byte_count_fields": ["delivered_bytes", "accepted_bytes", "acknowledged_bytes"], "success_requires": ["TestEnded", "SenderDrainProof", "delivered/accepted/acknowledged event counts and bytes equal", "pending bridge/sender/blob counts zero", "router finalized"], "non_success_requires": ["absence reasons", "last callback/event/frame ordinals", "delivered/accepted/acknowledged counts and bytes", "pending counts", "primary and bounded secondary errors"], "observed": false},
+    "remote_exit": {"only_requested_by": "stop-remote-exit", "observed": false}
+  },
+  "result_field_policy": {
+    "retained": ["success", "response_code", "response_message", "thread_name", "worker_identity", "iteration_marker", "bytes", "sent_bytes", "elapsed", "latency", "connect_time", "idle_time", "timestamp", "exit_status"],
+    "byte_fields": "retained and compared when a pinned run exists; never normalized away",
+    "timing": "see normalization.timing_tolerances; no runtime value is supplied"
+  },
+  "generated_from": {
+    "generator": "original static fixture authoring",
+    "generator_version": "not applicable",
+    "oracle_execution": "not run; this is a partial lifecycle contract projection",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "none; no oracle output is committed"
+  },
+  "normalization": {
+    "ignored_fields": ["sample.hn", "ephemeral_ports", "temporary_paths", "arrival_order", "JVM_object_ids"],
+    "timing_tolerances": {
+      "timestamp": {"comparison": "descriptor-only", "allowed_variance": "wall-clock value is recorded by a future run but not asserted"},
+      "elapsed": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000, "reason": "scheduler and control delivery are external"},
+      "latency": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000, "reason": "RMI stop delivery is external"},
+      "connect_time": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000, "reason": "RMI setup is external"},
+      "idle_time": {"comparison": "bounded", "minimum_ms": 0, "maximum_ms": 30000, "allowed_tolerance_ms": 30000, "reason": "idle-time reporting is external"}
+    },
+    "byte_policy": {"bytes": "retained; no normalization", "sent_bytes": "retained; no normalization"},
+    "reason": "This shared stop-plan projection defines static scheduler and command inputs; the individual contracts carry shutdown, stoptest, and remote-exit semantics without fabricated process evidence."
+  }
+}

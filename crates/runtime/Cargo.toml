@@ -1,0 +1,21 @@
+[package]
+name = "jmeter-rs-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+jmeter-rs-expr = { version = "0.1.0", path = "../expr" }
+jmeter-rs-model = { version = "0.1.0", path = "../model" }
+jmeter-rs-results = { version = "0.1.0", path = "../results" }
+
+[dev-dependencies]
+jmeter-rs-test-support = { version = "0.1.0", path = "../test-support" }

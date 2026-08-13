@@ -1,0 +1,75 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-JMX-NO-DROP-BOUNDARIES",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Clean-room bounded JMX topology combining disabled unknown/plugin, legacy BSF/report/MongoDB, GUI-shaped, and recorder-shaped nodes for lossless syntax preservation.",
+    "upstream_plan_copied": false,
+    "source_material": "Original XML and placeholder values designed from the profile's JMX/plugin/GUI/proxy contracts; no upstream plan, source file, plugin, script, browser capture, certificate, or generated JMX was copied."
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "The pinned Apache JMeter distribution is an external oracle reference only; no upstream plan, result, binary, Java class, plugin, script, certificate, key, or service output is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true,
+    "verification_scope": "Profile digest provenance only; this case intentionally performs no oracle execution and supplies no plugin or external adapter artifact."
+  },
+  "runtime": {
+    "java": {
+      "vendor": null,
+      "version": null,
+      "vm": null,
+      "major": null
+    },
+    "target_triple": null,
+    "os_image": null,
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "not asserted; no process was run",
+    "environment_allowlist": ["LC_ALL=C", "LANG=C", "TZ=UTC"],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": null,
+    "classpath_artifact_sha512": null,
+    "external_services": [],
+    "tls_material": []
+  },
+  "inputs": {
+    "plan_sha256": "a4f986f0f28c68a1ac5b4e9b0b3e33a6fb7363e2504b068a6ce2d83fffd8f106",
+    "property_sha256": "7e1f5e4a2a8ea1c3ea04fba3dc7fc63d72d2b5746a561aeb9a9546c78e6ae480",
+    "expected_sha256": "d0b717dd3682af40c98beb699d066448f7bb2ebda046118ac1d94b7efb5c6625",
+    "public_network_used": false,
+    "secrets_or_credentials": false,
+    "static_corpus_mutated": false
+  },
+  "oracle_execution": {
+    "performed": false,
+    "status": "external-unavailable",
+    "process_exit": null,
+    "sample_count": null,
+    "reason": "Static corpus task explicitly forbids Java/JMeter/JVM, plugin, GUI, browser, TLS, network, and subprocess execution.",
+    "raw_artifacts": "none"
+  },
+  "preservation_scope": {
+    "family": "FX-JMX-001",
+    "comparator_route": "jmx-semantic-static",
+    "unknown_and_legacy_payloads": "raw XML hashes in expected/semantic.json are diagnostic preservation anchors, not observed oracle output",
+    "execution_claim": false,
+    "unsupported_diagnostics": "typed static contract only; stable codes require adapter implementation and pinned evidence before promotion"
+  }
+}

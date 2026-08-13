@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="HTTP authentication state corpus" enabled="true">
+      <stringProp name="TestPlan.comments">Original local fixture: prefix-specific Basic/Digest credentials, challenge routes, and redacted dummy credential boundaries; preemptive/retry behavior remains oracle-observed.</stringProp>
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="Variables" enabled="true"><collectionProp name="Arguments.arguments"/></elementProp>
+      <stringProp name="TestPlan.user_define_classpath"></stringProp>
+    </TestPlan>
+    <hashTree>
+      <ConfigTestElement guiclass="HttpDefaultsGui" testclass="ConfigTestElement" testname="Loopback HTTP defaults" enabled="true">
+        <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="Arguments" enabled="true"><collectionProp name="Arguments.arguments"/></elementProp>
+        <stringProp name="HTTPSampler.domain">fixture.test</stringProp><stringProp name="HTTPSampler.port">${__P(oracle.port,18080)}</stringProp><stringProp name="HTTPSampler.protocol">http</stringProp><stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp><stringProp name="HTTPSampler.path"></stringProp><stringProp name="HTTPSampler.concurrentPool">1</stringProp><stringProp name="HTTPSampler.implementation">HttpClient4</stringProp>
+      </ConfigTestElement>
+      <hashTree/>
+      <DNSCacheManager guiclass="DNSCacheManagerGui" testclass="DNSCacheManager" testname="Explicit fixture DNS mapping" enabled="true"><collectionProp name="DNSCacheManager.hosts"><elementProp name="fixture-host" elementType="StaticHost"><stringProp name="StaticHost.Name">fixture.test</stringProp><stringProp name="StaticHost.Address">127.0.0.1</stringProp></elementProp></collectionProp><boolProp name="DNSCacheManager.clearEachIteration">false</boolProp><boolProp name="DNSCacheManager.isCustomResolver">true</boolProp><stringProp name="DNSCacheManager.servers">127.0.0.1</stringProp></DNSCacheManager>
+      <hashTree/>
+      <AuthManager guiclass="AuthPanel" testclass="AuthManager" testname="Per-thread authentication manager" enabled="true">
+        <collectionProp name="AuthManager.auth_list">
+          <elementProp name="basic-entry" elementType="Authorization">
+            <stringProp name="Authorization.url">http://fixture.test:${__P(oracle.port,18080)}/auth/basic</stringProp>
+            <stringProp name="Authorization.username">alice</stringProp>
+            <stringProp name="Authorization.password">dummy-basic-password</stringProp>
+            <stringProp name="Authorization.domain"></stringProp>
+            <stringProp name="Authorization.realm">jmeter-oracle</stringProp>
+            <stringProp name="Authorization.mechanism">BASIC</stringProp>
+          </elementProp>
+          <elementProp name="basic-overlap-entry" elementType="Authorization">
+            <stringProp name="Authorization.url">http://fixture.test:${__P(oracle.port,18080)}/auth/basic/specific</stringProp>
+            <stringProp name="Authorization.username">specific-user</stringProp>
+            <stringProp name="Authorization.password">dummy-specific-password</stringProp>
+            <stringProp name="Authorization.domain"></stringProp>
+            <stringProp name="Authorization.realm">jmeter-oracle-basic-specific</stringProp>
+            <stringProp name="Authorization.mechanism">BASIC</stringProp>
+          </elementProp>
+          <elementProp name="basic-specific-entry" elementType="Authorization">
+            <stringProp name="Authorization.url">http://fixture.test:${__P(oracle.port,18080)}/auth/specific-basic</stringProp>
+            <stringProp name="Authorization.username">specific-user</stringProp>
+            <stringProp name="Authorization.password">dummy-specific-password</stringProp>
+            <stringProp name="Authorization.domain"></stringProp>
+            <stringProp name="Authorization.realm">jmeter-oracle-basic-specific</stringProp>
+            <stringProp name="Authorization.mechanism">BASIC</stringProp>
+          </elementProp>
+          <elementProp name="digest-entry" elementType="Authorization">
+            <stringProp name="Authorization.url">http://fixture.test:${__P(oracle.port,18080)}/auth/digest</stringProp>
+            <stringProp name="Authorization.username">digest-user</stringProp>
+            <stringProp name="Authorization.password">dummy-digest-password</stringProp>
+            <stringProp name="Authorization.domain"></stringProp>
+            <stringProp name="Authorization.realm">jmeter-oracle</stringProp>
+            <stringProp name="Authorization.mechanism">DIGEST</stringProp>
+          </elementProp>
+          <elementProp name="digest-overlap-entry" elementType="Authorization">
+            <stringProp name="Authorization.url">http://fixture.test:${__P(oracle.port,18080)}/auth/digest/specific</stringProp>
+            <stringProp name="Authorization.username">specific-digest-user</stringProp>
+            <stringProp name="Authorization.password">dummy-specific-digest-password</stringProp>
+            <stringProp name="Authorization.domain"></stringProp>
+            <stringProp name="Authorization.realm">jmeter-oracle-digest-specific</stringProp>
+            <stringProp name="Authorization.mechanism">DIGEST</stringProp>
+          </elementProp>
+          <elementProp name="digest-specific-entry" elementType="Authorization">
+            <stringProp name="Authorization.url">http://fixture.test:${__P(oracle.port,18080)}/auth/specific-digest</stringProp>
+            <stringProp name="Authorization.username">specific-digest-user</stringProp>
+            <stringProp name="Authorization.password">dummy-specific-digest-password</stringProp>
+            <stringProp name="Authorization.domain"></stringProp>
+            <stringProp name="Authorization.realm">jmeter-oracle-digest-specific</stringProp>
+            <stringProp name="Authorization.mechanism">DIGEST</stringProp>
+          </elementProp>
+        </collectionProp>
+      </AuthManager>
+      <hashTree/>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="One auth-state user" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="One iteration" enabled="true"><boolProp name="LoopController.continue_forever">false</boolProp><stringProp name="LoopController.loops">1</stringProp></elementProp>
+        <stringProp name="ThreadGroup.num_threads">1</stringProp><stringProp name="ThreadGroup.ramp_time">0</stringProp><longProp name="ThreadGroup.start_time">0</longProp><longProp name="ThreadGroup.end_time">0</longProp><boolProp name="ThreadGroup.scheduler">false</boolProp><stringProp name="ThreadGroup.duration"></stringProp><stringProp name="ThreadGroup.delay"></stringProp><boolProp name="ThreadGroup.same_user_on_next_iteration">true</boolProp>
+      </ThreadGroup>
+      <hashTree>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="Basic challenge and credential" enabled="true"><boolProp name="HTTPSampler.postBodyRaw">false</boolProp><elementProp name="HTTPsampler.Arguments" elementType="Arguments"><collectionProp name="Arguments.arguments"/></elementProp><stringProp name="HTTPSampler.path">/auth/basic</stringProp><stringProp name="HTTPSampler.method">GET</stringProp><boolProp name="HTTPSampler.follow_redirects">false</boolProp><boolProp name="HTTPSampler.auto_redirects">false</boolProp><boolProp name="HTTPSampler.use_keepalive">false</boolProp><boolProp name="HTTPSampler.DO_MULTIPART_POST">false</boolProp><stringProp name="HTTPSampler.embedded_url_re"></stringProp></HTTPSamplerProxy><hashTree/>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="Basic URL-prefix specificity" enabled="true"><boolProp name="HTTPSampler.postBodyRaw">false</boolProp><elementProp name="HTTPsampler.Arguments" elementType="Arguments"><collectionProp name="Arguments.arguments"/></elementProp><stringProp name="HTTPSampler.path">/auth/basic/specific</stringProp><stringProp name="HTTPSampler.method">GET</stringProp><boolProp name="HTTPSampler.follow_redirects">false</boolProp><boolProp name="HTTPSampler.auto_redirects">false</boolProp><boolProp name="HTTPSampler.use_keepalive">false</boolProp><boolProp name="HTTPSampler.DO_MULTIPART_POST">false</boolProp><stringProp name="HTTPSampler.embedded_url_re"></stringProp></HTTPSamplerProxy><hashTree/>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="Basic exact specific entry" enabled="true"><boolProp name="HTTPSampler.postBodyRaw">false</boolProp><elementProp name="HTTPsampler.Arguments" elementType="Arguments"><collectionProp name="Arguments.arguments"/></elementProp><stringProp name="HTTPSampler.path">/auth/specific-basic</stringProp><stringProp name="HTTPSampler.method">GET</stringProp><boolProp name="HTTPSampler.follow_redirects">false</boolProp><boolProp name="HTTPSampler.auto_redirects">false</boolProp><boolProp name="HTTPSampler.use_keepalive">false</boolProp><boolProp name="HTTPSampler.DO_MULTIPART_POST">false</boolProp><stringProp name="HTTPSampler.embedded_url_re"></stringProp></HTTPSamplerProxy><hashTree/>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="Digest challenge boundary" enabled="true"><boolProp name="HTTPSampler.postBodyRaw">false</boolProp><elementProp name="HTTPsampler.Arguments" elementType="Arguments"><collectionProp name="Arguments.arguments"/></elementProp><stringProp name="HTTPSampler.path">/auth/digest</stringProp><stringProp name="HTTPSampler.method">GET</stringProp><boolProp name="HTTPSampler.follow_redirects">false</boolProp><boolProp name="HTTPSampler.auto_redirects">false</boolProp><boolProp name="HTTPSampler.use_keepalive">false</boolProp><boolProp name="HTTPSampler.DO_MULTIPART_POST">false</boolProp><stringProp name="HTTPSampler.embedded_url_re"></stringProp></HTTPSamplerProxy><hashTree/>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="Digest URL-prefix specificity" enabled="true"><boolProp name="HTTPSampler.postBodyRaw">false</boolProp><elementProp name="HTTPsampler.Arguments" elementType="Arguments"><collectionProp name="Arguments.arguments"/></elementProp><stringProp name="HTTPSampler.path">/auth/digest/specific</stringProp><stringProp name="HTTPSampler.method">GET</stringProp><boolProp name="HTTPSampler.follow_redirects">false</boolProp><boolProp name="HTTPSampler.auto_redirects">false</boolProp><boolProp name="HTTPSampler.use_keepalive">false</boolProp><boolProp name="HTTPSampler.DO_MULTIPART_POST">false</boolProp><stringProp name="HTTPSampler.embedded_url_re"></stringProp></HTTPSamplerProxy><hashTree/>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="Digest exact specific entry" enabled="true"><boolProp name="HTTPSampler.postBodyRaw">false</boolProp><elementProp name="HTTPsampler.Arguments" elementType="Arguments"><collectionProp name="Arguments.arguments"/></elementProp><stringProp name="HTTPSampler.path">/auth/specific-digest</stringProp><stringProp name="HTTPSampler.method">GET</stringProp><boolProp name="HTTPSampler.follow_redirects">false</boolProp><boolProp name="HTTPSampler.auto_redirects">false</boolProp><boolProp name="HTTPSampler.use_keepalive">false</boolProp><boolProp name="HTTPSampler.DO_MULTIPART_POST">false</boolProp><stringProp name="HTTPSampler.embedded_url_re"></stringProp></HTTPSamplerProxy><hashTree/>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="Basic challenge without matching entry" enabled="true"><boolProp name="HTTPSampler.postBodyRaw">false</boolProp><elementProp name="HTTPsampler.Arguments" elementType="Arguments"><collectionProp name="Arguments.arguments"/></elementProp><stringProp name="HTTPSampler.path">/auth/challenge-basic</stringProp><stringProp name="HTTPSampler.method">GET</stringProp><boolProp name="HTTPSampler.follow_redirects">false</boolProp><boolProp name="HTTPSampler.auto_redirects">false</boolProp><boolProp name="HTTPSampler.use_keepalive">false</boolProp><boolProp name="HTTPSampler.DO_MULTIPART_POST">false</boolProp><stringProp name="HTTPSampler.embedded_url_re"></stringProp></HTTPSamplerProxy><hashTree/>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="Digest challenge without matching entry" enabled="true"><boolProp name="HTTPSampler.postBodyRaw">false</boolProp><elementProp name="HTTPsampler.Arguments" elementType="Arguments"><collectionProp name="Arguments.arguments"/></elementProp><stringProp name="HTTPSampler.path">/auth/challenge-digest</stringProp><stringProp name="HTTPSampler.method">GET</stringProp><boolProp name="HTTPSampler.follow_redirects">false</boolProp><boolProp name="HTTPSampler.auto_redirects">false</boolProp><boolProp name="HTTPSampler.use_keepalive">false</boolProp><boolProp name="HTTPSampler.DO_MULTIPART_POST">false</boolProp><stringProp name="HTTPSampler.embedded_url_re"></stringProp></HTTPSamplerProxy><hashTree/>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="Open endpoint control" enabled="true"><boolProp name="HTTPSampler.postBodyRaw">false</boolProp><elementProp name="HTTPsampler.Arguments" elementType="Arguments"><collectionProp name="Arguments.arguments"/></elementProp><stringProp name="HTTPSampler.path">/auth/open</stringProp><stringProp name="HTTPSampler.method">GET</stringProp><boolProp name="HTTPSampler.follow_redirects">false</boolProp><boolProp name="HTTPSampler.auto_redirects">false</boolProp><boolProp name="HTTPSampler.use_keepalive">false</boolProp><boolProp name="HTTPSampler.DO_MULTIPART_POST">false</boolProp><stringProp name="HTTPSampler.embedded_url_re"></stringProp></HTTPSamplerProxy><hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

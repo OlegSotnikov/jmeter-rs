@@ -1,0 +1,34 @@
+[package]
+name = "jmeter-rs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+publish.workspace = true
+
+[lib]
+name = "jmeter_rs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "jmeter-rs"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+jmeter-rs-jmx = { version = "0.1.0", path = "../../crates/jmx" }
+jmeter-rs-model = { version = "0.1.0", path = "../../crates/model" }
+jmeter-rs-report = { version = "0.1.0", path = "../../crates/report" }
+jmeter-rs-results = { version = "0.1.0", path = "../../crates/results" }
+jmeter-rs-runtime = { version = "0.1.0", path = "../../crates/runtime" }
+
+[dev-dependencies]
+# The app-level runtime-property regression exercises the same built-in
+# expression resolver used by RuntimeCapabilities; production code remains
+# coupled only to the runtime adapter boundary.
+jmeter-rs-expr = { version = "0.1.0", path = "../../crates/expr" }

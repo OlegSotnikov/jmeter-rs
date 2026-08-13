@@ -1,0 +1,22 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# The validator intentionally invokes Cargo for metadata, so it does not need
+# the cargo_metadata crate. serde_json is the small, dependency-light parser
+# for profile/case/provenance documents; toml parses Cargo manifests; sha2
+# verifies the hashes recorded by fixture provenance.
+[dependencies]
+serde_json = { version = "=1.0.151", default-features = false, features = ["std"] }
+sha2 = { version = "=0.11.0", default-features = false }
+toml = { version = "=1.1.4", default-features = false, features = ["parse", "serde"] }

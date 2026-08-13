@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/jmeter-rs/compat/jmeter-5.6.3/fuzz-manifest/campaign-evidence.negative.json",
+  "title": "FX-FUZZ-001 adversarial schema vectors",
+  "description": "Mutation recipes are applied to the planned example by the static fixture check. Artifact-link vectors exercise the cross-record checks that standard JSON Schema cannot express as a foreign-key join.",
+  "type": "object",
+  "properties": {},
+  "negative_test_vectors": [
+    {"id": "top-status-observed", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/status", "value": "observed"}]},
+    {"id": "top-not-run-false", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/not_run", "value": false}]},
+    {"id": "evidence-status-observed", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/evidence_status", "value": "observed"}]},
+    {"id": "not-run-runner-flags", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/runner/flags", "value": ["-runs=1"]}]},
+    {"id": "not-run-campaign-seed", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/campaign/seed", "value": "1234"}]},
+    {"id": "not-run-target-count", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/target_outcomes/0/counts/executions", "value": 1}]},
+    {"id": "campaign-count-over-bound", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/target_outcomes/0/counts/executions", "value": 100001}]},
+    {"id": "not-run-target-seed", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/target_outcomes/0/seed", "value": "1234"}]},
+    {"id": "not-run-target-flags", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/target_outcomes/0/flags", "value": ["-runs=1"]}]},
+    {"id": "not-run-target-status", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/target_outcomes/0/status", "value": "pass"}]},
+    {"id": "not-run-outcome-count", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/outcome/counts/crashes", "value": 1}]},
+    {"id": "not-run-minimization", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/outcome/minimization/attempted", "value": true}]},
+    {"id": "not-run-outcome-status", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/outcome/status", "value": "pass"}]},
+    {"id": "invariant-positive-status", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/invariants/0/status", "value": "observed"}]},
+    {"id": "invariant-duplicate-set", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/invariants/1/invariant_id", "value": "JMX-LIMIT-001"}]},
+    {"id": "invariant-target-mismatch", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/invariants/0/target", "value": "bridge"}]},
+    {"id": "target-source-hash", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/targets/0/source_sha256", "value": "0000000000000000000000000000000000000000000000000000000000000000"}]},
+    {"id": "target-new-source-hash", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/targets/6/source_sha256", "value": "0000000000000000000000000000000000000000000000000000000000000000"}]},
+    {"id": "target-bound-mutation", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/targets/0/bounds/max_input_bytes", "value": 1}]},
+    {"id": "target-invariant-list", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/targets/0/invariant_ids", "value": ["JMX-LIMIT-001"]}]},
+    {"id": "target-new-invariant-list", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/targets/6/invariant_ids", "value": ["HTTP-URL-BOUNDS-001"]}]},
+    {"id": "invariant-new-target-mismatch", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/invariants/19/target", "value": "jmx_xml"}]},
+    {"id": "not-run-provenance-hash", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/corpus/provenance_sha256", "value": "0000000000000000000000000000000000000000000000000000000000000000"}]},
+    {"id": "corpus-seed-hash", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/corpus/seeds/0/sha256", "value": "0000000000000000000000000000000000000000000000000000000000000000"}]},
+    {"id": "corpus-seed-size", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/corpus/seeds/0/size_bytes", "value": 1}]},
+    {"id": "corpus-seed-path", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/corpus/seeds/0/path", "value": "fuzz/corpus/bridge/not-the-seed"}]},
+    {"id": "corpus-seed-duplicate", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "copy", "from": "/corpus/seeds/0", "path": "/corpus/seeds/1"}]},
+    {"id": "artifact-ref-missing-fields", "base": "expected/campaign-evidence.example.json", "operations": [{"op": "set", "path": "/target_outcomes/0/artifact_ids", "value": [{"artifact_id": "crash-1"}]}]}
+  ],
+  "artifact_record_mutation_vectors": [
+    {"id": "artifact-ref-unknown-id", "operations": [{"op": "set", "path": "/target_outcomes/0/artifact_ids", "value": ["crash-unknown"]}]},
+    {"id": "artifact-ref-duplicate-id", "operations": [{"op": "set", "path": "/target_outcomes/0/artifact_ids", "value": ["crash-1", "crash-1"]}]}
+  ],
+  "meta_validation_vectors": [
+    {"id": "accepted-plus-rejected-over-executions", "counts": {"executions": 3, "accepted_inputs": 2, "rejected_inputs": 2, "crashes": 0, "hangs": 0, "timeouts": 0, "sanitizer_findings": 0, "resource_limit_failures": 0}},
+    {"id": "aggregate-accepted-plus-rejected-over-executions", "counts": {"executions": 10, "accepted_inputs": 6, "rejected_inputs": 5, "crashes": 0, "hangs": 0, "timeouts": 0, "sanitizer_findings": 0, "resource_limit_failures": 0}}
+  ],
+  "artifact_link_vectors": [
+    {
+      "id": "unknown-definition-id",
+      "definitions": [{"artifact_id": "crash-1", "campaign_id": "campaign-a", "target": "jmx_xml", "kind": "crash", "path": "oracle-runs/fuzz-manifest/campaign-a/jmx_xml/crash-1", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "size_bytes": 10, "toolchain": {"rust": "nightly-2026-08-12", "cargo_fuzz": "0.12.0", "libfuzzer_sys": "0.4.13", "flags": ["-runs=1"]}}],
+      "references": [{"artifact_id": "crash-unknown", "campaign_id": "campaign-a", "target": "jmx_xml", "kind": "crash", "path": "oracle-runs/fuzz-manifest/campaign-a/jmx_xml/crash-unknown", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "size_bytes": 10, "toolchain": {"rust": "nightly-2026-08-12", "cargo_fuzz": "0.12.0", "libfuzzer_sys": "0.4.13", "flags": ["-runs=1"]}}]
+    },
+    {
+      "id": "artifact-hash-mismatch",
+      "definitions": [{"artifact_id": "crash-1", "campaign_id": "campaign-a", "target": "jmx_xml", "kind": "crash", "path": "oracle-runs/fuzz-manifest/campaign-a/jmx_xml/crash-1", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "size_bytes": 10, "toolchain": {"rust": "nightly-2026-08-12", "cargo_fuzz": "0.12.0", "libfuzzer_sys": "0.4.13", "flags": ["-runs=1"]}}],
+      "references": [{"artifact_id": "crash-1", "campaign_id": "campaign-a", "target": "jmx_xml", "kind": "crash", "path": "oracle-runs/fuzz-manifest/campaign-a/jmx_xml/crash-1", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "size_bytes": 10, "toolchain": {"rust": "nightly-2026-08-12", "cargo_fuzz": "0.12.0", "libfuzzer_sys": "0.4.13", "flags": ["-runs=1"]}}]
+    },
+    {
+      "id": "artifact-duplicate-definition-id",
+      "definitions": [
+        {"artifact_id": "crash-1", "campaign_id": "campaign-a", "target": "jmx_xml", "kind": "crash", "path": "oracle-runs/fuzz-manifest/campaign-a/jmx_xml/crash-1", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "size_bytes": 10, "toolchain": {"rust": "nightly-2026-08-12", "cargo_fuzz": "0.12.0", "libfuzzer_sys": "0.4.13", "flags": ["-runs=1"]}},
+        {"artifact_id": "crash-1", "campaign_id": "campaign-a", "target": "jmx_xml", "kind": "crash", "path": "oracle-runs/fuzz-manifest/campaign-a/jmx_xml/crash-1b", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "size_bytes": 11, "toolchain": {"rust": "nightly-2026-08-12", "cargo_fuzz": "0.12.0", "libfuzzer_sys": "0.4.13", "flags": ["-runs=1"]}}
+      ],
+      "references": []
+    },
+    {
+      "id": "artifact-campaign-or-toolchain-mismatch",
+      "definitions": [{"artifact_id": "crash-1", "campaign_id": "campaign-a", "target": "jmx_xml", "kind": "crash", "path": "oracle-runs/fuzz-manifest/campaign-a/jmx_xml/crash-1", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "size_bytes": 10, "toolchain": {"rust": "nightly-2026-08-12", "cargo_fuzz": "0.12.0", "libfuzzer_sys": "0.4.13", "flags": ["-runs=1"]}}],
+      "references": [{"artifact_id": "crash-1", "campaign_id": "campaign-b", "target": "jmx_xml", "kind": "crash", "path": "oracle-runs/fuzz-manifest/campaign-a/jmx_xml/crash-1", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "size_bytes": 10, "toolchain": {"rust": "nightly-2026-08-13", "cargo_fuzz": "0.12.0", "libfuzzer_sys": "0.4.13", "flags": ["-runs=2"]}}]
+    },
+    {
+      "id": "artifact-duplicate-path",
+      "definitions": [
+        {"artifact_id": "crash-1", "campaign_id": "campaign-a", "target": "jmx_xml", "kind": "crash", "path": "oracle-runs/fuzz-manifest/campaign-a/jmx_xml/crash-1", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "size_bytes": 10, "toolchain": {"rust": "nightly-2026-08-12", "cargo_fuzz": "0.12.0", "libfuzzer_sys": "0.4.13", "flags": ["-runs=1"]}},
+        {"artifact_id": "crash-2", "campaign_id": "campaign-a", "target": "jmx_xml", "kind": "crash", "path": "oracle-runs/fuzz-manifest/campaign-a/jmx_xml/crash-1", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "size_bytes": 11, "toolchain": {"rust": "nightly-2026-08-12", "cargo_fuzz": "0.12.0", "libfuzzer_sys": "0.4.13", "flags": ["-runs=1"]}}
+      ],
+      "references": [
+        {"artifact_id": "crash-1", "campaign_id": "campaign-a", "target": "jmx_xml", "kind": "crash", "path": "oracle-runs/fuzz-manifest/campaign-a/jmx_xml/crash-1", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "size_bytes": 10, "toolchain": {"rust": "nightly-2026-08-12", "cargo_fuzz": "0.12.0", "libfuzzer_sys": "0.4.13", "flags": ["-runs=1"]}},
+        {"artifact_id": "crash-2", "campaign_id": "campaign-a", "target": "jmx_xml", "kind": "crash", "path": "oracle-runs/fuzz-manifest/campaign-a/jmx_xml/crash-1", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "size_bytes": 11, "toolchain": {"rust": "nightly-2026-08-12", "cargo_fuzz": "0.12.0", "libfuzzer_sys": "0.4.13", "flags": ["-runs=1"]}}
+      ]
+    },
+    {
+      "id": "artifact-unlinked-definition",
+      "definitions": [{"artifact_id": "crash-unlinked", "campaign_id": "campaign-a", "target": "jmx_xml", "kind": "crash", "path": "oracle-runs/fuzz-manifest/campaign-a/jmx_xml/crash-unlinked", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "size_bytes": 10, "toolchain": {"rust": "nightly-2026-08-12", "cargo_fuzz": "0.12.0", "libfuzzer_sys": "0.4.13", "flags": ["-runs=1"]}}],
+      "references": []
+    },
+    {
+      "id": "artifact-aggregate-cap",
+      "definitions": [],
+      "references": [],
+      "declared_definition_count": 65,
+      "declared_total_size_bytes": 67108865
+    }
+  ]
+}

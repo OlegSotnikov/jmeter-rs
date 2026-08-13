@@ -1,0 +1,222 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-CONFIG-PRECEDENCE",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-CONFIG-001",
+  "conformance_ids": ["CFG-001", "CFG-002", "CFG-003"],
+  "external_runtime_boundary_ids": ["EXT-OS-001"],
+  "normalization_policy_refs": ["NORM-CONFIG-001", "NORM-ENV-001", "NORM-EXTERNAL-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "24547caf30acf019d9c26004f74c0928d9dddbd4823d242cbbf4008a63f865b8"
+  },
+  "property_files": [
+    {"path": "primary.properties", "sha256": "8a5b2d82082d4abc7a158e78e1bfd808307a9817c728fb59eef1cd677205fc1a"},
+    {"path": "default-jmeter.properties", "sha256": "885dc2d047050d8cc878eba276152e9641095510389366cc91c8ae11d8bdd43f"},
+    {"path": "user.properties", "sha256": "c78aae94e77784588e09d9c8b1ac9758ced74efa37782ae9690e5f22489f0992"},
+    {"path": "system.properties", "sha256": "5b7310012ba1e1a985e2f9ac46c934f139b96131d3a1e7b4ebccc75ccd1fc5bc"},
+    {"path": "additional-first.properties", "sha256": "efc9cb20cf922ac64f31a576e1f2ecde4abca12c5462a44b9832d7ec13d77946"},
+    {"path": "additional-second.properties", "sha256": "002618a8d1c00c75846cad5c87f58ead45adc663b9cad3e9a0cd06edd2035001"},
+    {"path": "additional-system.properties", "sha256": "ee91370e68b705cde8b7bf0ac971144e92724750352bcf1a139c578c8684fb1e"},
+    {"path": "additional-system-second.properties", "sha256": "fbe22fefaad1d3e4dbd68404a9e0e97470270d6955928321e752c96ec0c017af"},
+    {"path": "global.properties", "sha256": "b3fe5f8e0a6fb2e0f49832de14b7c24f599756400b0f09b615a4c6201efad53e"}
+  ],
+  "bounds": {
+    "schema_id": "jmeter-rs.fixture-bounds",
+    "scope": "future runner enforcement; the static fixture checker validates only the declaration shape and finite values",
+    "input": {
+      "max_files": 10,
+      "max_file_bytes": 65536,
+      "max_total_bytes": 262144,
+      "max_argv_tokens_per_scenario": 64
+    },
+    "output": {
+      "max_stdout_bytes": 65536,
+      "max_stderr_bytes": 65536,
+      "max_log_bytes": 65536,
+      "max_jtl_bytes": 65536,
+      "max_projection_bytes": 131072
+    },
+    "process": {
+      "max_processes": 1,
+      "max_child_processes": 1,
+      "max_runner_threads": 4,
+      "max_open_file_descriptors": 128
+    },
+    "artifact": {
+      "max_artifacts": 4,
+      "max_artifact_bytes": 65536,
+      "max_raw_artifact_bytes": 131072,
+      "max_artifact_references": 8
+    },
+    "time": {
+      "max_process_wait_seconds": 30,
+      "max_case_seconds": 120,
+      "max_operation_seconds": 30
+    },
+    "operation": {
+      "max_scenarios": 4,
+      "max_runs": 4,
+      "max_retries": 0,
+      "max_property_load_operations": 32
+    },
+    "property": {
+      "max_property_files": 9,
+      "max_entries_per_file": 64,
+      "max_key_bytes": 256,
+      "max_value_bytes": 4096,
+      "max_repeat_occurrences": 4
+    }
+  },
+  "command": {
+    "executable": "<jmeter-home>/bin/jmeter",
+    "executable_resolution": "explicit placeholder; resolve <jmeter-home> and <java-home> from the runner manifest; do not resolve either executable through inherited PATH",
+    "java_executable": "<java-home>/bin/java",
+    "working_directory": "<case-root>",
+    "working_directory_repository_relative": "compat/fixtures/jmeter-5.6.3/config-precedence",
+    "working_directory_scope": "the future harness must resolve <case-root> to the repository-relative case directory and chdir there before resolving every relative input",
+    "input_paths_relative_to": "working_directory",
+    "output_paths_relative_to": "working_directory",
+    "working_directory_requirements": {
+      "must_exist": true,
+      "must_be_directory": true,
+      "must_chdir_before_launch": true,
+      "required_inputs": [
+        "primary.properties",
+        "default-jmeter.properties",
+        "user.properties",
+        "system.properties",
+        "additional-first.properties",
+        "additional-second.properties",
+        "additional-system.properties",
+        "additional-system-second.properties",
+        "global.properties",
+        "plan.jmx"
+      ],
+      "path_separator": "use the target OS separator after resolving the repository-relative case directory; do not rewrite fixture-relative paths in the argv templates"
+    },
+    "implicit_property_lookup": {
+      "initial_file": "the file selected by -p in each argv template",
+      "required_keys": ["user.properties", "system.properties"],
+      "lookup_order": ["working_directory", "<jmeter-home>/bin"],
+      "working_directory_relative_paths": {
+        "user.properties": "user.properties",
+        "system.properties": "system.properties"
+      },
+      "required_for_this_fixture": true,
+      "missing_behavior": "fail fixture setup; do not silently substitute ambient user.properties or system.properties"
+    },
+    "environment_policy": "inherit no ambient variables; configure and record locale, timezone, charset, Java, and JMeter home explicitly",
+    "mode": "nongui",
+    "argv_templates": [
+      [
+        "<jmeter-home>/bin/jmeter", "-n", "-p", "primary.properties",
+        "-q", "additional-first.properties",
+        "-q", "additional-second.properties",
+        "-t", "plan.jmx", "-l", "<ignored>/baseline.jtl",
+        "-j", "<ignored>/baseline.log"
+      ],
+      [
+        "<jmeter-home>/bin/jmeter", "-n", "-p", "primary.properties",
+        "-q", "additional-first.properties",
+        "-q", "additional-second.properties",
+        "-S", "additional-system.properties",
+        "-S", "additional-system-second.properties",
+        "-Jcfg.source=cli-first", "-Jcfg.source=cli-jmeter",
+        "-Jcfg.repeat=cli-first", "-Jcfg.repeat=cli-repeat", "-Jcfg.empty=",
+        "-Dcfg.system.file=cli-system-first", "-Dcfg.system.file=cli-system",
+        "-Dcfg.system.repeat=cli-system-first", "-Dcfg.system.repeat=cli-system-repeat",
+        "-Dcfg.system.remove=cli-system-remove-first", "-Dcfg.system.remove=",
+        "-Gcfg.remote=remote-cli",
+        "-t", "plan.jmx", "-l", "<ignored>/local-overrides.jtl",
+        "-j", "<ignored>/local-overrides.log"
+      ],
+      [
+        "<jmeter-home>/bin/jmeter", "-n", "-p", "primary.properties",
+        "-Gglobal.properties", "-Gcfg.remote=remote-cli",
+        "-t", "plan.jmx", "-l", "<ignored>/global-file.jtl",
+        "-j", "<ignored>/global-file.log"
+      ],
+      [
+        "<jmeter-home>/bin/jmeter", "-n", "-p", "default-jmeter.properties",
+        "-q", "additional-first.properties",
+        "-q", "additional-second.properties",
+        "-t", "plan.jmx", "-l", "<ignored>/default-file.jtl",
+        "-j", "<ignored>/default-file.log"
+      ]
+    ],
+    "network": "none",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "locale_evidence": {
+      "requested": "en-US",
+      "observed": null,
+      "status": "pending-oracle",
+      "verification": "record the effective JVM locale and the launcher environment at oracle execution; this static manifest does not infer observation from the requested value"
+    },
+    "locale_materialization": {
+      "profile_locale": "en-US",
+      "portable_contract": "materialize the profile locale as an installed target-OS locale with an explicit UTF-8 codeset; on POSIX a valid example is en_US.UTF-8 and on Windows a valid example is en-US",
+      "target_os_examples": {
+        "posix": "en_US.UTF-8",
+        "windows": "en-US"
+      },
+      "installed_locale_required": true,
+      "observed": null,
+      "status": "pending-oracle",
+      "unavailable_behavior": "fail fixture setup or evidence promotion; do not silently fall back to C/POSIX or an uninstalled locale alias",
+      "verification": "record the exact materialized locale environment and JVM default locale for every future run"
+    },
+    "charset_evidence": {
+      "requested_default": "UTF-8",
+      "observed_default": null,
+      "status": "pending-oracle",
+      "property_file_decoder": "ISO-8859-1 via Java Properties.load(InputStream), independent of the requested default charset",
+      "verification": "record JVM file.encoding/default charset and retain the literal UTF-8 property probe; do not rewrite source bytes or fabricate its decoded value"
+    },
+    "jvm_requirements": {
+      "file_encoding": "UTF-8",
+      "default_charset": "UTF-8",
+      "file_encoding_status": "pending-oracle",
+      "default_charset_status": "pending-oracle",
+      "required": true,
+      "observation": {
+        "required": true,
+        "status": "pending-oracle",
+        "fields": [
+          "System.getProperty(\"file.encoding\")",
+          "Charset.defaultCharset().name()"
+        ],
+        "observed_file_encoding": null,
+        "observed_default_charset": null,
+        "missing_behavior": "fail evidence promotion; do not infer either observed value from command.default_charset or environment requests"
+      },
+      "verification": "a future runner must record the effective JVM file.encoding and Charset.defaultCharset().name() before comparing any projection"
+    },
+    "random_seed": null,
+    "environment_allowlist": []
+  },
+  "execution": {
+    "status": "not_run",
+    "process_exit": null,
+    "process_exit_asserted": false,
+    "sample_count": null,
+    "sample_count_asserted": false,
+    "oracle_invoked": false,
+    "comparator_executed": false,
+    "raw_artifacts": "oracle-runs/config-precedence/ (ignored; no Java/JMeter run recorded)",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "This checked-in corpus is a deterministic input and static expectation only; Java/JMeter execution is intentionally pending.",
+    "process_exit and sample_count are null because no oracle process ran; neither is an assertion, and no log text or JTL bytes are claimed.",
+    "The expectation asserts fixture-owned property scopes, parser edge cases, and documented load order. Ambient JVM properties, host identity, startup timestamps, and unobserved locale/charset values are not part of the expected set.",
+    "CFG-003 coverage is limited to an explicit case-root working directory, literal UTF-8 source bytes, UTF-8 JMX metadata, escaped property values, requested profile locale en-US, requested profile timezone UTC, and the profile's empty environment allowlist. Locale/default-charset observations are pending; the Linux/Windows/macOS target-triple matrix, launcher/JVM resolution, path-separator matrix, and OS-specific filesystem behavior remain harness gaps.",
+    "The -G vectors are only static remote-property merge projections: without a remote worker run, those values are unobservable and are not asserted as local Debug Sampler output.",
+    "The attached and separate -G file/key-value forms are intentional coverage. A future runner must report an option-parser gap rather than deleting, rewriting, or weakening these vectors.",
+    "The implicit user.properties and system.properties paths are fixture requirements resolved from each initial -p file; ambient files outside the declared lookup roots are out of scope.",
+    "The fixture covers configuration-affecting CLI options named by CFG-001; it does not claim complete CLI option, usage-text, report, or process-exit compatibility."
+  ]
+}

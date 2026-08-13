@@ -1,0 +1,39 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JTL-FIELDS",
+  "format": "jtl-csv",
+  "contract_kind": "jmeter-writer-wire",
+  "projection_schema": "neutral-csv-v1",
+  "evidence_status": "planned",
+  "expectation_basis": "Hand-authored projection of inputs/csv/tab-crlf.csv; no Apache JMeter output was measured.",
+  "writer_configuration": "switches/csv-tab-crlf.properties",
+  "header": ["timeStamp", "elapsed", "label", "responseCode", "success", "case_id", "comma_value"],
+  "writer_wire": {
+    "header_line": "timeStamp\telapsed\tlabel\tresponseCode\tsuccess\t\"case_id\"\t\"comma_value\"",
+    "sample_variable_headers_quoted": true,
+    "delimiter": "TAB",
+    "line_ending": "CRLF"
+  },
+  "rows": [{
+    "position": 0,
+    "fields": {
+      "timeStamp": "1700000000123",
+      "elapsed": "12",
+      "label": "tab\tlabel",
+      "responseCode": "200",
+      "success": "true",
+      "case_id": "jtl-fields",
+      "comma_value": "left,right"
+    }
+  }],
+  "quoting_assertions": [
+    {"field": "label", "parsed_value": "tab\tlabel", "serialized_csv_token": "\"tab\tlabel\""},
+    {"field": "comma_value", "parsed_value": "left,right", "serialized_csv_token": "\"left,right\""}
+  ],
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "The planned artifact target uses CRLF line endings; TAB delimiter, quoted sample-variable headers, timestamp format, and escaped field values are explicit static targets."
+  }
+}

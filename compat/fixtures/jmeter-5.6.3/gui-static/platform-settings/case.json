@@ -1,0 +1,148 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-GUI-STATIC-PLATFORM",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-GUI-001",
+  "conformance_ids": ["GUI-003"],
+  "external_runtime_boundary_ids": ["EXT-JVM-001", "EXT-OS-001"],
+  "normalization_policy_refs": ["NORM-ENV-001", "NORM-EXTERNAL-001"],
+  "plan": {
+    "path": "../guiclass-roundtrip/plan.jmx",
+    "sha256": "c3a83e0ea161a541e5def081cda82721f1dbab57ed4239b1c42efe6b0038e62f"
+  },
+  "property_files": [
+    {
+      "path": "gui-platform.properties",
+      "sha256": "cc1da032eef43136f9e7d9f3197180d58f662b1ff990753fbc1c8f0f2196fd6c"
+    }
+  ],
+  "inputs": [
+    {
+      "path": "../guiclass-roundtrip/plan.jmx",
+      "sha256": "c3a83e0ea161a541e5def081cda82721f1dbab57ed4239b1c42efe6b0038e62f"
+    },
+    {
+      "path": "gui-platform.properties",
+      "sha256": "cc1da032eef43136f9e7d9f3197180d58f662b1ff990753fbc1c8f0f2196fd6c"
+    },
+    {
+      "path": "matrix.json",
+      "sha256": "aa3c1dde689ec1ae54af2378f531dbb1daabd4dd6ee0252370936604644e525e"
+    },
+    {
+      "path": "expected/platform.json",
+      "sha256": "884fcdf70c721511aae06db2acbf876be073c96c8652995d4c912e3ba50b457b"
+    }
+  ],
+  "command": {
+    "working_directory": "<temporary-root>/workspace/platform-settings/<lane-id>",
+    "workspace_root": "<temporary-root>/workspace/platform-settings/<lane-id>",
+    "output_root": "<temporary-root>/oracle-runs/gui-static/platform-settings/<lane-id>",
+    "target_lane_matrix": "matrix.json#/target_lanes",
+    "path_policy": {
+      "copy_inputs_to_workspace": true,
+      "generated_outputs_root": "<temporary-root>/oracle-runs/gui-static/platform-settings/<lane-id>",
+      "static_corpus_writes": "forbidden",
+      "path_expansion": "Expand <temporary-root> and <lane-id> to fresh absolute per-lane roots before launch; do not resolve relative to this fixture directory.",
+      "path_encoding": {
+        "canonical_form": "Use absolute paths after token expansion; forward slashes are the portable descriptor form.",
+        "windows_form": "A Windows runner may convert separators only after expansion and must Java-properties-escape each backslash as \\\\ when writing a .properties value; shell quoting is not path escaping.",
+        "record_resolved_paths": true
+      }
+    },
+    "mode": "gui; future only",
+    "argv_template": ["jmeter", "-d", "<temporary-root>/jmeter-home", "-q", "<temporary-root>/workspace/platform-settings/<lane-id>/gui-platform.properties", "-j", "<temporary-root>/oracle-runs/gui-static/platform-settings/<lane-id>/gui.log", "-t", "<temporary-root>/workspace/platform-settings/<lane-id>/plan.jmx"],
+    "headless_argv_template": ["jmeter", "-d", "<temporary-root>/jmeter-home", "-q", "<temporary-root>/workspace/platform-settings/<lane-id>/gui-platform.properties", "-n", "-j", "<temporary-root>/oracle-runs/gui-static/platform-settings/<lane-id>/headless.log", "-t", "<temporary-root>/workspace/platform-settings/<lane-id>/plan.jmx"],
+    "network": "none",
+    "locale": "matrix-declared",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null,
+    "launcher_environment": {
+      "JMETER_LANGUAGE": "matrix-declared; set before JVM startup"
+    },
+    "jvm_system_properties": {
+      "user.language": "matrix-declared",
+      "user.region": "matrix-declared",
+      "user.timezone": "UTC",
+      "file.encoding": "UTF-8",
+      "java.util.prefs.userRoot": "<temporary-root>/prefs/platform-settings/<lane-id>"
+    },
+    "pre_launch": {
+      "materialize_tokens": {
+        "<temporary-root>": "fresh allowlisted temporary root"
+      },
+      "materialize_inputs": [
+        {
+          "source": "../guiclass-roundtrip/plan.jmx",
+          "destination": "<temporary-root>/workspace/platform-settings/<lane-id>/plan.jmx",
+          "copy_only": true
+        },
+        {
+          "source": "gui-platform.properties",
+          "destination": "<temporary-root>/workspace/platform-settings/<lane-id>/gui-platform.properties",
+          "copy_only": true
+        }
+      ],
+      "preferences": {
+        "user_root_template": "<temporary-root>/prefs/platform-settings/<lane-id>",
+        "fresh_root_per_lane": true,
+        "clear_before_each_lane": true,
+        "preference_nodes": {
+          "laf.command": "org/apache/jmeter/gui/action",
+          "recent_file_0": "org/apache/jmeter/gui/action",
+          "save_before_run": "org/apache/jmeter/gui"
+        }
+      },
+      "required": [
+        "Set JMETER_LANGUAGE/user.language/user.region before the -q property file; late language properties do not change initLocale.",
+        "Set java.util.prefs.userRoot before JVM startup so LAF preference overrides cannot leak between rows."
+      ]
+    }
+  },
+  "bounds": {
+    "schema_id": "jmeter-rs.fixture-bounds",
+    "schema_version": 1,
+    "enforcement": "declared; static-only; future runner must enforce",
+    "comparator_enforced": false,
+    "max_plan_bytes": 65536,
+    "max_plan_nodes": 32,
+    "max_plan_depth": 8,
+    "max_property_text_bytes": 8192,
+    "max_property_count_per_element": 32,
+    "max_backup_files": 10,
+    "max_backup_name_bytes": 96,
+    "max_template_files": 4,
+    "max_template_entries": 64,
+    "max_template_file_bytes": 65536,
+    "max_toolbar_entries": 64,
+    "max_icon_resource_bytes": 65536,
+    "max_undo_history": 25,
+    "max_textarea_undo": 50,
+    "max_output_bytes": 65536,
+    "max_log_bytes": 65536,
+    "max_gui_wait_seconds": 30
+  },
+  "future_oracle_actions": [
+    "Expand matrix.json#/target_lanes into twelve independent rows: Linux x86_64/aarch64, Windows x86_64/aarch64, and macOS x86_64/aarch64 each crossed with Java 8 and Java 17. Provision the pinned JMeter/JVM on each declared OS image, clear its fresh lane-specific preference root, set JMETER_LANGUAGE and java.util.prefs.userRoot before startup, activate the lane's ProcessTree supervisor gate, verify the worker/JMeter/classpath/plugin identities, and start a real display-backed GUI with that row's environment and properties.",
+    "Record effective language, Swing LAF selection using exact os.name then os-family lookup, toolbar/icon resource and size, tree icon size, HiDPI settings, expand-tree state, global undo capacity, and text-area undo capacity per lane.",
+    "Restart after each LAF change, reopen the lane's copied plan, and compare only that lane's normalized settings fields; retain raw UI/property diagnostics outside Git.",
+    "Run the declared headless argv only as a no-display persistence/parser probe; it must not be used to claim LAF, toolbar, icon, HiDPI, tree, or undo rendering.",
+    "Mark a row unavailable when its OS/display/runtime boundary cannot be provisioned; do not treat headless startup or a missing display as GUI evidence."
+  ],
+  "execution": {
+    "status": "static-only; oracle not executed",
+    "process_exit": null,
+    "sample_count": null,
+    "raw_artifacts": "<temporary-root>/oracle-runs/gui-static/platform-settings/<lane-id>/ (ignored; no artifacts committed)",
+    "expected": "expected/platform.json"
+  },
+  "limitations": [
+    "The property values and matrix are original planned inputs; no locale, LAF, toolbar, tree, HiDPI, expand-tree, or undo setting was observed.",
+    "Linux, Windows, and macOS rows are explicit planned matrix entries, not platform compatibility claims.",
+    "A GUI display server and OS facilities are required external capabilities for future evidence.",
+    "The matrix's twelve target/Java rows and OS-name candidates are bounded future lanes; they are not evidence that any runner, supervisor, JVM, or display is available.",
+    "The language property is intentionally absent from this -q file; locale must be established by launcher/JVM settings before JMeterUtils.initLocale."
+  ]
+}

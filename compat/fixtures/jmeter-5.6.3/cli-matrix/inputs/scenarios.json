@@ -1,0 +1,696 @@
+{
+  "schema_id": "jmeter-rs.cli-scenario-descriptors",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-CLI-001",
+  "compatibility_ids": ["CLI-001", "CLI-002", "CLI-003"],
+  "status": "planned",
+  "execution_status": "not-run-static-corpus",
+  "scenario_count": 48,
+  "argv_policy": "Argument vectors are future oracle templates only; no vector in this file was executed.",
+  "scenarios": [
+    {
+      "id": "help-question-short",
+      "argv": ["jmeter", "-?"],
+      "option_ids": ["OPT-001"],
+      "category": "help",
+      "expected": {
+        "outcome": "accept-and-print-help",
+        "required_vocabulary_ref": "help_version_vocabulary.option_help_tokens",
+        "exit_status_class": "usage-return",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "help-question-long",
+      "argv": ["jmeter", "--?"],
+      "option_ids": ["OPT-001"],
+      "category": "help",
+      "expected": {
+        "outcome": "accept-and-print-help",
+        "required_vocabulary_ref": "help_version_vocabulary.option_help_tokens",
+        "exit_status_class": "usage-return",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "help-short",
+      "argv": ["jmeter", "-h"],
+      "option_ids": ["OPT-002"],
+      "category": "help",
+      "expected": {
+        "outcome": "accept-and-print-help",
+        "required_vocabulary_ref": "help_version_vocabulary.usage_help_tokens",
+        "exit_status_class": "usage-return",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "help-long",
+      "argv": ["jmeter", "--help"],
+      "option_ids": ["OPT-002"],
+      "category": "help",
+      "expected": {
+        "outcome": "accept-and-print-help",
+        "required_vocabulary_ref": "help_version_vocabulary.usage_help_tokens",
+        "exit_status_class": "usage-return",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "version-short",
+      "argv": ["jmeter", "-v"],
+      "option_ids": ["OPT-003"],
+      "category": "version",
+      "expected": {
+        "outcome": "accept-and-print-version",
+        "required_vocabulary_ref": "help_version_vocabulary.version_tokens",
+        "exit_status_class": "usage-return",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "version-long",
+      "argv": ["jmeter", "--version"],
+      "option_ids": ["OPT-003"],
+      "category": "version",
+      "expected": {
+        "outcome": "accept-and-print-version",
+        "required_vocabulary_ref": "help_version_vocabulary.version_tokens",
+        "exit_status_class": "usage-return",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "all-option-pairs",
+      "argv": ["jmeter", "-?"],
+      "argv_vectors": [
+        ["jmeter", "-?"], ["jmeter", "--?"],
+        ["jmeter", "-h"], ["jmeter", "--help"],
+        ["jmeter", "-v"], ["jmeter", "--version"],
+        ["jmeter", "-p", "inputs/primary.properties"], ["jmeter", "--propfile", "inputs/primary.properties"],
+        ["jmeter", "-q", "inputs/additional-a.properties"], ["jmeter", "--addprop", "inputs/additional-a.properties"],
+        ["jmeter", "-t", "inputs/cli-plan.jmx"], ["jmeter", "--testfile", "inputs/cli-plan.jmx"],
+        ["jmeter", "-l", "oracle-runs/cli-matrix/cli-result.jtl"], ["jmeter", "--logfile", "oracle-runs/cli-matrix/cli-result.jtl"],
+        ["jmeter", "-i", "inputs/log4j2.xml"], ["jmeter", "--jmeterlogconf", "inputs/log4j2.xml"],
+        ["jmeter", "-j", "oracle-runs/cli-matrix/cli-run.log"], ["jmeter", "--jmeterlogfile", "oracle-runs/cli-matrix/cli-run.log"],
+        ["jmeter", "-n"], ["jmeter", "--nongui"],
+        ["jmeter", "-s"], ["jmeter", "--server"],
+        ["jmeter", "-E", "http"], ["jmeter", "--proxyScheme", "http"],
+        ["jmeter", "-H", "127.0.0.1"], ["jmeter", "--proxyHost", "127.0.0.1"],
+        ["jmeter", "-P", "8080"], ["jmeter", "--proxyPort", "8080"],
+        ["jmeter", "-N", "localhost|127.*"], ["jmeter", "--nonProxyHosts", "localhost|127.*"],
+        ["jmeter", "-u", "fixture-user"], ["jmeter", "--username", "fixture-user"],
+        ["jmeter", "-a", "fixture-pass"], ["jmeter", "--password", "fixture-pass"],
+        ["jmeter", "-Jcli.matrix.local=one"], ["jmeter", "--jmeterproperty", "cli.matrix.local=one"],
+        ["jmeter", "-Gcli.matrix.global=one"], ["jmeter", "--globalproperty", "cli.matrix.global=one"],
+        ["jmeter", "-Dcli.matrix.system=one"], ["jmeter", "--systemproperty", "cli.matrix.system=one"],
+        ["jmeter", "-S", "inputs/system-a.properties"], ["jmeter", "--systemPropertyFile", "inputs/system-a.properties"],
+        ["jmeter", "-f"], ["jmeter", "--forceDeleteResultFile"],
+        ["jmeter", "-L", "org.apache.jmeter=INFO"], ["jmeter", "--loglevel", "org.apache.jmeter=INFO"],
+        ["jmeter", "-r"], ["jmeter", "--runremote"],
+        ["jmeter", "-R", "127.0.0.1:1099"], ["jmeter", "--remotestart", "127.0.0.1:1099"],
+        ["jmeter", "-d", "inputs"], ["jmeter", "--homedir", "inputs"],
+        ["jmeter", "-X"], ["jmeter", "--remoteexit"],
+        ["jmeter", "-g", "inputs/report-input.csv"], ["jmeter", "--reportonly", "inputs/report-input.csv"],
+        ["jmeter", "-e"], ["jmeter", "--reportatendofloadtests"],
+        ["jmeter", "-o", "oracle-runs/cli-matrix/dashboard"], ["jmeter", "--reportoutputfolder", "oracle-runs/cli-matrix/dashboard"]
+      ],
+      "option_ids": [
+        "OPT-001", "OPT-002", "OPT-003", "OPT-004", "OPT-005", "OPT-006", "OPT-007", "OPT-008", "OPT-009", "OPT-010",
+        "OPT-011", "OPT-012", "OPT-013", "OPT-014", "OPT-015", "OPT-016", "OPT-017", "OPT-018", "OPT-019", "OPT-020",
+        "OPT-021", "OPT-022", "OPT-023", "OPT-024", "OPT-025", "OPT-026", "OPT-027", "OPT-028", "OPT-029", "OPT-030"
+      ],
+      "category": "option-vocabulary",
+      "expected": {
+        "outcome": "each-short-and-long-spelling-is-probed-individually",
+        "option_count": 30,
+        "vector_count": 60,
+        "vectors_are_concrete": true,
+        "process_exit": null,
+        "process_exit_asserted": false,
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "repeat-addprop",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-q", "inputs/additional-a.properties", "-q", "inputs/additional-b.properties"],
+      "option_ids": ["OPT-005", "OPT-006", "OPT-010"],
+      "category": "repeatable-options",
+      "expected": {
+        "outcome": "accept-and-preserve-ordered-occurrences",
+        "occurrence_count": 2,
+        "duplicate_key_precedence": "last-file-wins",
+        "effective_values": {"cli.matrix.repeat": "b", "cli.matrix.order": "second"},
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "repeat-jmeterproperty",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-Jcli.matrix.value=first", "-Jcli.matrix.value=second"],
+      "option_ids": ["OPT-018", "OPT-006", "OPT-010"],
+      "category": "repeatable-options",
+      "expected": {
+        "outcome": "accept-and-preserve-ordered-occurrences",
+        "occurrence_count": 2,
+        "duplicate_key_precedence": "last-occurrence-wins",
+        "effective_value": "second",
+        "value_semantics": "-J receives a key=value string; the value is not coerced to a number",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "repeat-globalproperty",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-Gcli.matrix.global=first", "-Ginputs/additional-a.properties", "-Gcli.matrix.global=second"],
+      "option_ids": ["OPT-019", "OPT-006", "OPT-010"],
+      "category": "repeatable-options",
+      "expected": {
+        "outcome": "accept-and-preserve-ordered-occurrences",
+        "occurrence_count": 3,
+        "accepted_argument_forms": ["key=value", "properties-file-path"],
+        "duplicate_key_precedence": "last-occurrence-wins",
+        "effective_value": "second",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "repeat-systemproperty",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-Dcli.matrix.system=first", "-Dcli.matrix.system=second"],
+      "option_ids": ["OPT-020", "OPT-006", "OPT-010"],
+      "category": "repeatable-options",
+      "expected": {
+        "outcome": "accept-and-preserve-ordered-occurrences",
+        "occurrence_count": 2,
+        "duplicate_key_precedence": "last-occurrence-wins",
+        "effective_value": "second",
+        "value_semantics": "-D receives a key=value string and updates the JVM system-property value in occurrence order",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "repeat-system-property-files",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-S", "inputs/system-a.properties", "-S", "inputs/system-b.properties"],
+      "option_ids": ["OPT-021", "OPT-006", "OPT-010"],
+      "category": "repeatable-options",
+      "expected": {
+        "outcome": "accept-and-preserve-ordered-occurrences",
+        "occurrence_count": 2,
+        "duplicate_key_precedence": "last-file-wins",
+        "effective_value": "system-b",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "repeat-loglevel",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-L", "org.apache.jmeter=INFO", "-L", "org.apache.jmeter=DEBUG"],
+      "option_ids": ["OPT-023", "OPT-006", "OPT-010"],
+      "category": "repeatable-options",
+      "expected": {
+        "outcome": "accept-and-preserve-ordered-occurrences",
+        "occurrence_count": 2,
+        "accepted_argument_forms": ["category=level"],
+        "duplicate_key_precedence": "last-occurrence-wins",
+        "effective_value": "org.apache.jmeter=DEBUG",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "last-testfile",
+      "argv": ["jmeter", "-n", "-t", "LAST"],
+      "option_ids": ["OPT-006", "OPT-010"],
+      "category": "LAST",
+      "expected": {
+        "outcome": "resolve-source-defined-recent-plan-when-recent-state-exists",
+        "last_form": "LAST",
+        "resolution": "JMeter.java calls LoadRecentProject.getRecentFile(0); this static corpus supplies no recent-project state",
+        "headless_resolution": "not-observed",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "last-logfile",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-l", "LAST"],
+      "argv_vectors": [
+        ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-l", "LAST"],
+        ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-l", "LAST.jtl"]
+      ],
+      "option_ids": ["OPT-006", "OPT-007", "OPT-010"],
+      "category": "LAST",
+      "expected": {
+        "outcome": "derive-result-name-with-jtl-suffix",
+        "last_forms": ["LAST", "LAST.jtl"],
+        "source_plan": "inputs/cli-plan.jmx",
+        "resolution": "JMeter.java processLAST(argument, .jtl) uses the source-defined recent file and replaces a .JMX suffix; no recent state is observed",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "last-jmeterlogfile",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-j", "LAST"],
+      "argv_vectors": [
+        ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-j", "LAST"],
+        ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-j", "LAST.log"]
+      ],
+      "option_ids": ["OPT-006", "OPT-009", "OPT-010"],
+      "category": "LAST",
+      "expected": {
+        "outcome": "retain-source-inconsistency-for-jmeter-log-LAST-forms",
+        "last_forms": ["LAST", "LAST.log"],
+        "source_plan": "inputs/cli-plan.jmx",
+        "resolution": "JMeter.java comments mention LAST.log, but NewDriver.replaceDateFormatInFileName receives the -j string and does not perform LoadRecentProject resolution; literal handling remains the oracle probe",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "last-derived-artifacts",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-l", "LAST", "-j", "LAST"],
+      "option_ids": ["OPT-006", "OPT-007", "OPT-009", "OPT-010"],
+      "category": "LAST",
+      "expected": {
+        "outcome": "derive-jtl-name-and-retain-jmeter-log-source-inconsistency",
+        "logfile_form": "LAST derives through processLAST; LAST.jtl is also accepted",
+        "jmeterlogfile_form": "LAST and LAST.log remain literal NewDriver inputs under the source inconsistency",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "last-lowercase-negative",
+      "argv": ["jmeter", "-n", "-t", "last"],
+      "option_ids": ["OPT-006", "OPT-010"],
+      "category": "LAST",
+      "expected": {
+        "outcome": "oracle-required-ordinary-path-versus-pseudo-value",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "nongui-load",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-l", "<ignored>/cli-result.jtl", "-j", "<ignored>/cli-run.log"],
+      "option_ids": ["OPT-006", "OPT-007", "OPT-009", "OPT-010"],
+      "category": "legal-combination",
+      "expected": {
+        "outcome": "accept-and-run-nongui-plan",
+        "sample_failure_does_not_define_process_exit": true,
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "report-at-end",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-l", "<ignored>/cli-result.jtl", "-e", "-o", "<ignored>/dashboard"],
+      "option_ids": ["OPT-006", "OPT-007", "OPT-010", "OPT-029", "OPT-030"],
+      "category": "legal-combination",
+      "expected": {
+        "outcome": "accept-load-test-and-generate-report-at-end",
+        "requires": ["OPT-007"],
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "report-only",
+      "argv": ["jmeter", "-g", "inputs/report-input.csv", "-o", "oracle-runs/cli-matrix/report-only"],
+      "option_ids": ["OPT-028", "OPT-030"],
+      "category": "report-only",
+      "expected": {
+        "outcome": "accept-report-only",
+        "requires": ["OPT-028", "OPT-030"],
+        "forbids_load_test_plan": true,
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "report-only-default-output-policy",
+      "argv": ["jmeter", "-g", "inputs/report-input.csv"],
+      "option_ids": ["OPT-028"],
+      "category": "report-only",
+      "expected": {
+        "outcome": "oracle-required-default-or-rejection-policy-for-omitted-o",
+        "requires": ["OPT-028"],
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "report-only-force-delete",
+      "argv": ["jmeter", "-g", "inputs/report-input.csv", "-f", "-o", "oracle-runs/cli-matrix/preexisting-dashboard"],
+      "option_ids": ["OPT-022", "OPT-028", "OPT-030"],
+      "category": "report-only",
+      "expected": {
+        "outcome": "accept-report-only-with-forced-output-replacement",
+        "requires": ["OPT-028", "OPT-030", "OPT-022"],
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "remote-all-hosts",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-r", "-Gcli.matrix.global=one", "-X"],
+      "option_ids": ["OPT-006", "OPT-010", "OPT-019", "OPT-024", "OPT-027"],
+      "category": "legal-combination",
+      "expected": {
+        "outcome": "accept-remote-load-test-and-request-remote-shutdown",
+        "remote_shutdown_requested": true,
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "remote-explicit-hosts",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-R", "127.0.0.1:<registry-port>", "-Gcli.matrix.global=one"],
+      "option_ids": ["OPT-006", "OPT-010", "OPT-019", "OPT-025"],
+      "category": "legal-combination",
+      "expected": {
+        "outcome": "accept-remote-load-test-with-explicit-hosts",
+        "remote_hosts_source": "-R-overrides-remote_hosts",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "server-mode",
+      "argv": ["jmeter", "-s"],
+      "option_ids": ["OPT-011"],
+      "category": "legal-combination",
+      "expected": {
+        "outcome": "accept-and-start-remote-server",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "proxy-options",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-E", "http", "-H", "127.0.0.1", "-P", "8080", "-N", "localhost|127.*", "-u", "fixture-user", "-a", "fixture-pass"],
+      "option_ids": ["OPT-006", "OPT-010", "OPT-012", "OPT-013", "OPT-014", "OPT-015", "OPT-016", "OPT-017"],
+      "category": "legal-combination",
+      "expected": {
+        "outcome": "accept-proxy-options",
+        "credential_values_are_synthetic": true,
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "proxy-port-string",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-H", "127.0.0.1", "-P", "fixture-port"],
+      "option_ids": ["OPT-006", "OPT-010", "OPT-013", "OPT-014"],
+      "category": "legal-combination",
+      "expected": {
+        "outcome": "accept-proxy-port-as-unvalidated-string-at-parser-boundary",
+        "proxy_port_argument_kind": "string",
+        "numeric_coercion": false,
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "logging",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-i", "inputs/log4j2.xml", "-j", "<ignored>/cli-run.log", "-L", "INFO", "-L", "org.apache.jmeter=DEBUG"],
+      "option_ids": ["OPT-006", "OPT-008", "OPT-009", "OPT-010", "OPT-023"],
+      "category": "logging",
+      "expected": {
+        "outcome": "accept-log-config-log-file-and-repeated-levels",
+        "log_categories_compared": ["startup", "option-parser", "report", "remote-shutdown", "fatal"],
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "logging-date-pattern",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-j", "<ignored>/run-'yyyyMMdd-HHmmss'.log"],
+      "option_ids": ["OPT-006", "OPT-009", "OPT-010"],
+      "category": "logging",
+      "expected": {
+        "outcome": "oracle-required-paired-quote-date-pattern-source-ambiguity",
+        "date_pattern_engine": null,
+        "date_pattern_engine_candidates": ["java.text.SimpleDateFormat", "java.time.format.DateTimeFormatter"],
+        "date_pattern_engine_asserted": false,
+        "date_pattern_source_status": "ambiguous-research-versus-pinned-source-call-site",
+        "date_pattern_probe": "yyyyMMdd-HHmmss",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "property-order",
+      "argv": ["jmeter", "-n", "-p", "inputs/primary.properties", "-q", "inputs/additional-a.properties", "-q", "inputs/additional-b.properties", "-Jcli.matrix.local=cli", "-Gcli.matrix.global=remote", "-Dcli.matrix.system=system", "-S", "inputs/system-a.properties", "-t", "inputs/cli-plan.jmx"],
+      "option_ids": ["OPT-004", "OPT-005", "OPT-006", "OPT-010", "OPT-018", "OPT-019", "OPT-020", "OPT-021"],
+      "category": "legal-combination",
+      "expected": {
+        "outcome": "accept-and-retain-order-for-repeatable-options",
+        "load_order_reference": "NORM-CONFIG-001-is-out-of-scope-for-this-family",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "illegal-nongui-without-testfile",
+      "argv": ["jmeter", "-n"],
+      "option_ids": ["OPT-010"],
+      "category": "illegal-combination",
+      "expected": {
+        "outcome": "reject-missing-test-plan",
+        "diagnostic_category": "option-combination-or-startup",
+        "exit_status_class": "usage-return",
+        "termination_behavior": "IllegalUserActionException is printed as Incorrect Usage and JMeter.start returns",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "illegal-report-at-end-without-logfile",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-e"],
+      "option_ids": ["OPT-006", "OPT-010", "OPT-029"],
+      "category": "illegal-combination",
+      "expected": {
+        "outcome": "reject-report-at-end-without-l",
+        "diagnostic_category": "option-combination",
+        "exit_status_class": "usage-return",
+        "termination_behavior": "IllegalUserActionException is printed as Incorrect Usage and JMeter.start returns",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "illegal-report-only-with-nongui",
+      "argv": ["jmeter", "-g", "inputs/report-input.csv", "-n"],
+      "argv_vectors": [
+        ["jmeter", "-g", "inputs/report-input.csv", "-n"],
+        ["jmeter", "--reportonly", "inputs/report-input.csv", "--nongui"]
+      ],
+      "option_ids": ["OPT-010", "OPT-028"],
+      "category": "illegal-combination",
+      "expected": {
+        "outcome": "reject-report-only-with-load-test-mode",
+        "vector_count": 2,
+        "diagnostic_category": "option-combination",
+        "exit_status_class": "usage-return",
+        "termination_behavior": "report-only disallowed-option validation returns through the usage path",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "illegal-report-only-with-runremote",
+      "argv": ["jmeter", "-g", "inputs/report-input.csv", "-r"],
+      "argv_vectors": [
+        ["jmeter", "-g", "inputs/report-input.csv", "-r"],
+        ["jmeter", "--reportonly", "inputs/report-input.csv", "--runremote"]
+      ],
+      "option_ids": ["OPT-024", "OPT-028"],
+      "category": "illegal-combination",
+      "expected": {
+        "outcome": "reject-report-only-with-runremote",
+        "vector_count": 2,
+        "diagnostic_category": "option-combination",
+        "exit_status_class": "usage-return",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "illegal-report-only-with-remotestart",
+      "argv": ["jmeter", "-g", "inputs/report-input.csv", "-R", "127.0.0.1:1099"],
+      "argv_vectors": [
+        ["jmeter", "-g", "inputs/report-input.csv", "-R", "127.0.0.1:1099"],
+        ["jmeter", "--reportonly", "inputs/report-input.csv", "--remotestart", "127.0.0.1:1099"]
+      ],
+      "option_ids": ["OPT-025", "OPT-028"],
+      "category": "illegal-combination",
+      "expected": {
+        "outcome": "reject-report-only-with-remotestart",
+        "vector_count": 2,
+        "diagnostic_category": "option-combination",
+        "exit_status_class": "usage-return",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "illegal-report-only-with-logfile",
+      "argv": ["jmeter", "-g", "inputs/report-input.csv", "-l", "oracle-runs/cli-matrix/report-only.jtl"],
+      "argv_vectors": [
+        ["jmeter", "-g", "inputs/report-input.csv", "-l", "oracle-runs/cli-matrix/report-only.jtl"],
+        ["jmeter", "--reportonly", "inputs/report-input.csv", "--logfile", "oracle-runs/cli-matrix/report-only.jtl"]
+      ],
+      "option_ids": ["OPT-007", "OPT-028"],
+      "category": "illegal-combination",
+      "expected": {
+        "outcome": "reject-report-only-with-logfile",
+        "vector_count": 2,
+        "diagnostic_category": "option-combination",
+        "exit_status_class": "usage-return",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "report-only-with-testfile",
+      "argv": ["jmeter", "-g", "inputs/report-input.csv", "-t", "inputs/cli-plan.jmx"],
+      "option_ids": ["OPT-006", "OPT-028"],
+      "category": "report-only",
+      "expected": {
+        "outcome": "accept-report-only-and-ignore-test-plan-option",
+        "ignored_option": "-t/--testfile",
+        "diagnostic_category": "none",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "report-only-with-report-at-end",
+      "argv": ["jmeter", "-g", "inputs/report-input.csv", "-e", "-o", "oracle-runs/cli-matrix/report-only-with-e"],
+      "option_ids": ["OPT-028", "OPT-029", "OPT-030"],
+      "category": "report-only",
+      "expected": {
+        "outcome": "accept-report-only-and-ignore-report-at-end-option",
+        "ignored_option": "-e/--reportatendofloadtests",
+        "diagnostic_category": "none",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "illegal-output-folder-nonempty-without-force",
+      "argv": ["jmeter", "-g", "inputs/report-input.csv", "-o", "oracle-runs/cli-matrix/preexisting-nonempty"],
+      "option_ids": ["OPT-028", "OPT-030"],
+      "category": "illegal-combination",
+      "expected": {
+        "outcome": "reject-or-report-output-safety-error",
+        "diagnostic_category": "configuration-or-output-safety",
+        "exit_status_class": "fatal-throwable-system-exit",
+        "documented_candidate_numeric_status": 1,
+        "termination_behavior": "output safety failure is a Throwable path; process_exit remains unobserved",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "missing-required-argument",
+      "argv": ["jmeter", "-n", "-t"],
+      "option_ids": ["OPT-006", "OPT-010"],
+      "category": "illegal-argv",
+      "expected": {
+        "outcome": "reject-missing-option-argument",
+        "diagnostic_category": "option-parser",
+        "exit_status_class": "usage-return",
+        "termination_behavior": "CLArgsParser prints Error and Usage, then JMeter.start returns",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "unknown-option",
+      "argv": ["jmeter", "--not-a-jmeter-option"],
+      "option_ids": [],
+      "category": "illegal-argv",
+      "expected": {
+        "outcome": "reject-unknown-option",
+        "diagnostic_category": "option-parser",
+        "exit_status_class": "usage-return",
+        "termination_behavior": "CLArgsParser prints Error and Usage, then JMeter.start returns",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "remote-exit-without-remote-selection",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-X"],
+      "argv_vectors": [
+        ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-X"],
+        ["jmeter", "--nongui", "--testfile", "inputs/cli-plan.jmx", "--remoteexit"]
+      ],
+      "option_ids": ["OPT-006", "OPT-010", "OPT-027"],
+      "category": "legal-combination",
+      "expected": {
+        "outcome": "accept-local-nongui-without-remote-selection",
+        "vector_count": 2,
+        "remote_selection": false,
+        "remote_shutdown_requested": false,
+        "remote_shutdown_state": "not-requested-no-remote-engine",
+        "diagnostic_category": "none",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "missing-plan-file",
+      "argv": ["jmeter", "-n", "-t", "<missing>/cli-plan.jmx"],
+      "option_ids": ["OPT-006", "OPT-010"],
+      "category": "fatal-startup",
+      "expected": {
+        "outcome": "reject-unreadable-test-plan",
+        "diagnostic_category": "fatal-startup",
+        "exit_status_class": "fatal-throwable-system-exit",
+        "documented_candidate_numeric_status": 1,
+        "termination_behavior": "unreadable-plan failure reaches the outer Throwable catch; process_exit remains unobserved",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "normal-sample-failure",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-sample-failure-plan.jmx", "-l", "oracle-runs/cli-matrix/sample-failure.jtl"],
+      "option_ids": ["OPT-006", "OPT-007", "OPT-010"],
+      "category": "normal-vs-sample-failure",
+      "expected": {
+        "outcome": "process-status-and-sample-status-are-compared-separately",
+        "input_plan": "inputs/cli-sample-failure-plan.jmx",
+        "expected_sample_count": 1,
+        "expected_failed_sample_count": 1,
+        "sample_failure_does_not_imply_process_failure": true,
+        "process_exit": null,
+        "process_exit_asserted": false,
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "remote-failure",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-R", "127.0.0.1:<unavailable-registry>"],
+      "option_ids": ["OPT-006", "OPT-010", "OPT-025"],
+      "category": "remote-failure",
+      "expected": {
+        "outcome": "compare-remote-failure-category-and-shutdown",
+        "diagnostic_category": "remote",
+        "exit_status_class": "remote-or-fatal-deferred",
+        "termination_behavior": "retain remote diagnostic; a Throwable escaping the client reaches the fatal System.exit path, but no process exit is observed",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "shutdown-property-matrix",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-Jjmeterengine.stopfail.system.exit=false"],
+      "argv_vectors": [
+        ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-Jjmeterengine.stopfail.system.exit=false"],
+        ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-Jjmeterengine.stopfail.system.exit=true"]
+      ],
+      "option_ids": ["OPT-006", "OPT-010", "OPT-018"],
+      "category": "exit-behavior",
+      "expected": {
+        "outcome": "compare-local-stop-failure-policy",
+        "property_under_test": "jmeterengine.stopfail.system.exit",
+        "property_transport": "-J sets the local JMeter property; both true and false probes are concrete",
+        "induction": "a future bounded stop-failure harness must exercise the immediate-stop path; this static plan is only the valid CLI input",
+        "numeric_exit_asserted": false
+      }
+    },
+    {
+      "id": "shutdown-remote-exit-property",
+      "argv": ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-R", "127.0.0.1:<registry-port>", "-Gjmeterengine.remote.system.exit=false", "-X"],
+      "argv_vectors": [
+        ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-R", "127.0.0.1:<registry-port>", "-Gjmeterengine.remote.system.exit=false", "-X"],
+        ["jmeter", "-n", "-t", "inputs/cli-plan.jmx", "-R", "127.0.0.1:<registry-port>", "-Gjmeterengine.remote.system.exit=true", "-X"]
+      ],
+      "option_ids": ["OPT-006", "OPT-010", "OPT-019", "OPT-025", "OPT-027"],
+      "category": "exit-behavior",
+      "expected": {
+        "outcome": "compare-remote-worker-exit-policy-after-explicit-remote-selection",
+        "property_under_test": "jmeterengine.remote.system.exit",
+        "property_transport": "-G transports the property to the selected remote worker; -J would affect only the client",
+        "remote_selection": "explicit -R 127.0.0.1:<registry-port>",
+        "remote_shutdown_requested": true,
+        "numeric_exit_asserted": false
+      }
+    }
+  ],
+  "scenario_coverage_notes": [
+    "The option catalog is the authoritative 30-pair inventory; scenarios intentionally do not combine mutually exclusive modes into one executable command.",
+    "A documented candidate exit status of 1 is a future assertion target only. It is not observed evidence.",
+    "Paths beginning with <...> are bounded placeholders and are never resolved or created by static validation."
+  ]
+}

@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Workflow and automation changes require maintainer review once branch rules
+# enable required CODEOWNERS approval.
+/.github/ @OlegSotnikov

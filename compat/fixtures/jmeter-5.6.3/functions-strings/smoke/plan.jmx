@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Function strings deterministic matrix" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="Deterministic function inputs" enabled="true">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="N" elementType="Argument">
+            <stringProp name="Argument.name">N</stringProp>
+            <stringProp name="Argument.value">1</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="A1" elementType="Argument">
+            <stringProp name="Argument.name">A1</stringProp>
+            <stringProp name="Argument.value">alpha</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="parts_5" elementType="Argument">
+            <stringProp name="Argument.name">parts_5</stringProp>
+            <stringProp name="Argument.value">stale</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="COLUMN" elementType="Argument">
+            <stringProp name="Argument.name">COLUMN</stringProp>
+            <stringProp name="Argument.value">age</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="TABLE" elementType="Argument">
+            <stringProp name="Argument.name">TABLE</stringProp>
+            <stringProp name="Argument.value">birthdays</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="NAME" elementType="Argument">
+            <stringProp name="Argument.name">NAME</stringProp>
+            <stringProp name="Argument.value">Smith</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="SQL" elementType="Argument">
+            <stringProp name="Argument.name">SQL</stringProp>
+            <stringProp name="Argument.value">select ${COLUMN} from ${TABLE} where name='${NAME}'</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+      <collectionProp name="TestPlan.thread_groups"/>
+      <stringProp name="TestPlan.comments">Original deterministic string/function matrix. Disabled rows retain capability-dependent built-in names without asserting host, clock, random, file, response, or JVM behavior.</stringProp>
+      <stringProp name="TestPlan.user_define_classpath"></stringProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="One deterministic user" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="One iteration" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">1</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">0</stringProp>
+        <longProp name="ThreadGroup.start_time">0</longProp>
+        <longProp name="ThreadGroup.end_time">0</longProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <stringProp name="ThreadGroup.duration"></stringProp>
+        <stringProp name="ThreadGroup.delay"></stringProp>
+      </ThreadGroup>
+      <hashTree>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="variables|v=${__V(A1)}|fallback=${__V(MISSING,fallback)}|eval=${__eval(${SQL})}|evalVar=${__evalVar(SQL)}" enabled="true">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">true</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree/>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="properties|value=${__property(fx.prop,PROP_SAVED,fallback)}|p=${__P(fx.prop)}|default=${__P(no.such)}|set=${__setProperty(fx.set,constant)}|defined=${__isPropDefined(fx.prop)}" enabled="true">
+          <boolProp name="displayJMeterProperties">true</boolProp>
+          <boolProp name="displayJMeterVariables">true</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree/>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="strings|lower=${__changeCase(MiXeD,lower)}|upper=${__changeCase(mixed,UPPER)}|capital=${__changeCase(hello world,CAPITALIZE)}|char=${__char(65,66,67)}|digest=${__digest(MD5,hello)}" enabled="true">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">true</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree/>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="escaping|oro=${__escapeOroRegexpChars(a.b*)}|html=${__escapeHtml(&lt;é &amp;&gt;)}|xml=${__escapeXml(&quot;bread&quot; &amp; &apos;butter&apos;)}|unescape=${__unescape(\r\n)}|unhtml=${__unescapeHtml(&amp;lt;Fran&amp;ccedil;ais&amp;gt;)}|url=${__urlencode(a b+c)}|back=${__urldecode(a+b%2Bc)}" enabled="true">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">true</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree/>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="numeric-and-split|int=${__intSum(2,5,7)}|int-output=${__intSum(2,sum_result)}|long=${__longSum(2,5,7)}|var=${__isVarDefined(A1)}|counter=${__counter(TRUE,counter)}|split=${__split(one|two||three,parts,|)}" enabled="true">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">true</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree/>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="side-effects|sum=${sum_result}|split=${parts_n}:${parts_1}:${parts_2}:${parts_3}:${parts_4}|stale=${parts_5}" enabled="true">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">true</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree/>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="date-conversion|date=${__dateTimeConvert(2024-02-29,yyyy-MM-dd,dd/MM/yyyy)}|shift=${__timeShift(yyyy-MM-dd,2024-02-28,P2D,en_US,shift)}" enabled="true">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">true</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree/>
+
+        <!-- These rows are inventory-only. Their names are in the 5.6.3 built-in vocabulary, but their behavior depends on an explicit capability or an uncontrolled environment. -->
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="inventory-random|random=${__Random(0,0)}|random-date=${__RandomDate(yyyy-MM-dd,2024-01-01,2024-01-01,en_US)}|random-vars=${__RandomFromMultipleVars(A1)}|random-string=${__RandomString(0,A)}|uuid=${__UUID}" enabled="false">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">false</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree/>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="inventory-files|csv=${__CSVRead(inputs/rows.csv,0)}|file=${__FileToString(inputs/value.txt)}|line=${__StringFromFile(inputs/lines.txt)}|write=${__StringToFile(inputs/output.txt,value,false,UTF-8)}|xpath=${__XPath(inputs/document.xml,//item/text())}|regex=${__regexFunction(value,pattern)}" enabled="false">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">false</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree/>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="inventory-context|plan=${__TestPlanName}|ip=${__machineIP}|machine=${__machineName}|sampler=${__samplerName}|group=${__threadGroupName}|thread=${__threadNum}|time=${__time}" enabled="false">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">false</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree/>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="inventory-output|log=${__log(inventory)}|logn=${__logn(inventory)}" enabled="false">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">false</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree/>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="inventory-scripting|beanshell=${__BeanShell(1+1)}|groovy=${__groovy(1+1)}|javascript=${__javaScript(1+1)}|jexl2=${__jexl2(1+1)}|jexl3=${__jexl3(1+1)}" enabled="false">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">false</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

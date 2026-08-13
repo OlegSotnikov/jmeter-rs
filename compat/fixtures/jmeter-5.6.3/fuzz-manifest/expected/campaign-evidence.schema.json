@@ -1,0 +1,1768 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/jmeter-rs/compat/jmeter-5.6.3/fuzz-manifest/campaign-evidence.schema.json",
+  "schema_id": "jmeter-rs.fuzz-campaign-evidence-schema",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-FUZZ-MANIFEST",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-FUZZ-001",
+  "normalization_policy_refs": [
+    "NORM-JMX-001",
+    "NORM-JTL-001",
+    "NORM-SECURITY-001"
+  ],
+  "title": "TEST-003 bounded fuzz campaign evidence",
+  "description": "Machine-checkable evidence record for the bounded JMeter 5.6.3 parser and boundary fuzz campaign. A planned/not-run record is explicitly non-evidence and cannot imply execution. Draft 2020-12 validates the closed shapes, exact target/invariant/corpus values, and status conditions; the repository static/xtask meta-validator must additionally enforce cross-array foreign keys, unique artifact IDs and paths, artifact joins, campaign/toolchain joins, count arithmetic, and aggregate artifact caps.",
+  "x-static-meta-validation": {
+    "required": true,
+    "implementation": "repository static/xtask validator",
+    "checks": [
+      "artifact_id_and_path_uniqueness",
+      "artifact_reference_set_equals_definition_set",
+      "artifact_campaign_target_toolchain_join",
+      "accepted_plus_rejected_at_most_executions",
+      "aggregate_artifact_count_and_bytes_caps",
+      "provenance_sha256_matches_declared_file"
+    ]
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "evidence_schema_id",
+    "case_id",
+    "profile_id",
+    "fixture_family_id",
+    "conformance_ids",
+    "normalization_policy_refs",
+    "evidence_status",
+    "status",
+    "not_run",
+    "campaign",
+    "runner",
+    "targets",
+    "corpus",
+    "invariants",
+    "target_outcomes",
+    "outcome",
+    "artifacts"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "jmeter-rs.fuzz-campaign-evidence"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "evidence_schema_id": {
+      "const": "jmeter-rs.fuzz-campaign-evidence-v1"
+    },
+    "case_id": {
+      "const": "ORACLE-JMETER-563-FUZZ-MANIFEST"
+    },
+    "profile_id": {
+      "const": "jmeter-5.6.3"
+    },
+    "fixture_family_id": {
+      "const": "FX-FUZZ-001"
+    },
+    "conformance_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "contains": {
+        "const": "TEST-003"
+      },
+      "items": {
+        "type": "string"
+      }
+    },
+    "normalization_policy_refs": {
+      "type": "array",
+      "minItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "NORM-JMX-001",
+          "NORM-JTL-001",
+          "NORM-SECURITY-001"
+        ]
+      }
+    },
+    "evidence_status": {
+      "enum": [
+        "planned; not-run",
+        "observed",
+        "failed"
+      ]
+    },
+    "status": {
+      "enum": [
+        "planned",
+        "not-run",
+        "observed",
+        "failed"
+      ]
+    },
+    "not_run": {
+      "type": "boolean"
+    },
+    "campaign": {
+      "$ref": "#/$defs/campaign"
+    },
+    "runner": {
+      "$ref": "#/$defs/runner"
+    },
+    "targets": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 10,
+      "uniqueItems": true,
+      "allOf": [
+        {"contains": {"required": ["target"], "properties": {"target": {"const": "jmx_xml"}}}},
+        {"contains": {"required": ["target"], "properties": {"target": {"const": "jtl_csv"}}}},
+        {"contains": {"required": ["target"], "properties": {"target": {"const": "jtl_xml"}}}},
+        {"contains": {"required": ["target"], "properties": {"target": {"const": "expr"}}}},
+        {"contains": {"required": ["target"], "properties": {"target": {"const": "bridge"}}}},
+        {"contains": {"required": ["target"], "properties": {"target": {"const": "property_config"}}}},
+        {"contains": {"required": ["target"], "properties": {"target": {"const": "http_policy"}}}},
+        {"contains": {"required": ["target"], "properties": {"target": {"const": "plugin_json"}}}},
+        {"contains": {"required": ["target"], "properties": {"target": {"const": "remote"}}}},
+        {"contains": {"required": ["target"], "properties": {"target": {"const": "runtime"}}}}
+      ],
+      "items": {
+        "$ref": "#/$defs/target"
+      }
+    },
+    "corpus": {
+      "$ref": "#/$defs/corpus"
+    },
+    "invariants": {
+      "type": "array",
+      "minItems": 29,
+      "maxItems": 29,
+      "uniqueItems": true,
+      "allOf": [
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "JMX-LIMIT-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "JMX-SOURCE-RETAIN-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "JMX-OPAQUE-INVENTORY-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "JMX-DROPPED-INVENTORY-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "JTL-CSV-PROJECTION-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "JTL-CSV-LIMIT-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "JTL-XML-PROJECTION-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "JTL-XML-LIMIT-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "EXPR-UNDEFINED-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "EXPR-LIMITS-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "EXPR-PROGRESS-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "BRIDGE-FRAME-ROUNDTRIP-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "BRIDGE-METADATA-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "BRIDGE-LIMIT-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "CONFIG-UNKNOWN-IGNORED-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "CONFIG-DUPLICATE-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "CONFIG-BOUNDS-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "JTL-CSV-UNKNOWN-HEADER-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "JTL-XML-WIRE-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "HTTP-URL-BOUNDS-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "HTTP-HEADER-BOUNDS-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "HTTP-COOKIE-BOUNDS-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "PLUGIN-JSON-PREFLIGHT-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "REMOTE-CODEC-ROUNDTRIP-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "REMOTE-STATE-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "REMOTE-BOUNDS-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "RUNTIME-CONTROLLER-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "RUNTIME-SCHEDULER-001"}}}},
+        {"contains": {"required": ["invariant_id"], "properties": {"invariant_id": {"const": "RUNTIME-BOUNDS-001"}}}}
+      ],
+      "items": {
+        "$ref": "#/$defs/invariant"
+      }
+    },
+    "target_outcomes": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 10,
+      "uniqueItems": true,
+      "allOf": [
+        {"contains": {"required": ["target"], "properties": {"target": {"const": "jmx_xml"}}}},
+        {"contains": {"required": ["target"], "properties": {"target": {"const": "jtl_csv"}}}},
+        {"contains": {"required": ["target"], "properties": {"target": {"const": "jtl_xml"}}}},
+        {"contains": {"required": ["target"], "properties": {"target": {"const": "expr"}}}},
+        {"contains": {"required": ["target"], "properties": {"target": {"const": "bridge"}}}},
+        {"contains": {"required": ["target"], "properties": {"target": {"const": "property_config"}}}},
+        {"contains": {"required": ["target"], "properties": {"target": {"const": "http_policy"}}}},
+        {"contains": {"required": ["target"], "properties": {"target": {"const": "plugin_json"}}}},
+        {"contains": {"required": ["target"], "properties": {"target": {"const": "remote"}}}},
+        {"contains": {"required": ["target"], "properties": {"target": {"const": "runtime"}}}}
+      ],
+      "items": {
+        "$ref": "#/$defs/targetOutcome"
+      }
+    },
+    "outcome": {
+      "$ref": "#/$defs/outcome"
+    },
+    "artifacts": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/artifact"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "not_run": {
+            "const": true
+          }
+        },
+        "required": ["not_run"]
+      },
+      "then": {
+        "properties": {
+          "status": {
+            "enum": ["planned", "not-run"]
+          },
+          "evidence_status": {
+            "const": "planned; not-run"
+          },
+          "campaign": {
+            "properties": {
+              "source_revision": {
+                "const": "not-run"
+              },
+              "started_at": {
+                "const": "not-run"
+              },
+              "finished_at": {
+                "const": "not-run"
+              },
+              "seed": {
+                "const": "not-run"
+              }
+            }
+          },
+          "runner": {
+            "properties": {
+              "toolchain": {
+                "const": "not-run"
+              },
+              "cargo_fuzz": {
+                "const": "not-run"
+              },
+              "flags": {
+                "maxItems": 0
+              }
+            }
+          },
+          "invariants": {
+            "not": {
+              "contains": {
+                "anyOf": [
+                  {
+                    "required": ["status"],
+                    "properties": {"status": {"enum": ["observed", "failed"]}}
+                  },
+                  {
+                    "required": ["evidence"],
+                    "properties": {
+                      "evidence": {
+                        "anyOf": [
+                          {
+                            "required": ["executions"],
+                            "properties": {"executions": {"exclusiveMinimum": 0}}
+                          },
+                          {
+                            "required": ["failures"],
+                            "properties": {"failures": {"exclusiveMinimum": 0}}
+                          },
+                          {
+                            "required": ["artifact_ids"],
+                            "properties": {"artifact_ids": {"minItems": 1}}
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "target_outcomes": {
+            "not": {
+              "contains": {
+                "anyOf": [
+                  {
+                    "required": ["status"],
+                    "properties": {"status": {"enum": ["pass", "fail"]}}
+                  },
+                  {
+                    "required": ["counts"],
+                    "properties": {
+                      "counts": {
+                        "anyOf": [
+                          {
+                            "required": ["executions"],
+                            "properties": {"executions": {"exclusiveMinimum": 0}}
+                          },
+                          {
+                            "required": ["accepted_inputs"],
+                            "properties": {"accepted_inputs": {"exclusiveMinimum": 0}}
+                          },
+                          {
+                            "required": ["rejected_inputs"],
+                            "properties": {"rejected_inputs": {"exclusiveMinimum": 0}}
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "required": ["artifact_ids"],
+                    "properties": {"artifact_ids": {"minItems": 1}}
+                  }
+                ]
+              }
+            }
+          },
+          "outcome": {
+            "properties": {
+              "status": {
+                "const": "not_run"
+              },
+              "counts": {
+                "$ref": "#/$defs/zeroCounts"
+              },
+              "artifacts": {
+                "maxItems": 0
+              },
+              "minimization": {
+                "properties": {
+                  "attempted": {
+                    "const": false
+                  },
+                  "status": {
+                    "const": "not_run"
+                  },
+                  "artifact_ids": {
+                    "maxItems": 0
+                  }
+                }
+              }
+            }
+          },
+          "artifacts": {
+            "maxItems": 0
+          }
+        },
+        "required": [
+          "status",
+          "evidence_status",
+          "campaign",
+          "runner",
+          "invariants",
+          "target_outcomes",
+          "outcome",
+          "artifacts"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": ["observed", "failed"]
+          }
+        },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "not_run": {
+            "const": false
+          }
+        },
+        "required": ["not_run"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "not_run": {
+            "const": false
+          }
+        },
+        "required": ["not_run"]
+      },
+      "then": {
+        "properties": {
+          "status": {
+            "enum": ["observed", "failed"]
+          },
+          "evidence_status": {
+            "enum": ["observed", "failed"]
+          },
+          "campaign": {
+            "properties": {
+              "source_revision": {
+                "not": {"const": "not-run"}
+              },
+              "started_at": {
+                "not": {"const": "not-run"}
+              },
+              "finished_at": {
+                "not": {"const": "not-run"}
+              },
+              "seed": {
+                "not": {"const": "not-run"}
+              }
+            }
+          },
+          "runner": {
+            "properties": {
+              "toolchain": {
+                "not": {"const": "not-run"}
+              },
+              "cargo_fuzz": {
+                "not": {"const": "not-run"}
+              },
+              "flags": {
+                "minItems": 1
+              }
+            }
+          },
+          "invariants": {
+            "not": {
+              "contains": {
+                "required": ["status"],
+                "properties": {
+                  "status": {"enum": ["planned", "not-run"]}
+                }
+              }
+            }
+          },
+          "target_outcomes": {
+            "not": {
+              "contains": {
+                "required": ["status"],
+                "properties": {"status": {"const": "not_run"}}
+              }
+            }
+          },
+          "outcome": {
+            "properties": {
+              "status": {"enum": ["pass", "fail"]},
+              "counts": {
+                "properties": {"executions": {"exclusiveMinimum": 0}}
+              }
+            }
+          }
+        },
+        "required": [
+          "status",
+          "evidence_status",
+          "campaign",
+          "runner",
+          "invariants",
+          "target_outcomes",
+          "outcome"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {"status": {"const": "planned"}},
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "not_run": {"const": true},
+          "evidence_status": {"const": "planned; not-run"}
+        },
+        "required": ["not_run", "evidence_status"]
+      }
+    },
+    {
+      "if": {
+        "properties": {"status": {"const": "not-run"}},
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "not_run": {"const": true},
+          "evidence_status": {"const": "planned; not-run"}
+        },
+        "required": ["not_run", "evidence_status"]
+      }
+    },
+    {
+      "if": {
+        "properties": {"evidence_status": {"const": "planned; not-run"}},
+        "required": ["evidence_status"]
+      },
+      "then": {
+        "properties": {
+          "status": {"enum": ["planned", "not-run"]},
+          "not_run": {"const": true}
+        },
+        "required": ["status", "not_run"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "evidence_status": {
+            "const": "observed"
+          }
+        },
+        "required": ["evidence_status"]
+      },
+      "then": {
+        "properties": {
+          "status": {"const": "observed"},
+          "not_run": {"const": false}
+        },
+        "required": ["status", "not_run"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "evidence_status": {
+            "const": "failed"
+          }
+        },
+        "required": ["evidence_status"]
+      },
+      "then": {
+        "properties": {
+          "status": {"const": "failed"},
+          "not_run": {"const": false}
+        },
+        "required": ["status", "not_run"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "required": ["status"],
+            "properties": {"status": {"const": "not_run"}}
+          }
+        },
+        "required": ["outcome"]
+      },
+      "then": {
+        "properties": {
+          "status": {"enum": ["planned", "not-run"]},
+          "evidence_status": {"const": "planned; not-run"},
+          "not_run": {"const": true}
+        },
+        "required": ["status", "evidence_status", "not_run"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "required": ["status"],
+            "properties": {"status": {"const": "pass"}}
+          }
+        },
+        "required": ["outcome"]
+      },
+      "then": {
+        "properties": {
+          "status": {"const": "observed"},
+          "evidence_status": {"const": "observed"},
+          "not_run": {"const": false}
+        },
+        "required": ["status", "evidence_status", "not_run"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "required": ["status"],
+            "properties": {"status": {"const": "fail"}}
+          }
+        },
+        "required": ["outcome"]
+      },
+      "then": {
+        "properties": {
+          "status": {"const": "failed"},
+          "evidence_status": {"const": "failed"},
+          "not_run": {"const": false}
+        },
+        "required": ["status", "evidence_status", "not_run"]
+      }
+    }
+  ],
+  "$defs": {
+    "targetName": {
+      "enum": [
+        "jmx_xml",
+        "jtl_csv",
+        "jtl_xml",
+        "expr",
+        "bridge",
+        "property_config",
+        "http_policy",
+        "plugin_json",
+        "remote",
+        "runtime"
+      ]
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "safePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)[^\\u0000]+$"
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "nonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "campaignCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000
+    },
+    "aggregateCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "executions",
+        "accepted_inputs",
+        "rejected_inputs",
+        "crashes",
+        "hangs",
+        "timeouts",
+        "sanitizer_findings",
+        "resource_limit_failures"
+      ],
+      "properties": {
+        "executions": {"$ref": "#/$defs/campaignCount"},
+        "accepted_inputs": {"$ref": "#/$defs/campaignCount"},
+        "rejected_inputs": {"$ref": "#/$defs/campaignCount"},
+        "crashes": {"$ref": "#/$defs/campaignCount"},
+        "hangs": {"$ref": "#/$defs/campaignCount"},
+        "timeouts": {"$ref": "#/$defs/campaignCount"},
+        "sanitizer_findings": {"$ref": "#/$defs/campaignCount"},
+        "resource_limit_failures": {"$ref": "#/$defs/campaignCount"}
+      }
+    },
+    "zeroCounts": {
+      "allOf": [
+        {"$ref": "#/$defs/counts"},
+        {
+          "properties": {
+            "executions": {"const": 0},
+            "accepted_inputs": {"const": 0},
+            "rejected_inputs": {"const": 0},
+            "crashes": {"const": 0},
+            "hangs": {"const": 0},
+            "timeouts": {"const": 0},
+            "sanitizer_findings": {"const": 0},
+            "resource_limit_failures": {"const": 0}
+          }
+        }
+      ]
+    },
+    "zeroFailureCounts": {
+      "allOf": [
+        {"$ref": "#/$defs/counts"},
+        {
+          "properties": {
+            "crashes": {"const": 0},
+            "hangs": {"const": 0},
+            "timeouts": {"const": 0},
+            "sanitizer_findings": {"const": 0},
+            "resource_limit_failures": {"const": 0}
+          }
+        }
+      ]
+    },
+    "aggregateCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "executions",
+        "accepted_inputs",
+        "rejected_inputs",
+        "crashes",
+        "hangs",
+        "timeouts",
+        "sanitizer_findings",
+        "resource_limit_failures"
+      ],
+      "properties": {
+        "executions": {"$ref": "#/$defs/aggregateCount"},
+        "accepted_inputs": {"$ref": "#/$defs/aggregateCount"},
+        "rejected_inputs": {"$ref": "#/$defs/aggregateCount"},
+        "crashes": {"$ref": "#/$defs/aggregateCount"},
+        "hangs": {"$ref": "#/$defs/aggregateCount"},
+        "timeouts": {"$ref": "#/$defs/aggregateCount"},
+        "sanitizer_findings": {"$ref": "#/$defs/aggregateCount"},
+        "resource_limit_failures": {"$ref": "#/$defs/aggregateCount"}
+      }
+    },
+    "zeroAggregateCounts": {
+      "allOf": [
+        {"$ref": "#/$defs/aggregateCounts"},
+        {
+          "properties": {
+            "executions": {"const": 0},
+            "accepted_inputs": {"const": 0},
+            "rejected_inputs": {"const": 0},
+            "crashes": {"const": 0},
+            "hangs": {"const": 0},
+            "timeouts": {"const": 0},
+            "sanitizer_findings": {"const": 0},
+            "resource_limit_failures": {"const": 0}
+          }
+        }
+      ]
+    },
+    "zeroFailureAggregateCounts": {
+      "allOf": [
+        {"$ref": "#/$defs/aggregateCounts"},
+        {
+          "properties": {
+            "crashes": {"const": 0},
+            "hangs": {"const": 0},
+            "timeouts": {"const": 0},
+            "sanitizer_findings": {"const": 0},
+            "resource_limit_failures": {"const": 0}
+          }
+        }
+      ]
+    },
+    "campaignConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runs_per_target",
+        "wall_seconds_per_target",
+        "testcase_timeout_seconds",
+        "rss_limit_megabytes",
+        "max_input_bytes",
+        "max_total_artifact_bytes",
+        "max_single_artifact_bytes",
+        "max_log_bytes",
+        "network",
+        "child_processes",
+        "script_execution",
+        "java_or_jmeter",
+        "argv_templates"
+      ],
+      "properties": {
+        "runs_per_target": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "wall_seconds_per_target": {"type": "integer", "minimum": 1, "maximum": 900},
+        "testcase_timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 30},
+        "rss_limit_megabytes": {"type": "integer", "minimum": 1, "maximum": 512},
+        "max_input_bytes": {"type": "integer", "minimum": 1, "maximum": 262144},
+        "max_total_artifact_bytes": {"const": 67108864},
+        "max_single_artifact_bytes": {"const": 1048576},
+        "max_log_bytes": {"const": 1048576},
+        "network": {"const": "none"},
+        "child_processes": {"const": false},
+        "script_execution": {"const": false},
+        "java_or_jmeter": {"const": false},
+        "argv_templates": {
+          "type": "array",
+          "minItems": 10,
+          "maxItems": 10,
+          "uniqueItems": true,
+          "allOf": [
+            {"contains": {"contains": {"const": "jmx_xml"}}},
+            {"contains": {"contains": {"const": "jtl_csv"}}},
+            {"contains": {"contains": {"const": "jtl_xml"}}},
+            {"contains": {"contains": {"const": "expr"}}},
+            {"contains": {"contains": {"const": "bridge"}}},
+            {"contains": {"contains": {"const": "property_config"}}},
+            {"contains": {"contains": {"const": "http_policy"}}},
+            {"contains": {"contains": {"const": "plugin_json"}}},
+            {"contains": {"contains": {"const": "remote"}}},
+            {"contains": {"contains": {"const": "runtime"}}}
+          ],
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
+    "campaign": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "campaign_id",
+        "source_revision",
+        "started_at",
+        "finished_at",
+        "seed",
+        "configuration"
+      ],
+      "properties": {
+        "campaign_id": {"type": "string", "pattern": "^test-003-[A-Za-z0-9._-]{1,96}$"},
+        "source_revision": {"type": "string", "minLength": 1},
+        "started_at": {"type": "string", "minLength": 1},
+        "finished_at": {"type": "string", "minLength": 1},
+        "seed": {"type": "string", "minLength": 1},
+        "configuration": {"$ref": "#/$defs/campaignConfiguration"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"source_revision": {"not": {"const": "not-run"}}}, "required": ["source_revision"]},
+          "then": {
+            "properties": {
+              "source_revision": {"pattern": "^[0-9a-f]{40,64}$"},
+              "started_at": {"pattern": "^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+              "finished_at": {"pattern": "^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+              "seed": {"pattern": "^[0-9]+$"}
+            }
+          }
+        }
+      ]
+    },
+    "runner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["toolchain", "cargo_fuzz", "libfuzzer_sys", "flags"],
+      "properties": {
+        "toolchain": {"type": "string", "minLength": 1},
+        "cargo_fuzz": {"type": "string", "minLength": 1},
+        "libfuzzer_sys": {"const": "0.4.13"},
+        "flags": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {"type": "string", "minLength": 1}
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"toolchain": {"not": {"const": "not-run"}}}, "required": ["toolchain"]},
+          "then": {"properties": {"toolchain": {"pattern": "^nightly-[0-9]{4}-[0-9]{2}-[0-9]{2}$"}}}
+        },
+        {
+          "if": {"properties": {"cargo_fuzz": {"not": {"const": "not-run"}}}, "required": ["cargo_fuzz"]},
+          "then": {"properties": {"cargo_fuzz": {"pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([+-][A-Za-z0-9.-]+)?$"}}}
+        }
+      ]
+    },
+    "bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_input_bytes"],
+      "properties": {
+        "max_input_bytes": {"type": "integer", "minimum": 1},
+        "max_output_bytes": {"type": "integer", "minimum": 1},
+        "max_record_bytes": {"type": "integer", "minimum": 1},
+        "max_text_bytes": {"type": "integer", "minimum": 1},
+        "max_expansions": {"type": "integer", "minimum": 1},
+        "max_nesting": {"type": "integer", "minimum": 1},
+        "max_payload_bytes": {"type": "integer", "minimum": 1},
+        "max_lines": {"type": "integer", "minimum": 1},
+        "max_line_bytes": {"type": "integer", "minimum": 1},
+        "max_columns": {"type": "integer", "minimum": 1},
+        "max_samples": {"type": "integer", "minimum": 1},
+        "max_attribute_bytes": {"type": "integer", "minimum": 1},
+        "max_depth": {"type": "integer", "minimum": 1},
+        "max_nodes": {"type": "integer", "minimum": 1},
+        "max_attributes": {"type": "integer", "minimum": 1},
+        "max_field_bytes": {"type": "integer", "minimum": 1},
+        "max_url_bytes": {"type": "integer", "minimum": 1},
+        "max_authority_bytes": {"type": "integer", "minimum": 1},
+        "max_path_query_bytes": {"type": "integer", "minimum": 1},
+        "max_fragment_bytes": {"type": "integer", "minimum": 1},
+        "max_header_entries": {"type": "integer", "minimum": 1},
+        "max_header_bytes": {"type": "integer", "minimum": 1},
+        "max_cookie_entries": {"type": "integer", "minimum": 1},
+        "max_cookie_header_bytes": {"type": "integer", "minimum": 1},
+        "max_message_bytes": {"type": "integer", "minimum": 1},
+        "max_raw_bytes": {"type": "integer", "minimum": 1},
+        "max_frame_bytes": {"type": "integer", "minimum": 1},
+        "max_plan_bytes": {"type": "integer", "minimum": 1},
+        "max_properties": {"type": "integer", "minimum": 1},
+        "max_references": {"type": "integer", "minimum": 1},
+        "max_capabilities": {"type": "integer", "minimum": 1},
+        "max_sample_depth": {"type": "integer", "minimum": 1},
+        "max_sample_nodes": {"type": "integer", "minimum": 1},
+        "max_children": {"type": "integer", "minimum": 1},
+        "max_loop_count": {"type": "integer", "minimum": 1},
+        "max_run_samples": {"type": "integer", "minimum": 1},
+        "max_run_steps": {"type": "integer", "minimum": 1},
+        "max_scheduler_wakes": {"type": "integer", "minimum": 1},
+        "max_step_budget": {"type": "integer", "minimum": 1}
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "source_path",
+        "source_sha256",
+        "corpus_directory",
+        "bounds",
+        "invariant_ids",
+        "corpus_seed_count",
+        "corpus_bytes"
+      ],
+      "properties": {
+        "target": {"$ref": "#/$defs/targetName"},
+        "source_path": {
+          "allOf": [
+            {"$ref": "#/$defs/safePath"},
+            {"pattern": "^fuzz/fuzz_targets/"}
+          ]
+        },
+        "source_sha256": {"$ref": "#/$defs/sha256"},
+        "corpus_directory": {
+          "allOf": [
+            {"$ref": "#/$defs/safePath"},
+            {"pattern": "^fuzz/corpus/"}
+          ]
+        },
+        "bounds": {"$ref": "#/$defs/bounds"},
+        "invariant_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "corpus_seed_count": {"$ref": "#/$defs/nonNegativeInteger"},
+        "corpus_bytes": {"$ref": "#/$defs/nonNegativeInteger"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"target": {"const": "jmx_xml"}}, "required": ["target"]},
+          "then": {
+            "properties": {
+              "source_path": {"const": "fuzz/fuzz_targets/jmx_xml.rs"},
+              "source_sha256": {"const": "59b00b33a2a08d00528199360b8d532deeb1329530b9ddc1555c9779474fce4b"},
+              "corpus_directory": {"const": "fuzz/corpus/jmx_xml"},
+              "bounds": {"const": {"max_input_bytes": 262144, "max_output_bytes": 524288}},
+              "invariant_ids": {"const": ["JMX-LIMIT-001", "JMX-SOURCE-RETAIN-001", "JMX-OPAQUE-INVENTORY-001", "JMX-DROPPED-INVENTORY-001"]},
+              "corpus_seed_count": {"const": 6},
+              "corpus_bytes": {"const": 2291}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"target": {"const": "jtl_csv"}}, "required": ["target"]},
+          "then": {
+            "properties": {
+              "source_path": {"const": "fuzz/fuzz_targets/jtl_csv.rs"},
+              "source_sha256": {"const": "505d5afb50f39893c921befa5005daede8a1e3d3f6bda96ed3151daaf469e8ed"},
+              "corpus_directory": {"const": "fuzz/corpus/jtl_csv"},
+              "bounds": {"const": {"max_input_bytes": 262144, "max_record_bytes": 16384, "max_attribute_bytes": 4096, "max_columns": 64, "max_depth": 16, "max_nodes": 512, "max_samples": 128, "max_attributes": 64, "max_output_bytes": 524288}},
+              "invariant_ids": {"const": ["JTL-CSV-PROJECTION-001", "JTL-CSV-LIMIT-001", "JTL-CSV-UNKNOWN-HEADER-001"]},
+              "corpus_seed_count": {"const": 6},
+              "corpus_bytes": {"const": 703}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"target": {"const": "jtl_xml"}}, "required": ["target"]},
+          "then": {
+            "properties": {
+              "source_path": {"const": "fuzz/fuzz_targets/jtl_xml.rs"},
+              "source_sha256": {"const": "c22b6e1d7aafbaa6878fe7ff8ead85177d859bda79da0450a74eae2f4a17b112"},
+              "corpus_directory": {"const": "fuzz/corpus/jtl_xml"},
+              "bounds": {"const": {"max_input_bytes": 262144, "max_record_bytes": 16384, "max_attribute_bytes": 4096, "max_columns": 64, "max_depth": 16, "max_nodes": 512, "max_samples": 128, "max_attributes": 64, "max_output_bytes": 524288}},
+              "invariant_ids": {"const": ["JTL-XML-PROJECTION-001", "JTL-XML-LIMIT-001", "JTL-XML-WIRE-001"]},
+              "corpus_seed_count": {"const": 6},
+              "corpus_bytes": {"const": 1558}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"target": {"const": "expr"}}, "required": ["target"]},
+          "then": {
+            "properties": {
+              "source_path": {"const": "fuzz/fuzz_targets/expr.rs"},
+              "source_sha256": {"const": "88eb6ef44671a2fa40a8795524c1921917051a28f6b38c3f7db3822f953f8f5a"},
+              "corpus_directory": {"const": "fuzz/corpus/expr"},
+              "bounds": {"const": {"max_input_bytes": 65536, "max_expansions": 256, "max_nesting": 16, "max_output_bytes": 131072}},
+              "invariant_ids": {"const": ["EXPR-UNDEFINED-001", "EXPR-LIMITS-001", "EXPR-PROGRESS-001"]},
+              "corpus_seed_count": {"const": 4},
+              "corpus_bytes": {"const": 234}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"target": {"const": "bridge"}}, "required": ["target"]},
+          "then": {
+            "properties": {
+              "source_path": {"const": "fuzz/fuzz_targets/bridge.rs"},
+              "source_sha256": {"const": "ef8ffd271875a4f446da582f1d3de64802ccea48e36e7b9f8c8beddb35386c3c"},
+              "corpus_directory": {"const": "fuzz/corpus/bridge"},
+              "bounds": {"const": {"max_input_bytes": 262144, "max_payload_bytes": 65536}},
+              "invariant_ids": {"const": ["BRIDGE-FRAME-ROUNDTRIP-001", "BRIDGE-METADATA-001", "BRIDGE-LIMIT-001"]},
+              "corpus_seed_count": {"const": 6},
+              "corpus_bytes": {"const": 240}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"target": {"const": "property_config"}}, "required": ["target"]},
+          "then": {
+            "properties": {
+              "source_path": {"const": "fuzz/fuzz_targets/property_config.rs"},
+              "source_sha256": {"const": "18b1b70c0a539f86a244ef2975fe581d4d70da1b9b47791355d00e14b089d903"},
+              "corpus_directory": {"const": "fuzz/corpus/property_config"},
+              "bounds": {"const": {"max_input_bytes": 65536, "max_lines": 64, "max_line_bytes": 2048, "max_columns": 64}},
+              "invariant_ids": {"const": ["CONFIG-UNKNOWN-IGNORED-001", "CONFIG-DUPLICATE-001", "CONFIG-BOUNDS-001"]},
+              "corpus_seed_count": {"const": 6},
+              "corpus_bytes": {"const": 719}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"target": {"const": "http_policy"}}, "required": ["target"]},
+          "then": {
+            "properties": {
+              "source_path": {"const": "fuzz/fuzz_targets/http_policy.rs"},
+              "source_sha256": {"const": "b10a56e779e5c229842a7d49db3bf883a90534ce4d11879b274d45324ae5c528"},
+              "corpus_directory": {"const": "fuzz/corpus/http_policy"},
+              "bounds": {"const": {"max_input_bytes": 65536, "max_field_bytes": 4096, "max_url_bytes": 8192, "max_authority_bytes": 2048, "max_path_query_bytes": 6144, "max_fragment_bytes": 2048, "max_header_entries": 8, "max_header_bytes": 65536, "max_cookie_entries": 8, "max_cookie_header_bytes": 65536}},
+              "invariant_ids": {"const": ["HTTP-URL-BOUNDS-001", "HTTP-HEADER-BOUNDS-001", "HTTP-COOKIE-BOUNDS-001"]},
+              "corpus_seed_count": {"const": 0},
+              "corpus_bytes": {"const": 0}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"target": {"const": "plugin_json"}}, "required": ["target"]},
+          "then": {
+            "properties": {
+              "source_path": {"const": "fuzz/fuzz_targets/plugin_json.rs"},
+              "source_sha256": {"const": "514b2c60deea0d8a4c679619b26836dfb034c3902832782edd501a92d80e6404"},
+              "corpus_directory": {"const": "fuzz/corpus/plugin_json"},
+              "bounds": {"const": {"max_input_bytes": 65536, "max_message_bytes": 32768, "max_raw_bytes": 49152}},
+              "invariant_ids": {"const": ["PLUGIN-JSON-PREFLIGHT-001"]},
+              "corpus_seed_count": {"const": 0},
+              "corpus_bytes": {"const": 0}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"target": {"const": "remote"}}, "required": ["target"]},
+          "then": {
+            "properties": {
+              "source_path": {"const": "fuzz/fuzz_targets/remote.rs"},
+              "source_sha256": {"const": "3946acbf8e33deb1ae9d0f0b2478a8a84ed1c74b1be48c21bfa10915197f9964"},
+              "corpus_directory": {"const": "fuzz/corpus/remote"},
+              "bounds": {"const": {"max_input_bytes": 65536, "max_field_bytes": 4096, "max_frame_bytes": 131072, "max_plan_bytes": 65536, "max_properties": 8, "max_references": 8, "max_capabilities": 8, "max_sample_depth": 8, "max_sample_nodes": 64, "max_samples": 8}},
+              "invariant_ids": {"const": ["REMOTE-CODEC-ROUNDTRIP-001", "REMOTE-STATE-001", "REMOTE-BOUNDS-001"]},
+              "corpus_seed_count": {"const": 0},
+              "corpus_bytes": {"const": 0}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"target": {"const": "runtime"}}, "required": ["target"]},
+          "then": {
+            "properties": {
+              "source_path": {"const": "fuzz/fuzz_targets/runtime.rs"},
+              "source_sha256": {"const": "f460b2c99ac7cff8747bd9793869a2ac75ca8b75b365c1fbfe9b09213cf85fa8"},
+              "corpus_directory": {"const": "fuzz/corpus/runtime"},
+              "bounds": {"const": {"max_input_bytes": 65536, "max_children": 8, "max_loop_count": 3, "max_run_samples": 32, "max_run_steps": 128, "max_scheduler_wakes": 8, "max_step_budget": 1}},
+              "invariant_ids": {"const": ["RUNTIME-CONTROLLER-001", "RUNTIME-SCHEDULER-001", "RUNTIME-BOUNDS-001"]},
+              "corpus_seed_count": {"const": 0},
+              "corpus_bytes": {"const": 0}
+            }
+          }
+        }
+      ]
+    },
+    "corpusSeed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "path", "sha256", "size_bytes"],
+      "properties": {
+        "target": {"$ref": "#/$defs/targetName"},
+        "path": {
+          "allOf": [
+            {"$ref": "#/$defs/safePath"},
+            {"pattern": "^fuzz/corpus/"}
+          ]
+        },
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"$ref": "#/$defs/nonNegativeInteger"}
+      }
+    },
+    "corpus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provenance_path", "provenance_sha256", "seed_count", "total_bytes", "seeds"],
+      "properties": {
+        "provenance_path": {"const": "fuzz/corpus/PROVENANCE.md"},
+        "provenance_sha256": {"const": "4b8d30bb1a7ac53887ecddae65e975fa0f56a0ea9f911dde4fb4f199b0cd14af"},
+        "seed_count": {"const": 34},
+        "total_bytes": {"const": 5745},
+        "seeds": {
+          "type": "array",
+          "minItems": 34,
+          "maxItems": 34,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/corpusSeed"},
+          "allOf": [
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "bridge"}, "path": {"const": "fuzz/corpus/bridge/cancel.seed"}, "sha256": {"const": "5f8cfbf7697ce05e01766778357f5809ffafc80c5f46d3869f95dbffd76e942b"}, "size_bytes": {"const": 31}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "bridge"}, "path": {"const": "fuzz/corpus/bridge/error.seed"}, "sha256": {"const": "833993152573ae315592da9627da928920050674eb2fe2d3c22d40837a04282a"}, "size_bytes": {"const": 35}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "bridge"}, "path": {"const": "fuzz/corpus/bridge/handshake.seed"}, "sha256": {"const": "b253f7118338db0830f8c28d13a3937cb8182c58c7dc2b59b463c60a5f9bdef7"}, "size_bytes": {"const": 28}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "bridge"}, "path": {"const": "fuzz/corpus/bridge/payload-text.seed"}, "sha256": {"const": "372955c51cc876cae5d485627a540a811f099b29dd1662a58c2649b3f2180260"}, "size_bytes": {"const": 66}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "bridge"}, "path": {"const": "fuzz/corpus/bridge/raw-header.seed"}, "sha256": {"const": "13ae69a0d8a85ba2ded654f29e313610791515a9d220bc4d7f4ea5d40adb89f5"}, "size_bytes": {"const": 44}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "bridge"}, "path": {"const": "fuzz/corpus/bridge/response.seed"}, "sha256": {"const": "ee79559a4ef86fb1d9e06a98c4c288b3feb559b00aefb45192b522d7352f607b"}, "size_bytes": {"const": 36}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "expr"}, "path": {"const": "fuzz/corpus/expr/escaping.expr"}, "sha256": {"const": "dacf5afdbede61f593cdd7893261881933210c354c5f10d8243bca366aac42fb"}, "size_bytes": {"const": 83}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "expr"}, "path": {"const": "fuzz/corpus/expr/limits.expr"}, "sha256": {"const": "98d793f37df4b3278679514bcb69160f94222043dafe12a581454d49af50308f"}, "size_bytes": {"const": 33}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "expr"}, "path": {"const": "fuzz/corpus/expr/literals-and-references.expr"}, "sha256": {"const": "1410ff8f2ebf3f663d4c890b9cbf0bdeedebe0998b540eb8a0dde73bbdc1c3bb"}, "size_bytes": {"const": 89}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "expr"}, "path": {"const": "fuzz/corpus/expr/utf8.expr"}, "sha256": {"const": "e367e04297a20b8b889b18777ec80eac01349cd0f29b5ac959a8acb51e3214c1"}, "size_bytes": {"const": 29}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "jmx_xml"}, "path": {"const": "fuzz/corpus/jmx_xml/entities-and-utf8.jmx"}, "sha256": {"const": "7922f5951d30d9b328961a9854aa6d274068c84355c56cb38404591baa648a18"}, "size_bytes": {"const": 468}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "jmx_xml"}, "path": {"const": "fuzz/corpus/jmx_xml/limits-depth.xml"}, "sha256": {"const": "3cb218e3702607fec638dcb0e42280bee5bc0c0ff6682ee70a97feb8efc83b47"}, "size_bytes": {"const": 490}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "jmx_xml"}, "path": {"const": "fuzz/corpus/jmx_xml/minimal-valid.jmx"}, "sha256": {"const": "27bbf74e703eca6f2e0a24d63ae5731cfc7cdb5d71d0f94fb8409cc6096b36fb"}, "size_bytes": {"const": 344}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "jmx_xml"}, "path": {"const": "fuzz/corpus/jmx_xml/truncated.xml"}, "sha256": {"const": "5d8630167e0f47370caabd9c54f62fc7d1c93169dff7c611ce74921eca36c9a0"}, "size_bytes": {"const": 117}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "jmx_xml"}, "path": {"const": "fuzz/corpus/jmx_xml/unknown-opaque.jmx"}, "sha256": {"const": "cf95a56e4ec2d6ff3bf4770849a8e497a05958a52407aa1947aeb9d9c20dd316"}, "size_bytes": {"const": 507}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "jmx_xml"}, "path": {"const": "fuzz/corpus/jmx_xml/upgrade-dropped.jmx"}, "sha256": {"const": "c9329c8e357869753f2d24b526acb13ed4589ab92bf2a2653b9cda0504fe13cf"}, "size_bytes": {"const": 365}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "jtl_csv"}, "path": {"const": "fuzz/corpus/jtl_csv/basic.csv"}, "sha256": {"const": "94d9b7e7ee298e14093d534901434a9275ffe7efd30d642aa7b19a98003b00da"}, "size_bytes": {"const": 188}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "jtl_csv"}, "path": {"const": "fuzz/corpus/jtl_csv/limits.csv"}, "sha256": {"const": "8b06990a7ed3f4d24277e69c9e5638ba5097d9bd500df0bc109e64295cd415b7"}, "size_bytes": {"const": 91}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "jtl_csv"}, "path": {"const": "fuzz/corpus/jtl_csv/malformed.csv"}, "sha256": {"const": "f209ef36b4e94033bc4b2271433fc28cad986707f82bf2657500a0c67f26bc7f"}, "size_bytes": {"const": 51}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "jtl_csv"}, "path": {"const": "fuzz/corpus/jtl_csv/quoted-fields.csv"}, "sha256": {"const": "e5b7008d599051cc91c8a60e50ec5c9942868bebbb4799051d7acf4fedf7e029"}, "size_bytes": {"const": 166}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "jtl_csv"}, "path": {"const": "fuzz/corpus/jtl_csv/unicode.csv"}, "sha256": {"const": "7915d00b2e304b05fb569dad4a4242bd33da8b839bf8234cb74028dede3ec298"}, "size_bytes": {"const": 154}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "jtl_csv"}, "path": {"const": "fuzz/corpus/jtl_csv/unknown-header.csv"}, "sha256": {"const": "69af462c77accb3179147d19c8898fde8fe4cc72e0c204142a537399d04dc971"}, "size_bytes": {"const": 53}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "jtl_xml"}, "path": {"const": "fuzz/corpus/jtl_xml/basic.xml"}, "sha256": {"const": "841574e072b49db385e7eecdbb7cc33dd483c64d7fc26a84b0f5f4a05ff44792"}, "size_bytes": {"const": 419}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "jtl_xml"}, "path": {"const": "fuzz/corpus/jtl_xml/entities-and-utf8.xml"}, "sha256": {"const": "6c94a121b431c89bf9db38b4e5602402529bb3fd0ee1e89288afbc057ab58fbe"}, "size_bytes": {"const": 234}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "jtl_xml"}, "path": {"const": "fuzz/corpus/jtl_xml/limits-depth.xml"}, "sha256": {"const": "612201e3f03c5b3bf0dc555859a624c2163ce46848f8474847c9eb407b2e9b5d"}, "size_bytes": {"const": 458}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "jtl_xml"}, "path": {"const": "fuzz/corpus/jtl_xml/malformed.xml"}, "sha256": {"const": "3c61c0cdaf0317fa1afce4d61bdfbc6bd9fde6ea0882326bb45f39cb720c7a65"}, "size_bytes": {"const": 73}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "jtl_xml"}, "path": {"const": "fuzz/corpus/jtl_xml/nested.xml"}, "sha256": {"const": "b0a1a6b21b48616bf66d5ac22fd0fba72cf409c7b707cc9c9eef6c607232fc0e"}, "size_bytes": {"const": 291}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "jtl_xml"}, "path": {"const": "fuzz/corpus/jtl_xml/unknown-attribute.xml"}, "sha256": {"const": "7fc3fe19d9ee671628c58aba9fa2726c454818d70a733bd02a47b0ed86f6574d"}, "size_bytes": {"const": 83}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "property_config"}, "path": {"const": "fuzz/corpus/property_config/duplicates.properties"}, "sha256": {"const": "f6e3a38d0fa584392dbde12ec54a373d1d9cd07bad223953845107301b190c98"}, "size_bytes": {"const": 105}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "property_config"}, "path": {"const": "fuzz/corpus/property_config/limits.properties"}, "sha256": {"const": "c82d25fb6567959770f17c99a66c78009e564bc24626d0a6b030f1e196925b0a"}, "size_bytes": {"const": 49}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "property_config"}, "path": {"const": "fuzz/corpus/property_config/malformed.properties"}, "sha256": {"const": "91b9e5b92e86f12c00409d16d7db5da88ca5e427c0f362d4b0d3d5cb5efb0d2b"}, "size_bytes": {"const": 124}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "property_config"}, "path": {"const": "fuzz/corpus/property_config/recognized.properties"}, "sha256": {"const": "56f5da849bf7a572f46ee0d0517573bab174a6c8528074e769c3e1cd30637e7c"}, "size_bytes": {"const": 275}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "property_config"}, "path": {"const": "fuzz/corpus/property_config/unicode.properties"}, "sha256": {"const": "24a7dc1b4e925944f7f7a205f3c4379143456848460229a0fe80ec1550797c3a"}, "size_bytes": {"const": 111}}}},
+            {"contains": {"required": ["target", "path", "sha256", "size_bytes"], "properties": {"target": {"const": "property_config"}, "path": {"const": "fuzz/corpus/property_config/unknown-only.properties"}, "sha256": {"const": "ffaf729aa82e37be019e201b84e26ec766d5f0aa8c81db0a34d6dd2585bd4cfb"}, "size_bytes": {"const": 55}}}}
+          ]
+        }
+      }
+    },
+    "artifactId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,128}$"
+    },
+    "artifactToolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rust", "cargo_fuzz", "libfuzzer_sys", "flags"],
+      "properties": {
+        "rust": {"type": "string", "minLength": 1},
+        "cargo_fuzz": {"type": "string", "minLength": 1},
+        "libfuzzer_sys": {"const": "0.4.13"},
+        "flags": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {"type": "string", "minLength": 1}
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"rust": {"not": {"const": "not-run"}}}, "required": ["rust"]},
+          "then": {"properties": {"rust": {"pattern": "^nightly-[0-9]{4}-[0-9]{2}-[0-9]{2}$"}}}
+        },
+        {
+          "if": {"properties": {"cargo_fuzz": {"not": {"const": "not-run"}}}, "required": ["cargo_fuzz"]},
+          "then": {"properties": {"cargo_fuzz": {"pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([+-][A-Za-z0-9.-]+)?$"}}}
+        }
+      ]
+    },
+    "invariantEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["executions", "failures", "artifact_ids", "notes"],
+      "properties": {
+        "executions": {"$ref": "#/$defs/campaignCount"},
+        "failures": {"$ref": "#/$defs/campaignCount"},
+        "artifact_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/artifactId"}
+        },
+        "notes": {"type": "string"}
+      }
+    },
+    "invariant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["invariant_id", "target", "status", "evidence"],
+      "properties": {
+        "invariant_id": {
+          "enum": [
+            "JMX-LIMIT-001",
+            "JMX-SOURCE-RETAIN-001",
+            "JMX-OPAQUE-INVENTORY-001",
+            "JMX-DROPPED-INVENTORY-001",
+            "JTL-CSV-PROJECTION-001",
+            "JTL-CSV-LIMIT-001",
+            "JTL-CSV-UNKNOWN-HEADER-001",
+            "JTL-XML-PROJECTION-001",
+            "JTL-XML-LIMIT-001",
+            "JTL-XML-WIRE-001",
+            "EXPR-UNDEFINED-001",
+            "EXPR-LIMITS-001",
+            "EXPR-PROGRESS-001",
+            "BRIDGE-FRAME-ROUNDTRIP-001",
+            "BRIDGE-METADATA-001",
+            "BRIDGE-LIMIT-001",
+            "CONFIG-UNKNOWN-IGNORED-001",
+            "CONFIG-DUPLICATE-001",
+            "CONFIG-BOUNDS-001",
+            "HTTP-URL-BOUNDS-001",
+            "HTTP-HEADER-BOUNDS-001",
+            "HTTP-COOKIE-BOUNDS-001",
+            "PLUGIN-JSON-PREFLIGHT-001",
+            "REMOTE-CODEC-ROUNDTRIP-001",
+            "REMOTE-STATE-001",
+            "REMOTE-BOUNDS-001",
+            "RUNTIME-CONTROLLER-001",
+            "RUNTIME-SCHEDULER-001",
+            "RUNTIME-BOUNDS-001"
+          ]
+        },
+        "target": {"$ref": "#/$defs/targetName"},
+        "status": {
+          "enum": ["planned", "not-run", "observed", "failed"]
+        },
+        "evidence": {"$ref": "#/$defs/invariantEvidence"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"invariant_id": {"const": "JMX-LIMIT-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "jmx_xml"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "JMX-SOURCE-RETAIN-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "jmx_xml"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "JMX-OPAQUE-INVENTORY-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "jmx_xml"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "JMX-DROPPED-INVENTORY-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "jmx_xml"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "JTL-CSV-PROJECTION-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "jtl_csv"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "JTL-CSV-LIMIT-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "jtl_csv"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "JTL-XML-PROJECTION-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "jtl_xml"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "JTL-XML-LIMIT-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "jtl_xml"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "EXPR-UNDEFINED-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "expr"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "EXPR-LIMITS-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "expr"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "EXPR-PROGRESS-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "expr"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "BRIDGE-FRAME-ROUNDTRIP-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "bridge"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "BRIDGE-METADATA-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "bridge"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "BRIDGE-LIMIT-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "bridge"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "CONFIG-UNKNOWN-IGNORED-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "property_config"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "CONFIG-DUPLICATE-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "property_config"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "CONFIG-BOUNDS-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "property_config"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "JTL-CSV-UNKNOWN-HEADER-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "jtl_csv"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "JTL-XML-WIRE-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "jtl_xml"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "HTTP-URL-BOUNDS-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "http_policy"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "HTTP-HEADER-BOUNDS-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "http_policy"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "HTTP-COOKIE-BOUNDS-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "http_policy"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "PLUGIN-JSON-PREFLIGHT-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "plugin_json"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "REMOTE-CODEC-ROUNDTRIP-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "remote"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "REMOTE-STATE-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "remote"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "REMOTE-BOUNDS-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "remote"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "RUNTIME-CONTROLLER-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "runtime"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "RUNTIME-SCHEDULER-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "runtime"}}}
+        },
+        {
+          "if": {"properties": {"invariant_id": {"const": "RUNTIME-BOUNDS-001"}}, "required": ["invariant_id"]},
+          "then": {"properties": {"target": {"const": "runtime"}}}
+        },
+        {
+          "if": {
+            "properties": {"status": {"enum": ["planned", "not-run"]}},
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "properties": {
+                  "executions": {"const": 0},
+                  "failures": {"const": 0},
+                  "artifact_ids": {"maxItems": 0}
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"status": {"const": "observed"}},
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "properties": {
+                  "executions": {"exclusiveMinimum": 0},
+                  "failures": {"const": 0}
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"status": {"const": "failed"}},
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "properties": {
+                  "executions": {"exclusiveMinimum": 0},
+                  "failures": {"exclusiveMinimum": 0}
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "targetOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "status", "counts", "invariant_ids", "artifact_ids", "seed", "flags"],
+      "properties": {
+        "target": {"$ref": "#/$defs/targetName"},
+        "status": {"enum": ["not_run", "pass", "fail"]},
+        "counts": {"$ref": "#/$defs/counts"},
+        "invariant_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "artifact_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/artifactId"}
+        },
+        "seed": {"type": ["string", "null"]},
+        "flags": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {"type": "string", "minLength": 1}
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"target": {"const": "jmx_xml"}}, "required": ["target"]},
+          "then": {"properties": {"invariant_ids": {"const": ["JMX-LIMIT-001", "JMX-SOURCE-RETAIN-001", "JMX-OPAQUE-INVENTORY-001", "JMX-DROPPED-INVENTORY-001"]}}}
+        },
+        {
+          "if": {"properties": {"target": {"const": "jtl_csv"}}, "required": ["target"]},
+          "then": {"properties": {"invariant_ids": {"const": ["JTL-CSV-PROJECTION-001", "JTL-CSV-LIMIT-001", "JTL-CSV-UNKNOWN-HEADER-001"]}}}
+        },
+        {
+          "if": {"properties": {"target": {"const": "jtl_xml"}}, "required": ["target"]},
+          "then": {"properties": {"invariant_ids": {"const": ["JTL-XML-PROJECTION-001", "JTL-XML-LIMIT-001", "JTL-XML-WIRE-001"]}}}
+        },
+        {
+          "if": {"properties": {"target": {"const": "expr"}}, "required": ["target"]},
+          "then": {"properties": {"invariant_ids": {"const": ["EXPR-UNDEFINED-001", "EXPR-LIMITS-001", "EXPR-PROGRESS-001"]}}}
+        },
+        {
+          "if": {"properties": {"target": {"const": "bridge"}}, "required": ["target"]},
+          "then": {"properties": {"invariant_ids": {"const": ["BRIDGE-FRAME-ROUNDTRIP-001", "BRIDGE-METADATA-001", "BRIDGE-LIMIT-001"]}}}
+        },
+        {
+          "if": {"properties": {"target": {"const": "property_config"}}, "required": ["target"]},
+          "then": {"properties": {"invariant_ids": {"const": ["CONFIG-UNKNOWN-IGNORED-001", "CONFIG-DUPLICATE-001", "CONFIG-BOUNDS-001"]}}}
+        },
+        {
+          "if": {"properties": {"target": {"const": "http_policy"}}, "required": ["target"]},
+          "then": {"properties": {"invariant_ids": {"const": ["HTTP-URL-BOUNDS-001", "HTTP-HEADER-BOUNDS-001", "HTTP-COOKIE-BOUNDS-001"]}}}
+        },
+        {
+          "if": {"properties": {"target": {"const": "plugin_json"}}, "required": ["target"]},
+          "then": {"properties": {"invariant_ids": {"const": ["PLUGIN-JSON-PREFLIGHT-001"]}}}
+        },
+        {
+          "if": {"properties": {"target": {"const": "remote"}}, "required": ["target"]},
+          "then": {"properties": {"invariant_ids": {"const": ["REMOTE-CODEC-ROUNDTRIP-001", "REMOTE-STATE-001", "REMOTE-BOUNDS-001"]}}}
+        },
+        {
+          "if": {"properties": {"target": {"const": "runtime"}}, "required": ["target"]},
+          "then": {"properties": {"invariant_ids": {"const": ["RUNTIME-CONTROLLER-001", "RUNTIME-SCHEDULER-001", "RUNTIME-BOUNDS-001"]}}}
+        },
+        {
+          "if": {"properties": {"status": {"const": "not_run"}}, "required": ["status"]},
+          "then": {
+            "properties": {
+              "counts": {"$ref": "#/$defs/zeroCounts"},
+              "artifact_ids": {"maxItems": 0},
+              "seed": {"const": null},
+              "flags": {"maxItems": 0}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"status": {"const": "pass"}}, "required": ["status"]},
+          "then": {
+            "properties": {
+              "counts": {
+                "allOf": [
+                  {"$ref": "#/$defs/zeroFailureCounts"},
+                  {"properties": {"executions": {"exclusiveMinimum": 0}}}
+                ]
+              },
+              "seed": {"type": "string", "minLength": 1},
+              "flags": {"minItems": 1}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"status": {"const": "fail"}}, "required": ["status"]},
+          "then": {
+            "properties": {
+              "counts": {
+                "allOf": [
+                  {"$ref": "#/$defs/counts"},
+                  {"properties": {"executions": {"exclusiveMinimum": 0}}},
+                  {
+                    "anyOf": [
+                      {"properties": {"crashes": {"exclusiveMinimum": 0}}},
+                      {"properties": {"hangs": {"exclusiveMinimum": 0}}},
+                      {"properties": {"timeouts": {"exclusiveMinimum": 0}}},
+                      {"properties": {"sanitizer_findings": {"exclusiveMinimum": 0}}},
+                      {"properties": {"resource_limit_failures": {"exclusiveMinimum": 0}}}
+                    ]
+                  }
+                ]
+              },
+              "artifact_ids": {"minItems": 1},
+              "seed": {"type": "string", "minLength": 1},
+              "flags": {"minItems": 1}
+            }
+          }
+        }
+      ]
+    },
+    "minimization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempted", "status", "artifact_ids"],
+      "properties": {
+        "attempted": {"type": "boolean"},
+        "status": {"enum": ["not_run", "not_attempted", "completed", "failed"]},
+        "artifact_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/artifactId"}
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"attempted": {"const": false}}, "required": ["attempted"]},
+          "then": {
+            "properties": {
+              "status": {"enum": ["not_run", "not_attempted"]},
+              "artifact_ids": {"maxItems": 0}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"attempted": {"const": true}}, "required": ["attempted"]},
+          "then": {
+            "properties": {
+              "status": {"enum": ["completed", "failed"]},
+              "artifact_ids": {"minItems": 1}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"status": {"const": "not_run"}}, "required": ["status"]},
+          "then": {
+            "properties": {
+              "attempted": {"const": false},
+              "artifact_ids": {"maxItems": 0}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"status": {"const": "not_attempted"}}, "required": ["status"]},
+          "then": {
+            "properties": {
+              "attempted": {"const": false},
+              "artifact_ids": {"maxItems": 0}
+            }
+          }
+        }
+      ]
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "counts", "artifacts", "minimization", "notes"],
+      "properties": {
+        "status": {"enum": ["not_run", "pass", "fail"]},
+        "counts": {"$ref": "#/$defs/aggregateCounts"},
+        "artifacts": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/artifactId"}
+        },
+        "minimization": {"$ref": "#/$defs/minimization"},
+        "notes": {"type": "string"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "not_run"}}, "required": ["status"]},
+          "then": {
+            "properties": {
+              "counts": {"$ref": "#/$defs/zeroAggregateCounts"},
+              "artifacts": {"maxItems": 0},
+              "minimization": {
+                "properties": {
+                  "attempted": {"const": false},
+                  "status": {"const": "not_run"},
+                  "artifact_ids": {"maxItems": 0}
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"status": {"const": "pass"}}, "required": ["status"]},
+          "then": {
+            "properties": {
+              "counts": {
+                "allOf": [
+                  {"$ref": "#/$defs/zeroFailureAggregateCounts"},
+                  {"properties": {"executions": {"exclusiveMinimum": 0}}}
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"status": {"const": "fail"}}, "required": ["status"]},
+          "then": {
+            "properties": {
+              "counts": {
+                "allOf": [
+                  {"$ref": "#/$defs/aggregateCounts"},
+                  {"properties": {"executions": {"exclusiveMinimum": 0}}},
+                  {
+                    "anyOf": [
+                      {"properties": {"crashes": {"exclusiveMinimum": 0}}},
+                      {"properties": {"hangs": {"exclusiveMinimum": 0}}},
+                      {"properties": {"timeouts": {"exclusiveMinimum": 0}}},
+                      {"properties": {"sanitizer_findings": {"exclusiveMinimum": 0}}},
+                      {"properties": {"resource_limit_failures": {"exclusiveMinimum": 0}}}
+                    ]
+                  }
+                ]
+              },
+              "artifacts": {"minItems": 1}
+            }
+          }
+        }
+      ]
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "campaign_id",
+        "target",
+        "kind",
+        "status",
+        "path",
+        "sha256",
+        "size_bytes",
+        "retention_reason",
+        "input",
+        "diagnostic",
+        "toolchain"
+      ],
+      "properties": {
+        "artifact_id": {"$ref": "#/$defs/artifactId"},
+        "campaign_id": {"type": "string", "minLength": 1},
+        "target": {"$ref": "#/$defs/targetName"},
+        "kind": {
+          "enum": [
+            "crash",
+            "hang",
+            "timeout",
+            "sanitizer",
+            "oom",
+            "resource-limit",
+            "minimized-input",
+            "regression",
+            "log",
+            "report"
+          ]
+        },
+        "status": {"enum": ["observed", "triaged", "fixed", "accepted"]},
+        "path": {
+          "allOf": [
+            {"$ref": "#/$defs/safePath"},
+            {"pattern": "^oracle-runs/fuzz-manifest/"}
+          ]
+        },
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 0, "maximum": 1048576},
+        "retention_reason": {"type": "string", "minLength": 1},
+        "input": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256", "size_bytes", "source", "minimized"],
+          "properties": {
+            "path": {
+              "allOf": [
+                {"$ref": "#/$defs/safePath"},
+                {"pattern": "^oracle-runs/fuzz-manifest/"}
+              ]
+            },
+            "sha256": {"$ref": "#/$defs/sha256"},
+            "size_bytes": {"type": "integer", "minimum": 0, "maximum": 262144},
+            "source": {"enum": ["original", "generated", "fuzz-minimized", "regression"]},
+            "minimized": {"type": "boolean"}
+          }
+        },
+        "diagnostic": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["exit_class", "signal", "stack_trace", "stable_error"],
+          "properties": {
+            "exit_class": {"enum": ["crash", "hang", "timeout", "sanitizer", "oom", "resource-limit", "clean"]},
+            "signal": {"type": ["integer", "null"], "minimum": 1},
+            "stack_trace": {"type": ["string", "null"]},
+            "stable_error": {"type": ["string", "null"]}
+          }
+        },
+        "toolchain": {"$ref": "#/$defs/artifactToolchain"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"kind": {"const": "crash"}}, "required": ["kind"]},
+          "then": {"properties": {"diagnostic": {"properties": {"exit_class": {"const": "crash"}}}}}
+        },
+        {
+          "if": {"properties": {"kind": {"const": "hang"}}, "required": ["kind"]},
+          "then": {"properties": {"diagnostic": {"properties": {"exit_class": {"const": "hang"}}}}}
+        },
+        {
+          "if": {"properties": {"kind": {"const": "timeout"}}, "required": ["kind"]},
+          "then": {"properties": {"diagnostic": {"properties": {"exit_class": {"const": "timeout"}}}}}
+        },
+        {
+          "if": {"properties": {"kind": {"const": "sanitizer"}}, "required": ["kind"]},
+          "then": {"properties": {"diagnostic": {"properties": {"exit_class": {"const": "sanitizer"}}}}}
+        },
+        {
+          "if": {"properties": {"kind": {"const": "oom"}}, "required": ["kind"]},
+          "then": {"properties": {"diagnostic": {"properties": {"exit_class": {"const": "oom"}}}}}
+        },
+        {
+          "if": {"properties": {"kind": {"const": "resource-limit"}}, "required": ["kind"]},
+          "then": {"properties": {"diagnostic": {"properties": {"exit_class": {"const": "resource-limit"}}}}}
+        }
+      ]
+    }
+  }
+}

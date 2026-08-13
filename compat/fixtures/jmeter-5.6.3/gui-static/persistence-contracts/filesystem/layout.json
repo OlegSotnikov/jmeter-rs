@@ -1,0 +1,111 @@
+{
+  "schema_id": "jmeter-rs.gui-filesystem-descriptor",
+  "schema_version": 1,
+  "status": "planned; static descriptor only",
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-GUI-STATIC-PERSISTENCE",
+  "mutation_policy": {
+    "static_corpus_mutated": false,
+    "future_mutation_root": "<temporary-root>",
+    "allowlisted_roots": ["<temporary-root>/jmeter-home", "<temporary-root>/workspace", "<temporary-root>/prefs", "<temporary-root>/oracle-runs"],
+    "outside_root_writes": "forbidden",
+    "generated_artifacts_committed": false
+  },
+  "roots": [
+    {
+      "name": "jmeter_home",
+      "path": "<temporary-root>/jmeter-home",
+      "kind": "directory",
+      "exists_in_static_corpus": false,
+      "future_contents": ["backups/", "bin/templates/templates.xml"]
+    },
+    {
+      "name": "workspace_root",
+      "path": "<temporary-root>/workspace/persistence-contracts",
+      "kind": "directory",
+      "exists_in_static_corpus": false,
+      "future_contents": ["gui-static-plan.jmx", "gui-persistence.properties"]
+    },
+    {
+      "name": "prefs_root",
+      "path": "<temporary-root>/prefs/persistence-contracts/<scenario-id>",
+      "kind": "java.util.prefs.userRoot directory",
+      "exists_in_static_corpus": false,
+      "future_contents": [
+        "org/apache/jmeter/gui/action/recent_file_0",
+        "org/apache/jmeter/gui/save_before_run",
+        "org/apache/jmeter/gui/action/laf.command"
+      ]
+    },
+    {
+      "name": "backup_root",
+      "path": "<temporary-root>/jmeter-home/backups",
+      "kind": "directory",
+      "exists_in_static_corpus": false,
+      "future_contents": ["gui-static-plan-*.jmx"]
+    },
+    {
+      "name": "oracle_run_root",
+      "path": "<temporary-root>/oracle-runs/gui-static/persistence-contracts",
+      "kind": "directory",
+      "exists_in_static_corpus": false,
+      "future_contents": ["last/gui.log", "last/saved-plan.jmx", "last/saved-plan.jtl", "last/LAST", "last/last-plan.log", "directory-listing.json"]
+    }
+  ],
+  "artifact_contracts": [
+    {
+      "artifact": "backup",
+      "name_pattern": "<plan-stem>-NNNNNN.jmx",
+      "number_width": 6,
+      "first_number": 1,
+      "max_files": 10,
+      "retention_max_count": 10,
+      "retention_max_hours": 0,
+      "source": "jmeter.gui.action.save.backup_on_save",
+      "conditions": ["target exists", "GUI tree is dirty"],
+      "delete_expired_only_after_successful_save": true
+    },
+    {
+      "artifact": "saved_plan",
+      "path": "<temporary-root>/oracle-runs/gui-static/persistence-contracts/last/saved-plan.jmx",
+      "source": "GUI save-as action",
+      "raw_artifact_policy": "retain outside Git after future oracle run"
+    },
+    {
+      "artifact": "template_index",
+      "path": "<temporary-root>/jmeter-home/bin/templates/templates.xml",
+      "source": "template.files",
+      "materialized_in_static_corpus": false
+    }
+  ],
+  "path_tokens": {
+    "JMETER_HOME": "<temporary-root>/jmeter-home",
+    "JMETER_HOME_PROPERTY_TOKEN": "${JMETER_HOME}",
+    "JMETER_HOME_PROPERTY_RULE": "JMeter does not expand this token; the future runner must materialize a copy before launch",
+    "PREFS_USER_ROOT": "<temporary-root>/prefs/persistence-contracts/<scenario-id>",
+    "LAST_PLAN": "the plan path most recently loaded by the GUI in this isolated scenario",
+    "LAST_JTL": "the JTL path derived from LAST_PLAN by the pinned oracle for -l LAST",
+    "LAST_LOG_LITERAL": "the literal LAST path under the declared -j LAST command working directory",
+    "LAST_PRECONDITION": "recent_file_0 is populated by GUI load in PREFS_USER_ROOT",
+    "PREFS_SCENARIO_ROOT": "<temporary-root>/prefs/persistence-contracts/<scenario-id>"
+  },
+  "bounds": {
+    "max_plan_bytes": 65536,
+    "max_plan_nodes": 32,
+    "max_plan_depth": 8,
+    "max_property_text_bytes": 8192,
+    "max_backup_files": 10,
+    "max_backup_name_bytes": 96,
+    "max_template_files": 4,
+    "max_template_entries": 64,
+    "max_template_file_bytes": 65536,
+    "max_path_token_bytes": 256,
+    "max_directory_entries_recorded": 128,
+    "max_gui_wait_seconds": 30
+  },
+  "oracle_observation": {
+    "performed": false,
+    "status": "planned; not observed",
+    "required_fields": ["backup_listing", "save_event_order", "last_resolution", "template_resolution", "workbench_pair"]
+  }
+}

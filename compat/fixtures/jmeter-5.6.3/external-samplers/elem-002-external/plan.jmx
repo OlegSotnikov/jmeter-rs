@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="ELEM-002 external sampler inventory" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="External placeholders" enabled="true">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="EXTERNAL_FIXTURE_STATUS" elementType="Argument">
+            <stringProp name="Argument.name">EXTERNAL_FIXTURE_STATUS</stringProp>
+            <stringProp name="Argument.value">external-unavailable</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="EXTERNAL_PLACEHOLDER" elementType="Argument">
+            <stringProp name="Argument.name">EXTERNAL_PLACEHOLDER</stringProp>
+            <stringProp name="Argument.value">not-configured</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+      <collectionProp name="TestPlan.thread_groups"/>
+      <stringProp name="TestPlan.comments">Original bounded descriptors for JMS, mail, MongoDB, Bolt, JUnit, OS Process, and Access Log samplers. Every external dependency is intentionally absent.</stringProp>
+      <stringProp name="TestPlan.user_define_classpath"></stringProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="One external inventory user" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="One bounded iteration" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">1</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">0</stringProp>
+        <longProp name="ThreadGroup.start_time">0</longProp>
+        <longProp name="ThreadGroup.end_time">0</longProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <stringProp name="ThreadGroup.duration"></stringProp>
+        <stringProp name="ThreadGroup.delay"></stringProp>
+      </ThreadGroup>
+      <hashTree>
+        <PublisherSampler guiclass="JMSPublisherGui" testclass="PublisherSampler" testname="JMS publisher requires provider" enabled="false">
+          <boolProp name="jms.jndi_properties">false</boolProp>
+          <stringProp name="jms.initial_context_factory">com.example.jms.InitialContextFactory</stringProp>
+          <stringProp name="jms.provider_url">jms://broker.external.invalid:61616</stringProp>
+          <stringProp name="jms.connection_factory">externalConnectionFactory</stringProp>
+          <stringProp name="jms.topic">external.topic.publish</stringProp>
+          <stringProp name="jms.security_principle">${EXTERNAL_PLACEHOLDER}</stringProp>
+          <stringProp name="jms.security_credentials">${EXTERNAL_PLACEHOLDER}</stringProp>
+          <stringProp name="jms.iterations">1</stringProp>
+          <boolProp name="jms.authenticate">false</boolProp>
+          <boolProp name="jms.read_response">false</boolProp>
+          <boolProp name="jms.destination_static">true</boolProp>
+          <stringProp name="jms_error_reconnect_on_codes"></stringProp>
+          <stringProp name="jms.input_file"></stringProp>
+          <stringProp name="jms.random_path"></stringProp>
+          <stringProp name="jms.text_message">fixture-message</stringProp>
+          <stringProp name="jms.config_choice">jms_use_text</stringProp>
+          <stringProp name="jms.config_msg_type">jms_text_message</stringProp>
+          <boolProp name="jms.non_persistent">false</boolProp>
+          <stringProp name="jms.priority">4</stringProp>
+          <stringProp name="jms.expiration">0</stringProp>
+          <stringProp name="jms.file_encoding"></stringProp>
+          <elementProp name="jms.jmsProperties" elementType="JMSProperties" testclass="JMSProperties" testname="JMS publisher properties" enabled="false">
+            <collectionProp name="JMSProperties.properties">
+              <elementProp name="fixture-property" elementType="JMSProperty" testclass="JMSProperty" testname="fixture JMS property" enabled="false">
+                <stringProp name="JMSProperty.name">fixture.property</stringProp>
+                <stringProp name="JMSProperty.value">external</stringProp>
+                <stringProp name="JMSProperty.type">java.lang.String</stringProp>
+              </elementProp>
+            </collectionProp>
+          </elementProp>
+        </PublisherSampler>
+        <hashTree/>
+
+        <SubscriberSampler guiclass="JMSSubscriberGui" testclass="SubscriberSampler" testname="JMS subscriber requires provider" enabled="false">
+          <boolProp name="jms.jndi_properties">false</boolProp>
+          <stringProp name="jms.initial_context_factory">com.example.jms.InitialContextFactory</stringProp>
+          <stringProp name="jms.provider_url">jms://broker.external.invalid:61616</stringProp>
+          <stringProp name="jms.connection_factory">externalConnectionFactory</stringProp>
+          <stringProp name="jms.topic">external.topic.subscribe</stringProp>
+          <stringProp name="jms.security_principle">${EXTERNAL_PLACEHOLDER}</stringProp>
+          <stringProp name="jms.security_credentials">${EXTERNAL_PLACEHOLDER}</stringProp>
+          <stringProp name="jms.iterations">1</stringProp>
+          <boolProp name="jms.authenticate">false</boolProp>
+          <boolProp name="jms.read_response">true</boolProp>
+          <boolProp name="jms.destination_static">true</boolProp>
+          <stringProp name="jms_error_reconnect_on_codes"></stringProp>
+          <stringProp name="jms.client_choice">jms_subscriber_receive</stringProp>
+          <stringProp name="jms.timeout">1000</stringProp>
+          <stringProp name="jms.durableSubscriptionId"></stringProp>
+          <stringProp name="jms.clientId">fixture-subscriber</stringProp>
+          <stringProp name="jms.selector"></stringProp>
+          <boolProp name="jms.stop_between_samples">false</boolProp>
+          <stringProp name="jms.separator"></stringProp>
+          <stringProp name="jms_error_pause_between"></stringProp>
+        </SubscriberSampler>
+        <hashTree/>
+
+        <JMSSampler guiclass="JMSSamplerGui" testclass="JMSSampler" testname="JMS point-to-point requires provider" enabled="false">
+          <stringProp name="JMSSampler.initialContextFactory">com.example.jms.InitialContextFactory</stringProp>
+          <stringProp name="JMSSampler.contextProviderUrl">jms://broker.external.invalid:61616</stringProp>
+          <elementProp name="JMSSampler.jndiProperties" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="JMS JNDI properties" enabled="false">
+            <collectionProp name="Arguments.arguments"/>
+          </elementProp>
+          <stringProp name="JMSSampler.timeout">1000</stringProp>
+          <stringProp name="JMSSampler.priority">4</stringProp>
+          <stringProp name="JMSSampler.expiration">0</stringProp>
+          <stringProp name="JMSSampler.jmsSelector"></stringProp>
+          <stringProp name="JMSSampler.jmsNumberOfSamplesToAggregate">1</stringProp>
+          <stringProp name="JMSSampler.communicationStyle">1</stringProp>
+          <stringProp name="JMSSampler.ReceiveQueue">external.queue.receive</stringProp>
+          <stringProp name="HTTPSamper.xml_data">fixture-request</stringProp>
+          <stringProp name="JMSSampler.SendQueue">external.queue.send</stringProp>
+          <stringProp name="JMSSampler.queueconnectionfactory">externalQueueConnectionFactory</stringProp>
+          <boolProp name="JMSSampler.isNonPersistent">false</boolProp>
+          <boolProp name="JMSSampler.useReqMsgIdAsCorrelId">false</boolProp>
+          <boolProp name="JMSSampler.useResMsgIdAsCorrelId">false</boolProp>
+          <elementProp name="arguments" elementType="JMSProperties" testclass="JMSProperties" testname="JMS point-to-point properties" enabled="false">
+            <collectionProp name="JMSProperties.properties">
+              <elementProp name="fixture-property" elementType="JMSProperty" testclass="JMSProperty" testname="fixture JMS property" enabled="false">
+                <stringProp name="JMSProperty.name">fixture.property</stringProp>
+                <stringProp name="JMSProperty.value">external</stringProp>
+                <stringProp name="JMSProperty.type">java.lang.String</stringProp>
+              </elementProp>
+            </collectionProp>
+          </elementProp>
+        </JMSSampler>
+        <hashTree/>
+
+        <MailReaderSampler guiclass="MailReaderSamplerGui" testclass="MailReaderSampler" testname="Mail reader requires JavaMail server" enabled="false">
+          <stringProp name="host_type">imap</stringProp>
+          <stringProp name="host">mail.external.invalid</stringProp>
+          <stringProp name="port">993</stringProp>
+          <stringProp name="username">${EXTERNAL_PLACEHOLDER}</stringProp>
+          <stringProp name="password">${EXTERNAL_PLACEHOLDER}</stringProp>
+          <stringProp name="folder">INBOX</stringProp>
+          <boolProp name="delete">false</boolProp>
+          <stringProp name="num_messages">1</stringProp>
+          <boolProp name="storeMimeMessage">false</boolProp>
+          <boolProp name="headerOnly">true</boolProp>
+        </MailReaderSampler>
+        <hashTree/>
+
+        <SmtpSampler guiclass="SmtpSamplerGui" testclass="SmtpSampler" testname="SMTP sampler requires JavaMail server" enabled="false">
+          <stringProp name="SMTPSampler.server">smtp.external.invalid</stringProp>
+          <stringProp name="SMTPSampler.serverPort">587</stringProp>
+          <stringProp name="SMTPSampler.serverTimeout">1000</stringProp>
+          <stringProp name="SMTPSampler.serverConnectionTimeout">1000</stringProp>
+          <boolProp name="SMTPSampler.useAuth">false</boolProp>
+          <stringProp name="SMTPSampler.username">${EXTERNAL_PLACEHOLDER}</stringProp>
+          <stringProp name="SMTPSampler.password">${EXTERNAL_PLACEHOLDER}</stringProp>
+          <stringProp name="SMTPSampler.mailFrom">fixture-sender@external.invalid</stringProp>
+          <stringProp name="SMTPSampler.replyTo"></stringProp>
+          <stringProp name="SMTPSampler.receiverTo">fixture-receiver@external.invalid</stringProp>
+          <stringProp name="SMTPSampler.receiverCC"></stringProp>
+          <stringProp name="SMTPSampler.receiverBCC"></stringProp>
+          <stringProp name="SMTPSampler.subject">fixture subject</stringProp>
+          <boolProp name="SMTPSampler.suppressSubject">false</boolProp>
+          <stringProp name="SMTPSampler.message">fixture body</stringProp>
+          <boolProp name="SMTPSampler.plainBody">true</boolProp>
+          <boolProp name="SMTPSampler.include_timestamp">false</boolProp>
+          <stringProp name="SMTPSampler.attachFile"></stringProp>
+          <boolProp name="SMTPSampler.messageSizeStatistics">false</boolProp>
+          <collectionProp name="SMTPSampler.headerFields"/>
+          <boolProp name="SMTPSampler.use_eml">false</boolProp>
+          <stringProp name="SMTPSampler.emlMessageToSend"></stringProp>
+          <boolProp name="SMTPSampler.enableDebug">false</boolProp>
+          <boolProp name="SMTPSampler.useSSL">false</boolProp>
+          <boolProp name="SMTPSampler.useStartTLS">false</boolProp>
+          <boolProp name="SMTPSampler.trustAllCerts">false</boolProp>
+          <boolProp name="SMTPSampler.enforceStartTLS">false</boolProp>
+          <stringProp name="SMTPSampler.tlsProtocols"></stringProp>
+          <boolProp name="SMTPSampler.useLocalTrustStore">false</boolProp>
+          <stringProp name="SMTPSampler.trustStoreToUse"></stringProp>
+        </SmtpSampler>
+        <hashTree/>
+
+        <MongoSourceElement guiclass="TestBeanGUI" testclass="MongoSourceElement" testname="MongoDB source requires driver" enabled="false">
+          <stringProp name="connection">mongodb://db.external.invalid:27017</stringProp>
+          <stringProp name="source">external-mongo-source</stringProp>
+        </MongoSourceElement>
+        <hashTree/>
+
+        <MongoScriptSampler guiclass="TestBeanGUI" testclass="MongoScriptSampler" testname="MongoDB script requires driver" enabled="false">
+          <stringProp name="MongoScriptSampler.source">external-mongo-source</stringProp>
+          <stringProp name="MongoScriptSampler.database">fixture</stringProp>
+          <stringProp name="MongoScriptSampler.username">${EXTERNAL_PLACEHOLDER}</stringProp>
+          <stringProp name="MongoScriptSampler.password">${EXTERNAL_PLACEHOLDER}</stringProp>
+          <stringProp name="MongoScriptSampler.script">return { fixture: true };</stringProp>
+        </MongoScriptSampler>
+        <hashTree/>
+
+        <BoltConnectionElement guiclass="TestBeanGUI" testclass="BoltConnectionElement" testname="Bolt connection requires Neo4j driver" enabled="false">
+          <stringProp name="boltUri">bolt://graph.external.invalid:7687</stringProp>
+          <stringProp name="username">${EXTERNAL_PLACEHOLDER}</stringProp>
+          <stringProp name="password">${EXTERNAL_PLACEHOLDER}</stringProp>
+          <stringProp name="maxConnectionPoolSize">1</stringProp>
+        </BoltConnectionElement>
+        <hashTree/>
+
+        <BoltSampler guiclass="TestBeanGUI" testclass="BoltSampler" testname="Bolt request requires Neo4j service" enabled="false">
+          <stringProp name="cypher">RETURN 1 AS fixture</stringProp>
+          <stringProp name="params">{}</stringProp>
+          <boolProp name="recordQueryResults">false</boolProp>
+          <stringProp name="accessMode">READ</stringProp>
+          <stringProp name="database">fixture</stringProp>
+          <stringProp name="txTimeout">1000</stringProp>
+        </BoltSampler>
+        <hashTree/>
+
+        <JUnitSampler guiclass="JUnitTestSamplerGui" testclass="JUnitSampler" testname="JUnit request requires user test class" enabled="false">
+          <stringProp name="junitSampler.classname">com.example.junit.ExternalFixtureTest</stringProp>
+          <stringProp name="junitSampler.constructorString"></stringProp>
+          <stringProp name="junitSampler.method">fixtureMethod</stringProp>
+          <stringProp name="junitSampler.success">true</stringProp>
+          <stringProp name="junitSampler.successCode">0</stringProp>
+          <stringProp name="junitSampler.failureCode">1</stringProp>
+          <stringProp name="junitSampler.failureMessage">fixture failure</stringProp>
+          <stringProp name="junitSampler.errorCode">2</stringProp>
+          <stringProp name="junitSampler.errorMessage">fixture error</stringProp>
+          <stringProp name="junitSampler.execTime">0</stringProp>
+          <stringProp name="junitSampler.appendError">true</stringProp>
+          <stringProp name="junitSampler.appendException">true</stringProp>
+        </JUnitSampler>
+        <hashTree/>
+
+        <SystemSampler guiclass="SystemSamplerGui" testclass="SystemSampler" testname="OS process requires platform adapter" enabled="false">
+          <stringProp name="SystemSampler.command">external-fixture-command</stringProp>
+          <stringProp name="SystemSampler.directory">external-fixture-root</stringProp>
+          <elementProp name="SystemSampler.arguments" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="OS command arguments" enabled="false">
+            <collectionProp name="Arguments.arguments">
+              <elementProp name="arg0" elementType="Argument" enabled="false">
+                <stringProp name="Argument.name">fixture</stringProp>
+                <stringProp name="Argument.value">external</stringProp>
+                <stringProp name="Argument.metadata">=</stringProp>
+              </elementProp>
+            </collectionProp>
+          </elementProp>
+          <elementProp name="SystemSampler.environment" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="OS environment" enabled="false">
+            <collectionProp name="Arguments.arguments">
+              <elementProp name="env0" elementType="Argument" enabled="false">
+                <stringProp name="Argument.name">EXTERNAL_FIXTURE_STATUS</stringProp>
+                <stringProp name="Argument.value">external-unavailable</stringProp>
+                <stringProp name="Argument.metadata">=</stringProp>
+              </elementProp>
+            </collectionProp>
+          </elementProp>
+          <boolProp name="SystemSampler.checkReturnCode">true</boolProp>
+          <stringProp name="SystemSampler.expectedReturnCode">0</stringProp>
+        </SystemSampler>
+        <hashTree/>
+
+        <AccessLogSampler guiclass="TestBeanGUI" testclass="AccessLogSampler" testname="Access log sampler requires file and parser" enabled="false">
+          <stringProp name="logFile">external-fixture/access.log</stringProp>
+          <stringProp name="parserClassName">com.example.accesslog.Parser</stringProp>
+          <stringProp name="filterClassName"></stringProp>
+          <stringProp name="protocol">http</stringProp>
+          <stringProp name="domain">web.external.invalid</stringProp>
+          <stringProp name="portString">80</stringProp>
+          <boolProp name="imageParsing">false</boolProp>
+        </AccessLogSampler>
+        <hashTree/>
+
+        <!-- Legacy input is retained only to exercise the pinned upgrade table;
+             it is opaque preservation data and is never an executable node. -->
+        <AccessLogSampler guiclass="org.apache.jmeter.protocol.http.control.gui.AccessLogSamplerGui" testclass="AccessLogSampler" testname="Access log legacy upgrade input" enabled="false">
+          <stringProp name="AccessLogSampler.log_file">external-fixture/legacy-access.log</stringProp>
+          <stringProp name="HTTPSampler.port">80</stringProp>
+          <stringProp name="HTTPSampler.domain">web.external.invalid</stringProp>
+          <stringProp name="AccessLogSampler.parser_class_name">com.example.accesslog.LegacyParser</stringProp>
+          <boolProp name="HTTPSampler.image_parser">false</boolProp>
+        </AccessLogSampler>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

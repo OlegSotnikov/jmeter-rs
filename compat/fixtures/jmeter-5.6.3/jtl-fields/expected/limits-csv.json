@@ -1,0 +1,22 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JTL-FIELDS",
+  "format": "jtl-csv",
+  "contract_kind": "resource-limit-contract",
+  "projection_schema": "error-contract-v1",
+  "comparator_ready": false,
+  "evidence_status": "planned",
+  "expectation_basis": "Bounded parser-error targets are static non-comparator contracts; no limit-triggering oracle run was measured.",
+  "header": [],
+  "rows": [],
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "Limit CSV contracts are rejected before a successful projection is accepted."
+  },
+  "contracts": [
+    {"id": "LIMIT-INPUT-BYTES-001", "path": "inputs/limits/input-bytes.csv", "bound": {"name": "max_input_bytes", "value": 32}, "expected_error_code": "output-limit"},
+    {"id": "LIMIT-TEXT-001", "path": "inputs/limits/long-field.csv", "bound": {"name": "max_text_value_bytes", "value": 16}, "expected_error_code": "output-limit"}
+  ]
+}

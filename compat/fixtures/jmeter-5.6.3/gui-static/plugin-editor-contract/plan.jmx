@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="GUI plugin editor contract" enabled="true">
+      <stringProp name="TestPlan.comments">Original plugin-editor boundary probe; no plugin artifact is bundled.</stringProp>
+    </TestPlan>
+    <hashTree>
+      <org.example.jmeter.rs.GuiEditorProbe guiclass="org.example.jmeter.rs.GuiEditorProbeGui" testclass="org.example.jmeter.rs.GuiEditorProbe" testname="Opaque plugin editor probe" enabled="false">
+        <stringProp name="org.example.jmeter.rs.editor.state">original &amp; opaque &lt;state&gt; café 雪</stringProp>
+        <stringProp name="org.example.jmeter.rs.editor.unknown">preserve-this-plugin-property</stringProp>
+      </org.example.jmeter.rs.GuiEditorProbe>
+      <hashTree/>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

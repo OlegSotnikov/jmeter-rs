@@ -1,0 +1,557 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jmeter-rs.invalid/schemas/harness-evidence.schema.json",
+  "title": "jmeter-rs pinned oracle evidence",
+  "description": "Strict evidence projection for the source-only harness. A static or unavailable record is not an observation; observed records must carry the repository commit, lock/toolchain hashes, authenticated artifact, bounded raw artifacts, and a comparator-shaped diff.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "case_id",
+    "profile_id",
+    "fixture_family_id",
+    "conformance_ids",
+    "coverage_by_conformance_id",
+    "normalization_policy_refs",
+    "evidence_status",
+    "source_only",
+    "materialization",
+    "oracle_execution",
+    "manifest_ref",
+    "profile_ref",
+    "artifact_verification",
+    "identity",
+    "toolchain",
+    "classpath",
+    "environment",
+    "raw_artifacts",
+    "comparison",
+    "unavailable_outcomes",
+    "release_conformance"
+  ],
+  "properties": {
+    "schema_id": {"const": "jmeter-rs.harness-evidence"},
+    "schema_version": {"const": 1},
+    "case_id": {"const": "ORACLE-JMETER-563-HARNESS-REPRODUCIBILITY"},
+    "profile_id": {"const": "jmeter-5.6.3"},
+    "fixture_family_id": {"const": "FX-HARNESS-001"},
+    "conformance_ids": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {"enum": ["TEST-001", "TEST-002", "TEST-004"]}
+    },
+    "coverage_by_conformance_id": {"$ref": "#/$defs/coverage"},
+    "normalization_policy_refs": {"$ref": "#/$defs/policyRefs"},
+    "evidence_status": {"enum": ["static-not-run", "unavailable-static", "observed"]},
+    "source_only": {"type": "boolean"},
+    "materialization": {"$ref": "#/$defs/materialization"},
+    "oracle_execution": {"$ref": "#/$defs/oracleExecution"},
+    "manifest_ref": {"$ref": "#/$defs/fileRef"},
+    "profile_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "profile_id"],
+      "properties": {
+        "path": {"const": "compat/profiles/jmeter-5.6.3.json"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "profile_id": {"const": "jmeter-5.6.3"}
+      }
+    },
+    "artifact_verification": {"$ref": "#/$defs/artifactVerification"},
+    "identity": {"$ref": "#/$defs/identity"},
+    "toolchain": {"$ref": "#/$defs/toolchain"},
+    "classpath": {"$ref": "#/$defs/classpath"},
+    "environment": {"$ref": "#/$defs/environment"},
+    "raw_artifacts": {"$ref": "#/$defs/rawArtifacts"},
+    "comparison": {"$ref": "#/$defs/comparison"},
+    "unavailable_outcomes": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {"$ref": "#/$defs/unavailableOutcome"}
+    },
+    "release_conformance": {"$ref": "#/$defs/releaseConformance"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "sha512": {"type": "string", "pattern": "^[0-9a-f]{128}$"},
+    "fingerprint": {"type": "string", "pattern": "^[0-9A-F]{40}$"},
+    "policyRefs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "NORM-STRUCTURE-001",
+          "NORM-JMX-001",
+          "NORM-JTL-001",
+          "NORM-TIME-001",
+          "NORM-CLI-001",
+          "NORM-CONFIG-001",
+          "NORM-ENV-001",
+          "NORM-REPORT-001",
+          "NORM-EXTERNAL-001",
+          "NORM-SECURITY-001"
+        ]
+      }
+    },
+    "materialization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_fixture_present", "oracle_evidence_materialized", "observed_run"],
+      "properties": {
+        "source_fixture_present": {"const": true},
+        "oracle_evidence_materialized": {"type": "boolean"},
+        "observed_run": {"type": "boolean"}
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["TEST-001", "TEST-002", "TEST-004"],
+      "properties": {
+        "TEST-001": {"$ref": "#/$defs/coverageEntry"},
+        "TEST-002": {"$ref": "#/$defs/coverageEntry"},
+        "TEST-004": {"$ref": "#/$defs/coverageEntry"}
+      }
+    },
+    "coverageEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["normalization_policy_refs", "external_runtime_boundary_ids"],
+      "properties": {
+        "normalization_policy_refs": {"$ref": "#/$defs/policyRefs"},
+        "external_runtime_boundary_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["EXT-JVM-001", "EXT-SERVICE-001", "EXT-RMI-001", "EXT-TLS-001", "EXT-PLUGIN-001"]}
+        }
+      }
+    },
+    "fileRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "oracleExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "invoked", "available", "outcome", "stable_reason_code", "reason", "developer_action", "release_action", "rust_only_substitute", "process_exit", "sample_count"],
+      "properties": {
+        "status": {"enum": ["not-run-static", "unavailable", "observed"]},
+        "invoked": {"type": "boolean"},
+        "available": {"type": "boolean"},
+        "outcome": {"enum": ["unavailable", "not-run", "observed"]},
+        "stable_reason_code": {"type": "string", "minLength": 1, "maxLength": 128},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "developer_action": {"enum": ["skip-with-clear-reason", "fail"]},
+        "release_action": {"enum": ["fail-closed", "eligible"]},
+        "rust_only_substitute": {"const": false},
+        "process_exit": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 0, "maximum": 255}]},
+        "sample_count": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 0, "maximum": 1000000}]}
+      }
+    },
+    "artifactVerification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["filename", "algorithm", "declared_digest", "digest_sidecar_url", "digest_gate_id", "sidecar_ref_id", "observed_digest", "digest_status", "signature", "gate_status", "release_eligible"],
+      "properties": {
+        "filename": {"const": "apache-jmeter-5.6.3.zip"},
+        "algorithm": {"const": "SHA-512"},
+        "declared_digest": {"$ref": "#/$defs/sha512"},
+        "digest_sidecar_url": {"type": "string", "format": "uri"},
+        "digest_gate_id": {"const": "GATE-ARTIFACT-SHA512-001"},
+        "sidecar_ref_id": {"const": "jmeter-digest-sidecar"},
+        "observed_digest": {"anyOf": [{"type": "null"}, {"const": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076"}]},
+        "digest_status": {"enum": ["not-run-static", "not-observed-static", "verified-observed"]},
+        "signature": {"$ref": "#/$defs/signatureVerification"},
+        "gate_status": {"enum": ["not-run-static", "failed", "passed"]},
+        "release_eligible": {"type": "boolean"}
+      }
+    },
+    "signatureVerification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "signature_url", "keys_url", "required_fingerprint", "observed_fingerprint", "status", "required_before_execution", "gate_id"],
+      "properties": {
+        "algorithm": {"const": "OpenPGP"},
+        "signature_url": {"type": "string", "format": "uri"},
+        "keys_url": {"type": "string", "format": "uri"},
+        "required_fingerprint": {"const": "C4923F9ABFB2F1A06F08E88BAC214CAA0612B399"},
+        "observed_fingerprint": {"anyOf": [{"type": "null"}, {"const": "C4923F9ABFB2F1A06F08E88BAC214CAA0612B399"}]},
+        "status": {"enum": ["not-run-static", "not-verified-static", "verified-observed"]},
+        "required_before_execution": {"const": true},
+        "gate_id": {"const": "GATE-PGP-SIGNATURE-001"}
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jmeter_rs_source_commit", "source_commit_status", "source_hashes", "profile_hash"],
+      "properties": {
+        "jmeter_rs_source_commit": {"anyOf": [{"type": "null"}, {"type": "string", "pattern": "^[0-9a-f]{40}$"}]},
+        "source_commit_status": {"enum": ["not-observed-static", "observed"]},
+        "source_hashes": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/sourceHash"},
+          "allOf": [
+            {"contains": {"required": ["path"], "properties": {"path": {"const": "Cargo.toml"}}}, "minContains": 1, "maxContains": 1},
+            {"contains": {"required": ["path"], "properties": {"path": {"const": "Cargo.lock"}}}, "minContains": 1, "maxContains": 1},
+            {"contains": {"required": ["path"], "properties": {"path": {"const": "rust-toolchain.toml"}}}, "minContains": 1, "maxContains": 1}
+          ]
+        },
+        "profile_hash": {"$ref": "#/$defs/fileRef"}
+      }
+    },
+    "sourceHash": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "role", "status"],
+      "properties": {
+        "path": {"enum": ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml"]},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "role": {"type": "string", "minLength": 1, "maxLength": 128},
+        "status": {"enum": ["source-pinned-not-run", "observed"]}
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rust", "java", "target_triple", "os_image"],
+      "properties": {
+        "rust": {"$ref": "#/$defs/rustToolchain"},
+        "java": {"$ref": "#/$defs/javaToolchain"},
+        "target_triple": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]},
+        "os_image": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}
+      }
+    },
+    "rustToolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel", "status", "compiler_version", "cargo_version", "manifest_sha256", "cargo_lock_sha256"],
+      "properties": {
+        "channel": {"const": "1.97.1"},
+        "status": {"enum": ["pinned-not-run", "observed"]},
+        "compiler_version": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]},
+        "cargo_version": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]},
+        "manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "cargo_lock_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "javaToolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["distribution", "version", "architecture", "status", "observed_version", "observed_vm"],
+      "properties": {
+        "distribution": {"const": "temurin"},
+        "version": {"const": "17.0.20"},
+        "architecture": {"const": "x64"},
+        "status": {"enum": ["declared-not-run", "observed"]},
+        "observed_version": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]},
+        "observed_vm": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]}
+      }
+    },
+    "classpath": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jmeter_distribution_declared_sha512", "jmeter_distribution_observed_sha512", "plugin_pins", "service_pins", "classpath_hashes_observed"],
+      "properties": {
+        "jmeter_distribution_declared_sha512": {"$ref": "#/$defs/sha512"},
+        "jmeter_distribution_observed_sha512": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/sha512"}]},
+        "plugin_pins": {"type": "array", "maxItems": 16},
+        "service_pins": {"type": "array", "maxItems": 16},
+        "classpath_hashes_observed": {"type": "boolean"}
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inherit", "allowlist", "observed_allowlist", "locale", "timezone", "charset", "observed_locale", "observed_timezone", "observed_charset", "source_date_epoch", "observed_source_date_epoch"],
+      "properties": {
+        "inherit": {"const": false},
+        "allowlist": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*=.*$"}},
+        "observed_allowlist": {"anyOf": [{"type": "null"}, {"type": "array", "maxItems": 32, "items": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*=.*$"}}]},
+        "locale": {"const": "en-US"},
+        "timezone": {"const": "UTC"},
+        "charset": {"const": "UTF-8"},
+        "observed_locale": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]},
+        "observed_timezone": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]},
+        "observed_charset": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 1}]},
+        "source_date_epoch": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 0}]},
+        "observed_source_date_epoch": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 0}]}
+      }
+    },
+    "rawArtifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["storage", "root", "present", "references"],
+      "properties": {
+        "storage": {"const": "outside-git"},
+        "root": {"type": "string", "minLength": 1},
+        "present": {"type": "boolean"},
+        "references": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {"$ref": "#/$defs/rawArtifactRef"}
+        }
+      }
+    },
+    "rawArtifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "path", "bound", "max_bytes", "sha256", "present", "status"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "kind": {"type": "string", "minLength": 1},
+        "path": {"type": "string", "pattern": "^oracle-runs/(?!/)(?!.*\\\\)(?!\\.\\.?/)(?!.*/\\.\\.?/)(?!.*\\/\\.\\.?$).+$"},
+        "bound": {"enum": ["max_manifest_bytes", "max_evidence_bytes", "max_process_output_bytes", "max_artifact_bytes", "max_raw_artifact_bytes", "max_jtl_bytes", "max_log_bytes", "max_diff_bytes", "max_raw_diff_bytes", "max_human_diff_bytes"]},
+        "max_bytes": {"type": "integer", "minimum": 1, "maximum": 1073741824},
+        "sha256": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]},
+        "present": {"type": "boolean"},
+        "status": {"enum": ["not-produced-static", "observed"]}
+      },
+      "allOf": [
+        {"if": {"properties": {"bound": {"const": "max_manifest_bytes"}}}, "then": {"properties": {"max_bytes": {"maximum": 262144}}}},
+        {"if": {"properties": {"bound": {"const": "max_evidence_bytes"}}}, "then": {"properties": {"max_bytes": {"maximum": 262144}}}},
+        {"if": {"properties": {"bound": {"const": "max_process_output_bytes"}}}, "then": {"properties": {"max_bytes": {"maximum": 1048576}}}},
+        {"if": {"properties": {"bound": {"const": "max_artifact_bytes"}}}, "then": {"properties": {"max_bytes": {"maximum": 134217728}}}},
+        {"if": {"properties": {"bound": {"const": "max_raw_artifact_bytes"}}}, "then": {"properties": {"max_bytes": {"maximum": 134217728}}}},
+        {"if": {"properties": {"bound": {"const": "max_jtl_bytes"}}}, "then": {"properties": {"max_bytes": {"maximum": 67108864}}}},
+        {"if": {"properties": {"bound": {"const": "max_log_bytes"}}}, "then": {"properties": {"max_bytes": {"maximum": 1048576}}}},
+        {"if": {"properties": {"bound": {"const": "max_diff_bytes"}}}, "then": {"properties": {"max_bytes": {"maximum": 1048576}}}},
+        {"if": {"properties": {"bound": {"const": "max_raw_diff_bytes"}}}, "then": {"properties": {"max_bytes": {"maximum": 1048576}}}},
+        {"if": {"properties": {"bound": {"const": "max_human_diff_bytes"}}}, "then": {"properties": {"max_bytes": {"maximum": 8192}}}}
+      ]
+    },
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "structured_diff_schema", "structured_diff_reference", "raw_diff_reference", "human_diff_reference", "human_diff_bound", "normalized_diff", "normalization_policy_refs", "implicit_normalization"],
+      "properties": {
+        "status": {"enum": ["not-produced", "observed"]},
+        "structured_diff_schema": {"const": "schemas/normalized-diff.schema.json"},
+        "structured_diff_reference": {"anyOf": [{"type": "null"}, {"type": "string", "pattern": "^oracle-runs/(?!/)(?!.*\\\\)(?!\\.\\.?/)(?!.*/\\.\\.?/)(?!.*\\/\\.\\.?$).+$"}]},
+        "raw_diff_reference": {"anyOf": [{"type": "null"}, {"type": "string", "pattern": "^oracle-runs/(?!/)(?!.*\\\\)(?!\\.\\.?/)(?!.*/\\.\\.?/)(?!.*\\/\\.\\.?$).+$"}]},
+        "human_diff_reference": {"anyOf": [{"type": "null"}, {"type": "string", "pattern": "^oracle-runs/(?!/)(?!.*\\\\)(?!\\.\\.?/)(?!.*/\\.\\.?/)(?!.*\\/\\.\\.?$).+$"}]},
+        "human_diff_bound": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bound", "max_bytes"],
+          "properties": {
+            "bound": {"const": "max_human_diff_bytes"},
+            "max_bytes": {"const": 8192}
+          }
+        },
+        "normalized_diff": {"$ref": "#/$defs/normalizedDiff"},
+        "normalization_policy_refs": {"$ref": "#/$defs/policyRefs"},
+        "implicit_normalization": {"const": false}
+      }
+    },
+    "normalizedDiff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_id", "schema_version", "status", "example_only", "normalization_policy_refs", "ignored_fields", "ignored_line_patterns", "differences", "difference_count", "raw_reference", "retained_outside_git"],
+      "properties": {
+        "schema_id": {"const": "jmeter-rs.harness-normalized-diff"},
+        "schema_version": {"const": 1},
+        "status": {"enum": ["not-produced", "observed"]},
+        "example_only": {"const": false},
+        "normalization_policy_refs": {"$ref": "#/$defs/policyRefs"},
+        "ignored_fields": {"type": "array", "maxItems": 128, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 512}},
+        "ignored_line_patterns": {"type": "array", "maxItems": 128, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 512}},
+        "differences": {"type": "array", "maxItems": 128, "items": {"$ref": "#/$defs/difference"}},
+        "difference_count": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 0, "maximum": 128}]},
+        "raw_reference": {"anyOf": [{"type": "null"}, {"type": "string", "pattern": "^oracle-runs/(?!/)(?!.*\\\\)(?!\\.\\.?/)(?!.*/\\.\\.?/)(?!.*\\/\\.\\.?$).+$"}]},
+        "retained_outside_git": {"type": "boolean"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "not-produced"}}},
+          "then": {
+            "properties": {
+              "ignored_fields": {"maxItems": 0},
+              "ignored_line_patterns": {"maxItems": 0},
+              "differences": {"maxItems": 0},
+              "difference_count": {"type": "null"},
+              "raw_reference": {"type": "null"},
+              "retained_outside_git": {"const": false}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"status": {"const": "observed"}}},
+          "then": {
+            "properties": {
+              "difference_count": {"type": "integer", "minimum": 0, "maximum": 128},
+              "raw_reference": {"type": "string", "pattern": "^oracle-runs/(?!/)(?!.*\\\\)(?!\\.\\.?/)(?!.*/\\.\\.?/)(?!.*\\/\\.\\.?$).+$"},
+              "retained_outside_git": {"const": true}
+            }
+          }
+        }
+      ]
+    },
+    "difference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "kind", "expected", "actual"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^/", "maxLength": 512},
+        "kind": {"enum": ["missing", "unexpected", "changed"]},
+        "expected": {"$ref": "#/$defs/value"},
+        "actual": {"$ref": "#/$defs/value"}
+      }
+    },
+    "value": {
+      "anyOf": [
+        {"type": "null"},
+        {"type": "boolean"},
+        {"type": "number"},
+        {"type": "string", "maxLength": 512},
+        {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/value"}},
+        {"type": "object", "maxProperties": 32, "additionalProperties": {"$ref": "#/$defs/value"}}
+      ]
+    },
+    "unavailableOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boundary_id", "conformance_ids", "status", "reason_code", "claim"],
+      "properties": {
+        "boundary_id": {"enum": ["EXT-JVM-001", "EXT-PLUGIN-001", "EXT-SERVICE-001", "EXT-RMI-001", "EXT-TLS-001"]},
+        "conformance_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {"enum": ["TEST-001", "TEST-002", "TEST-004"]}
+        },
+        "status": {"const": "unavailable"},
+        "reason_code": {"type": "string", "minLength": 1, "maxLength": 128},
+        "claim": {"type": "string", "minLength": 1, "maxLength": 4096}
+      }
+    },
+    "releaseConformance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eligible", "profile_status_change", "required_before_promotion"],
+      "properties": {
+        "eligible": {"const": false},
+        "profile_status_change": {"const": "none"},
+        "required_before_promotion": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"type": "string", "minLength": 1, "maxLength": 4096}}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"evidence_status": {"const": "observed"}}},
+      "then": {
+        "properties": {
+          "source_only": {"const": false},
+          "materialization": {
+            "properties": {"oracle_evidence_materialized": {"const": true}, "observed_run": {"const": true}}
+          },
+          "oracle_execution": {
+            "properties": {"status": {"const": "observed"}, "invoked": {"const": true}, "available": {"const": true}, "outcome": {"const": "observed"}}
+          },
+          "identity": {
+            "properties": {
+              "jmeter_rs_source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+              "source_commit_status": {"const": "observed"},
+              "source_hashes": {"items": {"properties": {"status": {"const": "observed"}}}}
+            }
+          },
+          "toolchain": {
+            "properties": {
+              "target_triple": {"type": "string", "minLength": 1},
+              "os_image": {"type": "string", "minLength": 1},
+              "rust": {"properties": {"status": {"const": "observed"}, "compiler_version": {"type": "string", "minLength": 1}, "cargo_version": {"type": "string", "minLength": 1}}},
+              "java": {"properties": {"status": {"const": "observed"}, "observed_version": {"type": "string", "minLength": 1}, "observed_vm": {"type": "string", "minLength": 1}}}
+            }
+          },
+          "environment": {
+            "properties": {
+              "observed_allowlist": {"type": "array", "minItems": 1},
+              "observed_locale": {"type": "string", "minLength": 1},
+              "observed_timezone": {"type": "string", "minLength": 1},
+              "observed_charset": {"type": "string", "minLength": 1},
+              "observed_source_date_epoch": {"type": "integer", "minimum": 0}
+            }
+          },
+          "artifact_verification": {
+            "properties": {
+              "observed_digest": {"const": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076"},
+              "digest_status": {"const": "verified-observed"},
+              "gate_status": {"const": "passed"},
+              "release_eligible": {"const": true},
+              "signature": {"properties": {"observed_fingerprint": {"const": "C4923F9ABFB2F1A06F08E88BAC214CAA0612B399"}, "status": {"const": "verified-observed"}}}
+            }
+          },
+          "raw_artifacts": {"properties": {"present": {"const": true}, "references": {"items": {"properties": {"status": {"const": "observed"}, "sha256": {"$ref": "#/$defs/sha256"}}}}}},
+          "comparison": {"properties": {"status": {"const": "observed"}, "structured_diff_reference": {"type": "string", "pattern": "^oracle-runs/(?!/)(?!.*\\\\)(?!\\.\\.?/)(?!.*/\\.\\.?/)(?!.*\\/\\.\\.?$).+$"}, "raw_diff_reference": {"type": "string", "pattern": "^oracle-runs/(?!/)(?!.*\\\\)(?!\\.\\.?/)(?!.*/\\.\\.?/)(?!.*\\/\\.\\.?$).+$"}, "human_diff_reference": {"type": "string", "pattern": "^oracle-runs/(?!/)(?!.*\\\\)(?!\\.\\.?/)(?!.*/\\.\\.?/)(?!.*\\/\\.\\.?$).+$"}, "normalized_diff": {"properties": {"status": {"const": "observed"}}}}}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"evidence_status": {"enum": ["static-not-run", "unavailable-static"]}}},
+      "then": {
+        "properties": {
+          "source_only": {"const": true},
+          "materialization": {
+            "properties": {"oracle_evidence_materialized": {"const": false}, "observed_run": {"const": false}}
+          },
+          "oracle_execution": {"properties": {"status": {"const": "not-run-static"}, "invoked": {"const": false}, "available": {"const": false}, "outcome": {"const": "not-run"}, "developer_action": {"const": "skip-with-clear-reason"}, "release_action": {"const": "fail-closed"}, "process_exit": {"type": "null"}, "sample_count": {"type": "null"}}},
+          "artifact_verification": {
+            "properties": {"observed_digest": {"type": "null"}, "digest_status": {"const": "not-run-static"}, "gate_status": {"const": "not-run-static"}, "release_eligible": {"const": false}, "signature": {"properties": {"observed_fingerprint": {"type": "null"}, "status": {"const": "not-run-static"}}}}
+          },
+          "identity": {
+            "properties": {
+              "jmeter_rs_source_commit": {"type": "null"},
+              "source_commit_status": {"const": "not-observed-static"},
+              "source_hashes": {"items": {"properties": {"status": {"const": "source-pinned-not-run"}}}}
+            }
+          },
+          "toolchain": {
+            "properties": {
+              "target_triple": {"type": "null"},
+              "os_image": {"type": "null"},
+              "rust": {"properties": {"status": {"const": "pinned-not-run"}, "compiler_version": {"type": "null"}, "cargo_version": {"type": "null"}}},
+              "java": {"properties": {"status": {"const": "declared-not-run"}, "observed_version": {"type": "null"}, "observed_vm": {"type": "null"}}}
+            }
+          },
+          "classpath": {
+            "properties": {
+              "jmeter_distribution_observed_sha512": {"type": "null"},
+              "classpath_hashes_observed": {"const": false}
+            }
+          },
+          "environment": {
+            "properties": {
+              "observed_allowlist": {"type": "null"},
+              "observed_locale": {"type": "null"},
+              "observed_timezone": {"type": "null"},
+              "observed_charset": {"type": "null"},
+              "observed_source_date_epoch": {"type": "null"}
+            }
+          },
+          "raw_artifacts": {
+            "properties": {
+              "present": {"const": false},
+              "references": {"items": {"properties": {"sha256": {"type": "null"}, "present": {"const": false}, "status": {"const": "not-produced-static"}}}}
+            }
+          },
+          "comparison": {"properties": {"status": {"const": "not-produced"}, "structured_diff_reference": {"type": "null"}, "raw_diff_reference": {"type": "null"}, "human_diff_reference": {"type": "null"}, "normalized_diff": {"properties": {"status": {"const": "not-produced"}, "example_only": {"const": false}, "difference_count": {"type": "null"}, "raw_reference": {"type": "null"}, "retained_outside_git": {"const": false}}}}}
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JTL-FIELDS",
+  "format": "jtl-csv",
+  "contract_kind": "jmeter-writer-wire",
+  "projection_schema": "neutral-csv-v1",
+  "evidence_status": "planned",
+  "expectation_basis": "Hand-authored projection of inputs/csv/tab-delimited.tsv; no Apache JMeter output was measured.",
+  "header": ["elapsed", "label", "responseCode", "responseMessage", "threadName", "dataType", "success", "failureMessage", "case_id", "comma_value"],
+  "writer_wire": {
+    "header_line": "elapsed\tlabel\tresponseCode\tresponseMessage\tthreadName\tdataType\tsuccess\tfailureMessage\t\"case_id\"\t\"comma_value\"",
+    "sample_variable_headers_quoted": true,
+    "delimiter": "TAB",
+    "line_ending": "LF"
+  },
+  "rows": [{
+    "position": 0,
+    "fields": {
+      "elapsed": "12",
+      "label": "tab\tlabel",
+      "responseCode": "500",
+      "responseMessage": "server\terror",
+      "threadName": "thread-1",
+      "dataType": "text",
+      "success": "false",
+      "failureMessage": "failed: \"needle\"",
+      "case_id": "jtl-fields",
+      "comma_value": "left,right"
+    }
+  }],
+  "quoting_assertions": [
+    {"field": "label", "parsed_value": "tab\tlabel", "serialized_csv_token": "\"tab\tlabel\""},
+    {"field": "responseMessage", "parsed_value": "server\terror", "serialized_csv_token": "\"server\terror\""},
+    {"field": "failureMessage", "parsed_value": "failed: \"needle\"", "serialized_csv_token": "\"failed: \"\"needle\"\"\""},
+    {"field": "comma_value", "parsed_value": "left,right", "serialized_csv_token": "\"left,right\""}
+  ],
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "The delimiter is inferred from the tab-separated header; quoted tabs, quotes, and commas remain exact static values."
+  }
+}

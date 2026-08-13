@@ -1,0 +1,91 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-CLI-MATRIX",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-CLI-001",
+  "conformance_ids": ["CLI-001", "CLI-002", "CLI-003"],
+  "normalization_policy_refs": ["NORM-CLI-001", "NORM-ENV-001"],
+  "inputs": [
+    {"path": "inputs/option-catalog.json", "sha256": "cc539ad9e4a22076897fc3ab8ae367756649c16f8d00cf4c8e97da2cb9c29fc1", "role": "documented option vocabulary"},
+    {"path": "inputs/scenarios.json", "sha256": "bfd8682851d42eff3d0ba44ea07c110041bbaaccd331b7de74a1e289472f3ea7", "role": "CLI option and combination scenarios"},
+    {"path": "inputs/process-contract.json", "sha256": "263ce7611a38256e0e106eeed2ef900a5578b27df320ff2be6f350ec84b27ce2", "role": "logging and process-exit contract"},
+    {"path": "inputs/runner-contract.json", "sha256": "4dfe2f857f1d40adb48cce8aa488bbfe56212bb0d1370fbb87cfd062abc2deca", "role": "future runner setup, lifecycle, local-RMI, output, and platform materialization contract"},
+    {"path": "inputs/cli-plan.jmx", "sha256": "02a1004df15cad7b7e0b073a7ea1de96275b74d0b5f68c51de9fa69362bdbc69", "role": "original future load-test input"},
+    {"path": "inputs/cli-sample-failure-plan.jmx", "sha256": "a6d6f30e3cc79fbef396a3f2e67b8968831c287269036a5f9f81e37f231c4070", "role": "original deterministic one-sample assertion-failure input"},
+    {"path": "inputs/report-input.csv", "sha256": "10d25bfeb3c8e1ed89c3d79f21465fd296f7666c2d855e20e46ba09afd69e287", "role": "original deterministic report-only CSV input"},
+    {"path": "inputs/primary.properties", "sha256": "87b91176c899f387f517b1ed9feab9628ae492927837a6f538da83b8d6cba5b8", "role": "original primary property input"},
+    {"path": "inputs/additional-a.properties", "sha256": "738f30ffeba58c8281342dba80858576422e00ce1e9e4a10702d8ffd313342fb", "role": "original repeated property input A"},
+    {"path": "inputs/additional-b.properties", "sha256": "36dba893cec05162bce439e430a9a7fd1d3936b7729810d6c4a924fa0c2d59a8", "role": "original repeated property input B"},
+    {"path": "inputs/system-a.properties", "sha256": "1cb64d00abfaff8d07f6ace108f54898cf52f48e0ba4dfe40302bf7f6c275867", "role": "original system property input"},
+    {"path": "inputs/system-b.properties", "sha256": "edef9a1f08a8ab68fc06322dd372c3d127f4b601ad31e37683c6a54e8db4a786", "role": "original repeated system property input B"},
+    {"path": "inputs/log4j2.xml", "sha256": "fa791a7a18021e443ef622e736471e7103c8024d463ea13777e39e86f911213c", "role": "original logging configuration input"},
+    {"path": "expected/semantic.json", "sha256": "7fa1091078551c158d14bf97f6cc1d1b98f9a94f5e9ff206a63a9532412d5bcc", "role": "static CLI process expectation"}
+  ],
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/cli-matrix",
+    "mode": "nongui",
+    "argv_templates": [
+      ["jmeter", "<scenario-id:help-question-short>"],
+      ["jmeter", "<scenario-id:nongui-load>"],
+      ["jmeter", "<scenario-id:report-only>"],
+      ["jmeter", "<scenario-id:logging>"],
+      ["jmeter", "<scenario-id:illegal-report-at-end-without-logfile>"]
+    ],
+    "template_interpretation": "Scenario IDs refer to inputs/scenarios.json; these vectors are not executable commands.",
+    "materialization_contract": "inputs/runner-contract.json",
+    "network": "none",
+    "locale": "target-materialized-locale-neutral",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null,
+    "environment_allowlist": ["PATH=<target-specific absolute allowlisted entries>", "LC_ALL=<target-supported locale-neutral value>", "LANG=<target-supported locale-neutral value>", "TZ=UTC"],
+    "environment_materialization_ref": "inputs/runner-contract.json#platform_materialization"
+  },
+  "determinism": {
+    "environment_allowlist": ["PATH=<target-specific absolute allowlisted entries>", "LC_ALL=<target-supported locale-neutral value>", "LANG=<target-supported locale-neutral value>", "TZ=UTC"],
+    "environment_materialization_ref": "inputs/runner-contract.json#platform_materialization",
+    "locale": "target-materialized-locale-neutral",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null,
+    "clock_mode": "not-applicable-static-descriptor",
+    "network": "none",
+    "normalized_fields": ["temporary_paths", "timestamps", "hostnames", "localized_prose", "JVM_object_ids"]
+  },
+  "bounds": {
+    "max_option_definitions": 30,
+    "max_scenarios": 48,
+    "max_option_value_bytes": 4096,
+    "max_argv_tokens_per_scenario": 32,
+    "max_repeat_occurrences": 4,
+    "max_help_output_bytes": 65536,
+    "max_version_output_bytes": 4096,
+    "max_diagnostic_bytes": 65536,
+    "max_log_bytes": 65536,
+    "max_report_entries": 128,
+    "max_process_wait_seconds": 30,
+    "max_plan_nodes": 40,
+    "max_plan_depth": 7,
+    "max_property_text_bytes": 4096
+  },
+  "execution": {
+    "status": "not-run-static-corpus",
+    "process_exit": null,
+    "process_exit_asserted": false,
+    "sample_count_asserted": false,
+    "raw_artifacts": "oracle-runs/cli-matrix/ (ignored; no Java/JMeter or subprocess run recorded)",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "Every checked-in file is original project material or a hand-authored descriptor; no Apache JMeter plan, result, log, binary, source, or captured usage/version output is redistributed.",
+    "The small JMX, properties, and Log4j2 XML files are bounded future inputs only. They were not loaded by Java/JMeter or jmeter-rs while creating this corpus.",
+    "The option catalog covers all 30 documented short/long pairs, including -E/--proxyScheme, and marks repeatability and LAST support explicitly. Exact acceptance and precedence remain pinned-oracle work.",
+    "Help/version vocabulary is a mode-specific token-set target under NORM-CLI-001; localized prose, whitespace, numeric exits, and output bytes are not asserted by this static corpus.",
+    "The -j paired-quote date pattern is intentionally source-ambiguous: the research baseline names SimpleDateFormat, while this corpus does not assert a pinned NewDriver formatter. The engine remains null/unasserted until exact-source and oracle review.",
+    "Legal/illegal and report-only scenarios record documented rules and oracle-required probes. Fatal Throwable/System.exit is a source-derived termination category only; process_exit remains null and unasserted until evidence.",
+    "inputs/runner-contract.json records future setup obligations for fresh output directories, direct-child bounded shutdown/reaping, local loopback RMI, unavailable-registry failure, stop-failure induction, and target-specific PATH/locale materialization; it is not an implementation.",
+    "Logging descriptors retain stream/category/exit comparisons and the paired-quote -j date-pattern probe without fabricating log text or log bytes.",
+    "No shell fixture, remote service, network endpoint, Java runtime, JMeter runtime, jmeter-rs process, or subprocess was started."
+  ]
+}

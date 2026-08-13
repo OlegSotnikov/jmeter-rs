@@ -1,0 +1,157 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-JTL-FIELDS",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored static CSV/XML JTL corpus, source JMX, and save-service property matrices for field selection, escaping, nesting, failures, limits, and invalid inputs. No oracle process was run while creating this corpus.",
+    "upstream_plan_copied": false
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter may be used later as a pinned external oracle; no upstream plan, result, or binary is redistributed by this static corpus."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": null,
+    "retrieved_at_status": "null: no local oracle artifact was retrieved for this static corpus",
+    "sha512_verified_before_execution": false,
+    "artifact_sha512_status": "profile-pinned reference only; no local artifact hash verification was performed",
+    "verification_basis": "Copied from the active profile's pinned artifact metadata; this corpus did not download, execute, or locally verify the artifact.",
+    "wire_reference": {
+      "source_file": "src/core/src/main/java/org/apache/jmeter/save/converters/SampleResultConverter.java",
+      "source_revision": "34a2785748e9e0b14702595e8682c387869deda3",
+      "source_url": "https://raw.githubusercontent.com/apache/jmeter/34a2785748e9e0b14702595e8682c387869deda3/src/core/src/main/java/org/apache/jmeter/save/converters/SampleResultConverter.java",
+      "sample_variables_source_file": "src/core/src/main/java/org/apache/jmeter/samplers/SampleEvent.java",
+      "sample_variables_source_url": "https://raw.githubusercontent.com/apache/jmeter/34a2785748e9e0b14702595e8682c387869deda3/src/core/src/main/java/org/apache/jmeter/samplers/SampleEvent.java",
+      "sample_variable_wire_spelling": "exact configured names; no underscore doubling",
+      "rust_contract_gap": "The Rust no-drop extension retains configured variable names, typed java.net.URL children, and unknown trees; the doubled-underscore spelling is isolated to variants/rust-no-drop/xml-doubled-variable.xml and is not a JMeter writer expectation.",
+      "transcription": "The pinned converter emits SampleCount and ErrorCount from one sample_count switch, writes optional assertion failureMessage children independently of the CSV-only failure-message property, and orders XML children as assertions, subresults, String sections, sampler data, then java.net.URL. These details were transcribed into original small fixtures; no upstream source or raw result was copied.",
+      "timestamp_contract": "Every timestamp-selection property vector explicitly sets sampleresult.timestamp.start; XML ts is the millisecond start or end value selected by that declaration.",
+      "license": "Apache-2.0"
+    }
+  },
+  "runtime": {
+    "java": {
+      "vendor": null,
+      "version": null,
+      "vm": null,
+      "major": null
+    },
+    "target_triple": null,
+    "os_image": null,
+    "locale": null,
+    "locale_declaration": "en-US",
+    "locale_status": "null actual value: en-US is a future-oracle declaration, not measured in this static corpus",
+    "timezone": null,
+    "timezone_declaration": "UTC",
+    "default_charset": null,
+    "default_charset_declaration": "UTF-8",
+    "jvm_system_properties": {
+      "user.language": "en",
+      "user.country": "US",
+      "file.encoding": "UTF-8",
+      "status": "required declaration, not measured"
+    },
+    "hostname_policy": "not asserted; hostname saving disabled",
+    "environment_allowlist": ["LC_ALL=en_US.UTF-8", "LANG=en_US.UTF-8", "TZ=UTC"],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": null,
+    "jmeter_classpath_status": "null actual value: future runs must use the profile-pinned Apache JMeter 5.6.3 distribution (SHA-512 checked; PGP verification required before oracle use)",
+    "classpath_artifact_sha512": null,
+    "classpath_artifact_sha512_status": "null actual value: no JMeter classpath was materialized or measured"
+  },
+  "inputs": {
+    "bounds": {
+      "max_input_bytes": 131072,
+      "max_result_bytes": 65536,
+      "max_text_bytes": 65536,
+      "max_samples": 64,
+      "max_depth": 16,
+      "max_xml_nodes": 1024,
+      "max_xml_attributes": 2048,
+      "max_csv_columns": 128,
+      "max_line_bytes": 65536
+    },
+    "plan_sha256": "b6445c4d1f5457eac7be32fb3b8b250efa17a8efc251ee585942062c7d645511",
+    "property_sha256": {
+      "oracle-csv.properties": "12c8bbc04ca045f63a3d41ae2328a0628773d87db3d511016b511da85ca536a2",
+      "oracle-xml.properties": "fb1ca358b77469258f9464f5ebccaf6f59418b4797a69a21208dcb1f8cd0e8aa"
+    },
+    "property_vector_sha256": {
+      "switches/csv-all-fields.properties": "b109048fe6763529ff8386be1f00b11e568793ff087355d7d90bed5e6fc852ac",
+      "switches/csv-minimal-no-header.properties": "9f350a02c10bff2f74cb03e029a22be7cbc3cbb1f45501788af0a28c76373196",
+      "switches/csv-tab-crlf.properties": "48fba797bde80d17d6453674c05acfa46d76a8adc441d188dbbe736b051b7abe",
+      "switches/xml-rich-on-error.properties": "b43d47f545124ccdb6533181169568291d53b328288ee89f861f9685537c0c56",
+      "switches/xml-response-file-only.properties": "fe49906055c3462ae19e3a2dd0fa69740e56df2d9e3729077ec3d18b112292a3",
+      "switches/xml-writer-rich.properties": "577341dd81f222834c3a270df240277691c9a6e72e46a54664667dd5b029999f",
+      "switches/xml-timestamp-end.properties": "fbab2ca8e1dd6356890ed323601da141cc4029308ca66682d4b3bbd82116a9a1",
+      "switches/xml-timestamp-start.properties": "915c56501356425fcadbbc89af6449cde4446340de729c54ba06080cec212991"
+    },
+    "additional_wire_input_sha256": {
+      "inputs/csv/tab-crlf.csv": "6155383effa3039bd1b79749970ee8798734945c313a57f5725212de9be03551",
+      "inputs/xml/timestamp-start.xml": "98b5238e273315032d002122837fa1a8d36a22847bc10c2cbc1c13b800258b96",
+      "inputs/xml/timestamp-end.xml": "8bcb56f24fbf00c371f8eff513d3ef63ad0206d6fc6537a5c3013a940c20b689",
+      "variants/rust-no-drop/xml-doubled-variable.xml": "de3d006a63ffeecbcb55c2597cd6100decfea8cc8c23c099cbb19c8c01231666",
+      "variants/jmeter-reader-loss/url-and-file.xml": "97d62baf477cdef7b168f7fccfac9770747080dee0696d71c2431339c60eb2b1"
+    },
+    "projection_sha256": {
+      "expected/csv.json": "164e6c35683afb04182f24baff4a3ca07ccb27713f1d298d68ff60e2f02d1abf",
+      "expected/csv-full.json": "9ef755d5ade9a773669a3e8553321334506b9626282a3d8ee196e74191312069",
+      "expected/csv-tab.json": "20170ef3afca9135bb1bb65b7ae3cb01f12355069978da13324cdd4bd02a5ccb",
+      "expected/csv-tab-crlf.json": "880908d8694774e603f3a774b435adb13db1b3f944bbe10d0890ac6f0cff0e57",
+      "expected/csv-failure.json": "1217edf4c9816ef57bd665de79d188ff3f54f628f6075e534c49ec0a72b973c0",
+      "expected/csv-bom.json": "cf53f98b6871219beb51c2b38de242719e1d89dd52ad5a85465fbea9822c3df3",
+      "expected/csv-date.json": "e9bd6e7af9e6ff1c9a96d9f4f0b5747053b9c276b3233c893dab4228e9f7aef4",
+      "expected/xml.json": "64ee750c32dbb3e1f0c1b38d5de09c4ac91bffc450fdb6c9981ab5d839fd1010",
+      "expected/xml-rich.json": "849eab80b0e4b3e2ecff76a5107a61b3666ce6283b8407bf88e9a5959c00dac6",
+      "expected/xml-legacy.json": "aeef9b1b6c37fd4f15233317676bb97bc979b0dc881e3037cc915b5288c51058",
+      "expected/xml-minimal.json": "86cda027c9d0044981d593d357ce3684ef6bf4c8b92a022af619cdc64f0d92bc",
+      "expected/xml-escaping-file.json": "e3860ca11256a8a50559b81464b225d6d33dd3c92b66b9c033dc2a71ebb867e8",
+      "expected/xml-response-on-error.json": "c3f224d2b04a6d9a221e17d1b255516f2a208524e389cb60ec20f9cc9c77c81f",
+      "expected/xml-response-file-only.json": "c62fe314bd5a6192f558df65ed06eb92715a157f66e4450824ff1eb385249410",
+      "expected/xml-timestamp-start.json": "2bbfc07848ad13c92f29b817d330a45f13ee8ba01e33467d5462ac21d807aab5",
+      "expected/xml-timestamp-end.json": "8a58c5e8d6e2c37bce0d6c5a54c7d027f35520ea403b1cfe38696ce320ac35ed",
+      "expected/rust-no-drop.xml.json": "c9cbe4770591f678d272a1914820029d2a534fa0236c361161b4dae75fbe6d07",
+      "expected/jmeter-reader-loss.xml.json": "f7159ca95a12bec459ab7138830ad8595af3c200e3589689e788cb7576491e13",
+      "expected/invalid-csv.json": "feb19f51425734a696e48cdee89cb45bdc5db3c56c3a0051491d4f9fc30e0af3",
+      "expected/invalid-xml.json": "eb099c32f75a479c49748894ca548d81d814469d1a930b86b56caf7219bba8fa",
+      "expected/limits-csv.json": "837151f9177fba89ba2c12626d83a7e1ddc18903f838c71acc92e362011ef81e",
+      "expected/limits-xml.json": "bbc8471fda616d64178be3aaad8532860f2bf069f7fb232a76f6a7f5ade0da79"
+    },
+    "resource_sha256": {
+      "resources/response-file-body.txt": "2b0e56e13aeb60cef6328bbc373f6e6cc601ec3bc9674c3c7bf9c5a4e2e1e477"
+    },
+    "variant_sha256": {
+      "variants/rust-no-drop/xml-doubled-variable.xml": "de3d006a63ffeecbcb55c2597cd6100decfea8cc8c23c099cbb19c8c01231666",
+      "variants/jmeter-reader-loss/url-and-file.xml": "97d62baf477cdef7b168f7fccfac9770747080dee0696d71c2431339c60eb2b1",
+      "variants/jmeter-reader-loss/README.md": "301e9ab9e516b0c9a87a8fb057e97be912b77feb0f09fd68af6e5fb5c62e8c5a",
+      "variants/rust-no-drop/README.md": "a6d842b3c5e080887dec0c8c1d3ab50b12d3e86cbc915b8e585f8294bf9ac470"
+    },
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  },
+  "evidence": {
+    "status": "planned",
+    "oracle_invoked": false,
+    "measured_output_present": false,
+    "expectations_are": "hand-authored hypotheses for bounded codec/parser tests",
+    "static_inputs_index": {
+      "path": "corpus.toml",
+      "sha256": "01914eb356dc75481b2485f567a4b8945599b01af782b645e489ab77093e998a",
+      "status": "checked-in immutable index; not measured oracle output"
+    },
+    "static_input_hashes": "sha256 values are recorded in corpus.toml and cover every checked-in wire input; none are measured oracle artifacts"
+  }
+}

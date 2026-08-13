@@ -1,0 +1,58 @@
+{
+  "schema_id": "jmeter-rs.planned-constraint-contract",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-PLUGIN-001",
+  "case_id": "ORACLE-JMETER-563-PLUGIN-ELEMENT-FUNCTION-ALIAS",
+  "conformance_ids": ["PLUG-002", "JMX-004"],
+  "normalization_policy_refs": ["NORM-JMX-001", "NORM-EXTERNAL-001"],
+  "external_runtime_boundary_ids": ["EXT-JVM-001", "EXT-PLUGIN-001"],
+  "expectation_basis": "original static plugin alias descriptor; no runtime observation",
+  "descriptor_kind": "plugin-element-function-jmx-alias",
+  "status": "declarative-static-only",
+  "oracle_status": "not-run",
+  "plugin_artifacts": [],
+  "aliases": [
+    {
+      "wire_tag": "AliasSampler",
+      "primary_testclass": "com.example.plugin.AliasSampler",
+      "primary_guiclass": "com.example.plugin.AliasSamplerGui",
+      "historical_wire_alias": "AliasSampler",
+      "historical_marker": "pluginAlias=historical",
+      "preserve_exact_attributes": ["pluginAlias", "sourceOrder"]
+    },
+    {
+      "wire_tag": "LegacyAliasSampler",
+      "primary_testclass": "com.example.plugin.LegacySampler",
+      "primary_guiclass": "com.example.plugin.LegacySamplerGui",
+      "historical_wire_alias": "LegacyAliasSampler",
+      "historical_marker": "pluginAlias=legacy-v0",
+      "preserve_exact_attributes": ["pluginAlias"]
+    }
+  ],
+  "function_contract": {
+    "wire_property": "plugin.function.expression",
+    "literal": "${__fixturePluginFunction(alpha\\,beta)}",
+    "parse_when_disabled": false,
+    "required_capability": "com.example.plugin.FixtureFunction",
+    "missing_capability_code": "plugin.function.unavailable",
+    "preserve_literal": true
+  },
+  "property_order_contract": {
+    "preserve_direct_child_order": true,
+    "duplicate_nodes_are_distinct": true,
+    "unknown_tags_are_opaque": true,
+    "unknown_attributes_are_opaque": true
+  },
+  "bounds": {
+    "max_aliases": 2,
+    "max_plugin_artifacts": 0,
+    "max_function_arguments": 2,
+    "max_plan_nodes": 12,
+    "max_descriptor_bytes": 8192
+  },
+  "invariants": [
+    "Primary, historical, and duplicate aliases retain exact wire values and source order.",
+    "Unknown properties and literal plugin function text are preserved without expansion."
+  ]
+}

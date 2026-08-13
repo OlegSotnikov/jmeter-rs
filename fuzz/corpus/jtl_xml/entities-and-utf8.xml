@@ -1,0 +1,1 @@
+<testResults version="1.2"><sample ts="1700000000003" t="7" s="true" lb="☃ &amp; café" rc="200" rm="OK"><responseData class="java.lang.String">lt &lt; gt &gt; quote &quot; snowman ☃ &#x2603;</responseData></sample></testResults>

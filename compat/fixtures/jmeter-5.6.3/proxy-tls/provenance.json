@@ -1,0 +1,68 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-PROXY-TLS",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored local HTTP/HTTPS origin routes and bounded loopback proxy contract for outbound proxy, recorder, mirror, CONNECT, and TLS cases.",
+    "upstream_plan_copied": false
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter 5.6.3 is an external oracle only; no upstream plan, result, binary, certificate, key, or plugin is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true
+  },
+  "runtime": {
+    "java": {
+      "vendor": "record at oracle run time",
+      "version": "record at oracle run time",
+      "vm": "record at oracle run time",
+      "major": 17
+    },
+    "target_triple": "record at oracle run time",
+    "os_image": "record at oracle run time",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "not asserted; hostname saving disabled",
+    "environment_allowlist": ["LC_ALL=C", "LANG=C", "TZ=UTC", "JAVA_HOME=<java-home>"],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "profile-pinned Apache JMeter 5.6.3 distribution (SHA-512 checked; PGP verification required before oracle use)",
+    "tls_toolchain": "record JDK/keytool and provider versions at external run time",
+    "run_root_policy": "existing effective-user-owned mode 0700 directory",
+    "active_handler_policy": "worker-admitted TLS handshake, one absolute monotonic session deadline, bounded join before trace close"
+  },
+  "inputs": {
+    "plan_sha256": "7b8a5f52e932a078cb369c04a5295e7f0ccf3101763d90fd6762d8f77e7af444",
+    "property_sha256": {
+      "oracle.properties": "8abcee3e7b0609544669268e70cf0d76d0086e8f1b536c424bf5d45e2ddf641a",
+      "oracle-direct-tls.properties": "a8d9961bbd19788c040b92aa0af98c71cfbedc54e263bc347213923937e0c588"
+    },
+    "case_manifest_path": "case.json",
+    "case_manifest_sha256": "7f7090bc50ca3a7f2b17c7d5d3ae35108ef8174c2d18942d3920fd7a9676b047",
+    "expected_semantic_sha256": "1d50e855c777e497b22557ad1463de9c7ec6f1abc2e35c2466ac2c33117ce13c",
+    "expected_semantic_bounds_ref": "case.json#/bounds",
+    "public_network_used": false,
+    "secrets_or_credentials": false,
+    "server_source": "scripts/fixture_server.py",
+    "server_sha256": "d66340c18264afa4ffb90d6e0fa5e9ed4acdf45492acb7a82a246627ee7e8f8b",
+    "server_policy": "stdlib-only, loopback-only, bounded request/response/relay/trace I/O, worker-admitted TLS handshake, one absolute monotonic session deadline, no PID-based lifecycle authority",
+    "runtime_material_policy": "Generated local certificates, client keys, JKS stores, and trace/JTL/log output are temporary ignored artifacts and are never committed.",
+    "proxy_secret_policy": "The fixture-server has no password command-line option; use an effective-user-owned mode 0600 file below the run root or an explicitly named environment capability. JMeter JVM TLS password assignments use a protected capability and are redacted from persisted argv."
+  }
+}

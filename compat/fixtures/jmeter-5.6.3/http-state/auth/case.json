@@ -1,0 +1,154 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-HTTP-STATE-AUTH",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-ELEMENTS-CORE-001",
+  "conformance_ids": [
+    "ELEM-001",
+    "ELEM-005"
+  ],
+  "normalization_policy_refs": [
+    "NORM-STRUCTURE-001",
+    "NORM-TIME-001",
+    "NORM-ENV-001",
+    "NORM-SECURITY-001"
+  ],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "b368b7b8c930c54c73b5d883ee654afc8e0439022c231c4729cb05fb4cc0cc77"
+  },
+  "property_files": [
+    {
+      "path": "oracle.properties",
+      "sha256": "4de39c0a9daaeacdff4e2bc10fe3b1045cc4edb6fa7e7ee5754b8ff5f415388c"
+    }
+  ],
+  "source_references": [
+    {
+      "path": "compat/fixtures/jmeter-5.6.3/http-state/server.py",
+      "sha256": "fb4ecb84a7e7525e3b07876600b232bc36e6790ae2e8bb2f8628e82259203dd4"
+    },
+    {
+      "path": "compat/fixtures/jmeter-5.6.3/http-state/harness-contract.md",
+      "sha256": "c5c6ea0938a9583f79b5fc7936a36317f47bc4dbc2a05f95ae5280406f75b88e"
+    },
+    {
+      "path": "compat/fixtures/jmeter-5.6.3/http-state/auth/expected/contract.json",
+      "sha256": "865dec3ce616ec99f07ca61ba049d1edef1e658ade025b0bda046b6cd191702f"
+    }
+  ],
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/http-state/auth",
+    "mode": "nongui",
+    "argv_template": [
+      "jmeter",
+      "-n",
+      "-q",
+      "oracle.properties",
+      "-Joracle.port=<server-port>",
+      "-t",
+      "plan.jmx",
+      "-l",
+      "<ignored>/oracle.jtl",
+      "-j",
+      "<ignored>/oracle.log"
+    ],
+    "fixture_server": {
+      "argv_template": [
+        "python3",
+        "../server.py",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "0",
+        "--max-requests",
+        "64",
+        "--idle-timeout-ms",
+        "5000",
+        "--session-timeout-ms",
+        "30000",
+        "--trace",
+        "<ignored>/trace.jsonl",
+        "--ready",
+        "<ignored>/ready.json"
+      ],
+      "working_directory": "compat/fixtures/jmeter-5.6.3/http-state/auth",
+      "server_path": "../server.py",
+      "server_sha256": "fb4ecb84a7e7525e3b07876600b232bc36e6790ae2e8bb2f8628e82259203dd4",
+      "bind_address": "127.0.0.1",
+      "network": "loopback-only",
+      "port_policy": "0 or 1024..65535",
+      "port_min": 1024,
+      "port_max": 65535,
+      "max_request_budget": 10000,
+      "max_requests": 64,
+      "expected_requests": null,
+      "idle_timeout_ms": 5000,
+      "session_timeout_ms": 30000,
+      "readiness_timeout_ms": 10000,
+      "max_body_bytes": 1048576,
+      "max_response_header_fields": 128,
+      "max_response_header_bytes": 65536,
+      "max_ready_bytes": 16384,
+      "max_trace_record_bytes": 131072,
+      "max_trace_bytes": 8388608,
+      "spawn": {
+        "shell": false,
+        "exact_child": true,
+        "stdin": "null",
+        "stdout": "<ignored>/server.stdout",
+        "stderr": "<ignored>/server.stderr"
+      },
+      "readiness": {
+        "path": "<ignored>/ready.json",
+        "protocol": "jmeter-rs-http-state-v1",
+        "atomic_rename": true,
+        "host": "127.0.0.1",
+        "port_source": "ready.port",
+        "expected_requests": null,
+        "timeout_ms": 10000,
+        "max_bytes": 16384
+      },
+      "port_injection": {
+        "property": "oracle.port",
+        "argument": "-Joracle.port=<server-port>",
+        "source": "ready.port"
+      },
+      "capture": {
+        "trace": "<ignored>/trace.jsonl",
+        "stdout": "<ignored>/server.stdout",
+        "stderr": "<ignored>/server.stderr",
+        "max_bytes": 8388608
+      },
+      "expected_request_count": null,
+      "shutdown": {
+        "mode": "bounded-watchdog-until-pinned-oracle",
+        "expected_request_count": null,
+        "fewer_requests": "bounded-idle-or-session-outcome",
+        "over_cap": "fixture-protocol-failure"
+      }
+    },
+    "network": "loopback-only",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null
+  },
+  "execution": {
+    "status": "not-run-static",
+    "process_exit": null,
+    "process_exit_asserted": false,
+    "oracle_available": false,
+    "sample_count": null,
+    "sample_count_asserted": false,
+    "raw_artifacts": "oracle-runs/http-state-auth/ (ignored; local evidence only)",
+    "expected": "expected/contract.json"
+  },
+  "limitations": [
+    "The expected file is a static fixture contract, not a generated JMeter result; the pinned oracle must be run before conformance is claimed.",
+    "This is a not-run static case: process_exit is null and no server, Java, or JMeter process was started.",
+    "Basic/Digest challenge and retry counts are unobserved until pinned oracle execution; only prefix selection and redaction are statically described.",
+    "Digest and TLS/Kerberos behavior are external adapter boundaries; all credentials are visibly labeled dummy corpus values and are redacted from server traces."
+  ]
+}

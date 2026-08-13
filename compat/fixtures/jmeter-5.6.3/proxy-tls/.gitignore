@@ -1,0 +1,18 @@
+# Runtime evidence and generated certificate material stay outside the corpus.
+oracle-runs/
+run-root/
+*.jsonl
+ready.json
+trace.jsonl
+__pycache__/
+*.crt
+*.csr
+*.key
+*.jks
+*.jceks
+*.p12
+*.pfx
+*.der
+*.pem
+*.secret
+*.truststore

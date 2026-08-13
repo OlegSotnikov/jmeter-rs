@@ -1,0 +1,10 @@
+# Checked entrypoint manifest for the pinned Rust 1.97.1 Linux x86_64
+# toolchain. The rustup value is the pinned 1.29.0 official installer
+# sidecar; the Rust component values are read-only SHA-256 measurements of
+# the existing checked cache. The bootstrap checks this map before execution.
+4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10  cargo/bin/rustup
+d3a664c970a9fd8361b64194861bebc1ae37b9054e5ee3400dc1c9e691797eea  rustup/toolchains/1.97.1-x86_64-unknown-linux-gnu/bin/rustc
+828980723df339d62434390e9fb8ef8831036583343ae2316b7ab5646b5c1953  rustup/toolchains/1.97.1-x86_64-unknown-linux-gnu/bin/cargo
+30de9e1efcd8f8fe7750e00d0c45ff8f4c480608ef1be5baf9ab6f1b4556e8f8  rustup/toolchains/1.97.1-x86_64-unknown-linux-gnu/bin/rustfmt
+e8fa6ad666c353e4c9248fc67074cf160ff2a5dbd97debd20416b81d7f917373  rustup/toolchains/1.97.1-x86_64-unknown-linux-gnu/bin/clippy-driver
+a0a3808dddb32f525601e608740ee7c1c5df86db4a7183ea945449f60d29509d  rustup/toolchains/1.97.1-x86_64-unknown-linux-gnu/bin/cargo-clippy

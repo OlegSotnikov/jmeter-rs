@@ -1,0 +1,40 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-JMX-ALIASES",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-JMX-001",
+  "conformance_ids": ["JMX-001", "JMX-002", "JMX-003"],
+  "normalization_policy_refs": ["NORM-JMX-001", "NORM-STRUCTURE-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "98ce7b3687c9255dc34c63cd4397a0f17f8ed586d0cb07bb03bead1bc4673e0e"
+  },
+  "property_files": [{
+    "path": "oracle.properties",
+    "sha256": "09078c1f6a7c8b573cbb835a33b929bc5a98eecc90b31c88e0ed376e499f8d31"
+  }],
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/jmx-aliases/aliases",
+    "mode": "nongui",
+    "argv_template": ["jmeter", "-n", "-q", "oracle.properties", "-t", "plan.jmx", "-l", "<ignored>/oracle.jtl", "-j", "<ignored>/oracle.log"],
+    "network": "none",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null
+  },
+  "execution": {
+    "status": "static-only; oracle not executed",
+    "process_exit": 0,
+    "sample_count": 0,
+    "raw_artifacts": "oracle-runs/jmx-aliases/aliases/ (ignored; no artifacts committed)",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "The plan and descriptor are original deterministic inputs for semantic JMX tests; no Java, Apache JMeter, JVM, or subprocess was executed while creating this corpus.",
+    "process_exit=0 and sample_count=0 are schema placeholders, not oracle evidence. A future pinned differential run must replace the static-only status with recorded execution evidence.",
+    "The expected descriptor compares aliases, upgrade results, ordered topology, all structural property node kinds, XML-decoded values, and absent-versus-empty distinctions.",
+    "floatProp entries are structural probes only: the pinned SaveService vocabulary comments out a floatProp alias, so acceptance remains JMX-FLOATPROP-001, a pinned-oracle question rather than an accepted claim."
+  ]
+}

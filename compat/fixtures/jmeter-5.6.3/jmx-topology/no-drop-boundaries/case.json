@@ -1,0 +1,62 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-JMX-NO-DROP-BOUNDARIES",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-JMX-001",
+  "conformance_ids": ["JMX-004", "ELEM-009", "GUI-001", "PROXY-002", "PLUG-002", "PLUG-003"],
+  "normalization_policy_refs": ["NORM-JMX-001", "NORM-STRUCTURE-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001"],
+  "external_runtime_boundary_ids": ["EXT-JVM-001", "EXT-PLUGIN-001", "EXT-OS-001", "EXT-SERVICE-001", "EXT-TLS-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "a4f986f0f28c68a1ac5b4e9b0b3e33a6fb7363e2504b068a6ce2d83fffd8f106"
+  },
+  "property_files": [
+    {
+      "path": "oracle.properties",
+      "sha256": "7e1f5e4a2a8ea1c3ea04fba3dc7fc63d72d2b5746a561aeb9a9546c78e6ae480"
+    }
+  ],
+  "descriptor": {
+    "path": "expected/semantic.json",
+    "sha256": "d0b717dd3682af40c98beb699d066448f7bb2ebda046118ac1d94b7efb5c6625"
+  },
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/jmx-topology/no-drop-boundaries",
+    "mode": "nongui-static-only",
+    "argv_template": ["<not-run: static-only>"],
+    "network": "none",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null
+  },
+  "bounds": {
+    "max_plan_bytes": 16384,
+    "max_plan_nodes": 16,
+    "max_plan_depth": 6,
+    "max_property_count_per_element": 16,
+    "max_property_text_bytes": 8192,
+    "max_threads": 1,
+    "max_iterations_per_thread": 1,
+    "max_samples": 0,
+    "max_network_requests": 0,
+    "max_processes": 0,
+    "max_result_bytes": 0,
+    "max_process_wait_seconds": 0
+  },
+  "execution": {
+    "status": "external-unavailable; static-only; plugin oracle not executed",
+    "oracle_available": false,
+    "process_exit": null,
+    "sample_count": null,
+    "raw_artifacts": "none",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "This is an original static JMX topology contract. No Java, Apache JMeter, JVM worker, plugin artifact, script engine, GUI, browser, TLS service, network client, or subprocess was invoked.",
+    "The plugin, BSF, report-plan, and MongoDB nodes are disabled placeholders. Their typed unavailable diagnostics do not claim runtime support or an observed error message.",
+    "The recorder-shaped HTTPS sampler and HeaderManager are original static inputs; generated browser JMX, CONNECT/TLS traffic, certificates, credentials, and request bodies are not copied or fabricated.",
+    "The expected projection is routed to a future jmx-semantic comparator. The generic JTL comparator must reject this format, and all raw differences belong outside Git."
+  ]
+}

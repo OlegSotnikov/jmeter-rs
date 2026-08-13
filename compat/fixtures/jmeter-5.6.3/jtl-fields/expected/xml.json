@@ -1,0 +1,90 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JTL-FIELDS",
+  "format": "jtl-xml",
+  "contract_kind": "jmeter-writer-wire",
+  "projection_schema": "neutral-xml-v1",
+  "evidence_status": "planned",
+  "writer_configuration": "oracle-xml.properties",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 1,
+  "wire_contract": {
+    "sample_variable_attributes": {
+      "spelling": "exact-configured-name",
+      "configured_names": ["case_id", "comma_value"],
+      "underscore_doubling": false
+    },
+    "assertion_result": {
+      "representation": "child-elements",
+      "child_order": ["name", "failure", "error", "failureMessage"]
+    },
+    "string_children": [
+      {"element": "responseHeader", "class": "java.lang.String"},
+      {"element": "requestHeader", "class": "java.lang.String"},
+      {"element": "responseData", "class": "java.lang.String"},
+      {"element": "samplerData", "class": "java.lang.String"},
+      {"element": "responseFile", "class": "java.lang.String"}
+    ],
+    "url_child": {"element": "java.net.URL", "class": null},
+    "child_order": ["assertionResult", "responseHeader", "requestHeader", "responseData", "responseFile", "samplerData", "java.net.URL"],
+    "wire_order": ["assertionResult", "responseHeader", "requestHeader", "responseData", "responseFile", "samplerData", "java.net.URL"],
+    "response_file": {"enabled": true, "expected": "only-if-sample-filename-present"},
+    "response_file_policy": "only when filename saving is enabled"
+  },
+  "samples": [{
+    "position": 0,
+    "attributes": {
+      "it": "0",
+      "lt": "0",
+      "ct": "0",
+      "s": "true",
+      "lb": "jtl-field-sample",
+      "rc": "200",
+      "rm": "OK",
+      "tn": "One deterministic user 1-1",
+      "dt": "text",
+      "de": "US-ASCII",
+      "sby": "0",
+      "sc": "1",
+      "ec": "0",
+      "ng": "1",
+      "na": "1",
+      "case_id": "jtl-fields",
+      "comma_value": "left,right"
+    },
+    "ignored_attributes": ["t", "by", "ts"],
+    "assertions": [{
+      "name": "Known value assertion",
+      "failure": "false",
+      "error": "false"
+    }],
+    "empty_children": ["responseHeader", "requestHeader", "responseFile"],
+    "wire_children": {
+      "wire_child_order": ["assertionResult", "responseHeader", "requestHeader", "responseData", "responseFile", "samplerData", "java.net.URL"],
+      "string_children_class": ["responseHeader", "requestHeader", "responseData", "samplerData", "responseFile"],
+      "assertion_child_elements": ["name", "failure", "error", "failureMessage"]
+    },
+    "sampler_data_contains": ["JMeterVariables"],
+    "debug_response_projection": {
+      "required_sections": ["JMeterVariables:"],
+      "variables": {
+        "JMeterThread.last_sample_ok": "true",
+        "case_id": "jtl-fields",
+        "comma_value": "left,right"
+      },
+      "ignored_line_patterns": [
+        "^JMeterThread\\.pack=.*$",
+        "^(START|TESTSTART)\\.(HMS|MS|YMD)=.*$",
+        "^__jm__.*$",
+        "^__jmv_.*$"
+      ]
+    }
+  }],
+  "expectation_basis": "Original hand-authored semantic hypothesis; no Apache JMeter output was measured.",
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.by", "sample.ts", "debug_response.dynamic_lines"],
+    "reason": "XML preserves the response and configured sample-variable attributes; the timestamp-selection vector explicitly pins sampleresult.timestamp.start, while only runtime elapsed/timestamp/byte count and dynamic Debug Sampler lines are proposed for normalization in a future oracle comparison."
+  }
+}

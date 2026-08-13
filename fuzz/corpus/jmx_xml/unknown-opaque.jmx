@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3" extension="keep-me">
+  <hashTree source="opaque">
+    <UnknownPlugin guiclass="UnknownGui" testclass="com.example.Unknown" testname="Opaque ☃" enabled="true" pluginFlag="preserve">
+      <stringProp name="plugin.value">&lt;raw&gt; &amp; value</stringProp>
+      <unknownProperty name="raw"><nested attr="untouched"/></unknownProperty>
+    </UnknownPlugin>
+    <hashTree/>
+  </hashTree>
+</jmeterTestPlan>

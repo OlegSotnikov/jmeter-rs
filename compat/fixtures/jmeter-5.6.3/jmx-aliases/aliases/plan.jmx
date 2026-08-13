@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Alias and typed-property corpus" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <stringProp name="TestPlan.comments">Original aliases &amp; typed values: &lt;keep&gt; "quoted" and 雪.</stringProp>
+      <stringProp name="fixture.empty-string"></stringProp>
+      <collectionProp name="fixture.empty-collection"/>
+      <collectionProp name="fixture.ordered-collection">
+        <stringProp name="first">one</stringProp>
+        <stringProp name="second">two &amp; 2</stringProp>
+      </collectionProp>
+      <mapProp name="fixture.ordered-map">
+        <stringProp name="alpha">A</stringProp>
+        <intProp name="beta">-7</intProp>
+      </mapProp>
+      <elementProp name="fixture.nested" elementType="FixtureElement" extra="retain">
+        <stringProp name="nested.text">nested &lt;value&gt; &amp; café</stringProp>
+        <boolProp name="nested.enabled">true</boolProp>
+        <objProp name="nested.object">
+          <value type="fixture.NestedBytes" encoding="utf-8">nested opaque &amp; bytes</value>
+        </objProp>
+      </elementProp>
+      <objProp name="fixture.empty-object"/>
+      <objProp name="fixture.object">
+        <value class="fixture.Bytes" encoding="utf-8">opaque &amp; bytes</value>
+      </objProp>
+      <intProp name="fixture.int">-2147483648</intProp>
+      <longProp name="fixture.long">9223372036854775807</longProp>
+      <floatProp name="fixture.float">-0.125</floatProp>
+      <doubleProp name="fixture.double">6.25</doubleProp>
+      <stringProp name="fixture.escaped">left &amp; right &lt;tag&gt; &quot;quote&quot; &apos;apostrophe&apos; / café / 雪</stringProp>
+      <boolProp name="fixture.false">false</boolProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Alias fixture group" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="One iteration" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">1</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">0</stringProp>
+        <longProp name="ThreadGroup.start_time">0</longProp>
+        <longProp name="ThreadGroup.end_time">0</longProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <stringProp name="ThreadGroup.duration"></stringProp>
+        <stringProp name="ThreadGroup.delay"></stringProp>
+      </ThreadGroup>
+      <hashTree>
+        <HTTPSampler2 guiclass="HttpTestSampleGui2" testclass="HTTPSampler2" testname="Historical HTTP alias" enabled="false">
+          <stringProp name="HTTPSampler.domain">alias.invalid</stringProp>
+          <stringProp name="HTTPSampler.port">80</stringProp>
+          <stringProp name="HTTPSampler.protocol">http</stringProp>
+          <stringProp name="HTTPSampler.path">/historical</stringProp>
+          <stringProp name="HTTPSampler.method">GET</stringProp>
+        </HTTPSampler2>
+        <hashTree/>
+        <HTTPSampler_ guiclass="HttpTestSampleGui" testclass="org.apache.jmeter.protocol.http.sampler.HTTPSamplerFull" testname="Upgraded HTTP class" enabled="false">
+          <stringProp name="HTTPSampler.domain">upgrade.invalid</stringProp>
+          <stringProp name="HTTPSampler.path">/full</stringProp>
+        </HTTPSampler_>
+        <hashTree/>
+        <FloatProperty guiclass="TestBeanGUI" testclass="FloatProperty" testname="Float property alias" enabled="false">
+          <floatProp name="FloatProperty.value">1.25</floatProp>
+        </FloatProperty>
+        <hashTree/>
+        <JMSSampler guiclass="JMSConfigGui" testclass="JMSSampler" testname="Historical JMS GUI alias" enabled="false">
+          <stringProp name="JMS.destination">fixture.queue</stringProp>
+        </JMSSampler>
+        <hashTree/>
+        <SoapSampler guiclass="SoapSamplerGui" testclass="SoapSampler" testname="Deprecated SOAP alias" enabled="false">
+          <stringProp name="SoapSampler.endpoint">http://deprecated.invalid/</stringProp>
+        </SoapSampler>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

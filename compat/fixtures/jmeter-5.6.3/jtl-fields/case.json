@@ -1,0 +1,95 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-JTL-FIELDS",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-JTL-001",
+  "fixture_family_refs": ["FX-JTL-001", "FX-CONFIG-001"],
+  "related_fixture_family_ids": ["FX-CONFIG-001"],
+  "conformance_ids": ["JTL-001", "JTL-002", "JTL-003", "JTL-004", "JTL-005"],
+  "normalization_policy_refs": ["NORM-JTL-001", "NORM-TIME-001", "NORM-ENV-001", "NORM-CONFIG-001", "NORM-SECURITY-001"],
+  "bounds": {
+    "schema_id": "jmeter-rs.fixture-bounds",
+    "schema_version": 1,
+    "enforcement": "declared-and-comparator-enforced",
+    "max_input_bytes": 131072,
+    "max_result_bytes": 65536,
+    "max_text_bytes": 65536,
+    "max_samples": 64,
+    "max_depth": 16,
+    "max_xml_nodes": 1024,
+    "max_xml_attributes": 2048,
+    "max_csv_columns": 128,
+    "max_line_bytes": 65536
+  },
+  "resource_limits": {
+    "max_samples": 64,
+    "max_response_bytes": 65536,
+    "max_assertion_results": 128,
+    "network": "none"
+  },
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "b6445c4d1f5457eac7be32fb3b8b250efa17a8efc251ee585942062c7d645511"
+  },
+  "property_files": [
+    {"path": "oracle-csv.properties", "sha256": "12c8bbc04ca045f63a3d41ae2328a0628773d87db3d511016b511da85ca536a2", "format": "csv"},
+    {"path": "oracle-xml.properties", "sha256": "fb1ca358b77469258f9464f5ebccaf6f59418b4797a69a21208dcb1f8cd0e8aa", "format": "xml"}
+  ],
+  "corpus_index": {
+    "path": "corpus.toml",
+    "sha256": "01914eb356dc75481b2485f567a4b8945599b01af782b645e489ab77093e998a",
+    "status": "checked-in immutable index; not oracle output"
+  },
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/jtl-fields",
+    "mode": "nongui",
+    "argv_templates": [
+      ["jmeter", "-n", "-q", "oracle-csv.properties", "-t", "plan.jmx", "-l", "<ignored>/oracle.csv.jtl", "-j", "<ignored>/oracle.csv.log"],
+      ["jmeter", "-n", "-q", "oracle-xml.properties", "-t", "plan.jmx", "-l", "<ignored>/oracle.xml.jtl", "-j", "<ignored>/oracle.xml.log"]
+    ],
+    "network": "none",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "jvm_locale_status": "declared en-US; not measured because no oracle was run",
+    "jvm_args": ["-Dfile.encoding=UTF-8", "-Duser.language=en", "-Duser.country=US", "-Duser.timezone=UTC"],
+    "random_seed": null
+  },
+  "execution": {
+    "status": "planned",
+    "process_exit": null,
+    "observed_process_exit": null,
+    "raw_artifacts": "ignored; no oracle artifacts collected (future local oracle-runs/jtl-fields/)",
+    "expected": [
+      {"path": "expected/csv.json", "sha256": "164e6c35683afb04182f24baff4a3ca07ccb27713f1d298d68ff60e2f02d1abf"},
+      {"path": "expected/csv-full.json", "sha256": "9ef755d5ade9a773669a3e8553321334506b9626282a3d8ee196e74191312069"},
+      {"path": "expected/csv-tab.json", "sha256": "20170ef3afca9135bb1bb65b7ae3cb01f12355069978da13324cdd4bd02a5ccb"},
+      {"path": "expected/csv-tab-crlf.json", "sha256": "880908d8694774e603f3a774b435adb13db1b3f944bbe10d0890ac6f0cff0e57"},
+      {"path": "expected/csv-failure.json", "sha256": "1217edf4c9816ef57bd665de79d188ff3f54f628f6075e534c49ec0a72b973c0"},
+      {"path": "expected/xml.json", "sha256": "64ee750c32dbb3e1f0c1b38d5de09c4ac91bffc450fdb6c9981ab5d839fd1010"},
+      {"path": "expected/xml-rich.json", "sha256": "849eab80b0e4b3e2ecff76a5107a61b3666ce6283b8407bf88e9a5959c00dac6"},
+      {"path": "expected/xml-legacy.json", "sha256": "aeef9b1b6c37fd4f15233317676bb97bc979b0dc881e3037cc915b5288c51058"},
+      {"path": "expected/xml-escaping-file.json", "sha256": "e3860ca11256a8a50559b81464b225d6d33dd3c92b66b9c033dc2a71ebb867e8"},
+      {"path": "expected/xml-response-on-error.json", "sha256": "c3f224d2b04a6d9a221e17d1b255516f2a208524e389cb60ec20f9cc9c77c81f"},
+      {"path": "expected/xml-response-file-only.json", "sha256": "c62fe314bd5a6192f558df65ed06eb92715a157f66e4450824ff1eb385249410"},
+      {"path": "expected/xml-timestamp-start.json", "sha256": "2bbfc07848ad13c92f29b817d330a45f13ee8ba01e33467d5462ac21d807aab5"},
+      {"path": "expected/xml-timestamp-end.json", "sha256": "8a58c5e8d6e2c37bce0d6c5a54c7d027f35520ea403b1cfe38696ce320ac35ed"},
+      {"path": "expected/csv-bom.json", "sha256": "cf53f98b6871219beb51c2b38de242719e1d89dd52ad5a85465fbea9822c3df3"},
+      {"path": "expected/csv-date.json", "sha256": "e9bd6e7af9e6ff1c9a96d9f4f0b5747053b9c276b3233c893dab4228e9f7aef4"},
+      {"path": "expected/xml-minimal.json", "sha256": "86cda027c9d0044981d593d357ce3684ef6bf4c8b92a022af619cdc64f0d92bc"},
+      {"path": "expected/rust-no-drop.xml.json", "sha256": "c9cbe4770591f678d272a1914820029d2a534fa0236c361161b4dae75fbe6d07"},
+      {"path": "expected/jmeter-reader-loss.xml.json", "sha256": "f7159ca95a12bec459ab7138830ad8595af3c200e3589689e788cb7576491e13"},
+      {"path": "expected/invalid-csv.json", "sha256": "feb19f51425734a696e48cdee89cb45bdc5db3c56c3a0051491d4f9fc30e0af3"},
+      {"path": "expected/invalid-xml.json", "sha256": "eb099c32f75a479c49748894ca548d81d814469d1a930b86b56caf7219bba8fa"},
+      {"path": "expected/limits-csv.json", "sha256": "837151f9177fba89ba2c12626d83a7e1ddc18903f838c71acc92e362011ef81e"},
+      {"path": "expected/limits-xml.json", "sha256": "bbc8471fda616d64178be3aaad8532860f2bf069f7fb232a76f6a7f5ade0da79"}
+    ]
+  },
+  "limitations": [
+    "The JMX plan and property files are reproducible source inputs only; no Java/JMeter invocation was performed for this corpus.",
+    "Expected projections are static hypotheses for codec tests and are not conformance evidence or measured Apache output.",
+    "Timestamp, hostname, and byte fields in the original smoke projections remain explicitly ignored under the declared normalization policies; the new wire-input cases use fixed values where parser behavior is under test.",
+    "The command templates are a future pinned-oracle recipe and must not be interpreted as an execution record."
+  ]
+}

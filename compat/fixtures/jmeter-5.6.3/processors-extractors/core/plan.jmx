@@ -1,0 +1,285 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="ELEM-008 processor and extractor corpus" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="Initial variables" enabled="true">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="fixture.initial" elementType="Argument">
+            <stringProp name="Argument.name">fixture.initial</stringProp>
+            <stringProp name="Argument.value">seed</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="fixture.iteration" elementType="Argument">
+            <stringProp name="Argument.name">fixture.iteration</stringProp>
+            <stringProp name="Argument.value">0</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="fixture.property" elementType="Argument">
+            <stringProp name="Argument.name">fixture.property</stringProp>
+            <stringProp name="Argument.value">${__P(processor.fixture.property,property-value)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+      <collectionProp name="TestPlan.thread_groups"/>
+      <stringProp name="TestPlan.comments">Original local source-only processor fixture; response corpus is injected by a future harness.</stringProp>
+      <stringProp name="TestPlan.user_define_classpath"></stringProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="One deterministic user" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="One iteration" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">1</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">0</stringProp>
+        <longProp name="ThreadGroup.start_time">0</longProp>
+        <longProp name="ThreadGroup.end_time">0</longProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <stringProp name="ThreadGroup.duration"></stringProp>
+        <stringProp name="ThreadGroup.delay"></stringProp>
+      </ThreadGroup>
+      <hashTree>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="Processor response carrier" enabled="true">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">true</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+          <boolProp name="displaySamplerProperties">true</boolProp>
+        </DebugSampler>
+        <hashTree>
+          <!-- Pre-processors execute before the sampler; source order is retained. -->
+          <UserParameters guiclass="UserParametersGui" testclass="UserParameters" testname="Deterministic user parameters" enabled="true">
+            <collectionProp name="UserParameters.names">
+              <stringProp name="1925345846">fixture.user</stringProp>
+              <stringProp name="1925345847">fixture.mode</stringProp>
+            </collectionProp>
+            <collectionProp name="UserParameters.thread_values">
+              <collectionProp name="-149786089">
+                <stringProp name="3387192">user-a</stringProp>
+                <stringProp name="3387193">local</stringProp>
+              </collectionProp>
+              <collectionProp name="-149786088">
+                <stringProp name="3387192">user-b</stringProp>
+                <stringProp name="3387193">local</stringProp>
+              </collectionProp>
+            </collectionProp>
+            <boolProp name="UserParameters.per_iteration">true</boolProp>
+          </UserParameters>
+          <hashTree/>
+          <RegExUserParameters guiclass="RegExUserParametersGui" testclass="RegExUserParameters" testname="Regex user parameters" enabled="true">
+            <stringProp name="RegExUserParameters.regex_ref_name">fixture.regex</stringProp>
+            <stringProp name="RegExUserParameters.param_names_gr_nr">1</stringProp>
+            <stringProp name="RegExUserParameters.param_values_gr_nr">2</stringProp>
+          </RegExUserParameters>
+          <hashTree/>
+          <SampleTimeout guiclass="TestBeanGUI" testclass="SampleTimeout" testname="Bounded sample timeout" enabled="true">
+            <stringProp name="InterruptTimer.timeout">1000</stringProp>
+          </SampleTimeout>
+          <hashTree/>
+          <BeanShellPreProcessor guiclass="TestBeanGUI" testclass="BeanShellPreProcessor" testname="Disabled BeanShell preprocessor" enabled="false">
+            <stringProp name="filename"></stringProp>
+            <stringProp name="parameters">source-only-disabled</stringProp>
+            <boolProp name="resetInterpreter">false</boolProp>
+            <stringProp name="script">vars.put('disabled', 'must-not-run')</stringProp>
+          </BeanShellPreProcessor>
+          <hashTree/>
+          <JSR223PreProcessor guiclass="TestBeanGUI" testclass="JSR223PreProcessor" testname="Disabled JSR223 preprocessor" enabled="false">
+            <stringProp name="scriptLanguage">groovy</stringProp>
+            <stringProp name="parameters">source-only-disabled</stringProp>
+            <stringProp name="filename"></stringProp>
+            <stringProp name="cacheKey">processor-disabled-cache</stringProp>
+            <stringProp name="script">vars.put('disabled', 'must-not-run')</stringProp>
+          </JSR223PreProcessor>
+          <hashTree/>
+          <JDBCPreProcessor guiclass="TestBeanGUI" testclass="JDBCPreProcessor" testname="Disabled JDBC preprocessor" enabled="false">
+            <stringProp name="dataSource">source-only-no-database</stringProp>
+            <stringProp name="query">SELECT fixture_value</stringProp>
+            <stringProp name="queryArguments"></stringProp>
+            <stringProp name="queryArgumentsTypes"></stringProp>
+            <stringProp name="queryType">Select Statement</stringProp>
+            <stringProp name="resultVariable">jdbc_result</stringProp>
+            <stringProp name="variableNames">jdbc_value</stringProp>
+          </JDBCPreProcessor>
+          <hashTree/>
+          <BSFPreProcessor guiclass="TestBeanGUI" testclass="BSFPreProcessor" testname="Disabled legacy BSF preprocessor" enabled="false">
+            <stringProp name="scriptLanguage">beanshell</stringProp>
+            <stringProp name="parameters">source-only-disabled</stringProp>
+            <stringProp name="filename"></stringProp>
+            <stringProp name="script">vars.put('disabled', 'must-not-run')</stringProp>
+          </BSFPreProcessor>
+          <hashTree/>
+          <AnchorModifier guiclass="AnchorModifierGui" testclass="AnchorModifier" testname="Disabled HTML link modifier" enabled="false"/>
+          <hashTree/>
+          <URLRewritingModifier guiclass="URLRewritingModifierGui" testclass="URLRewritingModifier" testname="Disabled URL rewriting modifier" enabled="false">
+            <boolProp name="path_extension">false</boolProp>
+            <boolProp name="path_extension_no_questionmark">false</boolProp>
+            <stringProp name="argument_name">fixture_token</stringProp>
+            <boolProp name="path_extension_no_equals">false</boolProp>
+            <boolProp name="cache_value">true</boolProp>
+          </URLRewritingModifier>
+          <hashTree/>
+
+          <!-- Post-processors execute after the sampler in this serialized order. -->
+          <RegexExtractor guiclass="RegexExtractorGui" testclass="RegexExtractor" testname="Regex all matches" enabled="true">
+            <stringProp name="RegexExtractor.useHeaders">false</stringProp>
+            <stringProp name="RegexExtractor.refname">rx_all</stringProp>
+            <stringProp name="RegexExtractor.regex">first=([^\r\n]+)</stringProp>
+            <stringProp name="RegexExtractor.template">$1$</stringProp>
+            <stringProp name="RegexExtractor.default">RX_DEFAULT</stringProp>
+            <stringProp name="RegexExtractor.match_number">-1</stringProp>
+          </RegexExtractor>
+          <hashTree/>
+          <RegexExtractor guiclass="RegexExtractorGui" testclass="RegexExtractor" testname="Regex first match" enabled="true">
+            <stringProp name="RegexExtractor.useHeaders">false</stringProp>
+            <stringProp name="RegexExtractor.refname">rx_first</stringProp>
+            <stringProp name="RegexExtractor.regex">first=([^\r\n]+)</stringProp>
+            <stringProp name="RegexExtractor.template">$1$</stringProp>
+            <stringProp name="RegexExtractor.default">RX_FIRST_DEFAULT</stringProp>
+            <stringProp name="RegexExtractor.match_number">1</stringProp>
+          </RegexExtractor>
+          <hashTree/>
+          <RegexExtractor guiclass="RegexExtractorGui" testclass="RegexExtractor" testname="Regex header match" enabled="true">
+            <stringProp name="RegexExtractor.useHeaders">true</stringProp>
+            <stringProp name="RegexExtractor.refname">rx_header</stringProp>
+            <stringProp name="RegexExtractor.regex">X-Fixture-Token: ([^\r\n]+)</stringProp>
+            <stringProp name="RegexExtractor.template">$1$</stringProp>
+            <stringProp name="RegexExtractor.default">RX_HEADER_DEFAULT</stringProp>
+            <stringProp name="RegexExtractor.match_number">1</stringProp>
+          </RegexExtractor>
+          <hashTree/>
+          <RegexExtractor guiclass="RegexExtractorGui" testclass="RegexExtractor" testname="Regex empty default" enabled="true">
+            <stringProp name="RegexExtractor.useHeaders">false</stringProp>
+            <stringProp name="RegexExtractor.refname">rx_empty</stringProp>
+            <stringProp name="RegexExtractor.regex">never-present=([^\r\n]+)</stringProp>
+            <stringProp name="RegexExtractor.template">$1$</stringProp>
+            <stringProp name="RegexExtractor.default"></stringProp>
+            <stringProp name="RegexExtractor.match_number">0</stringProp>
+            <boolProp name="RegexExtractor.default_empty_value">true</boolProp>
+          </RegexExtractor>
+          <hashTree/>
+          <BoundaryExtractor guiclass="BoundaryExtractorGui" testclass="BoundaryExtractor" testname="Boundary all matches" enabled="true">
+            <stringProp name="BoundaryExtractor.refname">boundary_all</stringProp>
+            <stringProp name="BoundaryExtractor.lboundary">first=</stringProp>
+            <stringProp name="BoundaryExtractor.rboundary">&#10;</stringProp>
+            <stringProp name="BoundaryExtractor.match_number">-1</stringProp>
+            <stringProp name="BoundaryExtractor.default">BOUNDARY_DEFAULT</stringProp>
+            <boolProp name="BoundaryExtractor.default_empty_value">false</boolProp>
+            <stringProp name="BoundaryExtractor.useHeaders">false</stringProp>
+          </BoundaryExtractor>
+          <hashTree/>
+          <HtmlExtractor guiclass="HtmlExtractorGui" testclass="HtmlExtractor" testname="CSS attribute extractor" enabled="true">
+            <stringProp name="HtmlExtractor.extractor_impl">JSOUP</stringProp>
+            <stringProp name="HtmlExtractor.attribute">data-id</stringProp>
+            <stringProp name="HtmlExtractor.expr">a.item</stringProp>
+            <stringProp name="HtmlExtractor.refname">css_ids</stringProp>
+            <stringProp name="HtmlExtractor.match_number">-1</stringProp>
+            <stringProp name="HtmlExtractor.default">CSS_DEFAULT</stringProp>
+            <boolProp name="HtmlExtractor.default_empty_value">false</boolProp>
+          </HtmlExtractor>
+          <hashTree/>
+          <XPathExtractor guiclass="XPathExtractorGui" testclass="XPathExtractor" testname="XPath text extractor" enabled="true">
+            <stringProp name="XPathExtractor.xpathQuery">/*[local-name()='fixture']/*[local-name()='item']/text()</stringProp>
+            <stringProp name="XPathExtractor.refname">xpath_text</stringProp>
+            <stringProp name="XPathExtractor.default">XPATH_DEFAULT</stringProp>
+            <boolProp name="XPathExtractor.tolerant">false</boolProp>
+            <boolProp name="XPathExtractor.namespace">true</boolProp>
+            <boolProp name="XPathExtractor.report_errors">true</boolProp>
+            <boolProp name="XPathExtractor.show_warnings">true</boolProp>
+            <boolProp name="XPathExtractor.quiet">false</boolProp>
+            <boolProp name="XPathExtractor.fragment">false</boolProp>
+            <boolProp name="XPathExtractor.whitespace">true</boolProp>
+            <boolProp name="XPathExtractor.validate">false</boolProp>
+            <boolProp name="XPathExtractor.download_dtds">false</boolProp>
+            <stringProp name="XPathExtractor.matchNumber">-1</stringProp>
+          </XPathExtractor>
+          <hashTree/>
+          <XPath2Extractor guiclass="XPath2ExtractorGui" testclass="XPath2Extractor" testname="XPath 2 text extractor" enabled="true">
+            <stringProp name="XPathExtractor2.xpathQuery">/fixture:fixture/fixture:item/text()</stringProp>
+            <stringProp name="XPathExtractor2.refname">xpath2_text</stringProp>
+            <stringProp name="XPathExtractor2.default">XPATH2_DEFAULT</stringProp>
+            <boolProp name="XPathExtractor2.fragment">false</boolProp>
+            <stringProp name="XPathExtractor2.namespaces">fixture=urn:jmeter-rs:processor-fixture</stringProp>
+            <stringProp name="XPathExtractor2.matchNumber">-1</stringProp>
+          </XPath2Extractor>
+          <hashTree/>
+          <JSONPostProcessor guiclass="JSONPostProcessorGui" testclass="JSONPostProcessor" testname="JSONPath extractor matrix" enabled="true">
+            <stringProp name="JSONPostProcessor.jsonPathExprs">$.request.id;$.items[*].name;$.missing</stringProp>
+            <stringProp name="JSONPostProcessor.referenceNames">json_id;json_names;json_missing</stringProp>
+            <stringProp name="JSONPostProcessor.defaultValues">JSON_DEFAULT;JSON_EMPTY;JSON_MISSING_DEFAULT</stringProp>
+            <boolProp name="JSONPostProcessor.compute_concat">true</boolProp>
+            <stringProp name="JSONPostProcessor.match_numbers">0;-1;1</stringProp>
+          </JSONPostProcessor>
+          <hashTree/>
+          <JMESPathExtractor guiclass="JMESPathExtractorGui" testclass="JMESPathExtractor" testname="JMESPath extractor" enabled="true">
+            <stringProp name="JMESExtractor.jmesPathExpr">items[*].name</stringProp>
+            <stringProp name="JMESExtractor.referenceName">jmes_names</stringProp>
+            <stringProp name="JMESExtractor.defaultValue">JMES_DEFAULT</stringProp>
+            <stringProp name="JMESExtractor.matchNumber">-1</stringProp>
+          </JMESPathExtractor>
+          <hashTree/>
+          <DebugPostProcessor guiclass="TestBeanGUI" testclass="DebugPostProcessor" testname="Candidate variable snapshot" enabled="true">
+            <boolProp name="displayJMeterProperties">true</boolProp>
+            <boolProp name="displayJMeterVariables">true</boolProp>
+            <boolProp name="displaySystemProperties">false</boolProp>
+            <boolProp name="displaySamplerProperties">true</boolProp>
+          </DebugPostProcessor>
+          <hashTree/>
+          <BeanShellPostProcessor guiclass="TestBeanGUI" testclass="BeanShellPostProcessor" testname="Disabled BeanShell postprocessor" enabled="false">
+            <stringProp name="filename"></stringProp>
+            <stringProp name="parameters">source-only-disabled</stringProp>
+            <boolProp name="resetInterpreter">false</boolProp>
+            <stringProp name="script">vars.put('disabled', 'must-not-run')</stringProp>
+          </BeanShellPostProcessor>
+          <hashTree/>
+          <JSR223PostProcessor guiclass="TestBeanGUI" testclass="JSR223PostProcessor" testname="Disabled JSR223 postprocessor" enabled="false">
+            <stringProp name="scriptLanguage">groovy</stringProp>
+            <stringProp name="parameters">source-only-disabled</stringProp>
+            <stringProp name="filename"></stringProp>
+            <stringProp name="cacheKey">processor-disabled-cache</stringProp>
+            <stringProp name="script">vars.put('disabled', 'must-not-run')</stringProp>
+          </JSR223PostProcessor>
+          <hashTree/>
+          <JDBCPostProcessor guiclass="TestBeanGUI" testclass="JDBCPostProcessor" testname="Disabled JDBC postprocessor" enabled="false">
+            <stringProp name="dataSource">source-only-no-database</stringProp>
+            <stringProp name="query">SELECT fixture_value</stringProp>
+            <stringProp name="queryArguments"></stringProp>
+            <stringProp name="queryArgumentsTypes"></stringProp>
+            <stringProp name="queryType">Select Statement</stringProp>
+            <stringProp name="resultVariable">jdbc_result</stringProp>
+            <stringProp name="variableNames">jdbc_value</stringProp>
+          </JDBCPostProcessor>
+          <hashTree/>
+          <BSFPostProcessor guiclass="TestBeanGUI" testclass="BSFPostProcessor" testname="Disabled legacy BSF postprocessor" enabled="false">
+            <stringProp name="scriptLanguage">beanshell</stringProp>
+            <stringProp name="parameters">source-only-disabled</stringProp>
+            <stringProp name="filename"></stringProp>
+            <stringProp name="script">vars.put('disabled', 'must-not-run')</stringProp>
+          </BSFPostProcessor>
+          <hashTree/>
+
+          <!-- An unknown plug-in subtree is disabled but must remain lossless. -->
+          <PluginPostProcessor guiclass="com.example.jmeter.PluginPostProcessorGui" testclass="com.example.jmeter.PluginPostProcessor" testname="Opaque processor plug-in" enabled="false" pluginVersion="0.1" custom="retain-me">
+            <stringProp name="plugin.known">known &amp; value</stringProp>
+            <pluginProperty name="plugin.opaque" encoding="raw">opaque &amp; property &lt;bytes&gt;</pluginProperty>
+            <pluginExtension format="nested" marker="α">
+              <opaqueChild key="one"><![CDATA[raw <plugin> bytes]]></opaqueChild>
+            </pluginExtension>
+          </PluginPostProcessor>
+          <hashTree>
+            <PluginChild guiclass="com.example.jmeter.PluginChildGui" testclass="com.example.jmeter.PluginChild" testname="Opaque child" enabled="false" childFlag="keep">
+              <pluginChildProperty name="child.raw">child &amp; raw</pluginChildProperty>
+            </PluginChild>
+            <hashTree/>
+          </hashTree>
+        </hashTree>
+      </hashTree>
+      <ResultAction guiclass="ResultActionGui" testclass="ResultAction" testname="Disabled result status action" enabled="false">
+        <stringProp name="TestLogicalAction">START_NEXT_ITERATION_OF_CURRENT_LOOP</stringProp>
+      </ResultAction>
+      <hashTree/>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

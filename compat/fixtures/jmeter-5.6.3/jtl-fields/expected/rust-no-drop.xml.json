@@ -1,0 +1,99 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JTL-FIELDS",
+  "format": "jtl-xml",
+  "contract_kind": "rust-no-drop-parser",
+  "comparator_ready": false,
+  "projection_schema": "rust-lossless-xml-v1",
+  "evidence_status": "planned",
+  "expectation_basis": "Hand-authored Rust no-drop/parser projection of variants/rust-no-drop/xml-doubled-variable.xml; it is a static non-comparator contract and not JMeter writer output.",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 1,
+  "rust_wire_contract": {
+    "jmeter_writer_wire": false,
+    "contract_owner": "crates/results/src/xml.rs",
+    "sample_variable_attributes": {
+      "spelling": "rust-contract-doubled-underscore",
+      "wire_input_names": ["case__id", "comma__value"],
+      "writer_reference_names": ["case_id", "comma_value"],
+      "reason": "This variant isolates the current Rust attribute sanitization gap; do not use it as a JMeter writer expectation."
+    },
+    "unknown_children": [{
+      "element": "pluginData",
+      "class": null,
+      "attributes": {"kind": "extension"},
+      "text": "opaque extension",
+      "preserve": true
+    }],
+    "wire_order": ["pluginData"],
+    "root_wire_order": ["rootExtension"]
+  },
+  "samples": [{
+    "position": 0,
+    "element": "sample",
+    "attributes": {
+      "s": "true", "lb": "parser extension", "case__id": "preserve", "comma__value": "left,right"
+    },
+    "assertions": [],
+    "sections": {},
+    "children": [{
+      "position": 0,
+      "element": "pluginData",
+      "attributes": {"kind": "extension"},
+      "sections": {},
+      "text": "opaque extension",
+      "assertions": [],
+      "children": [{
+        "position": 0,
+        "element": "pluginChild",
+        "attributes": {"code": "nested"},
+        "sections": {},
+        "text": "opaque nested",
+        "assertions": [],
+        "children": []
+      }]
+      }]
+  }],
+  "no_drop_contract": {
+    "root_children": [{
+      "position": 0,
+      "element": "rootExtension",
+      "attributes": {"kind": "root"},
+      "text": "",
+      "children": [{
+        "position": 0,
+        "element": "nestedRoot",
+        "attributes": {"code": "child"},
+        "text": "root opaque nested",
+        "children": []
+      }]
+    }],
+    "root_child_attachment": "samples[0].wire_xml_root_children",
+    "unknown_attributes": {
+      "action": "retain-exactly",
+      "names": ["case__id", "comma__value"]
+    },
+    "unknown_children": {
+      "action": "retain-ordered-tree",
+      "expected": [{
+        "position": 0,
+        "element": "pluginData",
+        "attributes": {"kind": "extension"},
+        "text": "opaque extension",
+        "children": [{
+          "position": 0,
+          "element": "pluginChild",
+          "attributes": {"code": "nested"},
+          "text": "opaque nested",
+          "children": []
+        }]
+      }]
+    }
+  },
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "The doubled-variable spelling and pluginData child are an explicit Rust parser variant; the JMeter writer cases use exact single-underscore names and java.lang.String only for typed JMeter text children."
+  }
+}

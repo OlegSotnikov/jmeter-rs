@@ -1,0 +1,4 @@
+# Preserve the physical CRLF source bytes for the line-ending fixture.
+fixture-crlf.properties -text
+fixture-lf.properties text eol=lf
+fixture-utf8.properties text eol=lf

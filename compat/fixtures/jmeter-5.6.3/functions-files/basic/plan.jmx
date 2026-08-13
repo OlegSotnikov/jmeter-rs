@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="Original file-backed function plan" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="File-backed function variables" enabled="true">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="file_utf8" elementType="Argument">
+            <stringProp name="Argument.name">file_utf8</stringProp>
+            <stringProp name="Argument.value">${__FileToString(inputs/utf8.txt,UTF-8,file_utf8_ref)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="file_utf8_traversal" elementType="Argument">
+            <stringProp name="Argument.name">file_utf8_traversal</stringProp>
+            <stringProp name="Argument.value">${__FileToString(inputs/nested/../utf8.txt,UTF-8)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="file_default_non_ascii" elementType="Argument">
+            <stringProp name="Argument.name">file_default_non_ascii</stringProp>
+            <stringProp name="Argument.value">${__FileToString(inputs/utf8.txt)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="file_ascii_default" elementType="Argument">
+            <stringProp name="Argument.name">file_ascii_default</stringProp>
+            <stringProp name="Argument.value">${__FileToString(inputs/ascii.txt)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="file_ascii_explicit" elementType="Argument">
+            <stringProp name="Argument.name">file_ascii_explicit</stringProp>
+            <stringProp name="Argument.value">${__FileToString(inputs/ascii.txt,US-ASCII)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="csv_first" elementType="Argument">
+            <stringProp name="Argument.name">csv_first</stringProp>
+            <stringProp name="Argument.value">${__CSVRead(inputs/rows.csv,0)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="csv_second" elementType="Argument">
+            <stringProp name="Argument.name">csv_second</stringProp>
+            <stringProp name="Argument.value">${__CSVRead(inputs/rows.csv,1)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="csv_next_first" elementType="Argument">
+            <stringProp name="Argument.name">csv_next_first</stringProp>
+            <stringProp name="Argument.value">${__CSVRead(inputs/rows.csv,next)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="csv_next_second" elementType="Argument">
+            <stringProp name="Argument.name">csv_next_second</stringProp>
+            <stringProp name="Argument.value">${__CSVRead(inputs/rows.csv,1)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="string_udv_first" elementType="Argument">
+            <stringProp name="Argument.name">string_udv_first</stringProp>
+            <stringProp name="Argument.value">${__StringFromFile(inputs/lines.txt,udv_line_first)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="string_udv_second" elementType="Argument">
+            <stringProp name="Argument.name">string_udv_second</stringProp>
+            <stringProp name="Argument.value">${__StringFromFile(inputs/lines.txt,udv_line_second)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="string_missing" elementType="Argument">
+            <stringProp name="Argument.name">string_missing</stringProp>
+            <stringProp name="Argument.value">${__StringFromFile(inputs/missing-lines.txt,string_missing)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="csv_missing" elementType="Argument">
+            <stringProp name="Argument.name">csv_missing</stringProp>
+            <stringProp name="Argument.value">${__CSVRead(inputs/missing.csv,0)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="file_missing" elementType="Argument">
+            <stringProp name="Argument.name">file_missing</stringProp>
+            <stringProp name="Argument.value">${__FileToString(inputs/missing.txt,UTF-8)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="xpath_first" elementType="Argument">
+            <stringProp name="Argument.name">xpath_first</stringProp>
+            <stringProp name="Argument.value">${__XPath(inputs/document.xml,//item[@id='first']/text())}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="xpath_no_match" elementType="Argument">
+            <stringProp name="Argument.name">xpath_no_match</stringProp>
+            <stringProp name="Argument.value">${__XPath(inputs/document.xml,//missing/text())}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="xpath_missing" elementType="Argument">
+            <stringProp name="Argument.name">xpath_missing</stringProp>
+            <stringProp name="Argument.value">${__XPath(inputs/missing.xml,//item/text())}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="write_first" elementType="Argument">
+            <stringProp name="Argument.name">write_first</stringProp>
+            <stringProp name="Argument.value">${__StringToFile(${__P(oracle.output.file)},first-line,false,UTF-8)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="write_second" elementType="Argument">
+            <stringProp name="Argument.name">write_second</stringProp>
+            <stringProp name="Argument.value">${__StringToFile(${__P(oracle.output.file)},|second-line,true,UTF-8)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="write_result" elementType="Argument">
+            <stringProp name="Argument.name">write_result</stringProp>
+            <stringProp name="Argument.value">${__FileToString(${__P(oracle.output.file)},UTF-8)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="utf16_source" elementType="Argument">
+            <stringProp name="Argument.name">utf16_source</stringProp>
+            <stringProp name="Argument.value">${__FileToString(inputs/utf16-source.txt,UTF-8)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="utf16_input" elementType="Argument">
+            <stringProp name="Argument.name">utf16_input</stringProp>
+            <stringProp name="Argument.value">${__FileToString(inputs/utf16-input.txt,UTF-16LE)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="write_utf16" elementType="Argument">
+            <stringProp name="Argument.name">write_utf16</stringProp>
+            <stringProp name="Argument.value">${__StringToFile(${__P(oracle.utf16.output.file)},${__FileToString(inputs/utf16-source.txt,UTF-8)},false,UTF-16LE)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="read_utf16" elementType="Argument">
+            <stringProp name="Argument.name">read_utf16</stringProp>
+            <stringProp name="Argument.value">${__FileToString(${__P(oracle.utf16.output.file)},UTF-16LE)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+      <collectionProp name="TestPlan.thread_groups"/>
+      <stringProp name="TestPlan.comments">Original local file inputs exercise deterministic built-in function contracts, including shared UDV/sampler StringFromFile source identity, an XPath UDV expression kept distinct from the sampler's file/expression cache key, and an independent UTF-16LE input.</stringProp>
+      <stringProp name="TestPlan.user_define_classpath"></stringProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="One deterministic file user" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="Three file iterations" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">3</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">1</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">0</stringProp>
+        <longProp name="ThreadGroup.start_time">0</longProp>
+        <longProp name="ThreadGroup.end_time">0</longProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <stringProp name="ThreadGroup.duration"></stringProp>
+        <stringProp name="ThreadGroup.delay"></stringProp>
+      </ThreadGroup>
+      <hashTree>
+        <DebugSampler guiclass="TestBeanGUI" testclass="DebugSampler" testname="file-${__StringFromFile(inputs/lines.txt,sampler_line_first)}-${__StringFromFile(inputs/lines.txt,sampler_line_second)}-${__XPath(inputs/document.xml,//item/text())}" enabled="true">
+          <boolProp name="displayJMeterProperties">false</boolProp>
+          <boolProp name="displayJMeterVariables">true</boolProp>
+          <boolProp name="displaySystemProperties">false</boolProp>
+        </DebugSampler>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

@@ -1,0 +1,548 @@
+{
+  "schema_id": "jmeter-rs.harness-manifest-schema",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-HARNESS-REPRODUCIBILITY",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-HARNESS-001",
+  "normalization_policy_refs": [
+    "NORM-ENV-001",
+    "NORM-EXTERNAL-001",
+    "NORM-SECURITY-001",
+    "NORM-TIME-001"
+  ],
+  "evidence_status": "static-not-run",
+  "source_only": true,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jmeter-rs.invalid/schemas/harness-manifest.schema.json",
+  "title": "jmeter-rs pinned oracle harness manifest",
+  "description": "Bounded source-only inputs for a future pinned JMeter oracle run. Null observed values and unavailable external pins are intentional and never evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "case_id",
+    "profile_id",
+    "fixture_family_id",
+    "conformance_ids",
+    "coverage_by_conformance_id",
+    "normalization_policy_refs",
+    "evidence_status",
+    "source_only",
+    "materialization",
+    "profile",
+    "pinned_oracle",
+    "verification_gates",
+    "repository_inputs",
+    "toolchain",
+    "platform",
+    "classpath",
+    "external_pins",
+    "environment",
+    "bounds",
+    "raw_artifacts",
+    "comparison",
+    "unavailable_oracle"
+  ],
+  "properties": {
+    "schema_id": {"const": "jmeter-rs.harness-manifest"},
+    "schema_version": {"const": 1},
+    "case_id": {"const": "ORACLE-JMETER-563-HARNESS-REPRODUCIBILITY"},
+    "profile_id": {"const": "jmeter-5.6.3"},
+    "fixture_family_id": {"const": "FX-HARNESS-001"},
+    "conformance_ids": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {"enum": ["TEST-001", "TEST-002", "TEST-004"]}
+    },
+    "coverage_by_conformance_id": {"$ref": "#/$defs/coverage"},
+    "normalization_policy_refs": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {"enum": ["NORM-ENV-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001", "NORM-TIME-001"]}
+    },
+    "evidence_status": {"const": "static-not-run"},
+    "source_only": {"const": true},
+    "materialization": {"$ref": "#/$defs/materialization"},
+    "profile": {"$ref": "#/$defs/profilePin"},
+    "pinned_oracle": {"$ref": "#/$defs/oraclePin"},
+    "verification_gates": {"$ref": "#/$defs/verificationGates"},
+    "repository_inputs": {"$ref": "#/$defs/repositoryInputs"},
+    "toolchain": {"$ref": "#/$defs/toolchain"},
+    "platform": {"$ref": "#/$defs/platform"},
+    "classpath": {"$ref": "#/$defs/classpath"},
+    "external_pins": {"$ref": "#/$defs/externalPins"},
+    "environment": {"$ref": "#/$defs/environment"},
+    "bounds": {"$ref": "#/$defs/bounds"},
+    "raw_artifacts": {"$ref": "#/$defs/rawArtifacts"},
+    "comparison": {"$ref": "#/$defs/comparison"},
+    "unavailable_oracle": {"$ref": "#/$defs/unavailableOracle"}
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sha512": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{128}$"
+    },
+    "materialization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_fixture_present", "oracle_evidence_materialized", "observed_run"],
+      "properties": {
+        "source_fixture_present": {"const": true},
+        "oracle_evidence_materialized": {"const": false},
+        "observed_run": {"const": false}
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["TEST-001", "TEST-002", "TEST-004"],
+      "properties": {
+        "TEST-001": {"$ref": "#/$defs/coverageEntry"},
+        "TEST-002": {"$ref": "#/$defs/coverageEntry"},
+        "TEST-004": {"$ref": "#/$defs/coverageEntry"}
+      }
+    },
+    "coverageEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["normalization_policy_refs", "external_runtime_boundary_ids"],
+      "properties": {
+        "normalization_policy_refs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {"enum": ["NORM-ENV-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001", "NORM-TIME-001"]}
+        },
+        "external_runtime_boundary_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["EXT-JVM-001", "EXT-SERVICE-001", "EXT-RMI-001", "EXT-TLS-001", "EXT-PLUGIN-001"]}
+        }
+      }
+    },
+    "profilePin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "sha256", "profile_version", "source_commit"],
+      "properties": {
+        "id": {"const": "jmeter-5.6.3"},
+        "path": {"const": "compat/profiles/jmeter-5.6.3.json"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "profile_version": {"const": 2},
+        "source_commit": {"const": "34a2785748e9e0b14702595e8682c387869deda3"}
+      }
+    },
+    "oraclePin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project", "version", "release_tag", "source_commit", "artifact", "verification"],
+      "properties": {
+        "project": {"const": "Apache JMeter"},
+        "version": {"const": "5.6.3"},
+        "release_tag": {"const": "rel/v5.6.3"},
+        "source_commit": {"const": "34a2785748e9e0b14702595e8682c387869deda3"},
+        "artifact": {"$ref": "#/$defs/artifact"},
+        "verification": {"$ref": "#/$defs/verification"}
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["filename", "format", "url", "digest", "signature"],
+      "properties": {
+        "filename": {"const": "apache-jmeter-5.6.3.zip"},
+        "format": {"const": "zip"},
+        "url": {"const": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip"},
+        "digest": {"$ref": "#/$defs/digest"},
+        "signature": {"$ref": "#/$defs/signature"}
+      }
+    },
+    "digest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "value", "sidecar_url", "digest_gate_id", "sidecar_ref_id"],
+      "properties": {
+        "algorithm": {"const": "SHA-512"},
+        "value": {"const": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076"},
+        "sidecar_url": {"const": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512"},
+        "digest_gate_id": {"const": "GATE-ARTIFACT-SHA512-001"},
+        "sidecar_ref_id": {"const": "jmeter-digest-sidecar"}
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "url", "keys_url", "signing_fingerprint", "status", "required_before_execution", "verification_gate_id"],
+      "properties": {
+        "algorithm": {"const": "OpenPGP"},
+        "url": {"const": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.asc"},
+        "keys_url": {"const": "https://archive.apache.org/dist/jmeter/KEYS"},
+        "signing_fingerprint": {"const": "C4923F9ABFB2F1A06F08E88BAC214CAA0612B399"},
+        "status": {"enum": ["not-verified-static", "verified-observed"]},
+        "required_before_execution": {"const": true},
+        "verification_gate_id": {"const": "GATE-PGP-SIGNATURE-001"}
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["digest_status", "signature_status", "observed_artifact_sha512", "observed_signature_fingerprint", "release_claim_eligible"],
+      "properties": {
+        "digest_status": {"enum": ["profile-recorded-not-run", "verified-observed"]},
+        "signature_status": {"enum": ["not-verified-static", "verified-observed"]},
+        "observed_artifact_sha512": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/sha512"}]},
+        "observed_signature_fingerprint": {"anyOf": [{"type": "null"}, {"type": "string", "pattern": "^[0-9A-F]{40}$"}]},
+        "release_claim_eligible": {"type": "boolean"}
+      }
+    },
+    "repositoryInputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hash_algorithm", "jmeter_rs_source_commit", "source", "lock", "profile"],
+      "properties": {
+        "hash_algorithm": {"const": "SHA-256"},
+        "jmeter_rs_source_commit": {"type": ["null", "string"], "pattern": "^[0-9a-f]{40}$"},
+        "source": {"allOf": [{"$ref": "#/$defs/hashEntries"}, {"contains": {"required": ["path"], "properties": {"path": {"const": "Cargo.toml"}}}, "minContains": 1, "maxContains": 1}, {"contains": {"required": ["path"], "properties": {"path": {"const": "rust-toolchain.toml"}}}, "minContains": 1, "maxContains": 1}]},
+        "lock": {"allOf": [{"$ref": "#/$defs/hashEntries"}, {"contains": {"required": ["path"], "properties": {"path": {"const": "Cargo.lock"}}}, "minContains": 1, "maxContains": 1}]},
+        "profile": {"allOf": [{"$ref": "#/$defs/hashEntries"}, {"contains": {"required": ["path"], "properties": {"path": {"const": "compat/profiles/jmeter-5.6.3.json"}}}, "minContains": 1, "maxContains": 1}]}
+      }
+    },
+    "hashEntries": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256", "role", "observed"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*\\\\)(?!.*(^|/)\\.\\.?(/|$)).+$"},
+          "sha256": {"$ref": "#/$defs/sha256"},
+          "role": {"type": "string", "minLength": 1, "maxLength": 128},
+          "observed": {"const": false}
+        }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rust", "java"],
+      "properties": {
+        "rust": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["channel", "manifest_path", "manifest_sha256", "cargo_lock_sha256", "components", "targets", "status"],
+          "properties": {
+            "channel": {"const": "1.97.1"},
+            "manifest_path": {"const": "rust-toolchain.toml"},
+            "manifest_sha256": {"$ref": "#/$defs/sha256"},
+            "cargo_lock_sha256": {"$ref": "#/$defs/sha256"},
+            "components": {"type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["rustfmt", "clippy"]}},
+            "targets": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "string"}},
+            "status": {"enum": ["pinned-not-run", "observed"]}
+          }
+        },
+        "java": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["distribution", "version", "architecture", "source", "minimum_profile_major", "recommended_profile_major", "status"],
+          "properties": {
+            "distribution": {"const": "temurin"},
+            "version": {"const": "17.0.20"},
+            "architecture": {"const": "x64"},
+            "source": {"type": "string", "minLength": 1},
+            "minimum_profile_major": {"const": 8},
+            "recommended_profile_major": {"const": 17},
+            "status": {"enum": ["declared-not-run", "observed"]}
+          }
+        }
+      }
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["release_image", "target_triple", "declared_targets", "locale", "timezone", "default_charset", "hostname_policy", "filesystem_policy", "network_policy", "process_policy"],
+      "properties": {
+        "release_image": {"type": "string", "minLength": 1},
+        "target_triple": {"type": "string", "minLength": 1},
+        "declared_targets": {"type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": true, "items": {"type": "string"}},
+        "locale": {"const": "en-US"},
+        "timezone": {"const": "UTC"},
+        "default_charset": {"const": "UTF-8"},
+        "hostname_policy": {"type": "string", "minLength": 1},
+        "filesystem_policy": {"type": "string", "minLength": 1},
+        "network_policy": {"type": "string", "minLength": 1},
+        "process_policy": {"type": "string", "minLength": 1}
+      }
+    },
+    "classpath": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "jmeter_distribution", "plugin_pins", "script_engine_pins"],
+      "properties": {
+        "policy": {"type": "string", "minLength": 1},
+        "jmeter_distribution": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["filename", "sha512", "path", "status"],
+          "properties": {
+            "filename": {"const": "apache-jmeter-5.6.3.zip"},
+            "sha512": {"$ref": "#/$defs/sha512"},
+            "path": {"type": "string", "minLength": 1},
+            "status": {"enum": ["pinned-not-staged", "observed"]}
+          }
+        },
+        "plugin_pins": {"type": "array", "maxItems": 16, "items": {"type": "object", "required": ["id", "status"], "properties": {"id": {"type": "string"}, "status": {"type": "string"}}}},
+        "script_engine_pins": {"type": "array", "maxItems": 16, "items": {"type": "object", "required": ["id", "status"], "properties": {"id": {"type": "string"}, "status": {"type": "string"}}}}
+      }
+    },
+    "externalPins": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plugin_pins", "service_pins", "pin_policy"],
+      "properties": {
+        "plugin_pins": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/externalPin"}},
+        "service_pins": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/externalPin"}},
+        "pin_policy": {"type": "string", "minLength": 1}
+      }
+    },
+    "externalPin": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "status"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "status": {"enum": ["unavailable-static", "pinned", "observed"]}
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inherit", "profile_allowlist", "allowlist", "deny_unknown", "secret_values_allowed", "working_directory", "source_date_epoch"],
+      "properties": {
+        "inherit": {"const": false},
+        "profile_allowlist": {"type": "array", "maxItems": 32, "items": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*=.*$"}},
+        "allowlist": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*=.*$"}},
+        "deny_unknown": {"const": true},
+        "secret_values_allowed": {"const": false},
+        "working_directory": {"type": "string", "minLength": 1},
+        "source_date_epoch": {"type": "string", "minLength": 1}
+      }
+    },
+    "bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_manifest_bytes", "max_evidence_bytes", "max_process_output_bytes", "max_artifact_bytes", "max_raw_artifact_bytes", "max_jtl_bytes", "max_log_bytes", "max_diff_entries", "max_diff_bytes", "max_raw_diff_bytes", "max_human_diff_bytes", "max_environment_entries", "max_plugin_pins", "max_service_pins", "max_external_retries", "oracle_timeout_seconds"],
+      "properties": {
+        "max_manifest_bytes": {"type": "integer", "minimum": 1, "maximum": 10485760},
+        "max_evidence_bytes": {"type": "integer", "minimum": 1, "maximum": 10485760},
+        "max_process_output_bytes": {"type": "integer", "minimum": 1, "maximum": 67108864},
+        "max_artifact_bytes": {"type": "integer", "minimum": 1, "maximum": 1073741824},
+        "max_raw_artifact_bytes": {"type": "integer", "minimum": 1, "maximum": 1073741824},
+        "max_jtl_bytes": {"type": "integer", "minimum": 1, "maximum": 1073741824},
+        "max_log_bytes": {"type": "integer", "minimum": 1, "maximum": 1073741824},
+        "max_diff_entries": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "max_diff_bytes": {"type": "integer", "minimum": 1, "maximum": 67108864},
+        "max_raw_diff_bytes": {"type": "integer", "minimum": 1, "maximum": 67108864},
+        "max_human_diff_bytes": {"type": "integer", "minimum": 1, "maximum": 67108864},
+        "max_environment_entries": {"type": "integer", "minimum": 1, "maximum": 256},
+        "max_plugin_pins": {"type": "integer", "minimum": 0, "maximum": 256},
+        "max_service_pins": {"type": "integer", "minimum": 0, "maximum": 256},
+        "max_external_retries": {"type": "integer", "minimum": 0, "maximum": 8},
+        "oracle_timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 3600}
+      }
+    },
+    "rawArtifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["git_tracked", "storage", "root", "retention_days", "references"],
+      "properties": {
+        "git_tracked": {"const": false},
+        "storage": {"type": "string", "minLength": 1},
+        "root": {"type": "string", "minLength": 1},
+        "retention_days": {"type": "integer", "minimum": 1, "maximum": 365},
+        "references": {"type": "array", "maxItems": 32, "items": {"type": "object", "additionalProperties": false, "required": ["id", "kind", "path", "required", "bound", "max_bytes", "sha256", "status"], "properties": {"id": {"type": "string", "minLength": 1}, "kind": {"type": "string", "minLength": 1}, "path": {"type": "string", "pattern": "^oracle-runs/(?!/)(?!.*\\\\)(?!\\.\\.?/)(?!.*/\\.\\.?/)(?!.*\/\\.\\.?$).+$"}, "required": {"type": "boolean"}, "bound": {"enum": ["max_manifest_bytes", "max_evidence_bytes", "max_process_output_bytes", "max_artifact_bytes", "max_raw_artifact_bytes", "max_jtl_bytes", "max_log_bytes", "max_diff_bytes", "max_raw_diff_bytes", "max_human_diff_bytes"]}, "max_bytes": {"type": "integer", "minimum": 1, "maximum": 1073741824}, "sha256": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]}, "status": {"enum": ["not-produced-static", "observed"]}}, "allOf": [{"if": {"properties": {"bound": {"const": "max_manifest_bytes"}}}, "then": {"properties": {"max_bytes": {"maximum": 262144}}}}, {"if": {"properties": {"bound": {"const": "max_evidence_bytes"}}}, "then": {"properties": {"max_bytes": {"maximum": 262144}}}}, {"if": {"properties": {"bound": {"const": "max_process_output_bytes"}}}, "then": {"properties": {"max_bytes": {"maximum": 1048576}}}}, {"if": {"properties": {"bound": {"const": "max_artifact_bytes"}}}, "then": {"properties": {"max_bytes": {"maximum": 134217728}}}}, {"if": {"properties": {"bound": {"const": "max_raw_artifact_bytes"}}}, "then": {"properties": {"max_bytes": {"maximum": 134217728}}}}, {"if": {"properties": {"bound": {"const": "max_jtl_bytes"}}}, "then": {"properties": {"max_bytes": {"maximum": 67108864}}}}, {"if": {"properties": {"bound": {"const": "max_log_bytes"}}}, "then": {"properties": {"max_bytes": {"maximum": 1048576}}}}, {"if": {"properties": {"bound": {"const": "max_diff_bytes"}}}, "then": {"properties": {"max_bytes": {"maximum": 1048576}}}}, {"if": {"properties": {"bound": {"const": "max_raw_diff_bytes"}}}, "then": {"properties": {"max_bytes": {"maximum": 1048576}}}}, {"if": {"properties": {"bound": {"const": "max_human_diff_bytes"}}}, "then": {"properties": {"max_bytes": {"maximum": 8192}}}}]}}
+      }
+    },
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "normalization_policy_refs", "allowed_normalizations", "forbidden_implicit_normalizations", "structured_diff_schema", "structured_diff_path", "raw_diff_path", "human_diff_path", "human_diff_bound", "diff_status_when_unavailable", "comparator_contract"],
+      "properties": {
+        "status": {"enum": ["not-run-static", "observed"]},
+        "normalization_policy_refs": {"$ref": "#/$defs/policyRefs"},
+        "allowed_normalizations": {"type": "array", "maxItems": 32, "items": {"type": "object", "additionalProperties": false, "required": ["field", "kind", "policy", "conformance_ids", "condition"], "properties": {"field": {"type": "string", "minLength": 1}, "kind": {"enum": ["ignored-field", "ignored-line-pattern"]}, "policy": {"enum": ["NORM-ENV-001", "NORM-EXTERNAL-001", "NORM-SECURITY-001", "NORM-TIME-001"]}, "conformance_ids": {"type": "array", "minItems": 1, "maxItems": 3, "uniqueItems": true, "items": {"enum": ["TEST-001", "TEST-002", "TEST-004"]}}, "condition": {"type": "string", "minLength": 1}}}},
+        "forbidden_implicit_normalizations": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"type": "string"}},
+        "structured_diff_schema": {"const": "schemas/normalized-diff.schema.json"},
+        "structured_diff_path": {"type": "string", "pattern": "^oracle-runs/(?!/)(?!.*\\\\)(?!\\.\\.?/)(?!.*/\\.\\.?/)(?!.*\\/\\.\\.?$).+$"},
+        "raw_diff_path": {"type": "string", "pattern": "^oracle-runs/(?!/)(?!.*\\\\)(?!\\.\\.?/)(?!.*/\\.\\.?/)(?!.*\\/\\.\\.?$).+$"},
+        "human_diff_path": {"type": "string", "pattern": "^oracle-runs/(?!/)(?!.*\\\\)(?!\\.\\.?/)(?!.*/\\.\\.?/)(?!.*\\/\\.\\.?$).+$"},
+        "human_diff_bound": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bound", "max_bytes"],
+          "properties": {
+            "bound": {"const": "max_human_diff_bytes"},
+            "max_bytes": {"const": 8192}
+          }
+        },
+        "diff_status_when_unavailable": {"const": "not-produced-with-reason"},
+        "comparator_contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["implementation", "structured_diff_fields", "ignored_field_forms", "ignored_line_pattern_field", "implicit_normalization"],
+          "properties": {
+            "implementation": {"const": "tools/jmeter-oracle/src/compare.rs"},
+            "structured_diff_fields": {"const": ["path", "kind", "expected", "actual"]},
+            "ignored_field_forms": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"type": "string"}},
+            "ignored_line_pattern_field": {"const": "debug_response.dynamic_lines"},
+            "implicit_normalization": {"const": false}
+          }
+        }
+      }
+    },
+    "policyRefs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "NORM-STRUCTURE-001",
+          "NORM-JMX-001",
+          "NORM-JTL-001",
+          "NORM-TIME-001",
+          "NORM-CLI-001",
+          "NORM-CONFIG-001",
+          "NORM-ENV-001",
+          "NORM-REPORT-001",
+          "NORM-EXTERNAL-001",
+          "NORM-SECURITY-001"
+        ]
+      }
+    },
+    "verificationGates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_digest", "pgp_signature", "execution_gate"],
+      "properties": {
+        "artifact_digest": {"$ref": "#/$defs/digestGate"},
+        "pgp_signature": {"$ref": "#/$defs/signatureGate"},
+        "execution_gate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["required_gates", "failure_action", "status"],
+          "properties": {
+            "required_gates": {"const": ["GATE-ARTIFACT-SHA512-001", "GATE-PGP-SIGNATURE-001"]},
+            "failure_action": {"const": "fail-closed-before-unpack-or-execution"},
+            "status": {"const": "not-run-static"}
+          }
+        }
+      }
+    },
+    "digestGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "required", "algorithm", "expected_digest", "sidecar_url", "artifact_ref_id", "sidecar_ref_id", "command", "stdin_format", "status", "observed_digest", "failure_action"],
+      "properties": {
+        "id": {"const": "GATE-ARTIFACT-SHA512-001"},
+        "required": {"const": true},
+        "algorithm": {"const": "SHA-512"},
+        "expected_digest": {"$ref": "#/$defs/sha512"},
+        "sidecar_url": {"const": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512"},
+        "artifact_ref_id": {"const": "jmeter-archive"},
+        "sidecar_ref_id": {"const": "jmeter-digest-sidecar"},
+        "command": {"const": ["sha512sum", "--check", "--status", "-"]},
+        "stdin_format": {"const": "<expected_digest>  <artifact>\n"},
+        "status": {"const": "not-run-static"},
+        "observed_digest": {"type": "null"},
+        "failure_action": {"const": "fail-closed-before-unpack-or-execution"}
+      }
+    },
+    "signatureGate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "required", "algorithm", "signature_url", "keys_url", "required_fingerprint", "keys_ref_id", "signature_ref_id", "artifact_ref_id", "import_command", "command", "required_status_line", "required_status_line_prefix", "status", "observed_fingerprint", "failure_action"],
+      "properties": {
+        "id": {"const": "GATE-PGP-SIGNATURE-001"},
+        "required": {"const": true},
+        "algorithm": {"const": "OpenPGP"},
+        "signature_url": {"const": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.asc"},
+        "keys_url": {"const": "https://archive.apache.org/dist/jmeter/KEYS"},
+        "required_fingerprint": {"const": "C4923F9ABFB2F1A06F08E88BAC214CAA0612B399"},
+        "keys_ref_id": {"const": "jmeter-keys"},
+        "signature_ref_id": {"const": "jmeter-signature"},
+        "artifact_ref_id": {"const": "jmeter-archive"},
+        "import_command": {"const": ["gpg", "--batch", "--homedir", "<ephemeral-gpg-home>", "--import", "<keys>"]},
+        "command": {"const": ["gpg", "--batch", "--homedir", "<ephemeral-gpg-home>", "--status-fd", "1", "--verify", "<signature>", "<artifact>"]},
+        "required_status_line": {"const": "[GNUPG:] VALIDSIG C4923F9ABFB2F1A06F08E88BAC214CAA0612B399"},
+        "required_status_line_prefix": {"const": "[GNUPG:] VALIDSIG C4923F9ABFB2F1A06F08E88BAC214CAA0612B399 "},
+        "status": {"const": "not-run-static"},
+        "observed_fingerprint": {"type": "null"},
+        "failure_action": {"const": "fail-closed-before-unpack-or-execution"}
+      }
+    },
+    "unavailableOracle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["developer_mode", "release_mode", "stable_reason_code", "required_message_fields", "rust_only_result", "profile_promotion"],
+      "properties": {
+        "developer_mode": {"const": "skip-with-clear-reason"},
+        "release_mode": {"const": "fail-closed"},
+        "stable_reason_code": {"const": "oracle-unavailable"},
+        "required_message_fields": {"type": "array", "minItems": 4, "maxItems": 4, "uniqueItems": true, "items": {"enum": ["profile_id", "artifact", "reason", "next_step"]}},
+        "rust_only_result": {"const": "not-a-substitute"},
+        "profile_promotion": {"const": "ineligible"}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"source_only": {"const": true}}},
+      "then": {
+        "properties": {
+          "materialization": {
+            "properties": {"source_fixture_present": {"const": true}, "oracle_evidence_materialized": {"const": false}, "observed_run": {"const": false}}
+          },
+          "pinned_oracle": {
+            "properties": {
+              "verification": {
+                "properties": {
+                  "digest_status": {"const": "profile-recorded-not-run"},
+                  "signature_status": {"const": "not-verified-static"},
+                  "observed_artifact_sha512": {"type": "null"},
+                  "observed_signature_fingerprint": {"type": "null"},
+                  "release_claim_eligible": {"const": false}
+                }
+              }
+            }
+          },
+          "toolchain": {
+            "properties": {
+              "rust": {"properties": {"status": {"const": "pinned-not-run"}}},
+              "java": {"properties": {"status": {"const": "declared-not-run"}}}
+            }
+          },
+          "classpath": {
+            "properties": {
+              "jmeter_distribution": {"properties": {"status": {"const": "pinned-not-staged"}}}
+            }
+          },
+          "raw_artifacts": {
+            "properties": {"references": {"items": {"properties": {"sha256": {"type": "null"}, "status": {"const": "not-produced-static"}}}}}
+          }
+        }
+      }
+    }
+  ]
+}

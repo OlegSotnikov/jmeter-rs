@@ -1,0 +1,70 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-SCRIPT-JAVA-CLASS-LOADING",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored bounded Java Sampler/JUnit Request JMX with absent user classes and explicit classpath descriptors for unavailable-class behavior.",
+    "upstream_plan_copied": false
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter is an external pinned oracle only; no upstream plan, result, binary, compiled class, plugin JAR, or machine path is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true
+  },
+  "runtime": {
+    "java": {
+      "vendor": "recorded by a future oracle runner; not executed by static validation",
+      "version": "Java 8+ required by the profile; Java 17 recommended; exact version pending oracle run",
+      "vm": "recorded by a future oracle runner",
+      "major": null,
+      "target_major": 17
+    },
+    "target_triple": "recorded by a future oracle runner",
+    "os_image": "recorded by a future oracle runner",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "not asserted; hostname saving is disabled",
+    "environment_allowlist": ["LC_ALL=C", "LANG=C", "TZ=UTC"],
+    "plugin_artifacts": [],
+    "plugin_artifact_inventory": {
+      "status": "absent",
+      "paths": [],
+      "reason": "No third-party plugin JAR is supplied. The two descriptor files are static inputs, not plugin artifacts."
+    },
+    "classpath_artifacts": [
+      {"name": "JMeter Java sampler implementation", "artifact_path": "lib/ext/ApacheJMeter_java.jar", "version": "5.6.3", "artifact_sha256": "db08dca730452d63bdc1c11e071713db87c0ee490804a022bb2cb702ac81fc08", "role": "built-in component"},
+      {"name": "JMeter JUnit sampler implementation", "artifact_path": "lib/ext/ApacheJMeter_junit.jar", "version": "5.6.3", "artifact_sha256": "5e7a2c6166998bd1a2349fd94106cd5a7af1b30fe1cab4246d1884a27e2a2eaf", "role": "built-in component"},
+      {"name": "JUnit", "artifact_path": "lib/junit-4.13.2.jar", "version": "4.13.2", "artifact_sha256": "8e495b634469d64fb8acfa3495a065cbacc8a0fff55ce1e31007be4c16dc57d3", "role": "pinned JUnit3/JUnit4 runtime"}
+    ],
+    "script_engines": [],
+    "jmeter_classpath": "profile-pinned Apache JMeter 5.6.3 distribution (SHA-512 checked; PGP verification required before oracle use) plus a future explicitly pinned user classpath; no classpath artifact is checked in"
+  },
+  "inputs": {
+    "plan_sha256": "ca4669ee5c387c81448cb808a41e9ec4bcb98c04a51d3d1ea1f969a4b44bba2e",
+    "property_path": "oracle.properties",
+    "property_sha256": "7cae683b78c5755e50e38f2ae79b35436184f380de0a4a8d604810c192301505",
+    "input_files": [
+      {"path": "inputs/java-sampler-class.properties", "sha256": "acaffec950d7ca1d6e2aa473a81e6415f726ee0e23886eb7a7fac17b619b89a6", "max_bytes": 512, "max_lines": 16},
+      {"path": "inputs/junit-class.properties", "sha256": "0bf73e4351fd0ba0e9f137491fab120d2df7c03ba7177c6c4c08a257f84da0de", "max_bytes": 512, "max_lines": 16},
+      {"path": "inputs/junit4-class.properties", "sha256": "85515f45f5306433d70a062c4f42bf82209ed2610982c0a33ff2a5962367edfe", "max_bytes": 512, "max_lines": 16}
+    ],
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  }
+}

@@ -1,0 +1,23 @@
+[package]
+name = "jmeter-rs-java-bridge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Local bounded wire contract; no async runtime, JVM bindings, or native ABI.
+jmeter-rs-bridge-protocol = { version = "0.1.0", path = "../bridge-protocol" }
+# nix 0.31.3 (MIT, MSRV 1.69); use only its safe process-group signal wrapper.
+nix = { version = "=0.31.3", default-features = false, features = ["process", "signal"] }
+
+[[bin]]
+name = "jmeter-rs-java-bridge-fake-worker"
+path = "src/bin/fake-worker.rs"

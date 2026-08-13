@@ -1,0 +1,66 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-FUNCTIONS-FILES-CONCURRENCY",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored bounded two-user JMX covering shared function-definition state, two independent StringFromFile occurrences, CSV cursor use, unordered thread mapping, and finite EOF behavior.",
+    "upstream_plan_copied": false
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter is an external pinned oracle only; no upstream plan, result, binary, or machine path is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true
+  },
+  "runtime": {
+    "java": {
+      "vendor": null,
+      "version": null,
+      "vm": null,
+      "major": null
+    },
+    "target_triple": null,
+    "os_image": null,
+    "future_recording": {
+      "target_triple": "required on a future oracle run",
+      "os_image": "required on a future oracle run"
+    },
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "jvm_charset_requirement": {
+      "file_encoding": "UTF-8",
+      "required": true,
+      "verification": "A future oracle runner must verify JVM file.encoding=UTF-8 before execution; this static corpus does not infer it from the process locale."
+    },
+    "hostname_policy": "not asserted; hostname saving is disabled",
+    "environment_allowlist": ["LC_ALL=en_US.UTF-8", "LANG=en_US.UTF-8", "TZ=UTC"],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "profile-pinned Apache JMeter 5.6.3 distribution (SHA-512 checked; PGP verification required before oracle use) when an oracle run is explicitly requested"
+  },
+  "inputs": {
+    "plan_sha256": "e86026ad93b14d02d21283c5902f40cfc785f19075719a31d1620603f9c2c844",
+    "property_sha256": "095c5d583b2401ae530bb74eaf070be96d2bf1490a53eb5b21d5bd9f21f0f981",
+    "input_files": [
+      {"path": "inputs/lines.txt", "sha256": "3ef30b67e7b9fd6b53b65079bcd18f76f6bf6cbe23d36ef862ea82b0f96f7264", "max_bytes": 128},
+      {"path": "inputs/rows.csv", "sha256": "c5b69a630f520e4e64cf9a5931051f8d63a6e5547a827465bdc7482b8c35bb31", "max_bytes": 128}
+    ],
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  }
+}

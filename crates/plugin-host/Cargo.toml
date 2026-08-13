@@ -1,0 +1,34 @@
+[package]
+name = "jmeter-rs-plugin-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# The worker wire contract is versioned independently from process policy.
+jmeter-rs-bridge-protocol = { version = "0.1.0", path = "../bridge-protocol" }
+# nix 0.31.3 (MIT, MSRV 1.69) provides the safe process-group signal wrapper
+# and file-descriptor flags used to make pipe I/O cancellable; std has no safe
+# killpg/fcntl API.  It has no native build step here and no libc/unsafe or
+# external-process boundary is introduced.
+nix = { version = "=0.31.3", default-features = false, features = ["fs", "process", "signal"] }
+# Manifest and worker payloads are deliberately data-only JSON.  Serde keeps
+# unknown fields available to callers while serde_json avoids introducing a
+# network/runtime dependency at this process boundary.
+serde = { version = "=1.0.229", default-features = false, features = ["derive", "std"] }
+serde_json = { version = "=1.0.151", default-features = false, features = ["std"] }
+# sha2 0.11.0 (MIT OR Apache-2.0, MSRV 1.85) provides a streaming SHA-256
+# digest for executable revalidation; std has no cryptographic digest API.
+sha2 = { version = "=0.11.0", default-features = false }
+
+[[bin]]
+name = "plugin-host-test-helper"
+path = "src/bin/plugin-host-test-helper.rs"

@@ -1,0 +1,136 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-DISTRIBUTED-RMI",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored bounded JMX, property, and expectation schemas for the Apache JMeter 5.6.3 distributed/RMI boundary. Worker data probes, a worker-local classpath marker, client decoys, certificates, logs, JTLs, and runner code are deliberately kept separate from runtime evidence. SSL name/value pairs use typed protected path and secret references with explicit -D<name>=<value> materialization and cleanup contracts.",
+    "change_note": "Corrected sender coverage to the nine selectable factory aliases, added Hold class-load/FQCN-constructor negatives, lowercase and unknown/empty mode contracts, client/server property ownership, and marked Asynch/StrippedAsynch end-of-test ordering as source observation rather than completion proof until a positive SenderDrainProof hook exists. Added callback/delivered-event ordinal domains, lifecycle overload and ProcessBatch delivery-kind descriptors, event/byte EventAck counts, closed terminal accounting, typed retry dispositions, replaced SSL literals with protected channel references, and refreshed SHA-256 provenance; no oracle execution was performed.",
+    "upstream_plan_copied": false
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter is a pinned external oracle only; no upstream plan, result, binary, Java class, worker data, or key material is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true
+  },
+  "runtime": {
+    "java": {
+      "vendor": "not provisioned for this static task",
+      "version": "not provisioned for this static task",
+      "vm": "not provisioned for this static task",
+      "major": 0
+    },
+    "target_triple": "x86_64-unknown-linux-gnu",
+    "os_image": "Ubuntu 24.04 (noble), Linux x86_64; static validation only",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "loopback-only; hostname output is normalized and not asserted",
+    "environment_allowlist": ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL=en_US.UTF-8", "LANG=en_US.UTF-8", "TZ=UTC", "RMI_HOST_DEF=127.0.0.1"],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "not executed; an external run must provision the profile-pinned Apache JMeter 5.6.3 distribution (SHA-512 checked; PGP verification required before oracle use)",
+    "classpath_artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076"
+  },
+  "inputs": {
+    "plan_sha256": "2f15a65c891e4db5643284dbe058327cc862db9af4636ab84635dd260f0ea504",
+    "property_sha256": {
+      "properties/client.properties": "eee5af224495581651c177167281113f5b711a484d7218a9cc8404daf1e6ba9b",
+      "properties/client-ssl.properties": "9b27fa866b4e3f6d05386bd099254cf18393836e919ad9984ca8a7a5f9d02dab",
+      "properties/client-failure.properties": "82fd188ed8d0668e17c8e488ee6c68c138317a56c2c36f4b2459fee0925609eb",
+      "properties/client-continue.properties": "0a7f4253655c2bbe99897d2ab97d6eb8dcca3bcddd01d84bf21a1d3dbe96e41f",
+      "properties/senders.properties": "882c250fb37fedd2b2014ec1829dc91f23777ab78cd0c4466b5429ed6fb12ce9",
+      "properties/stop.properties": "76f207c45bc25e5425899bc0526501e0142efdc02fbd71cde085645c030c9504",
+      "properties/server.properties": "04a49ac0e4693f1a5ac582f7ae105e59425cd7f52a3881b16ef5e96c2bfa89f0",
+      "properties/server-ssl.properties": "72356cd5ec9871cac0fca1b5de6d972f4467a28294579212589d250c7a24f53c"
+    },
+    "static_input_sha256": {
+      "inputs/worker-a/worker-local.txt": "ef0497762562cfe06883d468636f21c376b717b97b1e06b0ae44796d21c5335d",
+      "inputs/worker-b/worker-local.txt": "6e48a52a3c5e09659d80c87fdf787a59be97a683528ad6e20693ce748715a3d1",
+      "inputs/dependencies/fixture-dependency.marker": "e46f5df9a579a90907964c0f6615081ddbc26509b05c9696180fb5d673a897c8",
+      "inputs/dependencies/worker-classpath/fixture-dependency.marker": "e46f5df9a579a90907964c0f6615081ddbc26509b05c9696180fb5d673a897c8",
+      "inputs/client/worker-local.txt": "8646f5587804ea16ad099c76da4a516c0eaa45a54cc8faaf41016b29c2aaf7cd",
+      "inputs/client/fixture-dependency.marker": "17fa149883244d63de1187feb26624b1d3ef73297a9fb09f865b4533a2b4c31a",
+      "inputs/ssl/README.md": "2447020a6ef056774ac0dc94481bb9e1cb14a44956ae36024b002528f51f64b0"
+    },
+    "expected_sha256": {
+      "expected/basic.json": "ad8082e5ddce1355bbc39d6df8a4a3a8aa37b2edf35d3a14aad00950ab4ad890",
+      "expected/failure.json": "54c1c263053522ffea0d9938ac24877309f7ac5bf62fc6cd4e894b7d16983aea",
+      "expected/global-properties.json": "7282c48cd8ef69728f12759f376b29516268b8d989b68cd3b6f760241ad59ba2",
+      "expected/semantic.json": "9146e657393735d02842b04a7f0e344c288ee72607622449a60cf1a65f105c7e",
+      "expected/senders.json": "03c995bb3865cbfdee08f6ab184e057b2fabc0f7c6a473c9f1a84d23499a3507",
+      "expected/ssl.json": "b1cb36bda0d7858ebcae66bfba831dfdbae21b75b9c6f3b846f994f089897231",
+      "expected/stop-remote-exit.json": "d42e956ed0d0fb62e37b7cfc13a00a73ab7f383a730684809eca2aed61e26f30",
+      "expected/stop-shutdown.json": "152051496c797b4428b2e84953f596f53dfe0d4fb18d0b5646c34618e172e9ee",
+      "expected/stop-stoptest.json": "33a90b2c83377b463bb73a9f7c93fbc1db22fa6ea97f8cf65c150325f02fbd14",
+      "expected/stop.json": "0d895e94879c525b77c62a48b2bc6c99b1cb48d2ed88d7068390e996b6eccc4f"
+    },
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  },
+  "fixture_origin": {
+    "static_files": [
+      "plan.jmx",
+      "stop-plan.jmx",
+      "properties/*.properties",
+      "expected/*.json",
+      "inputs/worker-a/worker-local.txt",
+      "inputs/worker-b/worker-local.txt",
+      "inputs/dependencies/fixture-dependency.marker",
+      "inputs/dependencies/worker-classpath/fixture-dependency.marker",
+      "inputs/client/worker-local.txt",
+      "inputs/client/fixture-dependency.marker",
+      "inputs/ssl/README.md",
+      "inputs/README.md",
+      "case.json",
+      "provenance.json"
+    ],
+    "worker_data": "Original seed files are committed under inputs/worker-a and inputs/worker-b; an external runner must stage each distinct one-line value in its corresponding worker root. Client decoys are retained separately and must not be staged on workers.",
+    "dependency_inputs": "The committed fixture-dependency.marker and worker-classpath probe are harmless text provenance markers referenced by the JMX CSVDataSet/classpath fields; no JAR, plugin, or executable dependency is transferred or redistributed.",
+    "keystores": "Not committed; inputs/ssl/README.md records typed protected JKS path/secret channels, store type, alias, and certificate identities; an external runner must generate temporary stores with the pinned JDK keytool, resolve them only inside the isolated run root, and erase resolved material during cleanup.",
+    "jtl_and_logs": "Not committed; raw run roots are local evidence only.",
+    "runner": "Not materialized in this static corpus; no shell runner, cleanup command, Java process, or network operation is part of this change."
+  },
+  "additional_static_inputs": {
+    "stop-plan.jmx": {
+      "sha256": "006b55bb93909ac17337e2c69f031e7d7277f8c2b3a77c5da1309841a4b0f569",
+      "role": "secondary bounded stop-plan input"
+    }
+  },
+  "oracle_execution": {
+    "status": "not-run",
+    "reason": "The pinned Java/JMeter runtime is not provisioned for this task, and the task is restricted to safe static inputs. The profile remains external/planned as declared.",
+    "raw_artifacts": "none",
+    "expected_projections": "schema-only; no fabricated oracle values"
+  },
+  "distributed_boundary": {
+    "external_runtime_boundary_ids": ["EXT-RMI-001", "EXT-TLS-001"],
+    "compatibility_ids": ["DIST-001", "DIST-002", "DIST-003", "DIST-004"],
+    "workers": 2,
+    "bind_address": "127.0.0.1",
+    "port_model": {"base": 1099, "block_size": 8, "worker_registries": ["base+0", "base+1"], "worker_engines": ["base+2", "base+3"], "client_rmi_localport": "base+4", "derived_thread_listener": "client.rmi.localport+1 (base+5)", "derived_sample_listener": "client.rmi.localport+2 (base+6)", "controller_udp": "base+7", "controller_udp_commands": ["Shutdown", "StopTestNow"], "remote_hosts_override": "127.0.0.1:base+0,127.0.0.1:base+1"},
+    "startup_retry_properties": {"client.tries": 3, "client.retries_delay": 250, "attempt_semantics": "one initial attempt plus two retries", "max_retries": 2, "max_total_attempts": 3},
+    "partial_failure_injection": {"failure_type": "startup-connect-exception", "withheld_worker": "worker-b", "registry": "127.0.0.1:<base+1>", "engine": "127.0.0.1:<base+3>", "action": "do-not-start-worker-b-registry-or-engine", "startup_exception_class": "java.rmi.ConnectException", "observed": false},
+    "data_transfer_rule": "JMX is sent to every worker; worker-local files and dependencies are references only.",
+    "sample_sender_names": ["Standard", "DiskStore", "StrippedDiskStore", "Batch", "Statistical", "Stripped", "StrippedBatch", "Asynch", "StrippedAsynch"],
+    "unsupported_sender_negatives": [
+      {"name": "Hold", "category": "built-in-class-not-an-alias", "class_load": "class-present", "factory_alias": false},
+      {"name": "org.apache.jmeter.samplers.HoldSampleSender", "category": "fqcn-public-constructor-unavailable", "class_load": "class-present", "public_constructor": false}
+    ],
+    "rmi_host_configuration": {"environment": "RMI_HOST_DEF=127.0.0.1", "client_and_worker_jvm_property": "-Djava.rmi.server.hostname=127.0.0.1", "jmeter_property_file_key": "absent"}
+  }
+}

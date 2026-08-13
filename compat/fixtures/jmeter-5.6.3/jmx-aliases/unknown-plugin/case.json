@@ -1,0 +1,40 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-JMX-UNKNOWN-PLUGIN",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-PLUGIN-001",
+  "conformance_ids": ["JMX-001", "JMX-002", "JMX-004"],
+  "normalization_policy_refs": ["NORM-JMX-001", "NORM-STRUCTURE-001", "NORM-EXTERNAL-001"],
+  "external_runtime_boundary_ids": ["EXT-PLUGIN-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "56469835d579c692d3440bf2cb2c5a7005904b027882b48ac03d75ad43c7dae3"
+  },
+  "property_files": [{
+    "path": "oracle.properties",
+    "sha256": "600315b4d43d16a99544d785e4fbf7ed283f6504c1d5cde6ff5b4f8f44419c35"
+  }],
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/jmx-aliases/unknown-plugin",
+    "mode": "nongui",
+    "argv_template": ["jmeter", "-n", "-q", "oracle.properties", "-t", "plan.jmx", "-l", "<ignored>/oracle.jtl", "-j", "<ignored>/oracle.log"],
+    "network": "none",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null
+  },
+  "execution": {
+    "status": "external-unavailable; static-only; plugin oracle not executed",
+    "process_exit": 0,
+    "sample_count": 0,
+    "raw_artifacts": "oracle-runs/jmx-aliases/unknown-plugin/ (ignored; no artifacts committed)",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "The com.example.jmeter classes are deliberately nonexistent fixture identities; no plugin JAR, Java classloader, JVM, or subprocess is supplied or invoked.",
+    "This case proves preservation and explicit external-boundary accounting only. It does not claim that an arbitrary Java plugin can execute natively.",
+    "process_exit=0 and sample_count=0 are schema placeholders, not oracle evidence."
+  ]
+}

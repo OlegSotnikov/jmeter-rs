@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="ELEM-001 external sampler inventory" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="External placeholders" enabled="true">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="EXTERNAL_FIXTURE_STATUS" elementType="Argument">
+            <stringProp name="Argument.name">EXTERNAL_FIXTURE_STATUS</stringProp>
+            <stringProp name="Argument.value">external-unavailable</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="EXTERNAL_PLACEHOLDER" elementType="Argument">
+            <stringProp name="Argument.name">EXTERNAL_PLACEHOLDER</stringProp>
+            <stringProp name="Argument.value">not-configured</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+      <collectionProp name="TestPlan.thread_groups"/>
+      <stringProp name="TestPlan.comments">Original bounded descriptors for FTP, JDBC, Java, LDAP, LDAP Extended, and TCP. HTTP is intentionally excluded from this ELEM-001 case.</stringProp>
+      <stringProp name="TestPlan.user_define_classpath"></stringProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="One external inventory user" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="One bounded iteration" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">1</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">1</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">0</stringProp>
+        <longProp name="ThreadGroup.start_time">0</longProp>
+        <longProp name="ThreadGroup.end_time">0</longProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+        <stringProp name="ThreadGroup.duration"></stringProp>
+        <stringProp name="ThreadGroup.delay"></stringProp>
+      </ThreadGroup>
+      <hashTree>
+        <FTPSampler guiclass="FtpTestSamplerGui" testclass="FTPSampler" testname="FTP request requires service adapter" enabled="false">
+          <stringProp name="FTPSampler.server">ftp.external.invalid</stringProp>
+          <stringProp name="FTPSampler.port">21</stringProp>
+          <stringProp name="FTPSampler.filename">/fixture/input.dat</stringProp>
+          <stringProp name="FTPSampler.localfilename"></stringProp>
+          <stringProp name="FTPSampler.inputdata">fixture-upload-payload</stringProp>
+          <boolProp name="FTPSampler.binarymode">true</boolProp>
+          <boolProp name="FTPSampler.upload">false</boolProp>
+          <boolProp name="FTPSampler.saveresponse">false</boolProp>
+          <stringProp name="ConfigTestElement.username">${EXTERNAL_PLACEHOLDER}</stringProp>
+          <stringProp name="ConfigTestElement.password">${EXTERNAL_PLACEHOLDER}</stringProp>
+        </FTPSampler>
+        <hashTree/>
+
+        <JDBCSampler guiclass="TestBeanGUI" testclass="JDBCSampler" testname="JDBC request requires driver and database" enabled="false">
+          <stringProp name="dataSource">external-datasource</stringProp>
+          <stringProp name="queryType">Select Statement</stringProp>
+          <stringProp name="query">SELECT 1</stringProp>
+          <stringProp name="queryArguments"></stringProp>
+          <stringProp name="queryArgumentsTypes"></stringProp>
+          <stringProp name="variableNames">fixture_value</stringProp>
+          <stringProp name="resultSetHandler">Store as String</stringProp>
+          <stringProp name="resultVariable"></stringProp>
+          <stringProp name="queryTimeout">1</stringProp>
+          <stringProp name="resultSetMaxRows">1</stringProp>
+        </JDBCSampler>
+        <hashTree/>
+
+        <JavaSampler guiclass="JavaTestSamplerGui" testclass="JavaSampler" testname="Java request requires user class" enabled="false">
+          <stringProp name="classname">com.example.jmeter.ExternalJavaSampler</stringProp>
+          <elementProp name="arguments" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="Java request arguments" enabled="false">
+            <collectionProp name="Arguments.arguments"/>
+          </elementProp>
+        </JavaSampler>
+        <hashTree/>
+
+        <LDAPSampler guiclass="LdapTestSamplerGui" testclass="LDAPSampler" testname="LDAP request requires directory service" enabled="false">
+          <stringProp name="servername">ldap.external.invalid</stringProp>
+          <stringProp name="port">389</stringProp>
+          <stringProp name="rootdn">dc=fixture,dc=invalid</stringProp>
+          <stringProp name="test">search</stringProp>
+          <stringProp name="add">cn=fixture,ou=people,dc=fixture,dc=invalid</stringProp>
+          <stringProp name="modify">cn=fixture,ou=people,dc=fixture,dc=invalid</stringProp>
+          <stringProp name="delete">cn=fixture,ou=people,dc=fixture,dc=invalid</stringProp>
+          <stringProp name="search">ou=people,dc=fixture,dc=invalid</stringProp>
+          <stringProp name="searchfilter">(uid=fixture)</stringProp>
+          <boolProp name="user_defined">false</boolProp>
+          <elementProp name="arguments" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="LDAP user-defined arguments" enabled="false">
+            <collectionProp name="Arguments.arguments"/>
+          </elementProp>
+          <stringProp name="base_entry_dn">ou=people,dc=fixture,dc=invalid</stringProp>
+          <stringProp name="ConfigTestElement.username">${EXTERNAL_PLACEHOLDER}</stringProp>
+          <stringProp name="ConfigTestElement.password">${EXTERNAL_PLACEHOLDER}</stringProp>
+        </LDAPSampler>
+        <hashTree/>
+
+        <LDAPExtSampler guiclass="LdapExtTestSamplerGui" testclass="LDAPExtSampler" testname="LDAP extended request requires directory service" enabled="false">
+          <stringProp name="servername">ldap.external.invalid</stringProp>
+          <stringProp name="port">389</stringProp>
+          <stringProp name="secure">false</stringProp>
+          <stringProp name="trustall">false</stringProp>
+          <stringProp name="rootdn">dc=fixture,dc=invalid</stringProp>
+          <stringProp name="test">search</stringProp>
+          <stringProp name="search">ou=people,dc=fixture,dc=invalid</stringProp>
+          <stringProp name="searchfilter">(uid=fixture)</stringProp>
+          <elementProp name="arguments" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="LDAP extended arguments" enabled="false">
+            <collectionProp name="Arguments.arguments"/>
+          </elementProp>
+          <elementProp name="ldaparguments" elementType="LDAPArguments" guiclass="ArgumentsPanel" testclass="LDAPArguments" testname="LDAP attribute arguments" enabled="false">
+            <collectionProp name="Arguments.arguments"/>
+          </elementProp>
+          <stringProp name="base_entry_dn">ou=people,dc=fixture,dc=invalid</stringProp>
+          <!-- LdapExtConfigGui persists the selected scope index; 2 is SUBTREE. -->
+          <stringProp name="scope">2</stringProp>
+          <stringProp name="countlimit">1</stringProp>
+          <stringProp name="timelimit">1</stringProp>
+          <stringProp name="attributes">uid</stringProp>
+          <stringProp name="return_object">false</stringProp>
+          <stringProp name="deref_aliases">false</stringProp>
+          <stringProp name="user_dn">${EXTERNAL_PLACEHOLDER}</stringProp>
+          <stringProp name="user_pw">${EXTERNAL_PLACEHOLDER}</stringProp>
+          <stringProp name="sbind">false</stringProp>
+          <stringProp name="compare">false</stringProp>
+          <stringProp name="connection_timeout">1000</stringProp>
+          <stringProp name="comparedn"></stringProp>
+          <stringProp name="comparefilt"></stringProp>
+          <stringProp name="parseflag">false</stringProp>
+          <stringProp name="rename">false</stringProp>
+          <stringProp name="modddn"></stringProp>
+          <stringProp name="newdn"></stringProp>
+        </LDAPExtSampler>
+        <hashTree/>
+
+        <TCPSampler guiclass="TCPSamplerGui" testclass="TCPSampler" testname="TCP request requires endpoint" enabled="false">
+          <stringProp name="TCPSampler.server">tcp.external.invalid</stringProp>
+          <stringProp name="TCPSampler.port">9000</stringProp>
+          <stringProp name="TCPSampler.filename"></stringProp>
+          <stringProp name="TCPSampler.classname">com.example.tcp.ExternalClient</stringProp>
+          <boolProp name="TCPSampler.nodelay">true</boolProp>
+          <stringProp name="TCPSampler.timeout">1000</stringProp>
+          <stringProp name="TCPSampler.ctimeout">1000</stringProp>
+          <stringProp name="TCPSampler.request">fixture-request</stringProp>
+          <boolProp name="TCPSampler.reUseConnection">false</boolProp>
+          <boolProp name="TCPSampler.closeConnection">true</boolProp>
+          <stringProp name="TCPSampler.soLinger"></stringProp>
+          <stringProp name="TCPSampler.EolByte">10</stringProp>
+          <stringProp name="ConfigTestElement.username">${EXTERNAL_PLACEHOLDER}</stringProp>
+          <stringProp name="ConfigTestElement.password">${EXTERNAL_PLACEHOLDER}</stringProp>
+        </TCPSampler>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

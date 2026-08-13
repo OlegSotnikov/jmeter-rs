@@ -1,0 +1,50 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-TIMER-GAUSSIAN-RANDOM",
+  "format": "jmx-semantic",
+  "evidence_status": "planned",
+  "source": {
+    "kind": "original-static-contract",
+    "oracle_status": "not-run",
+    "note": "No JMeter or Java process was run while creating this corpus."
+  },
+  "timer_contract": {
+    "kind": "gaussian-random",
+    "testclass": "GaussianRandomTimer",
+    "properties": {
+      "ConstantTimer.delay": "20",
+      "RandomTimer.range": "5.0"
+    },
+    "base_delay_ms": 20,
+    "range_parameter": 5,
+    "underlying_distribution": {
+      "kind": "normal",
+      "support_ms": [null, null],
+      "support_semantics": "unbounded on both sides before timer delay conversion"
+    },
+    "emitted_delay_bounds_ms": [0, null],
+    "delay_bound_semantics": "The effective wait applied before this sampler is non-negative; raw Gaussian Timer.delay() output and the underlying normal variate remain unbounded below.",
+    "labels": [
+      "gaussian-sample"
+    ],
+    "planned_sample_count": 24,
+    "observed_sample_count": null,
+    "sample_count_asserted": false
+  },
+  "normalization": {
+    "ignored_fields": [],
+    "timing_tolerances": {
+      "enforcement": "descriptor-only",
+      "comparator_enforced": false,
+      "sample.t": {"comparison": "descriptor-only", "allowed_variance": "oracle-pending"},
+      "sample.it": {"comparison": "descriptor-only", "allowed_variance": "oracle-pending"},
+      "sample.lt": {"comparison": "descriptor-only", "allowed_variance": "oracle-pending"},
+      "sample.ct": {"comparison": "descriptor-only", "allowed_variance": "oracle-pending"},
+      "sample.ts": {"comparison": "descriptor-only", "allowed_variance": "oracle-pending"}
+    },
+    "byte_policy": {"bytes": "retained; no normalization", "sent_bytes": "retained; no normalization"},
+    "reason": "Static JMX contract only; raw Gaussian timer values are unbounded below while the effective pre-sampler wait is lower-bounded at zero. No JTL output is asserted."
+  }
+}

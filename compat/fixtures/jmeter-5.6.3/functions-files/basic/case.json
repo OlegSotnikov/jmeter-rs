@@ -1,0 +1,71 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-FUNCTIONS-FILES-BASIC",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-FUNCTIONS-001",
+  "conformance_ids": ["FUNC-001", "FUNC-002", "JTL-001", "TEST-001"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-JTL-001", "NORM-TIME-001", "NORM-ENV-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "6641ec963f1613142ea5d8cd8ab5a0519da031405600d92931c9ff67bd21c967"
+  },
+  "property_files": [{
+    "path": "oracle.properties",
+    "sha256": "528dee963672b5790ae1cd763360e0a72b56ab48f5bb378ba69f1f99b24cdb57"
+  }],
+  "command": {
+    "working_directory": "<case-root>",
+    "working_directory_scope": "runner resolves <case-root> to this case directory before chdir; every relative plan, property, input, and output path is resolved below it",
+    "input_paths_relative_to": "working_directory",
+    "output_paths_relative_to": "working_directory",
+    "mode": "nongui",
+    "argv_template": ["jmeter", "-n", "-q", "oracle.properties", "-t", "plan.jmx", "-l", "<ignored>/oracle.jtl", "-j", "<ignored>/oracle.log"],
+    "network": "none",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "jvm_requirements": {
+      "file_encoding": "UTF-8",
+      "required": true,
+      "verification": "A future oracle runner must verify JVM file.encoding=UTF-8 before execution; this static corpus does not infer it from the process locale."
+    },
+    "random_seed": null
+  },
+  "bounds": {
+    "schema_id": "jmeter-rs.fixture-bounds",
+    "schema_version": 1,
+    "enforcement": "declared; not runtime-enforced by this static corpus",
+    "max_threads": 1,
+    "max_iterations_per_thread": 3,
+    "max_samplers_per_iteration": 1,
+    "max_samples": 3,
+    "max_input_bytes": 512,
+    "max_output_files": 2,
+    "max_output_bytes": 128,
+    "max_label_bytes": 1024
+  },
+  "execution": {
+    "status": "not_run",
+    "process_exit": null,
+    "process_exit_asserted": false,
+    "sample_count": null,
+    "sample_count_status": "planned-from-topology",
+    "sample_count_asserted": false,
+    "raw_artifacts": "oracle-runs/functions-files/basic/ (ignored; not generated in this task)",
+    "expected": [
+      "expected/semantic.json",
+      {
+        "path": "expected/string-to-file-artifacts.json",
+        "sha256": "4c33401f69a6cf482359dbc483d781f4f24c233383973d3eb7adce059e150bdb"
+      }
+    ]
+  },
+  "limitations": [
+    "This manifest is a static corpus declaration; this task does not launch Java, JMeter, or a subprocess.",
+    "The output directory is case-local and ignored; the plan never names a machine path or ambient file.",
+    "The UDV and sampler StringFromFile occurrences intentionally share inputs/lines.txt so occurrence identity is observable.",
+    "The pinned JMeter 5.6.3 function documentation states that an unbounded StringFromFile sequence restarts at the beginning after EOF; the third iteration is therefore a source-backed recycle declaration, but no runtime oracle evidence is claimed.",
+    "Timing, byte counts, and Debug Sampler runtime lines are normalized; labels, line-valued file results, error sentinels, and XPath values remain observable. Multiline UTF-8/default/UTF-16 reads remain exact input and future-artifact contracts because the current debug projection parser cannot assert embedded newlines without loss."
+  ]
+}

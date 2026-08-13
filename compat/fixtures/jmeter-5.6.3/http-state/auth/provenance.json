@@ -1,0 +1,67 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-HTTP-STATE-AUTH",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored local JMX and loopback endpoint contract for HTTP AuthManager state.",
+    "upstream_plan_copied": false
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter is an external pinned oracle; no upstream plan, result, or binary is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "sha512_verified_before_execution": true
+  },
+  "runtime": {
+    "java": {
+      "vendor": "not executed",
+      "version": "not executed",
+      "vm": "not executed",
+      "major": 17
+    },
+    "target_triple": "not executed",
+    "os_image": "not executed",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "hostname_policy": "loopback host only; not asserted",
+    "environment_allowlist": [
+      "LC_ALL=C",
+      "LANG=C",
+      "TZ=UTC"
+    ],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "only the pinned Apache JMeter 5.6.3 distribution when oracle execution is enabled",
+    "classpath_artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076"
+  },
+  "harness_contract": "../harness-contract.md",
+  "server_policy": "stdlib-only, loopback-only, port 0 or 1024..65535, atomic endpoint readiness, bounded idle/session/request/trace limits, no PID authority; dummy Basic/Digest values are redacted",
+  "inputs": {
+    "plan_sha256": "b368b7b8c930c54c73b5d883ee654afc8e0439022c231c4729cb05fb4cc0cc77",
+    "property_sha256": "4de39c0a9daaeacdff4e2bc10fe3b1045cc4edb6fa7e7ee5754b8ff5f415388c",
+    "public_network_used": false,
+    "secrets_or_credentials": false,
+    "server_source": "../server.py",
+    "server_sha256": "fb4ecb84a7e7525e3b07876600b232bc36e6790ae2e8bb2f8628e82259203dd4",
+    "expected_sha256": {
+      "expected/contract.json": "865dec3ce616ec99f07ca61ba049d1edef1e658ade025b0bda046b6cd191702f"
+    },
+    "server_policy": "stdlib-only, loopback-only, finite trace cap plus bounded idle/session watchdog, no ambient proxy/network, no PID-based lifecycle; Basic/Digest challenge retries remain unobserved until pinned oracle execution; contract and expected SHA-256 references are pinned in case.json source_references.",
+    "harness_sha256": "c5c6ea0938a9583f79b5fc7936a36317f47bc4dbc2a05f95ae5280406f75b88e"
+  }
+}

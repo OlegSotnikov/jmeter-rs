@@ -1,0 +1,93 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-GUI-STATIC-WORKBENCH-MIGRATION",
+  "evidence_status": "not-run",
+  "normalization_policy_refs": ["NORM-JMX-001", "NORM-STRUCTURE-001", "NORM-EXTERNAL-001"],
+  "source": {
+    "kind": "original-static-descriptor",
+    "oracle_status": "not-run",
+    "runtime_observations": false,
+    "note": "No Java, JMeter, JVM, GUI, display server, or subprocess was run while creating this corpus."
+  },
+  "validation_contract": {
+    "contract_version": 1,
+    "comparator_enforced": false,
+    "comparator_id": null,
+    "comparator_route": "static-descriptor",
+    "validator_scope": "static schema, profile-reference, XML topology, disabled-content, and input-hash checks only",
+    "comparator_scope": "JMX WorkBench migration comparison is not implemented; this descriptor is a pinned source-derived expectation, not captured saved JMX evidence",
+    "activation": "Enable comparison only after a dedicated JMX WorkBench comparator and pinned oracle evidence are recorded."
+  },
+  "status": "planned; static expectation only",
+  "format": "jmx-semantic",
+  "source_topology": {
+    "root_pairs": ["TestPlan", "WorkBench"],
+    "workbench_child_pairs": ["Arguments"],
+    "workbench_empty": false
+  },
+  "migrated_topology": {
+    "root_pairs": ["TestPlan"],
+    "test_plan_child_pairs": ["TestFragmentController"],
+    "fragment_child_pairs": ["Arguments"],
+    "workbench_root_sibling": "discarded after migration"
+  },
+  "migrated_nodes": [
+    {
+      "path": "hashTree/TestPlan/hashTree/TestFragmentController",
+      "tag": "TestFragmentController",
+      "guiclass": "TestFragmentControllerGui",
+      "testclass": "TestFragmentController",
+      "testname": "WorkBench Test Fragment",
+      "enabled": "false",
+      "child_pairs": ["Arguments"]
+    },
+    {
+      "path": "hashTree/TestPlan/hashTree/TestFragmentController/hashTree/Arguments",
+      "tag": "Arguments",
+      "guiclass": "ArgumentsPanel",
+      "testclass": "Arguments",
+      "testname": "Workbench preparation arguments",
+      "enabled": "true",
+      "child_pairs": []
+    }
+  ],
+  "workbench_behavior": {
+    "empty_input": "discarded",
+    "nonempty_input": "migrated into TestPlan",
+    "non_test_element_rule": "non-test children are moved to disabled TestPlan children",
+    "remaining_element_rule": "remaining children are wrapped by a disabled TestFragmentController named WorkBench Test Fragment",
+    "pinned_source": "JMeter 5.6.3 JMeterTreeModel.addSubTree/moveWorkBenchToTestPlan"
+  },
+  "headless_contract": {
+    "display_required": false,
+    "parser_mode": "-n",
+    "execution": "no enabled thread group or sampler",
+    "status": "planned; no headless process was run"
+  },
+  "bounds": {
+    "max_plan_bytes": 65536,
+    "max_plan_nodes": 16,
+    "max_plan_depth": 6,
+    "max_property_text_bytes": 4096,
+    "max_property_count_per_element": 16,
+    "max_backup_files": 10,
+    "max_template_files": 4,
+    "max_template_entries": 64,
+    "max_toolbar_entries": 64,
+    "max_output_bytes": 65536,
+    "max_log_bytes": 65536,
+    "max_gui_wait_seconds": 30
+  },
+  "normalization": {
+    "ignored_fields": ["xml_lexical_whitespace", "xml_empty_element_spelling"],
+    "required_fields": ["source_topology", "migrated_topology", "migrated_nodes", "workbench_behavior"],
+    "do_not_normalize": ["ordered child pairs", "enabled state", "GUI/test class aliases"]
+  },
+  "oracle_observation": {
+    "performed": false,
+    "status": "planned; not observed",
+    "required_before_promotion": "Pinned JMeter 5.6.3 GUI load/save on Linux, Windows, and macOS"
+  }
+}

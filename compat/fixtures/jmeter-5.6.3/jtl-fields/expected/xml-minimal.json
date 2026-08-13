@@ -1,0 +1,23 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-JTL-FIELDS",
+  "format": "jtl-xml",
+  "contract_kind": "rust-reader-projection",
+  "comparator_ready": false,
+  "evidence_status": "planned",
+  "expectation_basis": "Hand-authored static non-comparator reader projection of inputs/xml/minimal.xml; no Apache JMeter output was measured.",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 1,
+  "samples": [{
+    "position": 0,
+    "element": "sample",
+    "attributes": {"s": "true", "lb": "minimal", "rc": "200", "rm": "OK"}
+  }],
+  "reader_semantics": "Missing optional attributes remain missing in the raw projection; no writer defaults are fabricated.",
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "This is a bounded abbreviated XML reader case, not a JMeter writer-wire output claim."
+  }
+}

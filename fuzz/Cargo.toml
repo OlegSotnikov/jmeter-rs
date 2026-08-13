@@ -1,0 +1,149 @@
+# This is a standalone cargo-fuzz workspace.  Keeping the fuzz package out of
+# the application workspace prevents libfuzzer-sys's native build support from
+# entering normal workspace checks.
+[workspace]
+members = ["."]
+
+[package]
+name = "jmeter-rs-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+rust-version = "1.97.1"
+license = "Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+# Keep the fuzzing ABI/tooling dependency reproducible.  The standalone lock
+# records this exact version; normal workspace builds never resolve it.
+libfuzzer-sys = "=0.4.13"
+
+[dependencies.jmeter-rs-bridge-protocol]
+version = "=0.1.0"
+path = "../crates/bridge-protocol"
+
+[dependencies.jmeter-rs-expr]
+version = "=0.1.0"
+path = "../crates/expr"
+
+[dependencies.jmeter-rs-jmx]
+version = "=0.1.0"
+path = "../crates/jmx"
+
+[dependencies.jmeter-rs-results]
+version = "=0.1.0"
+path = "../crates/results"
+
+# These pure, transport/process-free crates provide the bounded protocol and
+# state-machine surfaces covered by the TEST-003 targets.  They inherit the
+# workspace Apache-2.0 license and Rust 1.97.1 MSRV; no fuzz-only features or
+# native dependencies are enabled.  plugin-host's existing serde/nix/sha2
+# graph is intentional for JSON preflight and is not used to launch a worker.
+[dependencies.jmeter-rs-http]
+version = "=0.1.0"
+path = "../crates/http"
+
+[dependencies.jmeter-rs-plugin-host]
+version = "=0.1.0"
+path = "../crates/plugin-host"
+
+[dependencies.jmeter-rs-remote]
+version = "=0.1.0"
+path = "../crates/remote"
+
+[dependencies.jmeter-rs-runtime]
+version = "=0.1.0"
+path = "../crates/runtime"
+
+[[bin]]
+name = "jmx_xml"
+path = "fuzz_targets/jmx_xml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "jtl_csv"
+path = "fuzz_targets/jtl_csv.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "jtl_xml"
+path = "fuzz_targets/jtl_xml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "jtl_model"
+path = "fuzz_targets/jtl_model.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "expr"
+path = "fuzz_targets/expr.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "bridge"
+path = "fuzz_targets/bridge.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "bridge_rmi"
+path = "fuzz_targets/bridge_rmi.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "property_config"
+path = "fuzz_targets/property_config.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "save_config"
+path = "fuzz_targets/save_config.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "http_policy"
+path = "fuzz_targets/http_policy.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "plugin_json"
+path = "fuzz_targets/plugin_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "remote"
+path = "fuzz_targets/remote.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "runtime"
+path = "fuzz_targets/runtime.rs"
+test = false
+doc = false
+bench = false

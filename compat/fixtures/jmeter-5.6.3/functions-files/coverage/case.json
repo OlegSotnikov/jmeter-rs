@@ -1,0 +1,62 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-FUNCTIONS-FILES-COVERAGE",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-FUNCTIONS-001",
+  "conformance_ids": ["FUNC-001", "FUNC-002", "JTL-001", "TEST-001"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-JTL-001", "NORM-ENV-001"],
+  "plan": {
+    "path": "plan.jmx",
+    "sha256": "979788afed3e6b3f8240a5a3bc80348a5f1470b9dfdc8f0d08906141deb6227a"
+  },
+  "property_files": [{
+    "path": "oracle.properties",
+    "sha256": "dcdd02dead92d257d2ea7f3a054987424b68ab5100b3c31b1bf42fa88ce829ad"
+  }],
+  "command": {
+    "working_directory": "<case-root>",
+    "working_directory_scope": "runner resolves <case-root> to this case directory before chdir; every relative plan, property, input, and output path is resolved below it",
+    "input_paths_relative_to": "working_directory",
+    "output_paths_relative_to": "working_directory",
+    "mode": "nongui",
+    "argv_template": ["jmeter", "-n", "-q", "oracle.properties", "-t", "plan.jmx", "-l", "<ignored>/oracle.jtl", "-j", "<ignored>/oracle.log"],
+    "network": "none",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "jvm_requirements": {
+      "file_encoding": "UTF-8",
+      "required": true,
+      "verification": "A future oracle runner must verify JVM file.encoding=UTF-8 before execution; this static corpus does not infer it from the process locale."
+    },
+    "random_seed": null
+  },
+  "bounds": {
+    "schema_id": "jmeter-rs.fixture-bounds",
+    "schema_version": 1,
+    "enforcement": "declared; not runtime-enforced by this static corpus",
+    "max_threads": 1,
+    "max_iterations_per_thread": 1,
+    "max_samplers_per_iteration": 4,
+    "max_samples": 3,
+    "max_input_bytes": 512,
+    "max_output_files": 0,
+    "max_label_bytes": 2048
+  },
+  "execution": {
+    "status": "not_run",
+    "process_exit": null,
+    "process_exit_asserted": false,
+    "sample_count": null,
+    "sample_count_status": "planned-from-topology",
+    "sample_count_asserted": false,
+    "raw_artifacts": "oracle-runs/functions-files/coverage/ (ignored; not generated in this task)",
+    "expected": "expected/semantic.json"
+  },
+  "limitations": [
+    "Three expression probes are enabled, local, and finite; the expected JTL projection is comparator-backed in shape but execution remains not-run.",
+    "The unknown and case-sensitive function-name probe remains disabled; its exact source node and zero-sample preservation contract are static-only because the strict JTL comparator does not compare disabled JMX topology.",
+    "Dynamic filenames, independent StringFromFile occurrences, naive CSV delimiter parsing, and XPath selection are recorded for a future runner under the explicit case root and UTF-8 JVM requirement."
+  ]
+}

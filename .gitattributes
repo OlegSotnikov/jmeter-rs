@@ -1,0 +1,26 @@
+* text=auto eol=lf
+
+*.rs text diff=rust
+*.md text
+*.toml text
+*.yml text
+*.yaml text
+*.json text
+*.xml text
+*.jmx text eol=lf
+*.jtl text eol=lf
+*.csv text eol=lf
+*.sh text eol=lf
+
+LICENSE text eol=lf
+NOTICE text eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.jar binary
+*.zip binary
+*.gz binary
+*.tar binary

@@ -1,0 +1,173 @@
+{
+  "schema_id": "jmeter-rs.fixture-provenance",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-FUNCTIONS-RANDOM-TIME",
+  "origin": {
+    "kind": "original",
+    "author": "jmeter-rs project",
+    "created_at": "2026-08-12",
+    "description": "Hand-authored bounded JMX for JMeter random, date/time, counter, scope, and undefined-expansion contracts. Fixed domains and explicit descriptors prevent fabricated random/current-time output.",
+    "upstream_plan_copied": false
+  },
+  "license": {
+    "fixture_license": "Apache-2.0",
+    "repository_notice": "LICENSE and NOTICE at repository root",
+    "upstream_distribution_use": "Apache JMeter 5.6.3 is the pinned external oracle for a later run; no upstream plan, result, source, or binary is redistributed."
+  },
+  "oracle": {
+    "project": "Apache JMeter",
+    "version": "5.6.3",
+    "release_tag": "rel/v5.6.3",
+    "source_commit": "34a2785748e9e0b14702595e8682c387869deda3",
+    "artifact": "apache-jmeter-5.6.3.zip",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "artifact_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip",
+    "digest_url": "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-5.6.3.zip.sha512",
+    "retrieved_at": "2026-08-12",
+    "profile_digest_verification": {
+      "status": "declared-from-active-profile",
+      "algorithm": "SHA-512",
+      "digest": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+      "observed_local_artifact": null,
+      "signature_verified": false,
+      "verification_basis": "The profile records a SHA-512-only check. This static case did not fetch, unpack, or execute the artifact; PGP verification remains a future runner gate."
+    },
+    "case_run_verification": {
+      "status": "not-run-static-corpus",
+      "oracle_invoked": false,
+      "artifact_verified_for_case_run": null,
+      "process_exit": null,
+      "measured_output_present": false
+    }
+  },
+  "runtime": {
+    "java": {
+      "vendor": null,
+      "version": null,
+      "vm": null,
+      "major": null
+    },
+    "target_triple": "recorded by oracle runner",
+    "os_image": "recorded by oracle runner",
+    "locale": "en-US",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "requested_environment": {
+      "locale": "en-US",
+      "timezone": "UTC",
+      "default_charset": "UTF-8",
+      "system_properties": {"user.timezone": "UTC", "file.encoding": "UTF-8"}
+    },
+    "locale_evidence": {
+      "status": "pending-oracle",
+      "requested": "en-US",
+      "observed_launcher_locale": null,
+      "observed_jvm_default_locale": null,
+      "verification": "Record the materialized target-OS locale and Locale.getDefault().toLanguageTag(); fail evidence promotion if either is absent or differs from en-US."
+    },
+    "timezone_evidence": {
+      "status": "pending-oracle",
+      "requested": "UTC",
+      "observed_jvm_user_timezone": null,
+      "verification": "Launch with -Duser.timezone=UTC and record System.getProperty(\"user.timezone\"); do not infer the JVM zone from TZ alone."
+    },
+    "charset_evidence": {
+      "status": "pending-oracle",
+      "requested_file_encoding": "UTF-8",
+      "requested_default_charset": "UTF-8",
+      "observed_file_encoding": null,
+      "observed_default_charset": null,
+      "verification": "Record System.getProperty(\"file.encoding\") and Charset.defaultCharset().name(); fail evidence promotion if either is absent or differs from UTF-8."
+    },
+    "jvm_charset_requirement": {
+      "file_encoding": "UTF-8",
+      "default_charset": "UTF-8",
+      "user_timezone": "UTC",
+      "required": true,
+      "verification": "A future oracle runner must verify file.encoding, Charset.defaultCharset(), user.timezone, and the effective JVM locale before comparing output; this static corpus does not infer any observation from process settings."
+    },
+    "hostname_policy": "not asserted; hostname saving disabled and no host function is in the materialized plan",
+    "environment_allowlist": ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL=en_US.UTF-8", "LANG=en_US.UTF-8", "TZ=UTC"],
+    "plugin_artifacts": [],
+    "script_engines": [],
+    "jmeter_classpath": "not executed; future runs must use the profile-pinned Apache JMeter 5.6.3 distribution (SHA-512 checked; PGP verification required before oracle use)",
+    "classpath_artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "process_lifecycle": {
+      "shell": false,
+      "exact_child": true,
+      "stdin": "null",
+      "stdout": "<ignored>/oracle.stdout",
+      "stderr": "<ignored>/oracle.stderr",
+      "timeout_seconds": 30,
+      "wait_reap": "Wait and reap the exact launcher/Java child on success, error, timeout, and cancellation; never select a process by name or stale PID."
+    },
+    "runner_materialization": {
+      "jmeter_executable": "<jmeter-home>/bin/jmeter",
+      "java_executable": "<java-home>/bin/java",
+      "case_root": "<case-root>",
+      "resolution": "Resolve placeholders only from an allowlisted runner manifest after the profile artifact digest gate; inherited PATH lookup and shell interpolation are forbidden."
+    }
+  },
+  "determinism": {
+    "random_seed": null,
+    "random_source": {
+      "thread_local_random": ["__Random", "__RandomDate", "__RandomFromMultipleVars", "__RandomString"],
+      "uuid_random_uuid": ["__UUID"],
+      "seed_control": "Neither source is fixture-seedable through a supported JMeter 5.6.3 option; exact values are not claimed except for degenerate domains or shape contracts."
+    },
+    "clock": "UTC JVM timezone is required for exact epoch date/time forms; __time remains ambient wall-clock and descriptor-normalized, while dateTimeConvert/timeShift non-ambient inputs are fixed",
+    "locale": "Requested process/JVM locale is en-US and explicit date-function locale is en_US; effective launcher/JVM observations remain pending",
+    "bounds": {
+      "threads": 2,
+      "iterations_per_thread": 2,
+      "samplers_per_iteration": 3,
+      "maximum_samples": 12,
+      "max_plan_bytes": 32768,
+      "max_plan_nodes": 64,
+      "max_plan_depth": 8,
+      "max_property_text_bytes": 16384,
+      "max_property_count_per_element": 64,
+      "max_result_bytes": 131072,
+      "max_jtl_bytes": 131072,
+      "max_log_bytes": 65536,
+      "max_stdout_bytes": 65536,
+      "max_stderr_bytes": 65536,
+      "max_process_output_bytes": 65536,
+      "max_artifact_bytes": 1048576,
+      "max_processes": 1,
+      "max_child_processes": 1,
+      "max_process_wait_seconds": 30,
+      "max_operation_seconds": 30,
+      "max_case_seconds": 60,
+      "network": {"policy": "none", "max_connections": 0, "allowed_hosts": [], "max_request_bytes": 0, "max_response_bytes": 0}
+    }
+  },
+  "sources": [
+    {
+      "kind": "official-manual",
+      "url": "https://jmeter.apache.org/usermanual/functions",
+      "coverage": "Random, RandomDate, RandomFromMultipleVars, RandomString, UUID, counter, time, timeShift, dateTimeConvert, and expansion rules"
+    },
+    {
+      "kind": "pinned-source",
+      "url": "https://github.com/apache/jmeter/tree/34a2785748e9e0b14702595e8682c387869deda3/src/functions/src/main/java/org/apache/jmeter/functions",
+      "coverage": "5.6.3 ThreadLocalRandom domains for Random/RandomDate/RandomFromMultipleVars/RandomString, UUID.randomUUID delegation, RandomDate end-exclusive range, and function implementations"
+    }
+  ],
+  "inputs": {
+    "plan_sha256": "1c7b235e0836db16e02f0d6363e8e69f527cfc9dc9df5864381e80ac6ba3b447",
+    "property_sha256": "a97084ed29d23c71db204d86bdc45ab1f1cf2798ae4e53d6463dac2236a41e06",
+    "expected_sha256": "fe495b9d62cca4ba90bd83876e8ec04d78d1762c51323b9fe0fb51af02f1dc02",
+    "public_network_used": false,
+    "secrets_or_credentials": false
+  },
+  "evidence": {
+    "status": "not-run-static-corpus",
+    "oracle_invoked": false,
+    "measured_output_present": false,
+    "profile_digest_verified": false,
+    "case_run_artifact_verified": null,
+    "comparator_executed": false,
+    "expectations_are": "hand-authored planned constraints, later-consumed variable/phase contracts, and exact stable JTL projections; no observed Apache output"
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "schema_id": "jmeter-rs.planned-constraint-contract",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-CONTROLLERS-FULL-RUNTIME",
+  "fixture_family_id": "FX-ELEMENTS-CORE-001",
+  "conformance_ids": ["ELEM-003", "JMX-001", "TEST-001"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-TIME-001", "NORM-ENV-001"],
+  "evidence_status": "static-only",
+  "source_only": true,
+  "raw_artifacts": null,
+  "expectation_basis": "Original bounded RuntimeController wire and deadline contract; no Apache JMeter output was measured.",
+  "comparator_contract": {
+    "mode": "planned-invariant",
+    "enforcement": "not-comparator-enforced",
+    "comparator_enforced": false,
+    "reason": "The repository comparator accepts this formal static contract but does not enforce wall-clock deadline output.",
+    "unasserted_runtime_fields": ["elapsed time", "timestamps", "received bytes", "DebugSampler response text"]
+  },
+  "save_service_contract": {
+    "jmeter.save.saveservice.output_format": "xml",
+    "jmeter.save.saveservice.filename": "false",
+    "responseFile": "absent"
+  },
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations_per_thread": 1,
+    "max_controller_visits_per_iteration": 256,
+    "max_samples": 128,
+    "max_runtime_seconds": 1,
+    "max_clock_tolerance_ms": 100,
+    "max_process_wait_seconds": 5
+  },
+  "sample_contract": {
+    "attributes": {"s": "true", "rc": "200", "rm": "OK", "tn": "Runtime boundary user 1-1", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"},
+    "thread_name": "Runtime boundary user 1-1",
+    "retained_attributes": ["s", "tn", "sby", "rm", "ec"],
+    "absent_attributes": ["responseFile"]
+  },
+  "assertion_results": {
+    "configured": true,
+    "mode": "all",
+    "node": "assertionResult",
+    "child_order": ["name", "failure", "error", "failureMessage"],
+    "failure_message_property": "jmeter.save.saveservice.assertion_results_failure_message",
+    "expected_count": 0,
+    "absence": "no assertionResult nodes; this plan contains no assertion elements",
+    "retained_fields": ["name", "failure", "error", "failureMessage"]
+  },
+  "controller_contracts": [
+    {
+      "path": "ThreadGroup/runtime-zero",
+      "testclass": "RunTime",
+      "guiclass": "RunTimeGui",
+      "wire_properties": {"RunTime.seconds": "0"},
+      "child_labels": ["runtime-zero-must-not-run"],
+      "observable": "zero runtime has an expired deadline before child selection and emits no child sample"
+    },
+    {
+      "path": "ThreadGroup/runtime-one-second",
+      "testclass": "RunTime",
+      "guiclass": "RunTimeGui",
+      "wire_properties": {"RunTime.seconds": "1"},
+      "child_labels": ["runtime-deadline-child"],
+      "observable": "positive runtime selects the finite 128-iteration child controller only before a monotonic one-second deadline"
+    },
+    {
+      "path": "ThreadGroup/runtime-one-second/runtime-one-second-visit-cap",
+      "testclass": "LoopController",
+      "guiclass": "LoopControlPanel",
+      "wire_properties": {"LoopController.continue_forever": "false", "LoopController.loops": "128"},
+      "child_labels": ["runtime-deadline-child"],
+      "observable": "the runtime child cannot emit more than 128 DebugSampler visits; no sleep or unbounded sampler is used"
+    }
+  ],
+  "invariants": {
+    "zero_runtime": {"seconds": 0, "emitted_child_count": 0},
+    "positive_runtime": {
+      "seconds": 1,
+      "deadline_clock": "monotonic",
+      "deadline_tolerance_ms": 100,
+      "emitted_sample_count": {"min": 0, "max": 128},
+      "child_label": "runtime-deadline-child",
+      "visit_cap": {"controller": "LoopController", "loops": 128, "continue_forever": false},
+      "future_timing_bound": {"max_runtime_seconds": 1, "max_process_wait_seconds": 5, "no_unbounded_loop": true}
+    }
+  }
+}

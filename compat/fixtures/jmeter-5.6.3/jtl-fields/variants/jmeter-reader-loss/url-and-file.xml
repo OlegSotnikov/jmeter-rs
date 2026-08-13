@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Reader-semantics variant; it is not a writer-wire assertion. -->
+<testResults version="1.2"><sample t="4" s="true" lb="reader loss" rc="200" rm="OK"><responseFile class="java.lang.String">resources/response-file-body.txt</responseFile><java.net.URL>https://example.invalid/reader</java.net.URL></sample></testResults>

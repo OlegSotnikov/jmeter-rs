@@ -1,0 +1,197 @@
+{
+  "schema_id": "jmeter-rs.oracle-case",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-PROXY-003-MIRROR",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-PROXY-TLS-001",
+  "conformance_ids": [
+    "PROXY-003"
+  ],
+  "normalization_policy_refs": [
+    "NORM-STRUCTURE-001",
+    "NORM-TIME-001"
+  ],
+  "inputs": [
+    {
+      "path": "inputs/requests.json",
+      "sha256": "4a3de3e7b179a4520a8d54b67f035cea51d3cd9150b61e0b029df8ce2146399e"
+    }
+  ],
+  "expected": [
+    {
+      "path": "expected/api.json",
+      "sha256": "0a66b762c97288643eca4841376641fc7e4e46de71fab9f4c1420cc1e6df0be3"
+    },
+    {
+      "path": "expected/semantic.json",
+      "sha256": "9b16d0452bd1cfbe61d7669db3cab0a02df93e86af6840fba73c97dc22899c5d"
+    }
+  ],
+  "probes": [
+    {
+      "path": "tools/ApiProbe.java",
+      "sha256": "b0349922ac7bcf8bb20ead03450e099acf797fbdf143842e986c277566ec79fd"
+    },
+    {
+      "path": "tools/MirrorServerHarness.java",
+      "sha256": "36d1db945298f5d89b556d42ca8f9f6b0cc03dfaf31ad203b4207bd7efb90d58"
+    }
+  ],
+  "command": {
+    "working_directory": "compat/fixtures/jmeter-5.6.3/recorder-mirror",
+    "mode": "planned; future local mirror differential",
+    "argv_template": [
+      "<not-run: execute future_driver_actions in order>"
+    ],
+    "network": "local socket; upstream binds wildcard, so future network isolation is mandatory",
+    "locale": "C",
+    "timezone": "UTC",
+    "default_charset": "UTF-8",
+    "random_seed": null,
+    "execution": "planned; this handoff performs static checks only"
+  },
+  "bounds": {
+    "observed_case_count": 8,
+    "planned_case_count": 3,
+    "max_total_cases": 11,
+    "max_wire_bytes": 1024,
+    "max_body_bytes": 256,
+    "max_request_headers": 16,
+    "max_response_headers": 16,
+    "max_redirect_hops": 1,
+    "server_pool_size": 2,
+    "server_queue_size": 4,
+    "max_saturation_clients": 7,
+    "max_hold_ms": 5000
+  },
+  "execution": {
+    "status": "not-run-static",
+    "process_exit": null,
+    "oracle_available": false,
+    "sample_count": null,
+    "raw_artifacts": "oracle-runs/recorder-mirror/ (ignored; local evidence only)",
+    "expected": [
+      {
+        "path": "expected/api.json",
+        "sha256": "0a66b762c97288643eca4841376641fc7e4e46de71fab9f4c1420cc1e6df0be3"
+      },
+      {
+        "path": "expected/semantic.json",
+        "sha256": "9b16d0452bd1cfbe61d7669db3cab0a02df93e86af6840fba73c97dc22899c5d"
+      }
+    ]
+  },
+  "future_driver_actions": [
+    {
+      "step": "isolate-network",
+      "status": "planned",
+      "driver": "CI-provided network namespace or firewall policy",
+      "requirements": [
+        "Allow only the explicitly selected fixture port and the future driver's local probe.",
+        "Deny public and unrelated interface access; HttpMirrorServer constructs ServerSocket(port) without an address and therefore binds the platform wildcard address."
+      ]
+    },
+    {
+      "step": "compile-probes",
+      "status": "planned",
+      "argv": [
+        "<pinned-javac>",
+        "-cp",
+        "<pinned-jmeter-classpath>",
+        "-d",
+        "<ignored>/probe-classes",
+        "tools/ApiProbe.java",
+        "tools/MirrorServerHarness.java"
+      ],
+      "input": [
+        "tools/ApiProbe.java",
+        "tools/MirrorServerHarness.java"
+      ],
+      "assertions": [
+        "only the two original tools are compiled",
+        "compiler output is bounded and remains ignored temporary evidence"
+      ]
+    },
+    {
+      "step": "api-probe",
+      "status": "planned",
+      "argv": [
+        "<pinned-java>",
+        "-cp",
+        "<ignored>/probe-classes:<pinned-jmeter-classpath>",
+        "ApiProbe"
+      ],
+      "input": [
+        "tools/ApiProbe.java",
+        "tools/MirrorServerHarness.java"
+      ],
+      "assertions": [
+        "declared mirror fields, constructors, and methods match expected/api.json",
+        "run() is present on HttpMirrorServer",
+        "known public and private constant values match expected/api.json"
+      ]
+    },
+    {
+      "step": "start-mirror",
+      "status": "planned",
+      "argv": [
+        "<pinned-java>",
+        "-cp",
+        "<ignored>/probe-classes:<pinned-jmeter-classpath>",
+        "MirrorServerHarness",
+        "<explicit-unprivileged-port>",
+        "2",
+        "4",
+        "1000"
+      ],
+      "input": "tools/MirrorServerHarness.java",
+      "assertions": [
+        "startup readiness is confirmed by a bounded local connect probe",
+        "bind failure or getException() fails the process with a nonzero result",
+        "stopServer() is called and the owned thread is joined before success"
+      ]
+    },
+    {
+      "step": "replay-observed-vectors",
+      "status": "planned",
+      "driver": "bounded raw HTTP/1 client owned by the fixture runner",
+      "input": "inputs/requests.json#/cases",
+      "compare": "expected/semantic.json#/cases",
+      "limits": {
+        "max_cases": 8,
+        "max_wire_bytes": 1024,
+        "max_response_bytes": 1024,
+        "max_redirect_hops": 1
+      }
+    },
+    {
+      "step": "replay-planned-vectors",
+      "status": "planned",
+      "driver": "same bounded raw HTTP/1 client, with an explicit half-close and bounded concurrent fan-out",
+      "input": "inputs/requests.json#/planned_cases",
+      "compare": "expected/semantic.json#/planned_cases",
+      "limits": {
+        "max_cases": 3,
+        "max_saturation_clients": 7,
+        "max_read_bytes": 1024,
+        "max_wait_ms": 2000
+      }
+    },
+    {
+      "step": "stop-and-record",
+      "status": "planned",
+      "driver": "MirrorServerHarness finally path",
+      "assertions": [
+        "stopServer() is invoked exactly once for the owned server",
+        "join completes within the harness bound",
+        "isAlive() is false and getException() is null on successful teardown"
+      ]
+    }
+  ],
+  "limitations": [
+    "This corpus targets the HTTP Mirror Server, a local WorkBench fixture; it does not claim recorder CONNECT/TLS behavior.",
+    "The pinned mirror binds a platform wildcard address because its API accepts only a port; a future driver must provide network isolation and must not treat this as a loopback-only service.",
+    "The source-derived expectations have not been promoted to verified profile evidence.",
+    "No Java compiler, JMeter process, mirror server, network client, certificate, or key was used while authoring this static corpus."
+  ]
+}

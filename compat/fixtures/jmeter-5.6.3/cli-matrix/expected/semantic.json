@@ -1,0 +1,123 @@
+{
+  "schema_id": "jmeter-rs.cli-process-contract",
+  "schema_version": 1,
+  "case_id": "ORACLE-JMETER-563-CLI-MATRIX",
+  "profile_id": "jmeter-5.6.3",
+  "fixture_family_id": "FX-CLI-001",
+  "compatibility_ids": ["CLI-001", "CLI-002", "CLI-003"],
+  "format": "cli-process",
+  "status": "planned",
+  "evidence_status": "planned",
+  "expectation_basis": "Hand-authored bounded CLI contract descriptors; no measured oracle output.",
+  "normalization": {
+    "ignored_fields": [
+      "oracle.stdout_bytes",
+      "oracle.stderr_bytes",
+      "oracle.help_text_whitespace",
+      "oracle.localized_prose",
+      "oracle.temporary_paths",
+      "oracle.timestamps",
+      "oracle.hostname",
+      "oracle.log_bytes",
+      "oracle.JVM_object_ids"
+    ],
+    "reason": "Static descriptors record the pinned CLI contract and planned assertions only. No JMeter process, output stream, log, report, exit status, or oracle artifact was captured. Future comparison retains option acceptance, diagnostic category, token vocabulary, report restriction, shutdown category, declared ordering, and exact process exit when observed."
+  },
+  "fixture_family": {
+    "id": "FX-CLI-001",
+    "status": "planned",
+    "conformance_ids": ["CLI-001", "CLI-002", "CLI-003"],
+    "normalization_policy_refs": ["NORM-CLI-001", "NORM-ENV-001"],
+    "execution_status": "not-run-static-corpus",
+    "observed_evidence": false,
+    "raw_artifacts": "none; oracle-runs/cli-matrix/ is an ignored future evidence location"
+  },
+  "descriptor_inputs": [
+    {"path": "inputs/option-catalog.json", "role": "30 documented short/long option pairs and help/version vocabulary"},
+    {"path": "inputs/scenarios.json", "role": "repeat, LAST, legal/illegal, report-only, proxy, and option spelling probes"},
+    {"path": "inputs/process-contract.json", "role": "logging categories and deferred normal/fatal/remote exit expectations"},
+    {"path": "inputs/runner-contract.json", "role": "future output, lifecycle, local-RMI, unavailable-registry, stop-failure, and platform setup obligations"},
+    {"path": "inputs/cli-plan.jmx", "role": "original bounded future load-test input"},
+    {"path": "inputs/cli-sample-failure-plan.jmx", "role": "original deterministic one-sample assertion-failure input"},
+    {"path": "inputs/report-input.csv", "role": "original deterministic report-only CSV input"},
+    {"path": "inputs/primary.properties", "role": "original -p input"},
+    {"path": "inputs/additional-a.properties", "role": "original repeated -q input"},
+    {"path": "inputs/additional-b.properties", "role": "original repeated -q input"},
+    {"path": "inputs/system-a.properties", "role": "original repeated -S input"},
+    {"path": "inputs/system-b.properties", "role": "original repeated -S input B"},
+    {"path": "inputs/log4j2.xml", "role": "original -i Log4j2 input"}
+  ],
+  "coverage_summary": {
+    "documented_option_pairs": 30,
+    "option_pair_inventory_source": "inputs/option-catalog.json",
+    "repeatable_short_options": ["-q", "-J", "-G", "-D", "-S", "-L"],
+    "repeatable_long_options": ["--addprop", "--jmeterproperty", "--globalproperty", "--systemproperty", "--systemPropertyFile", "--loglevel"],
+    "last_options": ["-t/--testfile", "-l/--logfile", "-j/--jmeterlogfile"],
+    "help_aliases": ["-?", "--?", "-h", "--help"],
+    "version_aliases": ["-v", "--version"],
+    "report_options": ["-g/--reportonly", "-e/--reportatendofloadtests", "-o/--reportoutputfolder", "-f/--forceDeleteResultFile"],
+    "logging_options": ["-i/--jmeterlogconf", "-j/--jmeterlogfile", "-L/--loglevel"],
+    "remote_options": ["-s/--server", "-r/--runremote", "-R/--remotestart", "-G/--globalproperty", "-X/--remoteexit"],
+    "scenario_count": 48,
+    "all_option_pair_vector_count": 60,
+    "report_only_parser_disallowed_options": ["-n/--nongui", "-r/--runremote", "-R/--remotestart", "-l/--logfile"]
+  },
+  "planned_assertions": {
+    "CLI-001": {
+      "description": "Every documented short/long option is probed with concrete short and long vectors; repeated options retain occurrence order and documented last-value/file precedence; LAST is uppercase and scoped separately to test/result/log paths; help/version output is checked by source vocabulary.",
+      "source_descriptor": "inputs/option-catalog.json"
+    },
+    "CLI-002": {
+      "description": "Legal load, remote, proxy, property, report-at-end, report-only, and logging vectors are separated from parser/startup rejection vectors. -e requires -l; -n requires a test plan; report-only parser rejection is limited to -n/-r/-R/-l while -t and -e are concrete accepted probes; output safety is bounded.",
+      "source_descriptor": "inputs/scenarios.json"
+    },
+    "CLI-003": {
+      "description": "Normal completion, ordinary sample failure, parser/usage returns, fatal Throwable/System.exit paths, report failure, remote failure, -X shutdown, and property-controlled shutdown remain distinct process/log categories. Process exit is an exact comparator field when observed; static values remain null and unasserted.",
+      "source_descriptor": "inputs/process-contract.json"
+    }
+  },
+  "runner_setup_contract": {
+    "source_descriptor": "inputs/runner-contract.json",
+    "status": "planned",
+    "static_observation": false,
+    "required_setup": [
+      "fresh bounded output roots and explicit nonempty sentinels for output-safety probes",
+      "direct-argv/no-shell materialization with unresolved placeholders rejected",
+      "exact-child bounded shutdown and reaping for client/server/worker/registry processes",
+      "loopback-only local RMI worker and registry setup with recorded ports",
+      "no-listener loopback unavailable-registry setup",
+      "deliberate bounded stop-failure induction for the -J property matrix",
+      "target-specific PATH and locale/charset materialization with recorded runtime metadata"
+    ]
+  },
+  "date_pattern_contract": {
+    "status": "source-ambiguous",
+    "engine": null,
+    "engine_candidates": ["java.text.SimpleDateFormat", "java.time.format.DateTimeFormatter"],
+    "asserted": false,
+    "resolution": "Inspect the exact pinned source and compare the paired-quote -j path under a fixed UTC clock before implementing or asserting a formatter."
+  },
+  "static_only_disclaimer": {
+    "oracle_invoked": false,
+    "jmeter_rs_invoked": false,
+    "java_invoked": false,
+    "shell_fixture_invoked": false,
+    "remote_service_invoked": false,
+    "subprocess_invoked": false,
+    "expectation_kind": "hand-authored bounded contract projection, not measured output"
+  },
+  "comparator_contract": {
+    "format": "cli-process",
+    "process_exit": {
+      "expected": null,
+      "asserted": false,
+      "comparison": "When a pinned oracle or jmeter-rs child process is observed, compare its exact integer exit value. Until then retain null and do not infer a numeric value from source categories, parser diagnostics, or sample status."
+    },
+    "termination_behavior": {
+      "comparison": "Compare canonical exit_status_class values, including usage-return versus Throwable/System.exit behavior, as a separate category from process_exit."
+    },
+    "sample_status": {
+      "comparison": "Compare sample success/failure separately from process_exit; the deterministic failure plan expects one failed sample only when executed."
+    }
+  }
+}

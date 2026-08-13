@@ -1,0 +1,86 @@
+{
+  "schema_id": "jmeter-rs.planned-constraint-contract",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-CONTROLLERS-FULL-THROUGHPUT",
+  "fixture_family_id": "FX-ELEMENTS-CORE-001",
+  "conformance_ids": ["ELEM-003", "JTL-001", "TEST-001"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-JTL-001", "NORM-ENV-001"],
+  "evidence_status": "static-only",
+  "source_only": true,
+  "raw_artifacts": null,
+  "expectation_basis": "Original bounded ThroughputController invariants; no Apache JMeter output was measured.",
+  "comparator_contract": {
+    "mode": "planned-invariant",
+    "enforcement": "not-comparator-enforced",
+    "comparator_enforced": false,
+    "reason": "The repository comparator accepts this formal static contract but does not enforce per-thread throughput selection invariants.",
+    "unasserted_runtime_fields": ["elapsed time", "timestamps", "received bytes", "DebugSampler response text"]
+  },
+  "save_service_contract": {
+    "jmeter.save.saveservice.output_format": "xml",
+    "jmeter.save.saveservice.filename": "false",
+    "responseFile": "absent"
+  },
+  "bounds": {
+    "max_threads": 2,
+    "max_iterations_per_thread": 4,
+    "max_samples": 20,
+    "max_process_wait_seconds": 30
+  },
+  "sample_contract": {
+    "attributes": {"s": "true", "rc": "200", "rm": "OK", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"},
+    "tn_by_label": {
+      "number-before": "Per-thread total throughput 1-1",
+      "throughput-number": "Per-thread total throughput 1-1",
+      "number-after": "Per-thread total throughput 1-1",
+      "percent-before": "Per-thread percentage throughput 1-1",
+      "throughput-percent": "Per-thread percentage throughput 1-1",
+      "percent-after": "Per-thread percentage throughput 1-1"
+    },
+    "thread_name_by_label": {
+      "number-before": "Per-thread total throughput 1-1",
+      "throughput-number": "Per-thread total throughput 1-1",
+      "number-after": "Per-thread total throughput 1-1",
+      "percent-before": "Per-thread percentage throughput 1-1",
+      "throughput-percent": "Per-thread percentage throughput 1-1",
+      "percent-after": "Per-thread percentage throughput 1-1"
+    },
+    "retained_attributes": ["s", "tn", "sby", "rm", "ec"],
+    "absent_attributes": ["responseFile"]
+  },
+  "assertion_results": {
+    "configured": true,
+    "mode": "all",
+    "node": "assertionResult",
+    "child_order": ["name", "failure", "error", "failureMessage"],
+    "failure_message_property": "jmeter.save.saveservice.assertion_results_failure_message",
+    "expected_count": 0,
+    "absence": "no assertionResult nodes; this plan contains no assertion elements",
+    "retained_fields": ["name", "failure", "error", "failureMessage"]
+  },
+  "controller_contracts": [
+    {
+      "testclass": "ThroughputController",
+      "guiclass": "ThroughputControllerGui",
+      "wire_properties": {"ThroughputController.style": "0", "ThroughputController.perThread": "true", "ThroughputController.maxThroughput": "2", "ThroughputController.percentThroughput": "100.0"},
+      "observable": "total-execution mode selects exactly two child samples across four iterations for each thread"
+    },
+    {
+      "testclass": "ThroughputController",
+      "guiclass": "ThroughputControllerGui",
+      "wire_properties": {"ThroughputController.style": "1", "ThroughputController.perThread": "true", "ThroughputController.maxThroughput": "1", "ThroughputController.percentThroughput": "50.0"},
+      "observable": "percentage mode selects exactly two of four child visits per thread; selected positions are an invariant, not a fixed order claim"
+    }
+  ],
+  "invariants": {
+    "total_mode": {"iterations": 4, "child_label": "throughput-number", "selected_count_per_thread": 2, "selected_count_bound": {"min": 0, "max": 2}, "selection_scope": "per-thread"},
+    "percentage_mode": {"iterations": 4, "child_label": "throughput-percent", "percent": 50.0, "selected_count_per_thread": 2, "selected_count_bound": {"min": 0, "max": 4}, "selection_scope": "per-thread"},
+    "always_emitted": {"labels": ["number-before", "number-after", "percent-before", "percent-after"], "count_per_thread": 4}
+  },
+  "trace_shape": {
+    "number_group": {"ordered_labels": ["number-before", "throughput-number", "number-after"], "optional_child": "throughput-number", "optional_child_count": {"min": 0, "max": 1}, "repeat": 4},
+    "percent_group": {"ordered_labels": ["percent-before", "throughput-percent", "percent-after"], "optional_child": "throughput-percent", "optional_child_count": {"min": 0, "max": 1}, "repeat": 4}
+  },
+  "constraint_schema": "typed-count-v1"
+}

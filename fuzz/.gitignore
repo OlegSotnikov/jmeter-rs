@@ -1,0 +1,6 @@
+# cargo-fuzz build products and crash artifacts are not source fixtures.
+/target/
+/artifacts/
+/coverage/
+
+# `corpus/` is deliberately tracked; see corpus/PROVENANCE.md.

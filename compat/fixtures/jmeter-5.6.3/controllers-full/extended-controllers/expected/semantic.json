@@ -1,0 +1,98 @@
+{
+  "schema_id": "jmeter-rs.planned-constraint-contract",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-CONTROLLERS-FULL-EXTENDED",
+  "fixture_family_id": "FX-ELEMENTS-CORE-001",
+  "conformance_ids": ["ELEM-003", "JTL-001", "TEST-001"],
+  "normalization_policy_refs": ["NORM-STRUCTURE-001", "NORM-JTL-001", "NORM-ENV-001"],
+  "evidence_status": "static-only",
+  "source_only": true,
+  "raw_artifacts": null,
+  "expectation_basis": "Original bounded controller invariants; no Apache JMeter output was measured.",
+  "comparator_contract": {
+    "mode": "planned-invariant",
+    "enforcement": "not-comparator-enforced",
+    "comparator_enforced": false,
+    "reason": "The repository comparator accepts this formal static contract but does not execute or enforce unordered controller invariants.",
+    "unasserted_runtime_fields": ["elapsed time", "timestamps", "received bytes", "DebugSampler response text"]
+  },
+  "save_service_contract": {
+    "jmeter.save.saveservice.output_format": "xml",
+    "jmeter.save.saveservice.filename": "false",
+    "responseFile": "absent"
+  },
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations_per_thread": 1,
+    "max_samples": 9,
+    "max_process_wait_seconds": 30
+  },
+  "sample_contract": {
+    "attributes": {"s": "true", "rc": "200", "rm": "OK", "tn": "Extended controller matrix 1-1", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"},
+    "thread_name_by_label": {
+      "extended-before": "Extended controller matrix 1-1",
+      "random-order-a": "Extended controller matrix 1-1",
+      "random-order-b": "Extended controller matrix 1-1",
+      "random-child-a": "Extended controller matrix 1-1",
+      "random-child-b": "Extended controller matrix 1-1",
+      "switch-second-child": "Extended controller matrix 1-1",
+      "foreach-child-one": "Extended controller matrix 1-1",
+      "foreach-child-two": "Extended controller matrix 1-1",
+      "critical-section-child": "Extended controller matrix 1-1",
+      "extended-after": "Extended controller matrix 1-1"
+    },
+    "retained_attributes": ["s", "tn", "sby", "rm", "ec"],
+    "absent_attributes": ["responseFile"]
+  },
+  "assertion_results": {
+    "configured": true,
+    "mode": "all",
+    "node": "assertionResult",
+    "child_order": ["name", "failure", "error", "failureMessage"],
+    "failure_message_property": "jmeter.save.saveservice.assertion_results_failure_message",
+    "expected_count": 0,
+    "absence": "no assertionResult nodes; this plan contains no assertion elements",
+    "retained_fields": ["name", "failure", "error", "failureMessage"]
+  },
+  "ordered_prefix": ["extended-before"],
+  "unordered_segments": [
+    {"labels": ["random-order-a", "random-order-b"], "order": {"kind": "permutation", "each_count": 1}},
+    {"labels": ["random-child-a", "random-child-b"], "order": {"kind": "one-of", "total_count": 1, "each_count": {"min": 0, "max": 1}}}
+  ],
+  "ordered_suffix": ["switch-second-child", "foreach-child-one", "foreach-child-two", "critical-section-child", "extended-after"],
+  "expected_counts": {
+    "extended-before": 1,
+    "random-order-a": 1,
+    "random-order-b": 1,
+    "random-child-a": {"min": 0, "max": 1},
+    "random-child-b": {"min": 0, "max": 1},
+    "switch-first": 0,
+    "switch-second-child": 1,
+    "foreach-child-one": 1,
+    "foreach-child-two": 1,
+    "module-disabled-no-target": 0,
+    "include-disabled-no-path": 0,
+    "recording-disabled": 0,
+    "critical-section-child": 1,
+    "extended-after": 1
+  },
+  "controller_contracts": [
+    {"testclass": "RandomOrderController", "guiclass": "RandomOrderControllerGui", "wire_properties": {}, "observable": "each enabled child is selected once; only the two-child permutation invariant is asserted"},
+    {"testclass": "RandomController", "guiclass": "RandomControlGui", "wire_properties": {}, "observable": "exactly one enabled child is selected per iteration; no fixed random choice or seed is claimed"},
+    {"testclass": "SwitchController", "guiclass": "SwitchControllerGui", "wire_properties": {"SwitchController.value": "1"}, "observable": "zero-based value 1 selects the second child and skips the first"},
+    {"testclass": "ForeachController", "guiclass": "ForeachControlPanel", "wire_properties": {"ForeachController.inputVal": "item", "ForeachController.returnVal": "value", "ForeachController.useSeparator": "true"}, "observable": "item_1 and item_2 produce labels foreach-child-one and foreach-child-two through the value return variable"},
+    {"testclass": "ModuleController", "guiclass": "ModuleControllerGui", "enabled": false, "wire_properties": {"ModuleController.node_path": []}, "observable": "disabled unresolved target is preserved and emits no sample"},
+    {"testclass": "IncludeController", "guiclass": "IncludeControllerGui", "enabled": false, "wire_properties": {"IncludeController.includepath": ""}, "observable": "disabled empty include path is preserved and emits no sample"},
+    {"testclass": "RecordingController", "guiclass": "RecordController", "enabled": false, "wire_properties": {}, "observable": "disabled recording controller remains in source and emits no sample"},
+    {"testclass": "CriticalSectionController", "guiclass": "CriticalSectionControllerGui", "wire_properties": {"CriticalSectionController.lockName": "controllers-full-static-lock"}, "observable": "one thread acquires and releases the named lock around its child; multi-thread locking is covered by critical-section-multi"}
+  ],
+  "invariants": {
+    "random_order": {"labels": ["random-order-a", "random-order-b"], "each_count": 1, "order": {"kind": "permutation"}},
+    "random": {"labels": ["random-child-a", "random-child-b"], "total_count": 1, "each_count": {"min": 0, "max": 1}},
+    "switch": {"selected_index": 1, "selected_label": "switch-second-child"},
+    "foreach_values": {"input_variables": {"item_1": "one", "item_2": "two", "item_matchNr": "2"}, "return_variable": "value", "return_values": ["one", "two"], "expanded_labels": ["foreach-child-one", "foreach-child-two"], "visible_labels": ["foreach-child-one", "foreach-child-two"]},
+    "disabled_targets": ["ModuleController", "IncludeController", "RecordingController"]
+  },
+  "constraint_schema": "typed-count-v1"
+}

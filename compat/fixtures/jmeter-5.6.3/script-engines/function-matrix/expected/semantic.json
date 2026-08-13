@@ -1,0 +1,171 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-SCRIPT-FUNCTION-MATRIX",
+  "format": "jmx-semantic",
+  "evidence_status": "planned",
+  "source": {
+    "kind": "original-static-contract",
+    "oracle_status": "not-run",
+    "note": "No Java, JMeter, engine, compiler, subprocess, or network service was run while creating this corpus."
+  },
+  "capability_accounting": {
+    "status": "external-unavailable",
+    "required_boundaries": ["EXT-JVM-001", "EXT-PLUGIN-001"],
+    "unsupported_error_code": "unsupported-capability",
+    "stable_error_code_family": "script.*",
+    "no_silent_success": true,
+    "no_sample_output_claimed": true,
+    "missing_adapter_behavior": "preserve each function name and source expression; return the normalized script.engine.unavailable category when its engine is unavailable and never substitute another language"
+  },
+  "bounds": {
+    "max_threads": 1,
+    "max_iterations": 1,
+    "max_samples": 1,
+    "max_response_bytes": 8192,
+    "max_network_requests": 0,
+    "max_processes": 0,
+    "max_script_output_bytes": 4096
+  },
+  "function_probe": {
+    "sampler_testname": "function expressions at sampler time",
+    "sampler_testclass": "JSR223Sampler",
+    "script_language": "groovy",
+    "test_plan_udv_function_calls": false,
+    "variables_available_at_expansion": ["function_seed"],
+    "scope": "current virtual user during sampler execution",
+    "comma_escape": "Only a comma belonging to a function script argument is encoded as \\,; each final result-variable argument uses a literal unescaped comma delimiter.",
+    "escaped_comma_count": 4,
+    "unescaped_result_variable_delimiter_count": 10,
+    "result_variable_arguments": ["bsh_result", "groovy_result", "jexl2_result", "jexl3_result", "rhino_result", "binding_result", "bsh_error", "groovy_error", "jexl_error", "rhino_error"],
+    "side_effects": {
+      "variable_names": ["bsh_seen", "groovy_seen", "function_var", "binding_result", "bsh_result", "groovy_result", "jexl2_result", "jexl3_result", "rhino_result"],
+      "property_names": ["function_prop"],
+      "scope": "vars are current-user variables; props are run-scoped properties"
+    }
+  },
+  "function_contract": {
+    "expansion_phase": "sampler-time expansion of the JSR223 script text followed by script evaluation",
+    "functions": [
+      {
+        "name": "__BeanShell",
+        "engine": "BeanShell",
+        "expression": "vars.put(\"bsh_seen\"\\,\"yes\"); \"bsh-\" + vars.get(\"function_seed\")",
+        "binding_names": ["ctx", "vars", "props", "log"],
+        "required_capability": "EXT-JVM-001"
+      },
+      {
+        "name": "__groovy",
+        "engine": "Groovy",
+        "expression": "vars.put('groovy_seen'\\,'yes'); 'groovy-' + vars.get('function_seed')",
+        "binding_names": ["ctx", "vars", "props", "log"],
+        "required_capability": "EXT-JVM-001"
+      },
+      {
+        "name": "__jexl2",
+        "engine": "Commons JEXL 2",
+        "expression": "1 + 2",
+        "binding_names": ["vars", "props"],
+        "required_capability": "EXT-JVM-001"
+      },
+      {
+        "name": "__jexl3",
+        "engine": "Commons JEXL 3",
+        "expression": "4 + 5",
+        "binding_names": ["vars", "props"],
+        "required_capability": "EXT-JVM-001"
+      },
+      {
+        "name": "__javaScript",
+        "engine": "Rhino",
+        "property": "javascript.use_rhino=true",
+        "expression": "'rhino-' + 'value'",
+        "binding_names": ["ctx", "vars", "props", "log"],
+        "required_capability": "EXT-JVM-001",
+        "availability": "pinned-for-function-only"
+      }
+    ],
+    "function_cache_policy": {
+      "property": "function.cache.per.iteration",
+      "value": false,
+      "comparison": "The property is part of the static input; expansion timing and state reuse remain oracle observations."
+    }
+  },
+  "error_normalization": {
+    "stable_code_family": "script.*",
+    "scope": "adapter normalization categories only; these are not universal claims about every JMeter exception path",
+    "mappings": [
+      {
+        "trigger": "required BeanShell/Groovy/JEXL/Rhino engine is absent",
+        "category": "engine-unavailable",
+        "stable_error_code": "script.engine.unavailable",
+        "sample_effect": "capability failure; preserve source"
+      },
+      {
+        "trigger": "function parser rejects an escaped/unescaped argument boundary",
+        "category": "invalid-arguments",
+        "stable_error_code": "script.function.arguments-invalid",
+        "sample_effect": "function-specific failure or unchanged expansion is oracle-required"
+      },
+      {
+        "trigger": "engine evaluates a throwing function body",
+        "category": "evaluation-failed",
+        "stable_error_code": "script.evaluation.failed",
+        "sample_effect": "failure mapping is oracle-required; no universal JMeter result is claimed"
+      }
+    ]
+  },
+  "exceptions": [
+    {
+      "function": "__BeanShell",
+      "source": "inline",
+      "marker": "fixture-function-bsh",
+      "upstream_behavior": "exception/result handling is a pinned-oracle observation",
+      "normalized_category": "evaluation-failed",
+      "stable_error_code": "script.evaluation.failed",
+      "oracle_required": true,
+      "preserve_source": true
+    },
+    {
+      "function": "__groovy",
+      "source": "inline",
+      "marker": "fixture-function-groovy",
+      "upstream_behavior": "exception/result handling is a pinned-oracle observation",
+      "normalized_category": "evaluation-failed",
+      "stable_error_code": "script.evaluation.failed",
+      "oracle_required": true,
+      "preserve_source": true
+    },
+    {
+      "function": "__jexl3",
+      "source": "inline",
+      "marker": "missing_function_name",
+      "upstream_behavior": "undefined-name handling is a pinned-oracle observation",
+      "normalized_category": "evaluation-failed",
+      "stable_error_code": "script.evaluation.failed",
+      "oracle_required": true,
+      "preserve_source": true
+    },
+    {
+      "function": "__javaScript",
+      "source": "inline",
+      "marker": "fixture-function-rhino",
+      "upstream_behavior": "Rhino exception handling is a pinned-oracle observation",
+      "normalized_category": "evaluation-failed",
+      "stable_error_code": "script.evaluation.failed",
+      "oracle_required": true,
+      "preserve_source": true
+    }
+  ],
+  "unavailable_capability": {
+    "capability": "EXT-JVM-001",
+    "category": "engine-unavailable",
+    "stable_error_code": "script.engine.unavailable",
+    "behavior": "retain the original function expression and return a typed unavailable result; never translate BeanShell, Groovy, JEXL, or Rhino to another language"
+  },
+  "normalization": {
+    "ignored_fields": [],
+    "reason": "Function names, escaped source expressions, sampler-time expansion, binding names, variable/property keys, and typed failure categories remain observable. No oracle execution has supplied timing or result fields to normalize."
+  }
+}

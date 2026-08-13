@@ -1,0 +1,43 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-TIMER-CONSTANT-THROUGHPUT",
+  "format": "jmx-semantic",
+  "evidence_status": "planned",
+  "source": {
+    "kind": "original-static-contract",
+    "oracle_status": "not-run",
+    "note": "No JMeter or Java process was run while creating this corpus."
+  },
+  "timer_contract": {
+    "kind": "constant-throughput",
+    "testclass": "ConstantThroughputTimer",
+    "properties": {
+      "throughput": 6000.0,
+      "calcMode": 0
+    },
+    "throughput_per_minute": 6000,
+    "calculation_mode": "this-thread-only",
+    "labels": [
+      "constant-throughput-sample"
+    ],
+    "planned_sample_count": 12,
+    "observed_sample_count": null,
+    "sample_count_asserted": false
+  },
+  "normalization": {
+    "ignored_fields": [],
+    "timing_tolerances": {
+      "enforcement": "descriptor-only",
+      "comparator_enforced": false,
+      "sample.t": {"comparison": "descriptor-only", "allowed_variance": "oracle-pending"},
+      "sample.it": {"comparison": "descriptor-only", "allowed_variance": "oracle-pending"},
+      "sample.lt": {"comparison": "descriptor-only", "allowed_variance": "oracle-pending"},
+      "sample.ct": {"comparison": "descriptor-only", "allowed_variance": "oracle-pending"},
+      "sample.ts": {"comparison": "descriptor-only", "allowed_variance": "oracle-pending"}
+    },
+    "byte_policy": {"bytes": "retained; no normalization", "sent_bytes": "retained; no normalization"},
+    "reason": "Static JMX contract only; no JTL output or execution result is asserted."
+  }
+}

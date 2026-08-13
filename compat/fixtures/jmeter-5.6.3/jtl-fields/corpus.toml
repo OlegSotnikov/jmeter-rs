@@ -1,0 +1,536 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Original static corpus index.  No entry in this file is a measured JMeter
+# result.  The error codes and limits are planned parser-test targets.
+
+schema = "jmeter-rs.jtl-static-corpus"
+schema_version = 1
+profile_id = "jmeter-5.6.3"
+fixture_family_id = "FX-JTL-001"
+fixture_family_refs = ["FX-JTL-001", "FX-CONFIG-001"]
+case_id = "ORACLE-JMETER-563-JTL-FIELDS"
+evidence_status = "planned"
+oracle_invoked = false
+measured_output_present = false
+
+[scope]
+conformance_ids = ["JTL-001", "JTL-002", "JTL-003", "JTL-004", "JTL-005"]
+normalization_policy_refs = ["NORM-JTL-001", "NORM-TIME-001", "NORM-ENV-001", "NORM-CONFIG-001", "NORM-SECURITY-001"]
+
+[bounds]
+schema_id = "jmeter-rs.fixture-bounds"
+schema_version = 1
+enforcement = "declared-and-comparator-enforced"
+max_input_bytes = 131072
+max_result_bytes = 65536
+max_text_bytes = 65536
+max_samples = 64
+max_depth = 16
+max_xml_nodes = 1024
+max_xml_attributes = 2048
+max_csv_columns = 128
+max_line_bytes = 65536
+
+[writer_wire_contract]
+description = "inputs/csv and inputs/xml are JMeter 5.6.3 writer-wire-shaped cases; their expected JSON files are planned projections, never measured oracle output."
+xml_sample_variable_spelling = "exact-configured-name"
+sample_variable_header_rule = "CSV sample-variable header cells are quoted; XML sample-variable names use exact configured names with one underscore."
+xml_sample_variable_underscore_doubling = false
+xml_string_child_class = "java.lang.String"
+xml_url_element = "java.net.URL"
+assertion_representation = "assertionResult child elements"
+assertion_child_order = ["name", "failure", "error", "failureMessage"]
+assertion_failure_message_multiplicity = "optional per assertion; absent when no failure message is present"
+csv_failure_message_property = "jmeter.save.saveservice.assertion_results_failure_message"
+xml_failure_message_scope = "XML failureMessage is an optional assertionResult child; the CSV property does not gate XML emission"
+xml_child_order = ["assertionResult", "subresult", "responseHeader", "requestHeader", "responseData", "responseFile", "samplerData", "java.net.URL"]
+wire_order = ["assertionResult", "subresult", "responseHeader", "requestHeader", "responseData", "responseFile", "samplerData", "java.net.URL"]
+xml_child_order_scope = "converter order; each expected sample declares only the children actually present"
+xml_typed_subresult_excludes = ["java.net.URL"]
+response_data_class = "java.lang.String"
+response_file_class = "java.lang.String"
+url_class = "none"
+response_file_policy = "only when filename saving is enabled"
+sample_count_error_count_coupling = "SampleCount and ErrorCount are both emitted by the single sample_count save-service switch"
+rust_attribute_gap_variant = "variants/rust-no-drop/xml-doubled-variable.xml"
+
+[reader_semantics]
+jmeter_reader_contract = [
+  {id = "JTL-READER-FILE-001", action = "fallback-load-responseFile-when-responseData-absent", expected = "resource-backed value"},
+  {id = "JTL-READER-URL-001", action = "drop-java.net.URL-from-SampleResult", expected = "not-restored"}
+]
+rust_no_drop_contract = [
+  {id = "JTL-RUST-NODROP-ATTR-001", action = "retain-unknown-attributes-exactly", expected = "doubled-variable variant"},
+  {id = "JTL-RUST-NODROP-CHILD-001", action = "retain-unknown-child-tree", expected = "pluginData child"},
+  {id = "JTL-RUST-NODROP-URL-001", action = "retain-typed-url", expected = "java.net.URL child as typed Rust extension"}
+]
+projection_rule = "Writer-wire expectations, Rust no-drop projections, JMeter reader-loss actions, invalid-input contracts, and resource-limit contracts are distinct non-comparator contract_kind values."
+
+[runtime_contract]
+locale = "en-US"
+charset = "UTF-8"
+jvm_args = ["-Dfile.encoding=UTF-8", "-Duser.language=en", "-Duser.country=US", "-Duser.timezone=UTC"]
+status = "declared for future oracle, not measured"
+
+[capabilities.response_file_only]
+id = "CAP-RESPONSE-FILE-ONLY-001"
+input = "inputs/xml/response-file-only.xml"
+resource = "resources/response-file-body.txt"
+property_vector = "switches/xml-response-file-only.properties"
+expectation = "expected/xml-response-file-only.json"
+expected_variant_id = "EXPECT-XML-RESPONSE-FILE-ONLY-001"
+
+[[inputs]]
+id = "CSV-FULL-001"
+path = "inputs/csv/full-fields.csv"
+format = "jtl-csv"
+expectation = "expected/csv-full.json"
+expected_variant_id = "EXPECT-CSV-FULL-001"
+property_vector = "switches/csv-all-fields.properties"
+semantics = "jmeter-writer-wire"
+coverage = ["JTL-003", "JTL-004", "JTL-005"]
+sha256 = "d3aaebd5d208adeb8b9747e7a8da65ab0f1c002e5f591207878380f74e89e32b"
+notes = "All documented columns plus sample variables; comma, quote, and embedded newline escaping."
+
+[[inputs]]
+id = "CSV-TAB-001"
+path = "inputs/csv/tab-delimited.tsv"
+format = "jtl-csv"
+expectation = "expected/csv-tab.json"
+expected_variant_id = "EXPECT-CSV-TAB-001"
+property_vector = "switches/csv-tab-crlf.properties"
+semantics = "jmeter-writer-wire"
+coverage = ["JTL-003"]
+sha256 = "70673062beb5a8ee52adea4257eb080d3c63c481b8ef91ad0efa1344d2fda6f9"
+notes = "Tab delimiter inferred from the header; quoted tabs and commas remain field data."
+
+[[inputs]]
+id = "CSV-TAB-CRLF-001"
+path = "inputs/csv/tab-crlf.csv"
+format = "jtl-csv"
+expectation = "expected/csv-tab-crlf.json"
+expected_variant_id = "EXPECT-CSV-TAB-CRLF-001"
+property_vector = "switches/csv-tab-crlf.properties"
+semantics = "jmeter-writer-wire"
+coverage = ["JTL-003", "JTL-004"]
+line_ending = "CRLF"
+line_ending_status = "planned target; checked-in bytes are LF because this static apply_patch-only corpus did not materialize CRLF bytes"
+sha256 = "6155383effa3039bd1b79749970ee8798734945c313a57f5725212de9be03551"
+notes = "CRLF artifact target linked to the TAB/timestamp property vector; .gitattributes marks the future byte-level line ending; timestamp_format is a CSV-only formatting switch."
+
+[[inputs]]
+id = "CSV-FAILURE-001"
+path = "inputs/csv/failure.csv"
+format = "jtl-csv"
+expectation = "expected/csv-failure.json"
+expected_variant_id = "EXPECT-CSV-FAILURE-001"
+property_vector = "switches/csv-all-fields.properties"
+semantics = "jmeter-writer-wire"
+coverage = ["JTL-003", "JTL-005"]
+sha256 = "72b13b30c9ebba5f9e10bd8ea2e613c0e50e40ce6466c69a70d3896c139132cf"
+notes = "Unsuccessful sample with response code, filename, error count, and multiline failure message."
+
+[[inputs]]
+id = "CSV-BOM-001"
+path = "inputs/csv/bom-utf8.csv"
+format = "jtl-csv"
+expectation = "expected/csv-bom.json"
+expected_variant_id = "EXPECT-CSV-BOM-001"
+semantics = "rust-reader-projection"
+coverage = ["JTL-004"]
+sha256 = "570d349588c57df0ef167687ed73f85f1494af84f293d35d626bd087a28dd14e"
+notes = "UTF-8 BOM is an explicit input condition; acceptance is a planned reader target."
+
+[[inputs]]
+id = "CSV-DATE-001"
+path = "inputs/csv/legacy-date.csv"
+format = "jtl-csv"
+expectation = "expected/csv-date.json"
+expected_variant_id = "EXPECT-CSV-DATE-001"
+semantics = "rust-reader-projection"
+coverage = ["JTL-004"]
+sha256 = "97189348e324b1ac028243d2c2d6e372346cdc0228f33c750704c5ffcd351716"
+notes = "Legacy date-shaped timestamp text is retained as a string for date fallback tests."
+
+[[inputs]]
+id = "XML-RICH-001"
+path = "inputs/xml/rich-nested.xml"
+format = "jtl-xml"
+expectation = "expected/xml-rich.json"
+expected_variant_id = "EXPECT-XML-RICH-001"
+property_vector = "switches/xml-writer-rich.properties"
+semantics = "jmeter-writer-wire"
+coverage = ["JTL-001", "JTL-002", "JTL-005"]
+sha256 = "a4c0fa434359f0e573e0f3bc1368bef5ce4b42ea885a17b45b6af83b6d33866e"
+notes = "Two top-level samples, httpSample alias, nested children, assertion child elements, headers, sampler data, response data, java.net.URL, and sample variables; filename saving is disabled, so responseFile is absent."
+
+[[inputs]]
+id = "XML-LEGACY-001"
+path = "inputs/xml/legacy-rs.xml"
+format = "jtl-xml"
+expectation = "expected/xml-legacy.json"
+expected_variant_id = "EXPECT-XML-LEGACY-001"
+semantics = "jmeter-reader-compat"
+coverage = ["JTL-001", "JTL-004"]
+sha256 = "271c0e01645949a46c9515737740f5104f7a017fd8c970228e028b323ef47209"
+notes = "Legacy rs response-code spelling accepted on read."
+
+[[inputs]]
+id = "XML-MINIMAL-001"
+path = "inputs/xml/minimal.xml"
+format = "jtl-xml"
+expectation = "expected/xml-minimal.json"
+expected_variant_id = "EXPECT-XML-MINIMAL-001"
+semantics = "rust-reader-projection"
+coverage = ["JTL-001", "JTL-005"]
+sha256 = "602e0cedd2235103ffff996428edbfe21bd83c76237ee7c357ff7a044a7fc711"
+notes = "Abbreviated attributes may be absent; no fabricated defaults are expected in the raw projection."
+
+[[inputs]]
+id = "XML-RESPONSE-ON-ERROR-001"
+path = "inputs/xml/response-on-error.xml"
+format = "jtl-xml"
+expectation = "expected/xml-response-on-error.json"
+expected_variant_id = "EXPECT-XML-RESPONSE-ON-ERROR-001"
+property_vector = "switches/xml-rich-on-error.properties"
+semantics = "jmeter-writer-wire"
+coverage = ["JTL-002", "JTL-005"]
+sha256 = "b748f34e939de5d0ac4480553fd9e6358bc331818b4421e345cb7e57a93267a4"
+notes = "Failed sample isolates response_data.on_error; filename saving is disabled, so no responseFile is expected."
+
+[[inputs]]
+id = "XML-RESPONSE-FILE-ONLY-001"
+path = "inputs/xml/response-file-only.xml"
+format = "jtl-xml"
+expectation = "expected/xml-response-file-only.json"
+expected_variant_id = "EXPECT-XML-RESPONSE-FILE-ONLY-001"
+property_vector = "switches/xml-response-file-only.properties"
+semantics = "jmeter-writer-wire"
+coverage = ["JTL-002", "JTL-005"]
+sha256 = "9b168a5538f0d01724a7f29e541f39c28aeb07782dfad68454cf10a0c19334d4"
+notes = "Filename-enabled writer case with responseFile and no responseData; reader-side file loading is documented separately."
+
+[[inputs]]
+id = "XML-ESCAPE-FILE-001"
+path = "inputs/xml/escaping-and-file.xml"
+format = "jtl-xml"
+expectation = "expected/xml-escaping-file.json"
+expected_variant_id = "EXPECT-XML-ESCAPE-FILE-001"
+property_vector = "oracle-xml.properties"
+semantics = "jmeter-writer-wire"
+coverage = ["JTL-001", "JTL-002"]
+sha256 = "3514eb59e228bdd146c22d9d36f55788b47ac7e99b8185839ac048bf5ba8e752"
+notes = "XML entities, responseData, responseFile reference, java.net.URL section, and single-underscore sample variables."
+
+[[inputs]]
+id = "XML-TIMESTAMP-START-001"
+path = "inputs/xml/timestamp-start.xml"
+format = "jtl-xml"
+expectation = "expected/xml-timestamp-start.json"
+expected_variant_id = "EXPECT-XML-TIMESTAMP-START-001"
+property_vector = "switches/xml-timestamp-start.properties"
+semantics = "jmeter-writer-wire"
+coverage = ["JTL-001", "JTL-003"]
+sha256 = "98b5238e273315032d002122837fa1a8d36a22847bc10c2cbc1c13b800258b96"
+notes = "Fixed XML ts value representing sampleresult.timestamp.start=true; no formatted timestamp fallback is claimed."
+
+[[inputs]]
+id = "XML-TIMESTAMP-END-001"
+path = "inputs/xml/timestamp-end.xml"
+format = "jtl-xml"
+expectation = "expected/xml-timestamp-end.json"
+expected_variant_id = "EXPECT-XML-TIMESTAMP-END-001"
+property_vector = "switches/xml-timestamp-end.properties"
+semantics = "jmeter-writer-wire"
+coverage = ["JTL-001", "JTL-003"]
+sha256 = "8bcb56f24fbf00c371f8eff513d3ef63ad0206d6fc6537a5c3013a940c20b689"
+notes = "Fixed XML ts value representing sampleresult.timestamp.start=false; no formatted timestamp fallback is claimed."
+
+[[invalid_inputs]]
+id = "CSV-DUPLICATE-HEADER-001"
+path = "inputs/csv/invalid-duplicate-header.csv"
+format = "jtl-csv"
+expectation = "expected/invalid-csv.json"
+expected_variant_id = "ERROR-CSV-DUPLICATE-HEADER-001"
+sha256 = "1be05099f56bc43ac4db9f7b2696a6c94c205601e9e21555b152fe624fde1d0d"
+expected_error_code = "jtl-parse"
+expected_error_detail = "CSV JTL header repeats a column"
+
+[[invalid_inputs]]
+id = "CSV-EMPTY-HEADER-001"
+path = "inputs/csv/invalid-empty-header.csv"
+format = "jtl-csv"
+expectation = "expected/invalid-csv.json"
+expected_variant_id = "ERROR-CSV-EMPTY-HEADER-001"
+sha256 = "b9d3a7fa1b52b9837f320eee33f30ad767faa50ba903434dba03d83de7a90314"
+expected_error_code = "jtl-parse"
+expected_error_detail = "CSV JTL header contains an empty column"
+
+[[invalid_inputs]]
+id = "CSV-RAGGED-ROW-001"
+path = "inputs/csv/invalid-ragged-row.csv"
+format = "jtl-csv"
+expectation = "expected/invalid-csv.json"
+expected_variant_id = "ERROR-CSV-RAGGED-ROW-001"
+sha256 = "88bc333d768728610e2fa40ce37cab67b2109748d5b22b5cdb847fa01514eaab"
+expected_error_code = "jtl-parse"
+expected_error_detail = "CSV row field count differs from header"
+
+[[invalid_inputs]]
+id = "CSV-UNCLOSED-QUOTE-001"
+path = "inputs/csv/invalid-unclosed-quote.csv"
+format = "jtl-csv"
+expectation = "expected/invalid-csv.json"
+expected_variant_id = "ERROR-CSV-UNCLOSED-QUOTE-001"
+sha256 = "6ba1faabbdbf714db8f7a4131376ab83117772bf8dbb70caa4cec48eb092ff43"
+expected_error_code = "jtl-parse"
+expected_error_detail = "CSV has an unterminated quoted field"
+
+[[invalid_inputs]]
+id = "CSV-AFTER-QUOTE-001"
+path = "inputs/csv/invalid-after-quote.csv"
+format = "jtl-csv"
+expectation = "expected/invalid-csv.json"
+expected_variant_id = "ERROR-CSV-AFTER-QUOTE-001"
+sha256 = "5db19d7c4d13874d47ecf5c9541cc7e8e1ddb8a0c798a588752c7cc4405e0d15"
+expected_error_code = "jtl-parse"
+expected_error_detail = "CSV has characters after a closing quote"
+
+[[invalid_inputs]]
+id = "XML-WRONG-ROOT-001"
+path = "inputs/xml/invalid-wrong-root.xml"
+format = "jtl-xml"
+expectation = "expected/invalid-xml.json"
+expected_variant_id = "ERROR-XML-WRONG-ROOT-001"
+sha256 = "39707989107071526d3dc3ad05db1b09f96270773e3c388f1cc4a7dea55a50fb"
+expected_error_code = "jtl-parse"
+expected_error_detail = "JTL XML root must be testResults"
+
+[[invalid_inputs]]
+id = "XML-DUPLICATE-ATTRIBUTE-001"
+path = "inputs/xml/invalid-duplicate-attribute.xml"
+format = "jtl-xml"
+expectation = "expected/invalid-xml.json"
+expected_variant_id = "ERROR-XML-DUPLICATE-ATTRIBUTE-001"
+sha256 = "df02c5f802a4772fbb5a31c09cd9c48c533691c71da4fb57bfab5f0cdfe9dc34"
+expected_error_code = "jtl-parse"
+expected_error_detail = "XML element repeats an attribute"
+
+[[invalid_inputs]]
+id = "XML-ENTITY-001"
+path = "inputs/xml/invalid-entity.xml"
+format = "jtl-xml"
+expectation = "expected/invalid-xml.json"
+expected_variant_id = "ERROR-XML-ENTITY-001"
+sha256 = "c7688c6836462a7a19c6dbf50fe30666f465216e12c69aa893b1d54ed192ec70"
+expected_error_code = "jtl-parse"
+expected_error_detail = "unsupported XML entity"
+
+[[invalid_inputs]]
+id = "XML-CLOSE-001"
+path = "inputs/xml/invalid-mismatched-close.xml"
+format = "jtl-xml"
+expectation = "expected/invalid-xml.json"
+expected_variant_id = "ERROR-XML-CLOSE-001"
+sha256 = "7ac562f5838eb80d7edaff2a9b02d93193f80e8cc09118c92e1396809a9e3cfe"
+expected_error_code = "jtl-parse"
+expected_error_detail = "XML closing element does not match"
+
+[[invalid_inputs]]
+id = "XML-DOCTYPE-001"
+path = "inputs/xml/invalid-doctype.xml"
+format = "jtl-xml"
+expectation = "expected/invalid-xml.json"
+expected_variant_id = "ERROR-XML-DOCTYPE-001"
+sha256 = "fc371646a815ffe32d8f65633ce4fc52536b4b10977a080685f5897861e9eef9"
+expected_error_code = "jtl-parse"
+expected_error_detail = "DOCTYPE/CDATA is not valid"
+
+[[invalid_inputs]]
+id = "XML-ROOT-CHILD-001"
+path = "inputs/xml/invalid-root-child.xml"
+format = "jtl-xml"
+expectation = "expected/invalid-xml.json"
+expected_variant_id = "ERROR-XML-ROOT-CHILD-001"
+sha256 = "c864dfc85bad8203bf1c90fb21ce81ab427d47d116e45f31c6e6fcda4f2d98e7"
+expected_error_code = "unsupported-format"
+expected_error_detail = "unsupported JTL XML: unexpected XML root child 'notASample'"
+consumer = "jmeter-oracle-compare"
+rejection_kind = "consumer-specific-typed-rejection"
+
+[[limits]]
+id = "LIMIT-INPUT-BYTES-001"
+path = "inputs/limits/input-bytes.csv"
+format = "jtl-csv"
+expectation = "expected/limits-csv.json"
+expected_variant_id = "LIMIT-INPUT-BYTES-001"
+sha256 = "755623b3a6fa9848a81f4b9b3303705a003fa64dad5ab5b2fb6579a8347975be"
+max_input_bytes = 32
+expected_error_code = "output-limit"
+notes = "Small checked-in input is intentionally over the fixture-specific 32-byte budget."
+
+[[limits]]
+id = "LIMIT-EVENTS-001"
+path = "inputs/limits/too-many-events.xml"
+format = "jtl-xml"
+expectation = "expected/limits-xml.json"
+expected_variant_id = "LIMIT-EVENTS-001"
+sha256 = "1d8351a2c2aab1d7d61edb01806948c6705bfabbaa266763431ef04dcf637dd8"
+max_events = 2
+expected_error_code = "output-limit"
+notes = "Three top-level samples exceed a two-event budget."
+
+[[limits]]
+id = "LIMIT-DEPTH-001"
+path = "inputs/limits/too-deep.xml"
+format = "jtl-xml"
+expectation = "expected/limits-xml.json"
+expected_variant_id = "LIMIT-DEPTH-001"
+sha256 = "4304119a1dbaa0df1bf6a66417ed8a05ada64f8f7b67951230f3e950e8f82c3b"
+max_depth = 1
+expected_error_code = "output-limit"
+notes = "Nested sample depth exceeds one."
+
+[[limits]]
+id = "LIMIT-TEXT-001"
+path = "inputs/limits/long-field.csv"
+format = "jtl-csv"
+expectation = "expected/limits-csv.json"
+expected_variant_id = "LIMIT-TEXT-001"
+sha256 = "7920a7e66fb46d312bc4b4299ffbc6f80939b9648f20f0cf9e6f706cbdd80bf1"
+max_text_value_bytes = 16
+expected_error_code = "output-limit"
+notes = "The vector is small and deterministic; the caller supplies the 16-byte text bound."
+
+[[property_vectors]]
+path = "oracle-csv.properties"
+format = "csv"
+status = "planned"
+sha256 = "12c8bbc04ca045f63a3d41ae2328a0628773d87db3d511016b511da85ca536a2"
+
+[[property_vectors]]
+path = "oracle-xml.properties"
+format = "xml"
+status = "planned"
+sha256 = "fb1ca358b77469258f9464f5ebccaf6f59418b4797a69a21208dcb1f8cd0e8aa"
+
+[[property_vectors]]
+path = "switches/csv-all-fields.properties"
+format = "csv"
+status = "planned"
+sha256 = "b109048fe6763529ff8386be1f00b11e568793ff087355d7d90bed5e6fc852ac"
+
+[[property_vectors]]
+path = "switches/csv-minimal-no-header.properties"
+format = "csv"
+status = "planned"
+sha256 = "9f350a02c10bff2f74cb03e029a22be7cbc3cbb1f45501788af0a28c76373196"
+
+[[property_vectors]]
+path = "switches/csv-tab-crlf.properties"
+format = "csv"
+status = "planned"
+sha256 = "48fba797bde80d17d6453674c05acfa46d76a8adc441d188dbbe736b051b7abe"
+
+[[property_vectors]]
+path = "switches/xml-rich-on-error.properties"
+format = "xml"
+status = "planned"
+sha256 = "b43d47f545124ccdb6533181169568291d53b328288ee89f861f9685537c0c56"
+
+[[property_vectors]]
+path = "switches/xml-response-file-only.properties"
+format = "xml"
+status = "planned"
+sha256 = "fe49906055c3462ae19e3a2dd0fa69740e56df2d9e3729077ec3d18b112292a3"
+
+[[property_vectors]]
+path = "switches/xml-writer-rich.properties"
+format = "xml"
+status = "planned"
+sha256 = "577341dd81f222834c3a270df240277691c9a6e72e46a54664667dd5b029999f"
+
+[[property_vectors]]
+path = "switches/xml-timestamp-end.properties"
+format = "xml"
+status = "planned"
+sha256 = "fbab2ca8e1dd6356890ed323601da141cc4029308ca66682d4b3bbd82116a9a1"
+
+[[property_vectors]]
+path = "switches/xml-timestamp-start.properties"
+format = "xml"
+status = "planned"
+sha256 = "915c56501356425fcadbbc89af6449cde4446340de729c54ba06080cec212991"
+
+[[resources]]
+id = "RESOURCE-RESPONSE-FILE-001"
+path = "resources/response-file-body.txt"
+sha256 = "2b0e56e13aeb60cef6328bbc373f6e6cc601ec3bc9674c3c7bf9c5a4e2e1e477"
+capability = "responseFile-only reader fixture"
+
+[[variants]]
+id = "RUST-NO-DROP-XML-001"
+path = "variants/rust-no-drop/xml-doubled-variable.xml"
+kind = "rust-no-drop-parser"
+expectation = "expected/rust-no-drop.xml.json"
+expected_variant_id = "EXPECT-RUST-NO-DROP-XML-001"
+jmeter_writer_wire = false
+sha256 = "de3d006a63ffeecbcb55c2597cd6100decfea8cc8c23c099cbb19c8c01231666"
+notes = "Unknown/doubled attributes and pluginData must remain available to Rust parsing; do not compare as JMeter writer output."
+
+[[variants]]
+id = "JMETER-READER-LOSS-001"
+path = "variants/jmeter-reader-loss/url-and-file.xml"
+kind = "jmeter-reader-semantics"
+expectation = "expected/jmeter-reader-loss.xml.json"
+expected_variant_id = "EXPECT-JMETER-READER-LOSS-001"
+jmeter_writer_wire = false
+resource = "resources/response-file-body.txt"
+property_vector = "oracle-xml.properties"
+sha256 = "97d62baf477cdef7b168f7fccfac9770747080dee0696d71c2431339c60eb2b1"
+notes = "Executable reader-loss input: JMeter responseFile fallback and URL non-restoration are separate from writer-wire expectations."
+
+[[variant_documents]]
+id = "JMETER-READER-LOSS-DOC-001"
+path = "variants/jmeter-reader-loss/README.md"
+sha256 = "301e9ab9e516b0c9a87a8fb057e97be912b77feb0f09fd68af6e5fb5c62e8c5a"
+
+[[variant_documents]]
+id = "RUST-NO-DROP-DOC-001"
+path = "variants/rust-no-drop/README.md"
+sha256 = "a6d842b3c5e080887dec0c8c1d3ab50b12d3e86cbc915b8e585f8294bf9ac470"
+
+[[projections]]
+id = "EXPECT-CSV-BASE-001"
+path = "expected/csv.json"
+format = "jtl-csv"
+contract_kind = "jmeter-writer-wire"
+expected_variant_id = "EXPECT-CSV-BASE-001"
+source = "plan.jmx"
+sha256 = "164e6c35683afb04182f24baff4a3ca07ccb27713f1d298d68ff60e2f02d1abf"
+semantics = "original-plan-projection"
+coverage = ["JTL-003", "JTL-005"]
+notes = "Original static CSV projection retained for the plan smoke case; no oracle output was measured."
+
+[[projections]]
+id = "EXPECT-XML-BASE-001"
+path = "expected/xml.json"
+format = "jtl-xml"
+contract_kind = "jmeter-writer-wire"
+expected_variant_id = "EXPECT-XML-BASE-001"
+source = "plan.jmx"
+sha256 = "64ee750c32dbb3e1f0c1b38d5de09c4ac91bffc450fdb6c9981ab5d839fd1010"
+semantics = "original-plan-projection"
+coverage = ["JTL-001", "JTL-002", "JTL-005"]
+notes = "Original static XML projection retained for the plan smoke case; no oracle output was measured."
+
+[provenance]
+kind = "original"
+upstream_plan_copied = false
+pinned_oracle = "Apache JMeter 5.6.3 rel/v5.6.3 at 34a2785748e9e0b14702595e8682c387869deda3"
+artifact_sha512 = "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076"
+artifact_sha512_status = "profile pin only; no local artifact was retrieved or measured"
+wire_reference = "SampleResultConverter.java and SampleEvent.java at rel/v5.6.3; transcribed only, no upstream source or oracle output copied"
+sample_variable_wire_reference = "src/core/src/main/java/org/apache/jmeter/samplers/SampleEvent.java: configured names are emitted exactly; no underscore doubling"
+oracle_invoked = false
+raw_artifacts = "none"

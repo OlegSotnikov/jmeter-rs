@@ -1,0 +1,126 @@
+{
+  "schema_id": "jmeter-rs.semantic-expectation",
+  "schema_version": 1,
+  "profile_id": "jmeter-5.6.3",
+  "case_id": "ORACLE-JMETER-563-FUNC-STRINGS-SMOKE",
+  "format": "jtl-xml",
+  "evidence_status": "not_run",
+  "expectation_basis": "Hand-authored deterministic JTL XML contract; no Java, JMeter, or oracle process was executed.",
+  "root": {"element": "testResults", "version": "1.2"},
+  "sample_count": 7,
+  "ordered_labels": [
+    "variables|v=alpha|fallback=fallback|eval=select age from birthdays where name='Smith'|evalVar=select age from birthdays where name='Smith'",
+    "properties|value=from-properties|p=from-properties|default=1|set=|defined=true",
+    "strings|lower=mixed|upper=MIXED|capital=Hello world|char=ABC|digest=5d41402abc4b2a76b9719d911017c592",
+    "escaping|oro=a\\.b\\*|html=&lt;&eacute; &amp;&gt;|xml=&quot;bread&quot; &amp; &apos;butter&apos;|unescape=\r\n|unhtml=<Français>|url=a+b%2Bc|back=a b+c",
+    "numeric-and-split|int=14|int-output=2|long=14|var=true|counter=1|split=one|two||three",
+    "side-effects|sum=2|split=4:one:two:?:three|stale=${parts_5}",
+    "date-conversion|date=29/02/2024|shift=2024-03-01"
+  ],
+  "samples": [
+    {
+      "position": 0,
+      "element": "sample",
+      "label": "variables|v=alpha|fallback=fallback|eval=select age from birthdays where name='Smith'|evalVar=select age from birthdays where name='Smith'",
+      "attributes": {"s": "true", "lb": "variables|v=alpha|fallback=fallback|eval=select age from birthdays where name='Smith'|evalVar=select age from birthdays where name='Smith'", "rc": "200", "rm": "OK", "tn": "One deterministic user 1-1", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"},
+      "ignored_attributes": ["t", "it", "lt", "ct", "ts", "by"],
+      "assertions": [],
+      "children": [],
+      "debug_response_projection": {"required_sections": ["JMeterVariables:"]}
+    },
+    {
+      "position": 1,
+      "element": "sample",
+      "label": "properties|value=from-properties|p=from-properties|default=1|set=|defined=true",
+      "attributes": {"s": "true", "lb": "properties|value=from-properties|p=from-properties|default=1|set=|defined=true", "rc": "200", "rm": "OK", "tn": "One deterministic user 1-1", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"},
+      "ignored_attributes": ["t", "it", "lt", "ct", "ts", "by"],
+      "assertions": [],
+      "children": [],
+      "debug_response_projection": {"required_sections": ["JMeterVariables:", "JMeterProperties:"], "properties": {"fx.prop": "from-properties", "fx.set": "constant"}}
+    },
+    {
+      "position": 2,
+      "element": "sample",
+      "label": "strings|lower=mixed|upper=MIXED|capital=Hello world|char=ABC|digest=5d41402abc4b2a76b9719d911017c592",
+      "attributes": {"s": "true", "lb": "strings|lower=mixed|upper=MIXED|capital=Hello world|char=ABC|digest=5d41402abc4b2a76b9719d911017c592", "rc": "200", "rm": "OK", "tn": "One deterministic user 1-1", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"},
+      "ignored_attributes": ["t", "it", "lt", "ct", "ts", "by"],
+      "assertions": [],
+      "children": [],
+      "debug_response_projection": {"required_sections": ["JMeterVariables:"]}
+    },
+    {
+      "position": 3,
+      "element": "sample",
+      "label": "escaping|oro=a\\.b\\*|html=&lt;&eacute; &amp;&gt;|xml=&quot;bread&quot; &amp; &apos;butter&apos;|unescape=\r\n|unhtml=<Français>|url=a+b%2Bc|back=a b+c",
+      "attributes": {"s": "true", "lb": "escaping|oro=a\\.b\\*|html=&lt;&eacute; &amp;&gt;|xml=&quot;bread&quot; &amp; &apos;butter&apos;|unescape=\r\n|unhtml=<Français>|url=a+b%2Bc|back=a b+c", "rc": "200", "rm": "OK", "tn": "One deterministic user 1-1", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"},
+      "ignored_attributes": ["t", "it", "lt", "ct", "ts", "by"],
+      "assertions": [],
+      "children": [],
+      "debug_response_projection": {"required_sections": ["JMeterVariables:"]}
+    },
+    {
+      "position": 4,
+      "element": "sample",
+      "label": "numeric-and-split|int=14|int-output=2|long=14|var=true|counter=1|split=one|two||three",
+      "attributes": {"s": "true", "lb": "numeric-and-split|int=14|int-output=2|long=14|var=true|counter=1|split=one|two||three", "rc": "200", "rm": "OK", "tn": "One deterministic user 1-1", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"},
+      "ignored_attributes": ["t", "it", "lt", "ct", "ts", "by"],
+      "assertions": [],
+      "children": [],
+      "debug_response_projection": {"required_sections": ["JMeterVariables:"]}
+    },
+    {
+      "position": 5,
+      "element": "sample",
+      "label": "side-effects|sum=2|split=4:one:two:?:three|stale=${parts_5}",
+      "attributes": {"s": "true", "lb": "side-effects|sum=2|split=4:one:two:?:three|stale=${parts_5}", "rc": "200", "rm": "OK", "tn": "One deterministic user 1-1", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"},
+      "ignored_attributes": ["t", "it", "lt", "ct", "ts", "by"],
+      "assertions": [],
+      "children": [],
+      "debug_response_projection": {"required_sections": ["JMeterVariables:"], "variables": {"sum_result": "2", "parts": "one|two||three", "parts_n": "4", "parts_1": "one", "parts_2": "two", "parts_3": "?", "parts_4": "three"}}
+    },
+    {
+      "position": 6,
+      "element": "sample",
+      "label": "date-conversion|date=29/02/2024|shift=2024-03-01",
+      "attributes": {"s": "true", "lb": "date-conversion|date=29/02/2024|shift=2024-03-01", "rc": "200", "rm": "OK", "tn": "One deterministic user 1-1", "dt": "text", "de": "US-ASCII", "sby": "0", "sc": "1", "ec": "0", "ng": "1", "na": "1"},
+      "ignored_attributes": ["t", "it", "lt", "ct", "ts", "by"],
+      "assertions": [],
+      "children": [],
+      "debug_response_projection": {"required_sections": ["JMeterVariables:"], "variables": {"shift": "2024-03-01"}}
+    }
+  ],
+  "generated_from": {
+    "fixture_contract": {
+      "oracle_status": "not-run-static-corpus",
+      "sample_count_asserted": true,
+      "sample_count_basis": "Static enabled topology; the current comparator enforces this count when a future JTL is supplied, but no oracle count was observed.",
+      "bounds_contract": {"source": "case.bounds", "comparator_enforced": false, "max_threads": 1, "max_iterations_per_thread": 1, "max_samplers_per_iteration": 7, "max_samples": 7, "max_input_bytes": 512, "max_output_files": 0, "max_label_bytes": 4096},
+      "comparator_contract": {
+        "format": "jtl-xml",
+        "comparator_enforced": true,
+        "fields": ["root", "sample_count", "ordered_labels", "sample.attributes", "sample.assertions", "sample.children", "debug_response_projection.variables"],
+        "ignored_sample_attributes": ["t", "it", "lt", "ct", "ts", "by"],
+        "absence_proof": {"seeded_variable": "parts_5=stale", "probe_label": "side-effects|sum=2|split=4:one:two:?:three|stale=${parts_5}", "expected_after_split": "literal ${parts_5} expansion (undefined-variable preservation)", "mechanism": "ordered_labels compares the literal unresolved expansion; a direct absent-variable field is not comparator-supported", "comparator_enforced": true}
+      },
+      "enabled_probe_contracts": [
+        {"id": "int-sum-output-variable", "sample_position": 4, "expression": "${__intSum(2,sum_result)}", "expected": "2", "side_effects": {"sum_result": "2"}, "comparator_enforced": true},
+        {"id": "split-numbered-variable-output", "sample_position": 5, "expression": "${__split(one|two||three,parts,|)}", "expected": "one|two||three", "side_effects": {"parts": "one|two||three", "parts_n": "4", "parts_1": "one", "parts_2": "two", "parts_3": "?", "parts_4": "three"}, "absent_variables": ["parts_5"], "comparator_enforced": true},
+        {"id": "time-shift-output-variable", "sample_position": 6, "expression": "${__timeShift(yyyy-MM-dd,2024-02-28,P2D,en_US,shift)}", "expected": "2024-03-01", "side_effects": {"shift": "2024-03-01"}, "comparator_enforced": true}
+      ],
+      "function_inventory": {"total_builtin_names": 49, "deterministic_static_case_count": 24, "deterministic_names": ["__P", "__V", "__changeCase", "__char", "__counter", "__dateTimeConvert", "__digest", "__escapeHtml", "__escapeOroRegexpChars", "__escapeXml", "__eval", "__evalVar", "__intSum", "__isPropDefined", "__isVarDefined", "__longSum", "__property", "__setProperty", "__split", "__timeShift", "__unescape", "__unescapeHtml", "__urldecode", "__urlencode"], "disabled_capability_dependent_count": 25, "disabled_capability_dependent_names": ["__BeanShell", "__CSVRead", "__FileToString", "__Random", "__RandomDate", "__RandomFromMultipleVars", "__RandomString", "__StringFromFile", "__StringToFile", "__TestPlanName", "__UUID", "__XPath", "__groovy", "__javaScript", "__jexl2", "__jexl3", "__log", "__logn", "__machineIP", "__machineName", "__regexFunction", "__samplerName", "__threadGroupName", "__threadNum", "__time"], "external_plugin_names": ["__base64Encode", "__base64Decode", "__substring", "__strLen"], "golden_coverage_for_disabled_or_external": false},
+      "oracle_execution": {"status": "not-run", "process_exit": null, "reason": "Static authoring only; no Java/JMeter process or JTL output is included."}
+    },
+    "generator": "hand-authored static matrix",
+    "generator_version": "repository source and research only",
+    "random_seed": null,
+    "oracle_command_status": "recipe-not-executed",
+    "oracle_command": "env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 TZ=UTC <ignored>/jmeter-oracle-cache/apache-jmeter-5.6.3/bin/jmeter -n -q oracle.properties -t plan.jmx -l <ignored>/oracle.jtl -j <ignored>/oracle.log",
+    "artifact_sha512": "387fadca903ee0aa30e3f2115fdfedb3898b102e6b9fe7cc3942703094bd2e65b235df2b0c6d0d3248e74c9a7950a36e42625fd74425368342c12e40b0163076",
+    "raw_artifacts": "oracle-runs/functions-strings/smoke/ (ignored; no local evidence captured)",
+    "runtime_executed": false
+  },
+  "normalization": {
+    "ignored_fields": ["sample.t", "sample.it", "sample.lt", "sample.ct", "sample.ts", "sample.by"],
+    "reason": "NORM-JTL-001 retains exact XML sample identity and DebugSampler projections; NORM-TIME-001 and the JTL byte normalization cover timing and byte counters. No Java/JMeter/oracle process was run."
+  }
+}
